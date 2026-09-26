@@ -57,13 +57,12 @@ window.AppEnv = EnvConfig;
 window.COLLECTION_ROOT = COLLECTION_ROOT;
 
 const firebaseConfig = {
-    apiKey: "AIzaSyBU2JiWfVpbPqL6MPD7phiGdxbolttHA68",
-    authDomain: "medipol-envanter.firebaseapp.com",
-    projectId: "medipol-envanter",
-    storageBucket: "medipol-envanter.firebasestorage.app",
-    messagingSenderId: "226742369640",
-    appId: "1:226742369640:web:f0c0d561132fdcc013eadd",
-    measurementId: "G-E315LC7X17"
+    apiKey: "AIzaSyCz6BzD6OAGSj0C3gl0YvinizZZncd7I-w",
+    authDomain: "medipol-inventory-v3.firebaseapp.com",
+    projectId: "medipol-inventory-v3",
+    storageBucket: "medipol-inventory-v3.firebasestorage.app",
+    messagingSenderId: "434107090128",
+    appId: "1:434107090128:web:3e9b228b407a31b8190ad5"
 };
 
 
@@ -80,7 +79,7 @@ window.loginAsAdmin = async function (enteredCode) {
     if (typeof SecurityConfig !== 'undefined' && SecurityConfig.authenticate) {
         const success = await SecurityConfig.authenticate(enteredCode);
         if (success) {
-            const expiry = new Date().getTime() + (3 * 60 * 1000);
+            const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
             localStorage.setItem('admin_auth', JSON.stringify({ expiry: expiry }));
             window.location.href = 'admin.html';
         } else {
@@ -139,7 +138,14 @@ window._dbMirror = {}; // YENİ: Firebase'den gelen saf verilerin kopyası (Değ
  * @description Uygulamanın 'Canlı Veri' motorudur. 'onSnapshot' kullanarak 
  * Firebase'deki her değişikliği anında (sayfa yenilemeden) arayüze yansıtır.
  */
+// [WHY]: Oturum kapat/aç sonrası senkron yeniden başlatılınca eski dinleyiciler ölmemişse çift dinleyici oluşur.
+// [HOW]: Her onSnapshot'ın unsubscribe'ı saklanır; yeniden başlatmada önce eskiler kapatılır.
+let _syncUnsubscribers = [];
+
 window.startRealtimeSync = function () {
+    _syncUnsubscribers.forEach(unsub => { try { unsub(); } catch (e) { } });
+    _syncUnsubscribers = [];
+
     const statusDiv = document.getElementById('loginStatus');
     // [WHY]: Support 'access-val-node' ID which is used in index.html for security obfuscation.
     // [HOW]: Query both ID possibilities to retrieve the actual login input element.
@@ -156,7 +162,7 @@ window.startRealtimeSync = function () {
     const collectionsToListen = ['b1', 'b2', 'b3', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords', 'staff', 'units', 'locations', 'tasks', 'requests', 'assignments'];
 
     collectionsToListen.forEach(colName => {
-        onSnapshot(collection(fireDb, COLLECTION_ROOT, colName, "items"), (snapshot) => {
+        _syncUnsubscribers.push(onSnapshot(collection(fireDb, COLLECTION_ROOT, colName, "items"), (snapshot) => {
             console.log(`[DB-PATH-CHECK] Şu an aktif olarak dinlenen koleksiyon: ${COLLECTION_ROOT}/${colName}/items`);
 
             let hasModifications = false;
@@ -223,18 +229,14 @@ window.startRealtimeSync = function () {
                     loginInput.disabled = false;
                     loginInput.placeholder = "Erişim Kodu Giriniz";
                 }
-
-                if (typeof window.updateAdminDashboard === 'function') {
-                    window.updateAdminDashboard();
-                }
             }
-        }, (err) => { 
-            if(err.code !== "permission-denied") console.error(err); 
-        });
+        }, (err) => {
+            if(err.code !== "permission-denied") console.error(err);
+        }));
     });
 
     // B. SİSTEM AYARLARINI DİNLE
-    onSnapshot(doc(fireDb, "system_config", "admin_settings"), (docSnap) => {
+    _syncUnsubscribers.push(onSnapshot(doc(fireDb, "system_config", "admin_settings"), (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
             window.data.config = data;
@@ -290,9 +292,7 @@ window.startRealtimeSync = function () {
 
                 // 🛡️ NULL-GUARD: window.currentUser henüz yüklenmemiş olabilir (async Firebase init race condition).
                 // localStorage'dan da okuyarak ikincil güvenlik ağı kuruyoruz.
-                const localUser = window.currentUser || (() => {
-                    try { return JSON.parse(localStorage.getItem('activeUser')); } catch (e) { return null; }
-                })();
+                const localUser = window.currentUser || window.getActiveUser();
 
                 if (localUser) {
                     const isMatch = (
@@ -307,10 +307,7 @@ window.startRealtimeSync = function () {
                             window.logout('force_logout');
                         } else {
                             // Fallback: logout fonksiyonu henüz yüklenmemişse manuel temizle
-                            localStorage.removeItem('activeUser');
-                            localStorage.removeItem('admin_auth');
-                            sessionStorage.removeItem('adminVizesi');
-                            localStorage.removeItem('launchpadBypassed');
+                            window.clearSession();
                             window.location.replace('index.html');
                         }
                     }
@@ -320,19 +317,17 @@ window.startRealtimeSync = function () {
     }, (err) => {
         if (err.code === "permission-denied") console.warn("⏳ [Güvenlik] Firebase yetki onayı bekleniyor (admin_settings)...");
         else console.error("Dinleme hatası:", err);
-    });
+    }));
 
     // C. SİSTEM MESAJLARINI DİNLE
     // [WHY]: God-Eye panelinden gönderilen yönetici mesajlarını gerçek zamanlı yakalamak için.
     // [HOW]: system_config/admin_messages belgesindeki target_user_id ile mevcut kullanıcının id/code/name alanlarını karşılaştırır ve eşleşirse alert gösterir.
-    onSnapshot(doc(fireDb, "system_config", "admin_messages"), (docSnap) => {
+    _syncUnsubscribers.push(onSnapshot(doc(fireDb, "system_config", "admin_messages"), (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
             
-            const localUser = window.currentUser || (() => {
-                try { return JSON.parse(localStorage.getItem('activeUser')); } catch (e) { return null; }
-            })();
-            
+            const localUser = window.currentUser || window.getActiveUser();
+
             if (localUser && data.timestamp && data.message) {
                 const targetId = data.target_user_id;
                 const isMatch = (
@@ -359,7 +354,7 @@ window.startRealtimeSync = function () {
         }
     }, (err) => {
         if(err.code !== "permission-denied") console.error("Sistem mesajı dinleme hatası:", err);
-    });
+    }));
 };
 
 /**

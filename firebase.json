@@ -7,7 +7,28 @@
     "ignore": [
       "firebase.json",
       "**/.*",
-      "**/node_modules/**"
+      "**/.*/**",
+      ".git/**",
+      "**/node_modules/**",
+      "backup/**",
+      "backup_txt/**",
+      "scratch/**",
+      "functions/**",
+      "Mimari ve Geliştirmeler/**",
+      "**/*.md",
+      "plan.json",
+      "package*.json",
+      "Dockerfile",
+      "docker-compose.yml",
+      "nginx.conf",
+      "firestore.rules",
+      ".agents/**"
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css|html)",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
     ]
   }
 }

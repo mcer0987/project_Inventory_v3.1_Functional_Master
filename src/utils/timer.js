@@ -160,10 +160,7 @@ function logout(reason = 'manual') {
     if (warningDiv) warningDiv.style.display = 'none';
 
     // 2. Kimlik verilerini temizle
-    localStorage.removeItem('activeUser');
-    localStorage.removeItem('admin_auth');
-    sessionStorage.removeItem('adminVizesi');
-    localStorage.removeItem('launchpadBypassed');
+    window.clearSession();
 
     // [WHY]: Clear the Firebase Auth session to prevent automatic re-login on page refresh.
     // [HOW]: Invoke window.SecurityConfig.logout() or dynamically import the auth SDK and sign out.
@@ -179,6 +176,10 @@ function logout(reason = 'manual') {
             console.error("❌ Firebase Auth signOut error during dynamic fallback:", e);
         }
     }
+
+    // [WHY]: admin.html'de bu yol kullanılıyor ve olay yayınlanmadığı için firebase-handler senkronu sıfırlamıyor,
+    //        signOut ile ölen dinleyiciler kilit açıldıktan sonra yeniden başlamıyordu (AUTH-08).
+    window.dispatchEvent(new CustomEvent('onAppLogout', { detail: { reason } }));
 
     // 3. CSS Sınıfını Kaldır
     document.body.classList.remove('logged-in');

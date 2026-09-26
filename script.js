@@ -34,10 +34,7 @@ if (!window.data) {
 window.isFirebaseLoaded = window.isFirebaseLoaded || false;
 
 // Global currentUser ilklendirme
-try {
-    const activeUser = localStorage.getItem('activeUser');
-    if (activeUser) window.currentUser = JSON.parse(activeUser);
-} catch (e) { }
+window.currentUser = window.getActiveUser();
 
 // [R-SYS] - Internal Data Input Mask Manager
 window._dx = {
@@ -537,13 +534,8 @@ function renderMyRequestsTable() {
     const tbody = document.querySelector('#tableMyRequests tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    
-    let currentUser = null;
-    try {
-        currentUser = JSON.parse(localStorage.getItem('activeUser'));
-    } catch (e) {
-        console.warn('⚠️ [script] activeUser parse hatası:', e.message);
-    }
+
+    const currentUser = window.getActiveUser();
     if (!currentUser) return;
 
     const myReqs = window.data.requests.filter(r =>
@@ -603,12 +595,7 @@ window.renderPersonnelInventoryTable = function () {
     const tbody = document.querySelector('#tablePersonnelInventory tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    let currentUser = null;
-    try {
-        currentUser = JSON.parse(localStorage.getItem('activeUser'));
-    } catch (e) {
-        console.warn('⚠️ [script] activeUser parse hatası:', e.message);
-    }
+    const currentUser = window.getActiveUser();
     if (!currentUser) return;
 
     const completedRequests = (window.data.requests || [])
@@ -777,10 +764,7 @@ window.sendDraftInventoryRequest = async function (index) {
         document.getElementById('cartProductList').style.display = 'none';
         document.getElementById('cartNote').value = "";
         document.getElementById('cartPerson').value = "";
-        let activeUser = null;
-        try {
-            activeUser = JSON.parse(localStorage.getItem('activeUser'));
-        } catch (e) {}
+        const activeUser = window.getActiveUser();
         if (activeUser) document.getElementById('cartPerson').value = activeUser.name;
         renderCartItems();
         const modal = document.getElementById('cartModal');
@@ -1224,27 +1208,9 @@ function showCustomConfirm(title, message, callback) {
 }
 window.showCustomConfirm = showCustomConfirm;
 
-function loadData() {
-    try {
-        const saved = localStorage.getItem('inventoryData');
-        if (saved) {
-            const decompressed = LZString.decompressFromUTF16(saved);
-            const parsed = JSON.parse(decompressed || saved);
-            window.data = parsed;
-            return parsed;
-        }
-    } catch (e) { }
-    return { b1: [], b2: [], b3: [], personel: [], requests: [], productTypes: [] };
-}
-window.data = loadData();
-
-window.optimizeStorage = function () {
-    try {
-        localStorage.removeItem('inventoryData');
-        showAppAlert("Bellek temizlendi, sistem IndexedDB üzerinden yenileniyor...", "success");
-        setTimeout(() => location.reload(), 2000);
-    } catch (e) { showAppAlert("Temizleme başarısız!", "error"); }
-};
+// [WHY]: Eski localStorage önbelleği window.data'yı Firebase'den önce eksik/bayat veriyle eziyordu (DATA-07).
+// [HOW]: Tek kaynak Firestore snapshot'larıdır; kalmış önbellek bir kez silinir.
+localStorage.removeItem('inventoryData');
 
 window.loadFromDB = function (storeName) {
     return new Promise((resolve) => {
@@ -1255,18 +1221,6 @@ window.loadFromDB = function (storeName) {
         request.onsuccess = () => resolve(request.result || []);
         request.onerror = () => resolve([]);
     });
-};
-
-window.initData = async function () {
-    const b1 = await new Promise(res => loadFromDB('b1', res));
-    if (b1 && b1.length > 0) {
-        window.data.b1 = b1;
-        window.data.b2 = await new Promise(res => loadFromDB('b2', res));
-        window.data.b3 = await new Promise(res => loadFromDB('b3', res));
-        window.data.personel = await new Promise(res => loadFromDB('personel', res));
-    } else {
-        data = loadData();
-    }
 };
 
 function checkPermission(event) {
@@ -1312,19 +1266,6 @@ window.onclick = function (event) {
     const modal = document.getElementById('productModal');
     if (event.target == modal) closeProductModal();
 };
-
-window.addEventListener('pageshow', () => {
-    const activeUser = localStorage.getItem('activeUser');
-    const authScreen = document.getElementById('loginModal');
-    const appContainer = document.getElementById('appContainer');
-    if (activeUser) {
-        if (authScreen) authScreen.style.display = 'none';
-        if (appContainer) appContainer.style.display = 'block';
-    } else {
-        if (authScreen) authScreen.style.display = 'block';
-        if (appContainer) appContainer.style.display = 'none';
-    }
-});
 
 // PM NOTU: Firebase hazır olduktan sonra listener başlatılır
 window.addEventListener("load", () => {
@@ -1376,11 +1317,8 @@ function renderRequestAction(request) {
 }
 
 async function createLog(action, detail) {
-    let userName = "Bilinmeyen Kullanıcı";
-    try {
-        const parsed = JSON.parse(localStorage.getItem('activeUser'));
-        if (parsed && parsed.name) userName = parsed.name;
-    } catch (e) {}
+    const parsed = window.getActiveUser();
+    const userName = (parsed && parsed.name) || "Bilinmeyen Kullanıcı";
     const newLog = {
         date: getTurkiyeSaati(),
         user: userName,
@@ -1415,10 +1353,7 @@ async function updateRequestStatus(requestId, newStatus) {
 
 async function addRequest(event) {
     if (event) event.preventDefault();
-    let activeUser = null;
-    try {
-        activeUser = JSON.parse(localStorage.getItem('activeUser'));
-    } catch (e) {}
+    const activeUser = window.getActiveUser();
     const productName = document.getElementById('requestProductName').value;
     const productSn = document.getElementById('requestProductSn')?.value || "-";
     const newRequest = {
@@ -1440,10 +1375,7 @@ async function submitRequest(event) {
     if (event) event.preventDefault();
     const product = document.getElementById('reqProduct').value;
     const note = document.getElementById('reqNote').value;
-    let user = null;
-    try {
-        user = JSON.parse(localStorage.getItem('activeUser'));
-    } catch (e) {}
+    const user = window.getActiveUser();
     if (!product) { showAppAlert("Lütfen talep edilecek ürünü yazın.", "warning"); return; }
     const newRequest = {
         id: Date.now(),

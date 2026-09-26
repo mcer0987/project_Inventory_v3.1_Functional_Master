@@ -235,7 +235,7 @@ const showReportModal = function () {
         `;
     } else {
         const rowsHtml = logs.map(log => {
-            const badgeClass = log.securityLevel.includes('Blocked') ? 'sar-badge-blocked' : 'sar-badge-verified';
+            const badgeClass = log.securityLevel.includes('Bloke') ? 'sar-badge-blocked' : 'sar-badge-verified';
             return `
                 <tr>
                     <td style="font-weight: 500;">${log.type}</td>
@@ -392,10 +392,7 @@ const initializeSecurityProxies = function () {
             const creator = item.createdBy || item.createdByCode;
             const currentUser = window.currentUser?.name;
             let currentCode = null;
-            let activeUserObj = typeof window.secureRetrieve === 'function' ? window.secureRetrieve('activeUser') : null;
-            if (!activeUserObj && localStorage.getItem('activeUser')) {
-                try { activeUserObj = JSON.parse(localStorage.getItem('activeUser')); } catch (e) { }
-            }
+            const activeUserObj = window.getActiveUser();
             if (activeUserObj) currentCode = activeUserObj.code;
 
             const isSelfApproval = (creator && (String(creator) === String(currentCode) || String(creator).toLowerCase() === String(currentUser).toLowerCase()));
@@ -455,11 +452,10 @@ const initializeSecurityProxies = function () {
 // ─────────────────────────────────────────────────────────────────────────────
 // Dynamic Button Injection (Navbar Entegrasyonu)
 // ─────────────────────────────────────────────────────────────────────────────
-const originalUpdateNavbarUI = window.updateNavbarUI;
-if (originalUpdateNavbarUI) {
-    window.updateNavbarUI = function (user) {
-        originalUpdateNavbarUI(user);
-
+// [WHY]: window.updateNavbarUI sarmalayıcısı, auth-engine içeriden çağırdığı için hiç tetiklenmiyordu (EBYS-05).
+// [HOW]: auth-engine her navbar çiziminden sonra 'onNavbarRendered' yayınlar; buton bu olayda eklenir.
+window.addEventListener('onNavbarRendered', (e) => {
+        const user = (e && e.detail && e.detail.user) || {};
         const isAdmin = (user.name === 'Muhammed Cer' || user.name === 'Admin');
         if (isAdmin) {
             const userDisplay = document.getElementById('userDisplay');
@@ -508,8 +504,7 @@ if (originalUpdateNavbarUI) {
         
         // Proxy'leri her oturum açıldığında/yenilendiğinde bağla
         initializeSecurityProxies();
-    };
-}
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Namespace Export

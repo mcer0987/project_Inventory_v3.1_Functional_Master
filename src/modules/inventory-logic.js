@@ -27,8 +27,10 @@ export const addExit = async function () {
         return;
     }
 
-    const repo = window.currentExitRepo || selected.repo;
-    const index = window.currentExitIndex !== undefined ? window.currentExitIndex : selected.index;
+    // [WHY]: currentExitRepo B3 sekmesinden 'b3' olarak geliyordu; stok yerine çıkış log'u düşülüyordu (INV-02).
+    // [HOW]: Depo ve indeks aynı kaynaktan, seçilen üründen okunur (openExitModal satır ürününü ön-seçer).
+    const repo = selected.repo;
+    const index = selected.index;
 
     if (repo && index !== "" && index !== undefined) {
         const repoData = window.data[repo];
@@ -102,8 +104,8 @@ export const saveExit = async function (event) {
     const isDemirbas = selectedDiv.dataset.isDemirbas === 'true';
     const selected = selectedDiv.dataset;
 
-    const repo  = window.currentExitRepo  || selected.repo;
-    const index = window.currentExitIndex !== undefined ? window.currentExitIndex : selected.index;
+    const repo  = selected.repo;
+    const index = selected.index;
 
     const qtyInput = document.getElementById('exitQty');
     const requestedQty = parseInt(qtyInput?.value) || 1;

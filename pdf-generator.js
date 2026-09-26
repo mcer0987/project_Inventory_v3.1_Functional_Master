@@ -3,7 +3,7 @@ window.generateZimmetPDF = function(index) {
     const doc = new jsPDF(); 
 
     const item = data.b3[index];
-    const activeUser = JSON.parse(localStorage.getItem('activeUser')) || { name: 'Sistem Yöneticisi' };
+    const activeUser = window.getActiveUser() || { name: 'Sistem Yöneticisi' };
 
     // Logo (Placeholder - gerçek logo için doc.addImage(base64, 'PNG', x, y, w, h))
     doc.text('MEDIPOL UNV.', 10, 10);  // Logo yerine metin
@@ -11,14 +11,9 @@ window.generateZimmetPDF = function(index) {
     doc.setFontSize(16);
     doc.text('Zimmet Formu', 105, 20, { align: 'center' });
 
+    // [WHY]: Sabit örnek satırlar (transfer no, kişi, ITSM linki) gerçek zimmet gibi basılıyordu (ZIM-04). Gerçek form Faz 5'te.
     doc.setFontSize(10);
-    doc.text('Transfer Numarası: 10529', 10, 30);
-    doc.text('Teslim Tarihi: 30.12.2025 / 09:19', 110, 30);
-    doc.text('Bölümü: ONUR POLAT', 10, 40);
-    doc.text('Görevi Olduğu Varlık: Standart Zimmetleme', 110, 40);
-    doc.text('Zimmet Tipi Kodu: Yeni Kayıt', 10, 50);
-    doc.text('Zimmet Tipi Adı: Zimmet Tipi', 110, 50);
-    doc.text('Açıklama: https://itsm.medipol.edu.tr/front/ticket.form.php?id=223531 no lu kayıttan zimmeti', 10, 60);
+    doc.text('Teslim Tarihi: ' + (item.tarih || item.date || '-'), 10, 30);
 
     // Tablo
     doc.autoTable({

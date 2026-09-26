@@ -9,6 +9,7 @@ window.AppModules = window.AppModules || {};
 
 // 2. Import in the correct order
 import * as Utils from '../utils/utils.js';
+import '../../security-biometrics.js';                      // [SECURITY_GUARD] must run BEFORE auth-engine
 import * as Auth from './auth-engine.js';
 import { TableEngine } from '../ui/table-engine.js';
 import { InventoryLogic } from './inventory-logic.js';
@@ -30,8 +31,8 @@ window.addEventListener('onAppLogout', (e) => {
     const reason = (e && e.detail) ? e.detail.reason : 'manual';
     console.log(`🔄 [Observer - main.js] Logout event algılandı (${reason}). Soft Reset başlatılıyor...`);
 
+    // [WHY]: userAuth'u yalnız onAuthStateChanged yönetir; burada null'lamak yeniden girişte kayıtları reddettiriyordu (AUTH-10).
     window.currentUser = null;
-    window.userAuth = null;
     window._initialRenderDone = false;
     window.isFirebaseLoaded = false;
     window._launchpadTriggered = false;
@@ -50,10 +51,11 @@ window.addEventListener('onAppLogout', (e) => {
         }
     }
 
+    // [WHY]: 'hidden-modal' sınıfını hiçbir açıcı kaldırmadığı için yeniden girişte tüm modallar görünmez kalıyordu (UI-02).
+    // [HOW]: Yalnız satır içi display kaldırılır; açıcılar display'i yeniden ayarladığında modal görünür.
     document.querySelectorAll('.modal, .modern-modal, .app-modal, .checklist-modal').forEach(m => {
         if (m.id !== 'loginModal' && m.id !== 'adminLockModal') {
-            m.style.setProperty('display', 'none', 'important');
-            m.classList.add('hidden-modal');
+            m.style.display = 'none';
         }
     });
 
@@ -141,6 +143,13 @@ window.addEventListener('onInventoryDataUpdated', (e) => {
     // Satın alma, servis kayıtları, birimler, locations, tasks vb. (Diğer UI dosyaları)
     if (colName === 'purchaseOrders' || colName === 'serviceRecords') {
         if (typeof window.renderPurchaseModule === 'function') window.renderPurchaseModule();
+    }
+    // [WHY]: "Bana gelen onaylar" ve "Kişi Envanterim" canlı güncellenmiyordu (EBYS-19, ITSM-04).
+    if (colName === 'purchaseOrders') {
+        if (typeof window.renderMyApprovals === 'function') window.renderMyApprovals();
+    }
+    if (colName === 'b3' || colName === 'assignments') {
+        if (typeof window.renderPersonnelInventoryTable === 'function') window.renderPersonnelInventoryTable();
     }
     if (colName === 'units') {
         if (typeof window.renderUnitManagement === 'function') window.renderUnitManagement();
