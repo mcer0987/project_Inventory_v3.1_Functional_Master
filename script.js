@@ -513,17 +513,17 @@ window.renderRequestsTable = function () {
                     (isCompleted ? 'Teslim Alındı' : req.durum || 'Bilinmiyor')));
 
         row.innerHTML = `
-            <td style="text-align:center;"><input type="checkbox" class="req-checkbox" value="${index}"></td>
+            <td style="text-align:center;"><input type="checkbox" class="req-checkbox" value="${escapeHtml(req.id)}"></td>
             <td>${escapeHtml(req.tarih || "-")}</td>
             <td>${escapeHtml(req.personel || "-")}</td>
             <td>${escapeHtml(req.ürün || "-")} <strong>(${escapeHtml(req.adet || 1)} Adet)</strong></td>
             <td style="color:#7f8c8d;">${escapeHtml(req.not || "-")}</td>
             <td style="font-weight:bold; color:#2c3e50;">${escapeHtml(req.sn || "-")}</td>
-            <td style="text-align:center;"><span class="status-badge-pill ${statusClass}">${statusText}</span></td>
+            <td style="text-align:center;"><span class="status-badge-pill ${statusClass}">${escapeHtml(statusText)}</span></td>
             <td style="text-align:center;">
                 ${isPending ? `
-                    <button onclick="confirmRequest(${index})" class="req-approve-btn">Onayla</button>
-                    <button onclick="rejectRequest(${index})" class="req-reject-btn">Reddet</button>
+                    <button onclick="confirmRequest(${jsArg(req.id)})" class="req-approve-btn">Onayla</button>
+                    <button onclick="rejectRequest(${jsArg(req.id)})" class="req-reject-btn">Reddet</button>
                 ` : `<span class="req-done-text">${isCompleted ? 'Teslim Alındı' : 'İşlem Yapıldı'}</span>`}
             </td>
         `;
@@ -639,76 +639,108 @@ window.renderPersonnelInventoryTable = function () {
     });
 };
 
-window.confirmRequest = async function (index) {
-    const request = window.data.requests[index];
-    if (!request) return;
-    let snValue = '-';
-    if (typeof showCustomPrompt === 'function') {
-        snValue = await showCustomPrompt('Seri No / Zimmet Bilgisi', `"${request.ürün}" için seri numarası veya zimmet bilgisi girin (yoksa boş bırakın):`, '') || '-';
-    } else {
-        snValue = window.prompt(`"${request.ürün}" için seri numarası / zimmet bilgisi girin (yoksa boş bırakın):`, '') ?? '-';
+// [WHY]: Admin talep işlemleri dizi indeksiyle çalışıyordu; snapshot sonrası yanlış talep hedefleniyordu. Tablo yenilenmediği için
+//        ikinci tık ikinci onay + ikinci b3 kaydı yazıyordu; SN sorusunda İptal yine onaylıyordu; red/sil tüm DB'yi yazıyordu (ITSM-05).
+// [HOW]: Talepler id ile bulunur; yalnız bekleyen (taslak olmayan) talep onaylanır/reddedilir; talep başına işlem kilidi;
+//        İptal gerçekten iptaldir; onaylayan ve zaman kaydedilir; yalnız ilgili koleksiyonlar yazılır; tablolar yenilenir.
+const _requestActionsInFlight = new Set();
+const _findRequest = ref => (window.data.requests || []).find(r => String(r.id) === String(ref));
+const _isPendingRequest = r => {
+    const d = String(r.durum || '').trim().toUpperCase();
+    return ['', 'BEKLEMEDE', 'BEKLİYOR', 'BEKLIYOR', 'PENDING'].includes(d);
+};
+const _refreshRequestTables = () => {
+    ['renderRequestsTable', 'renderMyRequestsTable', 'renderAdminRequestTable', 'renderPersonnelInventoryTable']
+        .forEach(fn => { if (typeof window[fn] === 'function') window[fn](); });
+};
+const _saveRequestItem = updated => window.saveData('requests',
+    (window.data.requests || []).map(r => String(r.id) === String(updated.id) ? updated : r));
+
+window.confirmRequest = async function (requestId) {
+    const lockKey = String(requestId);
+    if (_requestActionsInFlight.has(lockKey)) return;
+    _requestActionsInFlight.add(lockKey);
+    try {
+        const request = _findRequest(requestId);
+        if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        if (!_isPendingRequest(request)) { showAppAlert('Bu talep zaten işlenmiş veya taslak durumda.', 'warning'); _refreshRequestTables(); return; }
+
+        const answer = window.prompt(`"${request.ürün}" için seri numarası / zimmet bilgisi girin (yoksa boş bırakın):`, '');
+        if (answer === null) return;
+        const snValue = answer.trim() || '-';
+
+        // prompt açıkken snapshot gelmiş olabilir: güncel nesne ve durum yeniden kontrol edilir
+        const live = _findRequest(requestId);
+        if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
+
+        const approver = window.currentUser?.name || 'Yönetici';
+        const now = getTurkiyeSaati();
+        const updated = { ...live, durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now };
+        if (await _saveRequestItem(updated) === false) { showAppAlert('Onay kaydedilemedi.', 'error'); return; }
+
+        const exitEntry = {
+            id: Date.now(),
+            requestId: live.id,
+            shelfNo: "TALEP",
+            productType: live.ürün,
+            description: "Personel Talebi Onaylandı",
+            sn: snValue,
+            sarfAdet: live.adet || 1,
+            note: `Onaylayan: ${approver}`,
+            person: live.personel,
+            alanKisi: live.personel,
+            date: getTurkiyeTarihi(),
+            tarih: getTurkiyeTarihi(),
+            isDemirbas: live.isDemirbas === true || live.isDemirbas === "true",
+            talepTuru: live.talepTuru || 'Kalıcı Zimmet',
+            oncelik: live.oncelik || 'Orta',
+            ...(live.iadeTarihi ? { iadeTarihi: live.iadeTarihi } : {}),
+            iadeEdildi: false,
+            sourceRepo: 'TALEP',
+            approvedBy: approver
+        };
+        const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
+        if (!alreadyLogged && await window.saveData('b3', [...(window.data.b3 || []), exitEntry]) === false) {
+            showAppAlert('Talep onaylandı ancak zimmet kaydı yazılamadı.', 'error');
+        } else {
+            showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.`, "success");
+        }
+        _refreshRequestTables();
+    } finally {
+        _requestActionsInFlight.delete(lockKey);
     }
-    snValue = (snValue || '').trim() || '-';
-    request.durum = 'approved';
-    request.sn = snValue;
-    const isDemirbasStatus = request.isDemirbas === true || request.isDemirbas === "true";
-
-    const exitEntry = {
-        id: Date.now(),
-        shelfNo: "TALEP",
-        productType: request.ürün,
-        description: "Personel Talebi Onaylandı",
-        sn: snValue,
-        sarfAdet: request.adet || 1,
-        note: "Onaylayan: Yönetici",
-        person: request.personel,
-        alanKisi: request.personel,
-        date: getTurkiyeTarihi(),
-        tarih: getTurkiyeTarihi(),
-        isDemirbas: isDemirbasStatus,
-        talepTuru: request.talepTuru || 'Kalıcı Zimmet',
-        oncelik: request.oncelik || 'Orta',
-        ...(request.iadeTarihi ? { iadeTarihi: request.iadeTarihi } : {}),
-        iadeEdildi: false,
-        sourceRepo: 'TALEP'
-    };
-
-    if (!window.data.b3) window.data.b3 = [];
-    window.data.b3.push(exitEntry);
-    // [BUGFIX] Bug 5: Targeted saves for requests and b3 individually
-    await window.saveData('requests', window.data.requests);
-    await window.saveData('b3', window.data.b3);
-
-    if (typeof renderRequestsTable === 'function') renderRequestsTable();
-    if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
-    showAppAlert(`${request.personel} isimli personelin talebi ONAYLANDI.`, "success");
 };
 
-window.rejectRequest = async function (index) {
-    const request = window.data.requests[index];
-    if (!request) return;
-    const onay = await showCustomConfirm("Talebi Reddet", `${request.personel} isimli personelin talebi reddedilecek. Emin misiniz?`);
-    if (onay === true) {
-        request.durum = 'rejected';
-        await window.saveData(window.data);
-        if (typeof renderRequestsTable === 'function') renderRequestsTable();
-        if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
-        showAppAlert(`${request.personel} talebi reddedildi.`, "error");
+window.rejectRequest = async function (requestId) {
+    const lockKey = String(requestId);
+    if (_requestActionsInFlight.has(lockKey)) return;
+    _requestActionsInFlight.add(lockKey);
+    try {
+        const request = _findRequest(requestId);
+        if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        if (!_isPendingRequest(request)) { showAppAlert('Bu talep zaten işlenmiş veya taslak durumda.', 'warning'); _refreshRequestTables(); return; }
+        const onay = await showCustomConfirm("Talebi Reddet", `${request.personel} isimli personelin talebi reddedilecek. Emin misiniz?`);
+        if (onay !== true) return;
+        const live = _findRequest(requestId);
+        if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
+        const updated = { ...live, durum: 'rejected', rejectedBy: window.currentUser?.name || 'Yönetici', rejectedAt: getTurkiyeSaati() };
+        if (await _saveRequestItem(updated) === false) { showAppAlert('Red kaydedilemedi.', 'error'); return; }
+        _refreshRequestTables();
+        showAppAlert(`${live.personel} talebi reddedildi.`, "error");
+    } finally {
+        _requestActionsInFlight.delete(lockKey);
     }
 };
 
-window.deleteRequest = async function (index) {
-    const request = window.data.requests[index];
-    if (!request) return;
+window.deleteRequest = async function (requestId) {
+    const request = _findRequest(requestId);
+    if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     const onay = await showCustomConfirm("Kaydı Sil", "Bu talep kaydını tamamen silmek istediğinize emin misiniz? Bu işlem geri alınamaz.");
-    if (onay === true) {
-        window.data.requests.splice(index, 1);
-        await window.saveData(window.data);
-        if (typeof renderRequestsTable === 'function') renderRequestsTable();
-        if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
-        if (typeof renderAdminRequestTable === 'function') renderAdminRequestTable();
-        showAppAlert("Talep kaydı kalıcı olarak silindi.", "info");
-    }
+    if (onay !== true) return;
+    const remaining = (window.data.requests || []).filter(r => String(r.id) !== String(requestId));
+    if (await window.saveData('requests', remaining) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
+    _refreshRequestTables();
+    showAppAlert("Talep kaydı kalıcı olarak silindi.", "info");
 };
 
 window.withdrawInventoryRequest = async function (index) {
@@ -1444,13 +1476,13 @@ function toggleAllRequests(source) {
 async function deleteSelectedRequests() {
     const checkboxes = document.querySelectorAll('.req-checkbox:checked');
     if (checkboxes.length === 0) { showAppAlert("Lütfen silinecek kayıtları seçiniz.", "error"); return; }
-    const indicesToDelete = Array.from(checkboxes).map(cb => parseInt(cb.value)).sort((a, b) => b - a);
-    const onay = await showCustomConfirm("Toplu Silme", `${indicesToDelete.length} adet kaydı kalıcı olarak silmek istediğinize emin misiniz?`);
+    const idsToDelete = new Set(Array.from(checkboxes).map(cb => String(cb.value)));
+    const onay = await showCustomConfirm("Toplu Silme", `${idsToDelete.size} adet kaydı kalıcı olarak silmek istediğinize emin misiniz?`);
     if (onay) {
-        indicesToDelete.forEach(index => { window.data.requests.splice(index, 1); });
-        await window.saveData(window.data);
+        const remaining = (window.data.requests || []).filter(r => !idsToDelete.has(String(r.id)));
+        if (await window.saveData('requests', remaining) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
         renderRequestsTable();
-        showAppAlert(`${indicesToDelete.length} kayıt başarıyla silindi.`, "success");
+        showAppAlert(`${idsToDelete.size} kayıt başarıyla silindi.`, "success");
         const headerCheck = document.querySelector('.select-all-header input');
         if (headerCheck) headerCheck.checked = false;
     }

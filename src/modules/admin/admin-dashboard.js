@@ -255,7 +255,9 @@ window.renderAdminRequestTable = function () {
         // Tamamlanma durumları (completed veya TESLİM ALINDI)
         const isCompleted = durumStr === 'COMPLETED' || durumStr === 'TESLİM ALINDI';
         // Bekleme durumları
-        const isPending = !isApproved && !isRejected && !isCompleted;
+        const isDraft = durumStr === 'DRAFT' || durumStr === 'TASLAK';
+        // [WHY]: Geri çekilmiş (taslak) talepler 'Bekliyor' görünüp onaylanabiliyordu (ITSM-05).
+        const isPending = !isApproved && !isRejected && !isCompleted && !isDraft;
 
         if (isPending) pendingCount++;
 
@@ -272,6 +274,8 @@ window.renderAdminRequestTable = function () {
             badgeHTML = `<span class="p-badge p-badge-completed" style="background: var(--badge-completed-bg); color: var(--badge-completed-text); border: 1px solid var(--badge-completed-border); padding:4px 8px; border-radius:12px; font-size:11px; font-weight:600;">
                             <i class="fas fa-check-double"></i> TESLİM ALINDI
                          </span>`;
+        } else if (isDraft) {
+            badgeHTML = `<span class="p-badge" style="background:#f1f5f9; color:#475569; padding:4px 8px; border-radius:12px; font-size:11px; font-weight:600;">TASLAK</span>`;
         } else {
             badgeHTML = `<span class="p-badge p-badge-waiting">
                             <i class="fas fa-clock"></i> BEKLEMEDE
@@ -298,14 +302,14 @@ window.renderAdminRequestTable = function () {
                 <td class="text-end pe-3">
                     <div class="d-flex justify-content-end gap-2">
                         ${isPending ? `
-                            <button onclick="window.confirmRequest(${index})" class="p-btn-icon play" title="Onayla">
+                            <button onclick="window.confirmRequest(${jsArg(req.id)})" class="p-btn-icon play" title="Onayla">
                                 <i class="fas fa-check"></i>
                             </button>
-                            <button onclick="window.rejectRequest(${index})" class="p-btn-icon delete" title="Reddet">
+                            <button onclick="window.rejectRequest(${jsArg(req.id)})" class="p-btn-icon delete" title="Reddet">
                                 <i class="fas fa-times"></i>
                             </button>
                         ` : `
-                            <button onclick="window.deleteRequest(${index})" class="p-btn-icon delete" title="Kayıttan Sil">
+                            <button onclick="window.deleteRequest(${jsArg(req.id)})" class="p-btn-icon delete" title="Kayıttan Sil">
                                 <i class="fas fa-trash"></i>
                             </button>
                         `}

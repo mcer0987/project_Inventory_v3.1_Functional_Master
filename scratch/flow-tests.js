@@ -171,6 +171,58 @@ const SCENARIOS = {
         });
     },
 
+    // D2 · ITSM-05 — admin request actions by id. b3 writes need an admin session, so b3 save attempts are counted.
+    async adminRequestActions(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            const base = Date.now();
+            const mk = (n, durum, personel) => ({ id: base + n, ürün: 'Req' + n + ' ' + ft.MARKER, personel, durum, adet: 1, tarih: '01.01.2026' });
+            await window.saveData('requests', [...(window.data.requests || []),
+                mk(1, 'Beklemede', 'Personel A ' + ft.MARKER), mk(2, 'Beklemede', 'Personel B ' + ft.MARKER), mk(3, 'draft', 'Personel C ' + ft.MARKER)]);
+            await ft.waitFor(async () => (await ft.readMarked('requests')).length === 3 && (window.data.requests || []).filter(r => String(r.ürün).includes(ft.MARKER)).length === 3);
+            const db = async n => (await ft.readMarked('requests')).find(r => r.id === base + n);
+            const realSave = window.saveData; let b3Attempts = 0;
+            window.saveData = async (col, items) => { if (col === 'b3') b3Attempts++; return realSave(col, items); };
+            window.showCustomConfirm = async () => true;
+            window.setActiveUser({ name: 'Yönetici Test' });
+
+            window.prompt = () => null;
+            await window.confirmRequest(base + 1);
+            await ft.sleep(1200);
+            out.cancelKeepsPending = (await db(1)).durum === 'Beklemede' && b3Attempts === 0;
+
+            window.prompt = () => 'SN-123';
+            await Promise.all([window.confirmRequest(base + 1), window.confirmRequest(base + 1)]);
+            await ft.waitFor(async () => (await db(1)).durum === 'approved');
+            const a = await db(1);
+            out.approved = { durum: a.durum, sn: a.sn, approvedBy: a.approvedBy, hasApprovedAt: !!a.approvedAt, b3AttemptsAfterDoubleClick: b3Attempts };
+
+            await ft.waitFor(async () => window.data.requests.find(r => r.id === base + 1)?.durum === 'approved');
+            await window.confirmRequest(base + 1);
+            out.secondApproveRefused = b3Attempts === out.approved.b3AttemptsAfterDoubleClick;
+
+            await window.confirmRequest(base + 3);
+            await ft.sleep(800);
+            out.draftRefused = (await db(3)).durum === 'draft';
+
+            window.setActiveUser({ name: 'Personel B ' + ft.MARKER });
+            await window.confirmRequest(base + 2);
+            await ft.sleep(800);
+            out.selfApprovalBlocked = (await db(2)).durum === 'Beklemede';
+
+            window.setActiveUser({ name: 'Yönetici Test' });
+            await window.rejectRequest(base + 2);
+            await ft.waitFor(async () => (await db(2)).durum === 'rejected');
+            out.rejected = { durum: (await db(2)).durum, rejectedBy: (await db(2)).rejectedBy };
+
+            await ft.waitFor(async () => window.data.requests.find(r => r.id === base + 2)?.durum === 'rejected');
+            await window.deleteRequest(base + 2);
+            out.deletedById = await ft.waitFor(async () => !(await db(2)) && !!(await db(1)) && !!(await db(3)));
+            window.saveData = realSave;
+            return out;
+        });
+    },
+
     // C6 · SEC-01 — payloads written by an anonymous (staff) session must not execute in admin.html
     async xssAdminPanel(page, browser) {
         const ids = await page.evaluate(async () => {

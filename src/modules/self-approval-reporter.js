@@ -317,9 +317,10 @@ const closeReportModal = function () {
 const initializeSecurityProxies = function () {
     const originalConfirmRequest = window.confirmRequest;
     if (originalConfirmRequest && !originalConfirmRequest._isSecured) {
-        const securedConfirm = async function (index) {
-            const request = window.data?.requests?.[index];
-            if (!request) return originalConfirmRequest(index);
+        // Talep artık id ile hedefleniyor (ITSM-05); sarmalayıcı aynı referansla arar.
+        const securedConfirm = async function (requestId) {
+            const request = (window.data?.requests || []).find(r => String(r.id) === String(requestId));
+            if (!request) return originalConfirmRequest(requestId);
 
             const currentUser = window.currentUser?.name;
             const requestor = request.personel;
@@ -373,7 +374,7 @@ const initializeSecurityProxies = function () {
                 });
             }
 
-            return originalConfirmRequest(index);
+            return originalConfirmRequest(requestId);
         };
         securedConfirm._isSecured = true;
         window.confirmRequest = securedConfirm;
