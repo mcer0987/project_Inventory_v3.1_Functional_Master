@@ -223,10 +223,6 @@ window.startRealtimeSync = function () {
                     loginInput.disabled = false;
                     loginInput.placeholder = "Erişim Kodu Giriniz";
                 }
-
-                if (typeof window.updateAdminDashboard === 'function') {
-                    window.updateAdminDashboard();
-                }
             }
         }, (err) => { 
             if(err.code !== "permission-denied") console.error(err); 

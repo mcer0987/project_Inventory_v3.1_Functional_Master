@@ -143,6 +143,13 @@ window.addEventListener('onInventoryDataUpdated', (e) => {
     if (colName === 'purchaseOrders' || colName === 'serviceRecords') {
         if (typeof window.renderPurchaseModule === 'function') window.renderPurchaseModule();
     }
+    // [WHY]: "Bana gelen onaylar" ve "Kişi Envanterim" canlı güncellenmiyordu (EBYS-19, ITSM-04).
+    if (colName === 'purchaseOrders') {
+        if (typeof window.renderMyApprovals === 'function') window.renderMyApprovals();
+    }
+    if (colName === 'b3' || colName === 'assignments') {
+        if (typeof window.renderPersonnelInventoryTable === 'function') window.renderPersonnelInventoryTable();
+    }
     if (colName === 'units') {
         if (typeof window.renderUnitManagement === 'function') window.renderUnitManagement();
     }

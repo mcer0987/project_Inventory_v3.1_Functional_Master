@@ -87,7 +87,8 @@ window.cycleCriticalFilter = function () {
 
 // ── 🚀 LOADING COORDINATOR ──
 window.LoadingCoordinator = {
-    expectedCollections: ["b1", "b2", "b3", "requests", "purchaseOrders", "serviceRecords", "settings"],
+    // [WHY]: "settings" hiç dinlenmeyen bir koleksiyondu; ekran her açılışta 4 sn zaman aşımını bekliyordu (ARC-04).
+    expectedCollections: ["b1", "b2", "b3", "requests", "purchaseOrders", "serviceRecords", "productTypes"],
     loadedCollections: new Set(),
     isRevealed: false,
 

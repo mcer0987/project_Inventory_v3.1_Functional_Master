@@ -9,6 +9,7 @@ import '../../services/purchase-servises.js';
 import '../edm-workflow.js';
 import './admin-purchase-render.js';
 import './inventory-management.js';
+import './admin-router.js';
 
 window.AppModules = window.AppModules || {};
 
