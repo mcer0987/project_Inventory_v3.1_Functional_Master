@@ -1,4 +1,4 @@
----
+d---
 trigger: always_on
 ---
 # 🏛️ THE AI ARCHITECTURE TEAM - UNIVERSAL MANIFESTO & ROLE DISTRIBUTION

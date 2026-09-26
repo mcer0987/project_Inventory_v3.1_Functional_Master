@@ -57,13 +57,12 @@ window.AppEnv = EnvConfig;
 window.COLLECTION_ROOT = COLLECTION_ROOT;
 
 const firebaseConfig = {
-    apiKey: "AIzaSyBU2JiWfVpbPqL6MPD7phiGdxbolttHA68",
-    authDomain: "medipol-envanter.firebaseapp.com",
-    projectId: "medipol-envanter",
-    storageBucket: "medipol-envanter.firebasestorage.app",
-    messagingSenderId: "226742369640",
-    appId: "1:226742369640:web:f0c0d561132fdcc013eadd",
-    measurementId: "G-E315LC7X17"
+    apiKey: "AIzaSyCz6BzD6OAGSj0C3gl0YvinizZZncd7I-w",
+    authDomain: "medipol-inventory-v3.firebaseapp.com",
+    projectId: "medipol-inventory-v3",
+    storageBucket: "medipol-inventory-v3.firebasestorage.app",
+    messagingSenderId: "434107090128",
+    appId: "1:434107090128:web:3e9b228b407a31b8190ad5"
 };
 
 
