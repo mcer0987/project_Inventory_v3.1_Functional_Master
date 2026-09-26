@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Fonksiyon: Kullanıcının geçerli bir oturumu var mı? (Anonim veya Custom Token)
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // 2. Fonksiyon: Kullanıcının oturumu "Admin" e-postasına mı ait?
+    // Not: Ücretsiz Spark planında kalmak için Custom Token iptal edildi, yerine sabit e-posta kullanılıyor.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == 'admin@medipol.local';
+    }
+
+    // ----------------------------------------------------
+    // YENİ CANLI MİMARİ: inventory_v2 (Subcollections)
+    // ----------------------------------------------------
+    match /inventory_v2/{col}/{document=**} {
+      // Bütün personeller veriyi görebilir
+      allow read: if isAuthenticated();
+      
+      // Admin her şeye yazabilir. Personeller yalnızca EBYS & Akış koleksiyonlarına (purchaseOrders, requests, tasks, vb.) yazabilir/geri çekebilir.
+      allow write: if isAdmin() || (isAuthenticated() && col in ['purchaseOrders', 'requests', 'tasks', 'assignments', 'serviceRecords']);
+    }
+
+    // ----------------------------------------------------
+    // GLOBAL KILL SWITCH & AYARLAR (system_config)
+    // ----------------------------------------------------
+    match /system_config/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ----------------------------------------------------
+    // ESKİ VE TEST MİMARİLERİ: ARŞİV KİLİDİ
+    // ----------------------------------------------------
+    // V1 (inventory) tamamen erişime kapatıldı.
+    match /inventory/{document=**} {
+      allow read, write: if false;
+    }
+    // v3.1 Ortam İzolasyonu: inventory_demo test ve geliştirme ortamı
+    match /inventory_demo/{col}/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || (isAuthenticated() && col in ['purchaseOrders', 'requests', 'tasks', 'assignments', 'serviceRecords']);
+    }
+    
+  }
+}

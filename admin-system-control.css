@@ -1,0 +1,1606 @@
+/* ═══════════════════════════════════════════════════════════════════
+   🌌 SİSTEM KONTROL MERKEZİ — VIP EXCLUSIVE CSS
+   ═══════════════════════════════════════════════════════════════════
+   Bu stil dosyası SADECE VIP sekmesine aittir.
+   Projede başka hiçbir yerde olmayan premium efektler barındırır.
+   Teknolojiler: Glassmorphism 2.0, CSS Houdini Patterns, 
+   GPU-accelerated Animations, Container Queries
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── VIP RENK PALETİ (CSS Custom Properties) ─────────────────── */
+#systemControlTab {
+    --vip-matrix:    #00ff88;
+    --vip-neon-blue: #0a84ff;
+    --vip-neon-purple: #5e5ce6;
+    --vip-danger:    #ff2d55;
+    --vip-warning:   #ff9f0a;
+    --vip-surface:   rgba(15, 23, 42, 0.95);
+    --vip-glass:     rgba(255, 255, 255, 0.04);
+    --vip-glass-border: rgba(255, 255, 255, 0.08);
+    --vip-text:      #e2e8f0;
+    --vip-text-muted: #64748b;
+    --vip-radius:    16px;
+    --vip-glow-sm:   0 0 8px;
+    --vip-glow-md:   0 0 20px;
+    --vip-glow-lg:   0 0 40px;
+}
+
+/* ─── KOYU TEMA ZORLAYICI (Her zaman dark, bağımsız) ──────────── */
+#systemControlTab {
+    position: relative;
+    z-index: 1;
+    background: #0b1120;
+    border-radius: 12px;
+    padding: 24px;
+    min-height: calc(100vh - 120px);
+    overflow: hidden;
+    color: var(--vip-text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+/* ─── LIGHT-MODE RENK SIZINTISI KORUMASI ──────────────────────── */
+/* Body light modda olsa bile VIP tab içindeki HER element koyu kalır */
+#systemControlTab,
+#systemControlTab * {
+    color: var(--vip-text);
+    border-color: var(--vip-glass-border);
+}
+
+#systemControlTab .vip-card {
+    background: var(--vip-glass) !important;
+    border-color: var(--vip-glass-border) !important;
+    color: var(--vip-text) !important;
+}
+
+#systemControlTab .vip-card-header {
+    background: rgba(255, 255, 255, 0.02) !important;
+    color: var(--vip-text) !important;
+    border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+#systemControlTab .ops-card {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+#systemControlTab .ops-label {
+    color: var(--vip-text-muted) !important;
+}
+
+#systemControlTab .health-metric-label,
+#systemControlTab .health-metric-label i {
+    color: var(--vip-text-muted) !important;
+}
+
+#systemControlTab .health-metric {
+    border-bottom-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+#systemControlTab .health-bar {
+    background: rgba(255, 255, 255, 0.06) !important;
+}
+
+#systemControlTab .platform-chip {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+#systemControlTab .platform-chip-label {
+    color: var(--vip-text-muted) !important;
+}
+
+#systemControlTab .platform-chip-value {
+    color: var(--vip-text) !important;
+}
+
+#systemControlTab .session-detail {
+    border-bottom-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+#systemControlTab .session-detail-label {
+    color: var(--vip-text-muted) !important;
+}
+
+#systemControlTab .session-detail-value {
+    color: var(--vip-text) !important;
+}
+
+#systemControlTab .session-label {
+    color: var(--vip-text-muted) !important;
+}
+
+#systemControlTab .debug-title {
+    color: var(--vip-text) !important;
+}
+
+#systemControlTab .debug-desc {
+    color: var(--vip-text-muted) !important;
+}
+
+#systemControlTab .vip-terminal {
+    background: #060d1a !important;
+    border-color: #1a2744 !important;
+}
+
+/* ─── SIDEBAR VIP DÖNÜŞÜMÜ ─────────────────────────────────────── */
+/* Admin VIP sekmesine girdiğinde sidebar başka bir evrene dönüşür */
+.sidebar {
+    transition:
+        background 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+        box-shadow 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+        border-color 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.vip-active {
+    background: #080e1e !important;
+    box-shadow:
+        inset -1px 0 0 rgba(0, 255, 136, 0.08),
+        4px 0 30px rgba(0, 255, 136, 0.04);
+}
+
+.sidebar.vip-active .sidebar-header {
+    background: linear-gradient(180deg, #0a1428, #060d1a) !important;
+    color: #00ff88 !important;
+    text-shadow: 0 0 12px rgba(0, 255, 136, 0.3);
+    border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+    transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    letter-spacing: 2px;
+}
+
+.sidebar.vip-active .nav-item {
+    color: #94a3b8 !important;
+    border-bottom-color: rgba(0, 255, 136, 0.06) !important;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.vip-active .nav-item:hover {
+    background: rgba(0, 255, 136, 0.08) !important;
+    color: #e2e8f0 !important;
+    padding-left: 25px;
+    border-left: 3px solid rgba(0, 255, 136, 0.4) !important;
+}
+
+.sidebar.vip-active .nav-item.active {
+    background: rgba(0, 255, 136, 0.1) !important;
+    color: #00ff88 !important;
+    border-left: 4px solid #00ff88 !important;
+    text-shadow: 0 0 8px rgba(0, 255, 136, 0.2);
+}
+
+/* Sidebar VIP Sekme Özel Stili */
+.vip-nav-item {
+    font-weight: 700;
+    color: var(--vip-text-muted);
+}
+.vip-nav-item i {
+    color: var(--vip-matrix);
+}
+
+/* Sidebar Matrix Arka Planı (Sadece VIP aktifken) */
+.sidebar.vip-active {
+    position: relative;
+    overflow: hidden;
+}
+.sidebar.vip-active::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='120'%3E%3Ctext x='10' y='20' fill='%2300ff8810' font-family='monospace' font-size='12'%3E0%3C/text%3E%3Ctext x='30' y='50' fill='%2300ff8808' font-family='monospace' font-size='10'%3E1%3C/text%3E%3Ctext x='5' y='80' fill='%2300ff8806' font-family='monospace' font-size='14'%3E%7B%3C/text%3E%3Ctext x='40' y='100' fill='%2300ff8805' font-family='monospace' font-size='11'%3E%7D%3C/text%3E%3Ctext x='20' y='110' fill='%2300ff8807' font-family='monospace' font-size='9'%3Ef%3C/text%3E%3C/svg%3E");
+    background-size: 60px 120px;
+    opacity: 0.15;
+    animation: matrixFall 20s linear infinite;
+    pointer-events: none;
+    z-index: 0;
+}
+.sidebar.vip-active > * {
+    position: relative;
+    z-index: 1; /* Menü öğeleri matrix'in üstünde kalsın */
+}
+
+/* Sidebar VIP butonunun özel neon parıltısı */
+.sidebar.vip-active #nav-systemControl {
+    position: relative;
+    overflow: hidden;
+}
+
+.sidebar.vip-active #nav-systemControl::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, 
+        transparent,
+        rgba(0, 255, 136, 0.03),
+        transparent
+    );
+    animation: vipSidebarSweep 3s ease-in-out infinite;
+}
+
+@keyframes vipSidebarSweep {
+    0%, 100% { transform: translateX(-100%); }
+    50% { transform: translateX(100%); }
+}
+
+/* Theme toggle butonu VIP modda */
+.sidebar.vip-active .theme-toggle-btn {
+    color: #64748b !important;
+    border-color: rgba(0, 255, 136, 0.1) !important;
+    transition: all 0.4s;
+}
+
+.sidebar.vip-active .theme-toggle-btn:hover {
+    color: #00ff88 !important;
+    border-color: rgba(0, 255, 136, 0.3) !important;
+}
+
+/* ─── MAIN CONTENT VIP PORTAL GEÇİŞİ ─────────────────────────── */
+.main-content {
+    transition: background 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.main-content.vip-bg {
+    background: #070c18 !important;
+}
+
+/* ─── MATRIX RAIN ARKA PLAN (CSS-only, GPU-accelerated) ──────── */
+#systemControlTab::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background-image:
+        radial-gradient(ellipse at 20% 50%, rgba(0, 255, 136, 0.03) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, rgba(94, 92, 230, 0.04) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 80%, rgba(10, 132, 255, 0.03) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+    animation: vipAmbientShift 20s ease-in-out infinite alternate;
+    will-change: opacity;
+    contain: strict;
+}
+
+/* Matrix karakter yağmuru katmanı */
+#systemControlTab::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='120'%3E%3Ctext x='10' y='20' fill='%2300ff8840' font-family='monospace' font-size='12'%3E0%3C/text%3E%3Ctext x='30' y='50' fill='%2300ff8830' font-family='monospace' font-size='10'%3E1%3C/text%3E%3Ctext x='5' y='80' fill='%2300ff8820' font-family='monospace' font-size='14'%3E%7B%3C/text%3E%3Ctext x='40' y='100' fill='%2300ff8815' font-family='monospace' font-size='11'%3E%7D%3C/text%3E%3Ctext x='20' y='110' fill='%2300ff8810' font-family='monospace' font-size='9'%3Ef%3C/text%3E%3C/svg%3E");
+    background-size: 60px 120px;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.85; /* Performans için kısılan opaklık full açıldı */
+    filter: drop-shadow(0 0 5px rgba(0, 255, 136, 0.8)); /* Ağır glow eklendi */
+    animation: matrixFall 20s linear infinite;
+    will-change: transform;
+}
+
+@keyframes matrixFall {
+    0%   { transform: translateY(-120px); }
+    100% { transform: translateY(0); }
+}
+
+@keyframes vipAmbientShift {
+    0%   { opacity: 0.6; }
+    50%  { opacity: 1; }
+    100% { opacity: 0.8; }
+}
+
+/* ─── VIP BAŞLIK ALANI ────────────────────────────────────────── */
+.vip-header {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+}
+
+.vip-header h2 {
+    font-size: 1.6rem;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    background: linear-gradient(135deg, var(--vip-matrix), var(--vip-neon-blue), var(--vip-neon-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    animation: vipTitleGlow 4s ease-in-out infinite alternate;
+    margin: 0;
+}
+
+@keyframes vipTitleGlow {
+    0%   { filter: brightness(1) drop-shadow(0 0 5px rgba(0,255,136,0.3)); }
+    100% { filter: brightness(1.2) drop-shadow(0 0 15px rgba(94,92,230,0.4)); }
+}
+
+.vip-header small {
+    display: block;
+    color: var(--vip-text-muted);
+    font-size: 0.8rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 4px;
+    animation: typewriterFade 2s ease forwards;
+}
+
+@keyframes typewriterFade {
+    0%   { opacity: 0; transform: translateX(-10px); }
+    100% { opacity: 1; transform: translateX(0); }
+}
+
+.vip-header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.vip-btn-reset {
+    background: transparent;
+    border: 1px solid rgba(255, 45, 85, 0.3);
+    color: var(--vip-danger);
+    padding: 8px 20px;
+    border-radius: 24px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    letter-spacing: 0.5px;
+}
+
+.vip-btn-reset:hover {
+    background: rgba(255, 45, 85, 0.1);
+    border-color: var(--vip-danger);
+    box-shadow: var(--vip-glow-sm) rgba(255, 45, 85, 0.3);
+    transform: scale(1.05);
+}
+
+/* ─── VIP GRID LAYOUT ─────────────────────────────────────────── */
+.vip-grid {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 20px;
+    padding-bottom: 60px;
+}
+
+/* ─── GLASSMORPHISM 2.0 KART ──────────────────────────────────── */
+.vip-card {
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(40px) saturate(250%);
+    -webkit-backdrop-filter: blur(40px) saturate(250%);
+    border: 1px solid rgba(0, 255, 136, 0.15);
+    border-radius: var(--vip-radius);
+    padding: 0;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    animation: vipCardEntry 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.6),
+        0 0 20px rgba(0, 255, 136, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        inset 0 0 20px rgba(0, 255, 136, 0.05);
+}
+
+.vip-card::before {
+    content: '';
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background: conic-gradient(
+        transparent, 
+        rgba(0, 255, 136, 0.1), 
+        transparent 30%
+    );
+    animation: rotateCardGlow 4s linear infinite;
+    pointer-events: none;
+    z-index: 0;
+}
+
+@keyframes rotateCardGlow {
+    100% { transform: rotate(360deg); }
+}
+
+.vip-card:nth-child(1) { animation-delay: 0.05s; }
+.vip-card:nth-child(2) { animation-delay: 0.1s; }
+.vip-card:nth-child(3) { animation-delay: 0.15s; }
+.vip-card:nth-child(4) { animation-delay: 0.2s; }
+.vip-card:nth-child(5) { animation-delay: 0.25s; }
+.vip-card:nth-child(6) { animation-delay: 0.3s; }
+
+@keyframes vipCardEntry {
+    0% {
+        opacity: 0;
+        transform: translateY(30px) scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Hologram tarama çizgisi — her kartın üzerinden geçer */
+.vip-card::before {
+    content: '';
+    position: absolute;
+    top: -100%;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--vip-matrix), transparent);
+    opacity: 0;
+    z-index: 10;
+    animation: hologramScan 8s linear infinite;
+    animation-delay: inherit;
+}
+
+@keyframes hologramScan {
+    0%   { top: -2px; opacity: 0; }
+    5%   { opacity: 0.6; }
+    50%  { top: 100%; opacity: 0.6; }
+    55%  { opacity: 0; }
+    100% { opacity: 0; top: 100%; }
+}
+
+/* Hover: Neon glow efekti */
+.vip-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(0, 255, 136, 0.2);
+    box-shadow:
+        0 8px 40px rgba(0, 0, 0, 0.4),
+        var(--vip-glow-md) rgba(0, 255, 136, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* ─── KART BAŞLIĞI ────────────────────────────────────────────── */
+.vip-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--vip-text);
+    cursor: grab;
+    user-select: none;
+    background: rgba(255, 255, 255, 0.02);
+    transition: background 0.2s;
+}
+
+.vip-card-header:active {
+    cursor: grabbing;
+    background: rgba(0, 255, 136, 0.03);
+}
+
+.vip-card-header .header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.vip-card-header .header-left i {
+    font-size: 1rem;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(0, 255, 136, 0.08);
+}
+
+.vip-card-header .header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.vip-card-header .grip-icon {
+    color: var(--vip-text-muted);
+    opacity: 0.4;
+    font-size: 0.85rem;
+    transition: opacity 0.2s;
+}
+
+.vip-card-header:hover .grip-icon {
+    opacity: 0.8;
+    color: var(--vip-matrix);
+}
+
+/* Collapse butonu */
+.vip-collapse-btn {
+    background: none;
+    border: none;
+    color: var(--vip-text-muted);
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 4px;
+    transition: all 0.3s;
+    opacity: 0;
+}
+
+.vip-card-header:hover .vip-collapse-btn {
+    opacity: 1;
+}
+
+.vip-collapse-btn:hover {
+    color: var(--vip-matrix);
+}
+
+/* Kart içerik alanı */
+.vip-card-body {
+    padding: 16px 20px 20px;
+    position: relative;
+}
+
+.vip-card.collapsed .vip-card-body {
+    display: none;
+}
+
+.vip-card.collapsed {
+    opacity: 0.7;
+}
+
+.vip-card.collapsed .vip-collapse-btn {
+    opacity: 1;
+    transform: rotate(180deg);
+}
+
+/* ─── TERMİNAL (CANLI LOG EKRANİ) ────────────────────────────── */
+.vip-terminal {
+    background: transparent;
+    border-radius: 0;
+    padding: 0;
+    height: 420px;
+    overflow-y: auto;
+    font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 0.8rem;
+    color: var(--vip-matrix);
+    border: none;
+    position: relative;
+    box-shadow: none;
+}
+
+/* Özel ince ve neon kaydırma çubuğu (Scrollbar) */
+.vip-terminal::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+.vip-terminal::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+}
+.vip-terminal::-webkit-scrollbar-thumb {
+    background: rgba(0, 255, 136, 0.3);
+    border-radius: 4px;
+}
+.vip-terminal::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 255, 136, 0.6);
+}
+
+/* CRT Scanline Effect */
+.vip-terminal::after {
+    content: " ";
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+    z-index: 10;
+    background-size: 100% 2px, 3px 100%;
+    pointer-events: none;
+    opacity: 0.4;
+}
+
+/* Terminal başlık barı (Pencere içinde pencere görünümünü kaldırmak için transparan) */
+.vip-terminal-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 8px 14px;
+    background: transparent;
+    border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+    position: sticky;
+    top: 0;
+    z-index: 15; /* Scanline'ın üzerinde kalsın */
+    backdrop-filter: blur(5px);
+}
+
+.vip-terminal-dot, .vip-terminal-title {
+    display: none !important; /* Amatör macOS pencere görünümünü gizle */
+}
+
+.vip-terminal-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.vip-terminal-dot.red    { background: #ff5f57; }
+.vip-terminal-dot.yellow { background: #ffbd2e; }
+.vip-terminal-dot.green  { background: #28c840; }
+
+.vip-terminal-title {
+    margin-left: 10px;
+    font-size: 0.7rem;
+    color: var(--vip-text-muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.vip-terminal-logs {
+    padding: 12px 14px;
+}
+
+/* Terminal Filter Butonları */
+.vip-terminal-filters {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.vip-filter-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--vip-text-muted);
+    font-size: 0.65rem;
+    padding: 3px 10px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.vip-filter-btn:hover,
+.vip-filter-btn.active {
+    background: rgba(0, 255, 136, 0.1);
+    color: var(--vip-matrix);
+    border-color: rgba(0, 255, 136, 0.3);
+}
+
+.vip-filter-btn.filter-error.active {
+    background: rgba(255, 45, 85, 0.1);
+    color: var(--vip-danger);
+    border-color: rgba(255, 45, 85, 0.3);
+}
+
+.vip-filter-btn.filter-warn.active {
+    background: rgba(255, 159, 10, 0.1);
+    color: var(--vip-warning);
+    border-color: rgba(255, 159, 10, 0.3);
+}
+
+/* Log Girdileri */
+.log-entry {
+    margin-bottom: 2px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    word-break: break-all;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    animation: logSlideIn 0.3s ease backwards;
+    line-height: 1.4;
+}
+
+@keyframes logSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-8px);
+    }
+}
+
+.log-entry .log-icon {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    margin-top: 2px;
+}
+
+.log-entry.info { color: var(--vip-neon-blue); }
+.log-entry.info .log-icon { color: var(--vip-neon-blue); }
+
+.log-entry.warn { color: var(--vip-warning); }
+.log-entry.warn .log-icon { color: var(--vip-warning); }
+
+.log-entry.error { color: var(--vip-danger); }
+.log-entry.error .log-icon { color: var(--vip-danger); }
+
+.log-entry.success { color: var(--vip-matrix); }
+.log-entry.success .log-icon { color: var(--vip-matrix); }
+
+.log-entry .timestamp {
+    color: #475569;
+    font-size: 0.7rem;
+    flex-shrink: 0;
+    min-width: 65px;
+}
+
+.log-entry .log-msg {
+    flex: 1;
+}
+
+/* Terminal Clear butonu */
+.vip-terminal-clear {
+    background: none;
+    border: 1px solid rgba(255, 45, 85, 0.2);
+    color: var(--vip-danger);
+    font-size: 0.65rem;
+    padding: 3px 10px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 600;
+}
+
+.vip-terminal-clear:hover {
+    background: rgba(255, 45, 85, 0.1);
+    border-color: var(--vip-danger);
+}
+
+/* ─── NEON SCROLLBAR (VIP-only) ───────────────────────────────── */
+#systemControlTab ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+#systemControlTab ::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 10px;
+}
+
+#systemControlTab ::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, var(--vip-matrix), var(--vip-neon-purple));
+    border-radius: 10px;
+    box-shadow: var(--vip-glow-sm) rgba(0, 255, 136, 0.3);
+}
+
+#systemControlTab ::-webkit-scrollbar-thumb:hover {
+    background: var(--vip-matrix);
+}
+
+/* ─── SİSTEM SAĞLIK MONİTÖRÜ ─────────────────────────────────── */
+.health-metric {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.health-metric:last-child {
+    border-bottom: none;
+}
+
+.health-metric-label {
+    font-size: 0.8rem;
+    color: var(--vip-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.health-metric-label i {
+    width: 18px;
+    text-align: center;
+}
+
+.health-metric-value {
+    font-size: 0.85rem;
+    font-weight: 700;
+    font-family: 'Cascadia Code', monospace;
+}
+
+/* Sağlık barları */
+.health-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 6px;
+}
+
+.health-bar-fill {
+    height: 100%;
+    border-radius: 10px;
+    transition: width 1.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+    position: relative;
+    box-shadow: var(--vip-glow-sm) currentColor;
+}
+
+.health-bar-fill.good    { background: linear-gradient(90deg, #10b981, var(--vip-matrix)); color: var(--vip-matrix); }
+.health-bar-fill.warning { background: linear-gradient(90deg, #f59e0b, #fbbf24); color: #fbbf24; }
+.health-bar-fill.danger  { background: linear-gradient(90deg, #ef4444, var(--vip-danger)); color: var(--vip-danger); }
+
+/* Kalp atışı animasyonu — bağlantı durumu */
+.heartbeat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    animation: heartbeat 1.5s ease-in-out infinite;
+}
+
+.heartbeat-dot.online  { background: var(--vip-matrix); box-shadow: var(--vip-glow-sm) rgba(0, 255, 136, 0.5); }
+.heartbeat-dot.offline { background: var(--vip-danger); box-shadow: var(--vip-glow-sm) rgba(255, 45, 85, 0.5); animation: none; }
+
+@keyframes heartbeat {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%      { transform: scale(1.4); opacity: 0.7; }
+}
+
+/* ─── OPERASYON RAPORU — COUNT-UP SAYAÇLAR ────────────────────── */
+.ops-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.ops-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    transition: all 0.3s;
+    position: relative;
+    overflow: hidden;
+}
+
+.ops-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(0, 255, 136, 0.15);
+    transform: translateY(-2px);
+}
+
+/* Alt neon çizgi */
+.ops-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 10%;
+    width: 80%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--vip-neon-blue), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.ops-card:hover::after {
+    opacity: 1;
+}
+
+.ops-value {
+    font-size: 1.8rem;
+    font-weight: 800;
+    font-family: 'Cascadia Code', monospace;
+    line-height: 1;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #fff, #94a3b8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.ops-label {
+    font-size: 0.7rem;
+    color: var(--vip-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-weight: 600;
+}
+
+.ops-card .ops-icon {
+    font-size: 1.2rem;
+    margin-bottom: 8px;
+    opacity: 0.6;
+}
+
+/* Renk varyantları */
+.ops-card.blue   .ops-value { background: linear-gradient(135deg, var(--vip-neon-blue), #60a5fa); -webkit-background-clip: text; background-clip: text; }
+.ops-card.green  .ops-value { background: linear-gradient(135deg, var(--vip-matrix), #34d399); -webkit-background-clip: text; background-clip: text; }
+.ops-card.purple .ops-value { background: linear-gradient(135deg, var(--vip-neon-purple), #a78bfa); -webkit-background-clip: text; background-clip: text; }
+.ops-card.red    .ops-value { background: linear-gradient(135deg, var(--vip-danger), #f87171); -webkit-background-clip: text; background-clip: text; }
+
+/* ─── DEBUG & HATA TAKİP PANELİ ───────────────────────────────── */
+.debug-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.debug-list::-webkit-scrollbar {
+    width: 6px;
+}
+.debug-list::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+.debug-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 159, 10, 0.3);
+    border-radius: 4px;
+}
+.debug-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 159, 10, 0.6);
+}
+
+.debug-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    font-size: 0.82rem;
+    transition: background 0.2s;
+}
+
+.debug-item:hover {
+    background: rgba(255, 255, 255, 0.02);
+    padding-left: 6px;
+    border-radius: 6px;
+}
+
+.debug-status {
+    flex-shrink: 0;
+    font-size: 0.9rem;
+    margin-top: 1px;
+}
+
+.debug-info {
+    flex: 1;
+}
+
+.debug-title {
+    font-weight: 600;
+    color: var(--vip-text);
+    margin-bottom: 2px;
+}
+
+.debug-desc {
+    font-size: 0.75rem;
+    color: var(--vip-text-muted);
+}
+
+.debug-badge {
+    flex-shrink: 0;
+    font-size: 0.6rem;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    align-self: center;
+}
+
+.debug-badge.resolved {
+    background: rgba(0, 255, 136, 0.1);
+    color: var(--vip-matrix);
+    border: 1px solid rgba(0, 255, 136, 0.2);
+}
+
+.debug-badge.active {
+    background: rgba(255, 159, 10, 0.1);
+    color: var(--vip-warning);
+    border: 1px solid rgba(255, 159, 10, 0.2);
+    animation: neonPulse 2s ease-in-out infinite;
+}
+
+.debug-badge.critical {
+    background: rgba(255, 45, 85, 0.1);
+    color: var(--vip-danger);
+    border: 1px solid rgba(255, 45, 85, 0.2);
+    animation: neonPulse 1s ease-in-out infinite;
+}
+
+@keyframes neonPulse {
+    0%, 100% { box-shadow: none; }
+    50%      { box-shadow: var(--vip-glow-sm) currentColor; }
+}
+
+/* ─── PLATFORM BİLGİLERİ ──────────────────────────────────────── */
+.platform-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.platform-chip {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 0.78rem;
+    transition: all 0.2s;
+}
+
+.platform-chip:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(94, 92, 230, 0.2);
+}
+
+.platform-chip-label {
+    color: var(--vip-text-muted);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.platform-chip-value {
+    color: var(--vip-text);
+    font-weight: 700;
+    font-family: 'Cascadia Code', monospace;
+    font-size: 0.8rem;
+}
+
+/* ─── OTURUM & GÜVENLİK WIDGET'I ─────────────────────────────── */
+.session-countdown {
+    text-align: center;
+    padding: 10px 0;
+}
+
+.session-time {
+    font-size: 2.2rem;
+    font-weight: 800;
+    font-family: 'Cascadia Code', monospace;
+    letter-spacing: 3px;
+    background: linear-gradient(135deg, var(--vip-matrix), var(--vip-neon-blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.session-time.warning {
+    background: linear-gradient(135deg, var(--vip-warning), var(--vip-danger));
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation: neonPulse 1s ease-in-out infinite;
+}
+
+.session-label {
+    font-size: 0.7rem;
+    color: var(--vip-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-top: 4px;
+}
+
+.session-detail {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    font-size: 0.8rem;
+}
+
+.session-detail-label {
+    color: var(--vip-text-muted);
+}
+
+.session-detail-value {
+    color: var(--vip-text);
+    font-weight: 600;
+}
+
+/* Güvenlik seviyesi barı */
+.security-level {
+    display: flex;
+    gap: 3px;
+    margin-top: 10px;
+}
+
+.security-bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    transition: background 0.5s;
+}
+
+.security-bar.active {
+    background: var(--vip-matrix);
+    box-shadow: var(--vip-glow-sm) rgba(0, 255, 136, 0.3);
+}
+
+/* ─── SORTABLE DRAG STİLLERİ ──────────────────────────────────── */
+.vip-card.sortable-ghost {
+    opacity: 0.4;
+    border: 2px dashed rgba(0, 255, 136, 0.4) !important;
+    box-shadow: var(--vip-glow-lg) rgba(0, 255, 136, 0.15) !important;
+    transform: rotate(1deg);
+}
+
+.vip-card.sortable-chosen {
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.5),
+        var(--vip-glow-md) rgba(0, 255, 136, 0.2) !important;
+    border-color: rgba(0, 255, 136, 0.3) !important;
+    z-index: 100;
+}
+
+.vip-card.sortable-drag {
+    opacity: 0.9;
+}
+
+/* ─── ESKİ FOOTER KODLARI KALDIRILDI (V3 Phase 3) ─────────────────
+   Sitemap butonu ve versiyon bilgisi sidebar'a entegre edildi. 
+   ------------------------------------------------------------------ */
+
+
+/* ─── GOD-EYE RADAR EFEKTİ ────────────────────────────────────── */
+.god-eye-radar {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 255, 136, 0.3);
+    position: relative;
+    background: 
+        linear-gradient(rgba(0, 255, 136, 0.1) 1px, transparent 1px) 50% 50% / 20px 20px,
+        linear-gradient(90deg, rgba(0, 255, 136, 0.1) 1px, transparent 1px) 50% 50% / 20px 20px;
+    box-shadow: 0 0 30px rgba(0, 255, 136, 0.1);
+    overflow: hidden;
+}
+
+.god-eye-radar::before, .god-eye-radar::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    border: 1px solid rgba(0, 255, 136, 0.2);
+    border-radius: 50%;
+}
+.god-eye-radar::before { width: 100px; height: 100px; }
+.god-eye-radar::after { width: 50px; height: 50px; }
+
+.radar-scanner {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 75px; height: 75px;
+    background: conic-gradient(from 0deg, transparent 70%, rgba(0, 255, 136, 0.8) 100%);
+    transform-origin: 0 0;
+    animation: radarScan 3s linear infinite;
+}
+
+@keyframes radarScan {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.radar-dot {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: #ff2d55; /* Neon Red/Pink for targets */
+    border-radius: 50%;
+    box-shadow: 0 0 8px #ff2d55;
+    animation: radarBlink 3s ease-out infinite;
+    opacity: 0;
+}
+
+@keyframes radarBlink {
+    0% { opacity: 0; transform: scale(0.5); }
+    10% { opacity: 1; transform: scale(1.2); }
+    30% { opacity: 0.5; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1); }
+}
+
+/* ─── RESPONSIVE ──────────────────────────────────────────────── */
+@media (max-width: 900px) {
+    .vip-grid {
+        grid-template-columns: 1fr;
+    }
+    .ops-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .platform-info-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 600px) {
+    #systemControlTab {
+        padding: 12px;
+    }
+    .vip-header h2 {
+        font-size: 1.2rem;
+    }
+    .ops-grid {
+        grid-template-columns: 1fr;
+    }
+    .vip-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  GOD-EYE v2 — KULLANICI AKTİVİTE PANELİ & HEATMAP STİLLERİ       */
+/*  [WHY]: VIP panelin kullanıcı müdahale ve heatmap modülü için      */
+/*  [HOW]: Slide-in panel, SVG pie dilimleri, renk animasyonları      */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── HEATMAP TOGGLE BUTONU ─────────────────────────────────────── */
+#godEyeHeatmapToggle {
+    font-size: 0.7rem;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--vip-neon-blue);
+    background: rgba(10, 132, 255, 0.08);
+    color: var(--vip-neon-blue);
+    cursor: pointer;
+    transition: all 0.25s ease;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+#godEyeHeatmapToggle:hover {
+    background: rgba(10, 132, 255, 0.2);
+    box-shadow: 0 0 10px rgba(10, 132, 255, 0.3);
+}
+#godEyeHeatmapToggle.heatmap-active {
+    background: rgba(255, 159, 10, 0.12);
+    border-color: var(--vip-warning);
+    color: var(--vip-warning);
+    box-shadow: 0 0 10px rgba(255, 159, 10, 0.25);
+}
+
+/* ─── GOD-EYE RADAR CONTAINER ───────────────────────────────────── */
+#godEyeRadarContainer {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 220px;
+}
+
+/* ─── RADAR DOT — TIKLAMA ENABLEd ──────────────────────────────── */
+.radar-dot {
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.radar-dot:hover {
+    transform: scale(1.6) !important;
+    box-shadow: 0 0 18px rgba(255, 45, 85, 0.8);
+    z-index: 10;
+}
+.radar-dot.selected {
+    transform: scale(2) !important;
+    box-shadow: 0 0 24px rgba(255, 45, 85, 1), 0 0 48px rgba(255, 45, 85, 0.4);
+    animation: radarDotPulse 0.8s ease infinite !important;
+}
+@keyframes radarDotPulse {
+    0%, 100% { box-shadow: 0 0 12px rgba(255, 45, 85, 0.9); }
+    50%       { box-shadow: 0 0 30px rgba(255, 45, 85, 0.5), 0 0 60px rgba(255, 45, 85, 0.2); }
+}
+
+/* ─── HEATMAP SVG PIE CONTAINER ─────────────────────────────────── */
+#godEyeHeatmapSVG {
+    display: none;
+    width: 200px;
+    height: 200px;
+    filter: drop-shadow(0 0 20px rgba(10, 132, 255, 0.2));
+    transition: opacity 0.4s ease;
+}
+#godEyeHeatmapSVG.visible {
+    display: block;
+    animation: heatmapFadeIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes heatmapFadeIn {
+    from { opacity: 0; transform: scale(0.85) rotate(-10deg); }
+    to   { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+/* Heatmap dilim renk sınıfları */
+.hm-slice-cool { fill: rgba(10, 132, 255, 0.35); stroke: rgba(10, 132, 255, 0.7); }
+.hm-slice-warm { fill: rgba(255, 159, 10, 0.55); stroke: rgba(255, 159, 10, 0.9); }
+.hm-slice-hot  { fill: rgba(255, 45, 85, 0.70);  stroke: rgba(255, 45, 85, 1);    }
+.hm-slice      { stroke-width: 1.5; cursor: pointer; transition: opacity 0.3s ease; }
+.hm-slice:hover { opacity: 0.85; filter: brightness(1.3); }
+
+.hm-label {
+    fill: rgba(255, 255, 255, 0.85);
+    font-size: 8px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    letter-spacing: 0.3px;
+}
+.hm-center-text {
+    fill: var(--vip-text-muted);
+    font-size: 7px;
+    font-family: 'Inter', sans-serif;
+    text-anchor: middle;
+    dominant-baseline: central;
+}
+
+/* ─── KULLANICI AKTİVİTE PANELİ (Slide-in) ─────────────────────── */
+#userActivityPanel {
+    position: fixed;
+    top: 0;
+    right: -420px;
+    width: 400px;
+    height: 100vh;
+    z-index: 99999;
+    background: linear-gradient(160deg,
+        rgba(10, 12, 28, 0.97) 0%,
+        rgba(15, 23, 42, 0.98) 100%);
+    backdrop-filter: blur(24px) saturate(1.8);
+    border-left: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: -20px 0 60px rgba(0, 0, 0, 0.7), -4px 0 20px rgba(10, 132, 255, 0.1);
+    transition: right 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#userActivityPanel.panel-open {
+    right: 0;
+}
+
+/* Panel Overlay */
+#userActivityOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(3px);
+    z-index: 99998;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+#userActivityOverlay.overlay-visible {
+    display: block;
+    opacity: 1;
+}
+
+/* Panel Header */
+.uap-header {
+    padding: 24px 24px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(135deg, rgba(255, 45, 85, 0.08) 0%, transparent 60%);
+}
+.uap-header-info {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.uap-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(255, 45, 85, 0.3), rgba(94, 92, 230, 0.3));
+    border: 2px solid rgba(255, 45, 85, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--vip-danger);
+    box-shadow: 0 0 20px rgba(255, 45, 85, 0.25);
+    letter-spacing: 0;
+    flex-shrink: 0;
+}
+.uap-user-name {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--vip-text);
+    margin-bottom: 3px;
+}
+.uap-user-meta {
+    font-size: 0.72rem;
+    color: var(--vip-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.uap-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(0, 255, 136, 0.1);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    border-radius: 20px;
+    padding: 2px 8px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--vip-matrix);
+    letter-spacing: 0.8px;
+}
+.uap-live-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--vip-matrix);
+    animation: uapLivePulse 1.2s ease infinite;
+}
+@keyframes uapLivePulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--vip-matrix); }
+    50%       { opacity: 0.4; box-shadow: none; }
+}
+
+.uap-close-btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--vip-text-muted);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s ease;
+    font-size: 14px;
+}
+.uap-close-btn:hover {
+    background: rgba(255, 45, 85, 0.15);
+    border-color: var(--vip-danger);
+    color: var(--vip-danger);
+    transform: rotate(90deg);
+}
+
+/* Panel Body */
+.uap-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.uap-body::-webkit-scrollbar { width: 4px; }
+.uap-body::-webkit-scrollbar-track { background: transparent; }
+.uap-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+/* Aktivite Kartı */
+.uap-section-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--vip-text-muted);
+    margin-bottom: 8px;
+}
+
+.uap-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+.uap-stat-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+    transition: border-color 0.2s ease;
+}
+.uap-stat-card:hover { border-color: rgba(255, 255, 255, 0.12); }
+.uap-stat-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--vip-text);
+    line-height: 1;
+}
+.uap-stat-label {
+    font-size: 0.65rem;
+    color: var(--vip-text-muted);
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+}
+
+/* Son Aktivite Listesi */
+.uap-activity-list {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 8px;
+}
+.uap-activity-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 10px;
+    font-size: 0.78rem;
+    color: var(--vip-text);
+    transition: background 0.2s ease;
+}
+.uap-activity-item:hover { background: rgba(255,255,255,0.05); }
+.uap-activity-icon { color: var(--vip-neon-blue); font-size: 0.8rem; margin-top: 1px; flex-shrink: 0; }
+.uap-activity-time { color: var(--vip-text-muted); font-size: 0.65rem; margin-top: 2px; }
+
+/* Mesaj Formu */
+.uap-msg-form {
+    display: flex; flex-direction: column; gap: 8px;
+}
+.uap-msg-textarea {
+    width: 100%;
+    min-height: 80px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    color: var(--vip-text);
+    padding: 10px 12px;
+    font-size: 0.82rem;
+    font-family: 'Inter', sans-serif;
+    resize: vertical;
+    transition: border-color 0.2s ease;
+    box-sizing: border-box;
+}
+.uap-msg-textarea:focus {
+    outline: none;
+    border-color: var(--vip-neon-blue);
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.1);
+}
+.uap-msg-textarea::placeholder { color: var(--vip-text-muted); }
+
+/* Aksiyon Butonları */
+.uap-action-btn {
+    width: 100%;
+    padding: 11px 16px;
+    border-radius: 10px;
+    border: 1px solid;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: all 0.25s ease;
+    letter-spacing: 0.3px;
+}
+.uap-btn-msg {
+    background: rgba(10, 132, 255, 0.1);
+    border-color: rgba(10, 132, 255, 0.4);
+    color: var(--vip-neon-blue);
+}
+.uap-btn-msg:hover {
+    background: rgba(10, 132, 255, 0.22);
+    box-shadow: 0 0 16px rgba(10, 132, 255, 0.3);
+    transform: translateY(-1px);
+}
+.uap-btn-logout {
+    background: rgba(255, 45, 85, 0.08);
+    border-color: rgba(255, 45, 85, 0.35);
+    color: var(--vip-danger);
+}
+.uap-btn-logout:hover {
+    background: rgba(255, 45, 85, 0.2);
+    box-shadow: 0 0 16px rgba(255, 45, 85, 0.3);
+    transform: translateY(-1px);
+}
+.uap-btn-logout:active {
+    transform: scale(0.97);
+}
+/* Onay state */
+.uap-btn-logout.confirming {
+    background: rgba(255, 45, 85, 0.3);
+    border-color: var(--vip-danger);
+    animation: confirmPulse 0.6s ease infinite;
+}
+@keyframes confirmPulse {
+    0%, 100% { box-shadow: 0 0 8px rgba(255, 45, 85, 0.4); }
+    50%       { box-shadow: 0 0 24px rgba(255, 45, 85, 0.7); }
+}
+
+/* Panel Footer */
+.uap-footer {
+    padding: 16px 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.65rem;
+    color: var(--vip-text-muted);
+    text-align: center;
+    letter-spacing: 0.5px;
+}

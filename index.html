@@ -1,0 +1,1521 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Envanter Takip Sistemi</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <!-- PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    <script>
+        (function () {
+            emailjs.init("Wx26W2WPWjJaHu1yv");
+        })();
+    </script>
+
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="dark-theme.css">
+    <script src="dark-mode-toggle.js"></script>
+    <link rel="stylesheet" href="todo-module.css">
+    <script src="todo-module.js"></script>
+
+    <!-- Launchpad (Zero Page) [DECOMMISSIONED] -->
+    <!-- <link rel="stylesheet" href="launchpad.css?v=1.0.5"> -->
+    <!-- <script src="scratch/launchpad.js?v=1.0.5"></script> -->
+
+    <style>
+        @media print {
+
+            body {
+                margin: 0;
+                font-family: Arial, Helvetica, sans-serif;
+                color: #222;
+            }
+
+            .print-container {
+                padding: 16px;
+            }
+
+            .print-title {
+                font-size: 18px;
+                font-weight: bold;
+                margin-bottom: 4px;
+            }
+
+            .print-date {
+                font-size: 12px;
+                margin-bottom: 12px;
+            }
+
+            .print-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 11px;
+            }
+
+            /* HEADER */
+            .print-table th {
+                background: #2c3e50;
+                color: white;
+                padding: 7px 8px;
+                border: 1px solid #9aa4ad;
+                text-align: left;
+                font-weight: 600;
+            }
+
+            /* CELL */
+            .print-table td {
+                padding: 6px 8px;
+                border: 1px solid #cfd6dc;
+                /* ince excel çizgi */
+            }
+
+            /* zebra */
+            .print-table tr:nth-child(even) {
+                background: #f7f9fb;
+            }
+
+            /* SAYFA KIRILIM */
+            thead {
+                display: table-header-group;
+            }
+
+            tr {
+                page-break-inside: avoid;
+            }
+
+            /* SÜTUN GENİŞLİKLERİ */
+            .print-table th:nth-child(1),
+            .print-table td:nth-child(1) {
+                width: 35px;
+                text-align: center;
+            }
+
+            .print-table th:nth-child(2),
+            .print-table td:nth-child(2) {
+                width: 70px;
+                /* sütun */
+            }
+
+            .print-table th:nth-child(3),
+            .print-table td:nth-child(3) {
+                width: 85px;
+                /* raf */
+            }
+
+            .print-table th:nth-child(6),
+            .print-table td:nth-child(6) {
+                width: 55px;
+                text-align: center;
+            }
+
+            /* DURUM RENKLERİ */
+            .status-hazir {
+                background: #e8f5e9;
+                color: #2e7d32;
+                font-weight: 600;
+            }
+
+            .status-ariza {
+                background: #ffebee;
+                color: #c62828;
+                font-weight: 600;
+            }
+
+            .status-sifir {
+                background: #e3f2fd;
+                color: #1565c0;
+                font-weight: 600;
+            }
+
+            .status-diger {
+                background: #fff8e1;
+                color: #ef6c00;
+                font-weight: 600;
+            }
+
+            /* hizalama */
+            .col-center {
+                text-align: center;
+            }
+
+            .col-adet {
+                text-align: center;
+                font-weight: 600;
+            }
+
+        }
+    </style>
+
+</head>
+
+<body>
+    <!-- KILL SWITCH: Bakım Modu Kontrolü -->
+    <script>
+        (function () {
+            if (localStorage.getItem("system_maintenance_mode") === "true") {
+                // Ekranda tüm sayfayı kaplayan bakım katmanını oluşturur
+                document.write(`
+                    <div id="maintenanceOverlay" style="position: fixed; inset: 0; background: #0f172a; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100000; color: white; font-family: sans-serif; text-align: center; padding: 20px;">
+                        <svg width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 20px;">
+                            <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                        <h1 style="color: #ef4444; margin-bottom: 10px;">SİSTEM BAKIMDA</h1>
+                        <p style="color: #94a3b8; max-width: 400px; line-height: 1.6; margin-bottom: 30px;">Şu anda acil bir bakım veya güncelleme çalışması yapılmaktadır. Lütfen daha sonra tekrar deneyin.</p>
+                        
+                        <!-- Yönetici Giriş Arayüzü -->
+                        <div id="maintenanceAdminBox" style="margin-top: 20px;">
+                            <button onclick="document.getElementById('maintenanceForm').style.display='block'; this.style.display='none';" style="background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.2s;">🛡️ Yönetici Girişi</button>
+                            <div id="maintenanceForm" style="display: none;">
+                                <input type="password" id="maintenanceCode" placeholder="Giriş Kodu" onkeypress="if(event.key === 'Enter') window.adminBypassMaintenance();" style="background: #1e293b; border: 1px solid #475569; color: white; padding: 10px; border-radius: 8px; font-size: 1rem; width: 180px; text-align: center; outline: none; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;" maxlength="5">
+                                <button onclick="window.adminBypassMaintenance()" style="background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.2s;">Giriş Yap</button>
+                            </div>
+                        </div>
+                    </div>
+                `);
+            }
+        })();
+    </script>
+    <div id="appAlert" class="app-alert" style="display: none;">
+        <div class="app-alert-content">
+            <span id="appAlertMessage"></span>
+            <button onclick="closeAppAlert()">Tamam</button>
+        </div>
+    </div>
+
+    <div id="customAlertOverlay" class="custom-alert-overlay" style="display: none;">
+        <div class="custom-alert-box">
+            <h3 id="alertTitle">Emin misiniz?</h3>
+            <p id="alertMessage">Bu işlemi gerçekleştirmek istediğinize emin misiniz?</p>
+            <div class="alert-buttons">
+                <button id="alertConfirmBtn" class="btn-confirm">Evet</button>
+                <button id="alertCancelBtn" class="btn-cancel">Hayır</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- =================================================================
+         LAUNCHPAD (ZERO PAGE) - PREMIUM BENTO GRID & MESH GRADIENT
+         ================================================================= -->
+    <div id="launchpad-view" style="display: none !important;">
+        <div class="launchpad-container">
+            <!-- HEADER ROW (Greeting + Clock/Weather) -->
+            <div class="launchpad-header-row">
+                <div class="launchpad-hero">
+                    <div class="hero-title-wrapper">
+                        <h2 id="launchpad-personal-greeting" class="personal-greeting">Yükleniyor...</h2>
+                        <h1 id="launchpad-greeting" class="anim-type-1"><span class="skeleton-text"></span></h1>
+                        <div class="abstract-orb"></div>
+                        <div class="abstract-orb orb-2"></div>
+                    </div>
+                </div>
+
+                <!-- Top Right Micro-Widgets -->
+                <div class="launchpad-top-widgets">
+                    <div class="weather-widget" id="weather-widget" style="display: none;">
+                        <i class="fas fa-sun" id="weather-icon"></i>
+                        <span id="weather-temp">--°C</span>
+                    </div>
+                    <div class="zen-clock-widget">
+                        <div id="zen-time">--:--<span class="seconds">--</span></div>
+                        <div id="zen-date">Yükleniyor...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bento Grid Widgets (Auth Fazı) -->
+            <div class="launchpad-bento-grid" id="lp-bento-grid" style="display:none;">
+                <div class="bento-card">
+                    <div class="bento-icon"><i class="fas fa-box"></i></div>
+                    <div class="bento-info">
+                        <h3>Aktif Donanım Protokolü</h3>
+                        <h2 id="lp-zimmet-count"><span class="skeleton-text"></span></h2>
+                    </div>
+                </div>
+                <div class="bento-card">
+                    <div class="bento-icon"><i class="fas fa-tasks"></i></div>
+                    <div class="bento-info">
+                        <h3>Operasyonel Görevler</h3>
+                        <h2 id="lp-todo-count"><span class="skeleton-text"></span></h2>
+                    </div>
+                </div>
+                <div class="bento-card">
+                    <div class="bento-icon"><i class="fas fa-file-invoice"></i></div>
+                    <div class="bento-info">
+                        <h3>İşlem Bekleyen Modüller</h3>
+                        <h2 id="lp-talep-count"><span class="skeleton-text"></span></h2>
+                    </div>
+                </div>
+            </div>
+
+            <h2 class="launchpad-section-title" id="lp-nav-title" style="display:none;">Sistem Bağlantı Noktaları</h2>
+
+            <!-- Navigation Cards -->
+            <div class="launchpad-nav-grid" id="lp-nav-grid" style="display:none;">
+                <div class="bento-card nav-card" onclick="triggerLaunchModule('b1')">
+                    <i class="fas fa-warehouse nav-icon"></i>
+                    <span>Ana Depo (B1)</span>
+                </div>
+                <div class="bento-card nav-card" onclick="triggerLaunchModule('b2')">
+                    <i class="fas fa-boxes nav-icon"></i>
+                    <span>Alt Depo (B2)</span>
+                </div>
+                <div class="bento-card nav-card" onclick="triggerLaunchModule('myTasksTab')">
+                    <i class="fas fa-check-double nav-icon"></i>
+                    <span>Görev Yönetimi</span>
+                </div>
+                <div class="bento-card nav-card" onclick="triggerLaunchModule('myRequests')">
+                    <i class="fas fa-clipboard-list nav-icon"></i>
+                    <span>Taleplerim</span>
+                </div>
+                <div class="bento-card nav-card" onclick="triggerLaunchModule('purchaseTab')">
+                    <i class="fas fa-shopping-cart nav-icon"></i>
+                    <span>Satın Alma (EBYS)</span>
+                </div>
+            </div>
+
+            <!-- GATE (NO-AUTH) ALANI: Sadece minimal şifre girişi -->
+            <div id="lp-gate-container" class="lp-gate-container" style="display:none;">
+                <div class="lp-gate-layout">
+                    <!-- Sol Taraf: İnteraktif Panel -->
+                    <div class="lp-gate-left">
+                        <div class="gate-info-box">
+                            <i class="fas fa-shield-alt"></i>
+                            <div class="gate-info-text">
+                                <span class="gate-info-title">Sistem Erişimi Kısıtlı</span>
+                                <span class="gate-info-desc">Merkezi veritabanına bağlanmak için yetki doğrulama
+                                    bekleniyor.</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Merkez: Şifre Girişi -->
+                    <div class="lp-gate-center">
+                        <div class="minimal-login-wrapper">
+                            <div class="bio-scan-icon" onclick="window.handleFingerprintClick()"
+                                style="cursor: pointer;"><i class="fas fa-fingerprint"></i></div>
+<input type="text" id="lp-gate-input" class="minimal-bio-input" maxlength="5"
+                                 placeholder="Erişim Kodu" autocomplete="off" spellcheck="false"
+                                 onkeyup="if(event.key === 'Enter') { window.handleFingerprintClick(); }">
+                        </div>
+                    </div>
+
+                    <!-- Sağ Taraf: Kurucu Ağına Geçiş -->
+                    <div class="lp-gate-right">
+                        <div class="gate-dimension-portal" onclick="window.handlePortalClick()">
+                            <i class="fas fa-atom"></i>
+                            <span class="gate-portal-text">Kurucu Ağına Geçiş</span>
+                            <div class="portal-ripple"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- En altta Live Data Badge'leri (Konteyner içerisine alındı) -->
+            <div class="launchpad-footer-badges">
+                <div class="live-data-widget">
+                    <div class="live-waves">
+                        <span class="wave"></span><span class="wave"></span><span class="wave"></span><span
+                            class="wave"></span>
+                    </div>
+                    <div class="live-data-info">
+                        <span class="live-label">SİSTEM DURUMU</span>
+                        <span class="live-value" id="launchpad-live-status">Bağlanıyor...</span>
+                    </div>
+                </div>
+                <div class="live-data-widget">
+                    <!-- Canlı Ping Radar İkonu -->
+                    <div class="css-icon-ping">
+                        <div class="ping-core"></div>
+                        <div class="ping-ring"></div>
+                    </div>
+                    <div class="live-data-info">
+                        <span class="live-label">VERİTABANI GECİKMESİ</span>
+                        <span class="live-value" id="launchpad-ping">12ms</span>
+                    </div>
+                </div>
+                <div class="live-data-widget">
+                    <!-- Canlı Security Scanner İkonu -->
+                    <div class="css-icon-security">
+                        <div class="sec-core"></div>
+                        <div class="sec-ring-1"></div>
+                        <div class="sec-ring-2"></div>
+                    </div>
+                    <div class="live-data-info">
+                        <span class="live-label">GÜVENLİK PROTOKOLÜ</span>
+                        <span class="live-value"
+                            style="background: linear-gradient(90deg, #2ecc71, #27ae60); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Aktif</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Boot Sequence Overlay (Gizli) -->
+            <div id="lp-boot-sequence" class="lp-boot-sequence" style="display:none;">
+                <div class="boot-text-container">
+                    <div class="boot-spinner"></div>
+                    <h2 id="boot-status-text">Kozmos Ağına Bağlanıyor...</h2>
+                </div>
+            </div>
+
+            <!-- Klasik Görünüme Dönüş Butonu (Gizli) -->
+            <div id="lp-classic-toggle" class="lp-classic-toggle" onclick="window.setClassicMode()">
+                <i class="fas fa-exchange-alt"></i> Klasik Giriş
+            </div>
+        </div> <!-- /launchpad-container -->
+    </div>
+
+    <div class="inventory-screen" id="inventory-screen">
+
+        <div class="header" style="display:flex; align-items:center; gap:10px;">
+            <div class="logo-wrapper" style="display:flex; align-items:center; gap:10px;">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="24" height="24" rx="6" fill="#3498db" />
+                    <path d="M17 7H7V17H17V7Z" stroke="white" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <path d="M7 12H17" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M12 7V17" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <div style="font-weight:800; font-size:1.2rem; color:var(--color-primary); letter-spacing:-0.5px;">
+                    ENVANTER<span style="font-weight:400; color:var(--color-text-muted);">TAKİP SİSTEMİ</span></div>
+            </div>
+            <button class="theme-toggle-btn" onclick="toggleTheme()" title="Koyu Temaya Geç" id="themeToggleMain">
+                <i class="fas fa-moon"></i>
+            </button>
+            <!-- [DECOMMISSIONED] Launchpad Button Removed -->
+        </div>
+
+        <div id="sessionWarning"
+            style="display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #ff9800; color: white; padding: 15px 30px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 9999; font-weight: bold;">
+            ⚠️ Oturumunuz 1 dakika içinde kapatılacak! Devam etmek için sayfaya tıklayın.
+        </div>
+
+        <div class="tabs">
+            <button class="tab-button active" onclick="switchTab.call(this, 'b1')">B1 Depo</button>
+            <button class="tab-button" data-tab="b1" onclick="switchTab.call(this, 'b2')">B2 Depo</button>
+            <button class="tab-button" data-tab="b2" onclick="switchTab.call(this, 'b3')">Envanter Çıkış Yap</button>
+            <button class="tab-button" data-tab="b3" onclick="switchTab.call(this, 'personel')">Personel
+                Yönetimi</button>
+            <button class="tab-button" onclick="switchTab.call(this, 'unitsTab')">Birim Yönetimi</button>
+            <button class="tab-button" onclick="switchTab('requests')">Gelen Talepler</button>
+            <button class="tab-button" onclick="switchTab.call(this, 'purchaseTab')">Satın Alma (EBYS)</button>
+            <button class="tab-btn" onclick="openTab('history')" id="adminHistoryTab" style="display:none;">İşlem
+                Geçmişi</button>
+            <button class="tab-button" onclick="switchTab.call(this, 'myApprovals')">Bana Gelen Onaylar</button>
+            <button class="tab-button" onclick="switchTab.call(this, 'myTasksTab')">Görevlerim</button>
+        </div>
+
+        <div id="b1" class="tab-content active">
+            <div class="search-bar">
+                <input type="text" id="searchB1" placeholder="Ürün adı, türü, raf no veya durum ara..."
+                    onkeyup="searchTable('b1')" autocomplete="off" style="background: transparent; color: inherit;">
+                <select id="b1StatusFilter" class="uab-btn-outline" style="height: 40px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; outline: none; padding: 0 12px; margin-right: 4px;">
+                    <option value="active" selected>🟢 Sadece Aktifler</option>
+                    <option value="all">⚪ Hepsini Göster</option>
+                    <option value="passive">🔴 Sadece Pasifler</option>
+                </select>
+                <button class="view-toggle-btn" id="viewToggleB1" onclick="window.toggleCardView('b1')"
+                    title="Kart Görünümüne Geç">
+                    <i class="fas fa-th-large"></i>
+                </button>
+            </div>
+            <!-- =================================================================
+                 UNIVERSAL ACTION BAR — B1
+                 [WHY]: Tum butonlar tek hiyerarside, ayni yukseklik ve radius ile.
+                        Toplu islem butonlari (.uab-bulk) JS kontrolunde belirir.
+                 ================================================================= -->
+            <div class="uab-bar" id="uabB1">
+                <!-- Birincil İşlem -->
+                <button class="uab-btn uab-btn-primary" onclick="if(validateAdminAction()) openProductModal('add')">
+                    <i class="fas fa-plus"></i> Ürün Ekle
+                </button>
+
+                <div class="uab-separator"></div>
+
+                <!-- Toplu Seçim Checkbox -->
+                <label class="uab-checkbox-wrap">
+                    <input type="checkbox" id="selectAllB1" onclick="if(validateAdminAction()) toggleSelectAll('b1')">
+                    Toplu Seç
+                </label>
+
+                <!-- Toplu İşlem Butonları: Sadece seçim yapılınca görünür (.uab-bulk-visible JS'de eklenir) -->
+                <button class="uab-btn uab-btn-danger uab-bulk" onclick="if(validateAdminAction()) bulkDelete('b1')">
+                    <i class="fas fa-trash-alt"></i> Toplu Sil
+                </button>
+
+                <div class="uab-separator"></div>
+
+                <!-- İkincil İşlemler -->
+                <button class="uab-btn uab-btn-outline" onclick="if(validateAdminAction()) exportPDF('b1')">
+                    <i class="fas fa-file-pdf"></i> PDF
+                </button>
+
+                <label for="fileInput" class="uab-btn uab-btn-purple"
+                    onclick="if(validateAdminAction()) document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
+                    <i class="fas fa-file-excel"></i> Import
+                </label>
+
+                <button class="uab-btn uab-btn-success" onclick="exportToExcel('b1')">
+                    <i class="fas fa-chart-bar"></i> Excel Rapor
+                </button>
+
+                <div class="uab-separator"></div>
+
+                <button class="uab-btn uab-btn-teal" onclick="if(validateAdminAction()) exportFirebaseBackup()">
+                    <i class="fas fa-save"></i> Yedek Al
+                </button>
+
+                <label for="firebaseBackupImport" class="uab-btn uab-btn-warning"
+                    onclick="if(!validateAdminAction()) return false;">
+                    <i class="fas fa-undo"></i> Yedekten Yükle
+                </label>
+
+                <!-- Gizli dosya input'ları -->
+                <input type="file" id="firebaseBackupImport" accept=".json" style="display:none"
+                    onchange="importFirebaseBackup(event)">
+            </div>
+
+            <div class="table-responsive-wrapper">
+                <table id="tableB1">
+                    <thead>
+                        <tr>
+                            <th>Seç</th>
+                            <th onclick="sortTable('sütun', 'b1')" style="cursor:pointer">Sütun </th>
+                            <th onclick="sortTable('raf', 'b1')" style="cursor:pointer">Raf/Shelves </th>
+                            <th onclick="sortTable('ürün', 'b1')" style="cursor:pointer">Ürün </th>
+                            <th onclick="sortTable('marka', 'b1')" style="cursor:pointer">Marka </th>
+                            <th onclick="sortTable('adet', 'b1')" style="cursor:pointer">Adet </th>
+                            <th onclick="sortTable('durumu', 'b1')" style="cursor:pointer">Durumu </th>
+                            <th onclick="sortTable('tür', 'b1')" style="cursor:pointer">Ürün Türü </th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <!-- Kart Görünümü Kapsayıcısı (B1) - Başlangıçta Gizli -->
+            <div id="cardViewB1" class="card-view-container" style="display:none;"></div>
+        </div>
+
+
+        <div id="b2" class="tab-content">
+            <div class="search-bar">
+                <input type="text" id="searchB2" placeholder="Ürün adı, türü, raf no veya durum ara..."
+                    onkeyup="searchTable('b2')" autocomplete="off" style="background: transparent; color: inherit;">
+                <button class="view-toggle-btn" id="viewToggleB2" onclick="window.toggleCardView('b2')"
+                    title="Kart Görünümüne Geç">
+                    <i class="fas fa-th-large"></i>
+                </button>
+            </div>
+            <!-- =================================================================
+                 UNIVERSAL ACTION BAR — B2
+                 ================================================================= -->
+            <div class="uab-bar" id="uabB2">
+                <button class="uab-btn uab-btn-primary" onclick="if(validateAdminAction()) openProductModal('add')">
+                    <i class="fas fa-plus"></i> Ürün Ekle
+                </button>
+
+                <div class="uab-separator"></div>
+
+                <label class="uab-checkbox-wrap">
+                    <input type="checkbox" id="selectAllB2" onclick="toggleSelectAll('b2')">
+                    Toplu Seç
+                </label>
+
+                <button class="uab-btn uab-btn-danger uab-bulk" onclick="bulkDelete('b2')">
+                    <i class="fas fa-trash-alt"></i> Toplu Sil
+                </button>
+
+                <div class="uab-separator"></div>
+
+                <button class="uab-btn uab-btn-outline" onclick="exportPDF('b2')">
+                    <i class="fas fa-file-pdf"></i> PDF
+                </button>
+
+                <label for="fileInput" class="uab-btn uab-btn-purple"
+                    onclick="document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
+                    <i class="fas fa-file-excel"></i> Import
+                </label>
+            </div>
+            <div class="table-responsive-wrapper">
+                <table id="tableB2">
+                    <thead>
+                        <tr>
+                            <th>Seç</th>
+                            <th onclick="sortTable('sütun', 'b2')">Sütun</th>
+                            <th onclick="sortTable('raf', 'b2')">Raf/Shelves</th>
+                            <th onclick="sortTable('ürün', 'b2')">Ürün</th>
+                            <th onclick="sortTable('marka', 'b2')">Marka</th>
+                            <th onclick="sortTable('adet', 'b2')">Adet</th>
+                            <th onclick="sortTable('durumu', 'b2')">Durumu</th>
+                            <th onclick="sortTable('tür', 'b2')">Ürün Türü</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <!-- Kart Görünümü Kapsayıcısı (B2) - Başlangıçta Gizli -->
+            <div id="cardViewB2" class="card-view-container" style="display:none;"></div>
+        </div>
+
+        <div id="b3" class="tab-content">
+            <div class="actions">
+                <button class="add-btn" onclick="openExitModal('b3')">Envanter Çıkışı Yap</button>
+                <button class="add-btn" style="background:#f39c12; margin-left:5px;" onclick="openCartModal()">Toplu
+                    Çıkış Yap</button>
+                <button class="add-btn" onclick="openRequestModal()" id="btnTalepEt">Envanter Talep Et</button>
+                <button class="add-btn" onclick="switchTab('myRequests')">Taleplerim</button>
+                <button class="add-btn" onclick="switchTab('personnelInventoryTab')"
+                    style="background-color: var(--color-purple); color: white;">Kişi Envanteri</button>
+                <button class="add-btn" onclick="exportToExcel('b3')" style="background:#27ae60;">📊 Excel
+                    Rapor</button>
+                <!-- <div class="bulk-actions">
+                <button class="add-btn" onclick="exportPDF('b3')">PDF Export</button>
+            </div> -->
+            </div>
+            <div class="table-responsive-wrapper">
+                <table id="tableB3">
+                    <thead>
+                        <tr>
+                            <th>Raf No</th>
+                            <th>Ürün Türü</th>
+                            <th>Ürün Açıklama</th>
+                            <th>SN / BioPro / Itsm</th>
+                            <th>Sarf İse Adet</th>
+                            <th>Açıklama / Not</th>
+                            <th>Alan Kişi</th>
+                            <th>Tarih</th>
+                            <th>İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="personel" class="tab-content">
+            <div class="actions">
+                <button class="add-btn" onclick="openPersonelModal('add')">Personel Ekle</button>
+                <button class="add-btn" onclick="exportPDF('personel')">PDF Export</button>
+            </div>
+            <div class="table-responsive-wrapper">
+                <table id="tablePersonel">
+                    <thead>
+                        <tr>
+                            <th>Seç</th>
+                            <th>Ad Soyad</th>
+                            <th>Oturum Kodu</th>
+                            <th>İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="importExcel(event)">
+
+        <div id="requests" class="tab-content">
+            <h3>Gelen Envanter Talepleri</h3>
+            <div class="action-buttons">
+                <button onclick="exportTableToExcel('tableRequests', 'Gelen_Talepler')" class="btn-export"
+                    style="background-color: #27ae60; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;">
+                    📊 Excel'e Aktar
+                </button>
+
+                <button onclick="deleteSelectedRequests()" class="btn-bulk-delete"
+                    style="background-color: #c0392b; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px;">
+                    🗑️ Seçilenleri Sil
+                </button>
+            </div>
+            <div class="table-responsive-wrapper">
+                <table id="tableRequests">
+                    <thead>
+                        <tr>
+                            <th style="text-align:center;"><input type="checkbox" id="selectAllReqs"></th>
+                            <th>Tarih</th>
+                            <th>Personel</th>
+                            <th>Ürün</th>
+                            <th>Gerekçe / Not</th>
+                            <th>SN / BioPro / Itsm</th>
+                            <th style="text-align:center;">Durum</th>
+                            <th style="text-align:center;">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="myRequests" class="tab-content">
+            <h3>Taleplerim</h3>
+            <div class="table-container">
+                <table id="tableMyRequests">
+                    <thead>
+                        <tr>
+                            <th>Tarih</th>
+                            <th>Ürün</th>
+                            <th>Durum</th>
+                            <th>İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="personnelInventoryTab" class="tab-content">
+            <h3>Kişi Envanterim</h3>
+            <div class="table-container">
+                <table id="tablePersonnelInventory">
+                    <thead>
+                        <tr>
+                            <th>Teslim Tarihi</th>
+                            <th>Ürün</th>
+                            <th>Seri No</th>
+                            <th>Miktar</th>
+                            <th>Tür</th>
+                            <th>Not / Açıklama</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="myApprovals" class="tab-content">
+            <!-- COMPACT & MODERN HEADER -->
+            <div class="modern-approval-header-slim mb-4">
+                <!-- Sol Kısım: İkon + Başlık -->
+                <div class="d-flex align-items-center gap-3">
+                    <div class="header-icon-box-slim">
+                        <i class="fas fa-clipboard-check"></i>
+                    </div>
+                    <div class="d-flex flex-column">
+                        <h3 class="header-main-title-slim">Bana Gelen Onaylar</h3>
+                        <p class="header-subtitle-animated">Onayınızı bekleyen iş akışlarını buradan yönetebilirsiniz.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Sağ Kısım: Değerler ve Badge -->
+                <div class="header-right-content">
+                    <div class="header-stat-item d-none d-md-flex">
+                        <span class="header-stat-label">İlgili Talepler</span>
+                        <!-- <span id="totalMyRelatedRequests" class="header-stat-value">0</span> -->
+                    </div>
+                    <div class="header-badge-container">
+                        <span id="myApprovalCount" class="modern-badge-slim" style="display: none;">
+                            <i class="fas fa-bell pulse-icon"></i>
+                            <span id="myApprovalCountText">0 Bekleyen Onay</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div id="myApprovalsContainer" class="approval-grid">
+                <!-- Onay kartları buraya yüklenecek -->
+            </div>
+        </div>
+
+        <div id="unitsTab" class="tab-content">
+            <h3>Birim / Departman Listesi</h3>
+            <div class="actions">
+                <button class="add-btn" onclick="window.openUnitModal()">+ Yeni Birim Ekle</button>
+            </div>
+
+            <table id="tableUnits" class="main-table">
+                <thead>
+                    <tr>
+                        <th style="width: 30%;">Birim Adı</th>
+                        <th style="width: 50%;">Atanan Personeller</th>
+                        <th style="text-align:right; width: 20%;">İşlemler</th>
+                    </tr>
+                </thead>
+                <tbody id="unitListArea">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="myTasksTab" class="tab-content">
+            <!-- todo-module.js burayı dolduracak -->
+        </div>
+
+        <!-- Satın Alma Talepleri Sekmesi (EBYS) -->
+        <div id="purchaseTab" class="tab-content">
+            <div class="premium-card">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h3 class="mb-0" style="color: var(--color-secondary); font-weight: 700; letter-spacing: -0.5px;">
+                        Satın Alma Talepleri (EBYS)</h3>
+                    <div class="d-flex gap-2">
+                        <button class="add-btn"
+                            style="background-color: var(--color-primary); border-radius: var(--radius-md); border:none; color:white; font-weight:600;"
+                            onclick="window.openNewPurchaseModal()">
+                            <i class="fas fa-plus me-2"></i>Yeni Talep
+                        </button>
+                        <button class="add-btn"
+                            style="background-color: var(--color-success-dark); border-radius: var(--radius-md); border:none; color:white; font-weight:600;"
+                            onclick="exportTableToExcel('tablePurchaseRecords', 'Satin_Alma_Talepleri')">
+                            <i class="fas fa-file-excel me-2"></i>Excel
+                        </button>
+                    </div>
+                </div>
+
+                <div class="actions mb-4"
+                    style=" padding: 15px; border-radius: var(--radius-md); border: 1px solid transparent;">
+                    <div style="position: relative; width: 300px;">
+                        <i class="fas fa-search"
+                            style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8;"></i>
+                        <input type="text" id="purchaseSearch" placeholder="Evrak no, ürün veya personel ara..."
+                            onkeyup="renderPurchaseModule()"
+                            style="width: 100%; padding: 10px 10px 10px 35px; border-radius: var(--radius-md); border: 1px solid var(--color-border); outline: none; font-size: 13px; background: transparent; color: inherit;">
+                    </div>
+                </div>
+
+                <div class="premium-table-wrapper">
+                    <table id="tablePurchaseRecords" class="premium-table">
+                        <thead>
+                            <tr>
+                                <th>Evrak No</th>
+                                <th>Tarih</th>
+                                <th>Talep Eden</th>
+                                <th>İlgili Birim / Ürün</th>
+                                <th>Durum</th>
+                                <th style="text-align:right;">İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody id="purchaseTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div> <!-- /inventory-screen -->
+
+    <!-- Birim Yönetimi İçin Gelişmiş Modal -->
+        <div id="unitModal" class="modal"
+            style="display:none; background: rgba(0,0,0,0.5); position: fixed; top:0; left:0; width:100%; height:100%; z-index:9999;">
+            <div class="modal-content"
+                style="background:white; width:500px; margin: 50px auto; padding:20px; border-radius:8px;">
+                <h3 id="unitModalTitle">Yeni Birim Tanımla</h3>
+                <hr>
+                <div class="form-group">
+                    <label>Birim Adı:</label>
+                    <input type="text" id="modalUnitName" class="form-control" placeholder="Örn: Bilgi İşlem"
+                        style="width:100%; margin-bottom:15px;" autocomplete="off">
+                </div>
+
+                <div class="form-group">
+                    <label>Personel Ekle (Ara/Seç):</label>
+                    <input type="text" id="personnelSearch" onkeyup="window.searchPersonnelForUnit(this.value)"
+                        placeholder="Personel Adı Yazın..." class="form-control" style="width:100%;" autocomplete="off">
+                    <div id="searchResultList"
+                        style="border:1px solid #ddd; display:none; max-height:150px; overflow-y:auto; position:absolute; width:460px; background:white; z-index:10;">
+                    </div>
+                </div>
+
+                <div class="selected-personnel-area" style="margin-top:20px;">
+                    <label><b>Atanan Personeller:</b></label>
+                    <ul id="selectedPersonnelList" class="list-group"
+                        style="margin-top:10px; max-height:150px; overflow-y:auto;">
+                    </ul>
+                </div>
+
+                <div class="modal-footer" style="margin-top:20px; text-align:right;">
+                    <button onclick="window.closeUnitModal()" class="btn-cancel">Vazgeç</button>
+                    <button onclick="window.saveUnitData()" class="btn-save"
+                        style="background:#27ae60; color:white; padding:8px 15px; border:none; border-radius:4px;">Kaydet</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Akış Başlatma Seçenekleri Modalı -->
+        <div id="startWorkflowModal" class="modern-modal"
+            style="display:none; position:fixed; z-index:10001; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6);">
+            <div class="modern-modal-content modal-modern-teal"
+                style="background:#ffffff; margin:3% auto; padding:0; width:820px; max-width:92vw; border-radius: var(--radius-xl); box-shadow: var(--shadow-xl); overflow:hidden; border: 1px solid var(--color-border-light);">
+                <div class="modal-header-modern"
+                    style="background:var(--color-primary-light); border-bottom: 1px solid var(--color-border-light); padding: 20px 24px; position: relative;">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="modal-icon-box"
+                            style="width: 48px; height: 48px; background: var(--color-primary); color: white; border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; font-size: 20px;">
+                            🚀
+                        </div>
+                        <div>
+                            <h5 class="mb-0 fw-bold" style="font-size: 20px; color: var(--color-primary-dark);">İş
+                                Akışını Başlat</h5>
+                            <p class="mb-0 text-muted" style="font-size: 14px; color: var(--color-text-muted);">Onay
+                                akışını yapılandırın ve başlatın</p>
+                        </div>
+                    </div>
+                    <button type="button" onclick="closeStartWorkflowModal()" class="modal-close-btn"
+                        style="position: absolute; top: 20px; right: 24px; background: none; border: none; color: var(--color-text-muted); font-size: 24px; cursor: pointer; width: 32px; height: 32px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; transition: var(--transition);"
+                        onmouseover="this.style.background='var(--color-border-light)'; this.style.color='var(--color-text)';"
+                        onmouseout="this.style.background='none'; this.style.color='var(--color-text-muted)';">&times;</button>
+                </div>
+                <div class="modal-body-modern" style="background:#ffffff; padding: 32px 24px; min-height:400px;">
+                    <input type="hidden" id="startWorkflowReqId">
+
+                    <div class="mb-4">
+                        <label class="modern-label text-muted mb-2" style="font-size:12px; font-weight:600;">İş
+                            Akışı</label>
+                        <div class="d-flex gap-2">
+                            <div class="flex-grow-1">
+                                <select id="tplSelectDropdown" class="form-select workflow-search-box w-100"
+                                    style="padding-top:12px; padding-bottom:12px;"
+                                    onchange="window.toggleWorkflowMethod(this.value)">
+                                    <option value="manual">-- Yeni Özel İş Akışı (Manuel) --</option>
+                                    <!-- JS ile şablonlar eklenecek -->
+                                </select>
+                            </div>
+                            <button type="button" class="btn-add-user" onclick="window.addManualStep()"
+                                title="Adım Ekle">
+                                <i class="fas fa-user-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-3 shadow-sm border border-light">
+                        <table class="workflow-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 5%;"></th>
+                                    <th style="width: 50%;">Arama Adı</th>
+                                    <th style="width: 35%;">İmza Türü</th>
+                                    <th style="width: 10%;" class="text-center">Detay</th>
+                                </tr>
+                            </thead>
+                            <tbody id="manualStepsContainer">
+                                <!-- JS ile dolacak -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Seçilmeyen/Eski Yapıya Uyumluluk için Gizli input -->
+                    <input type="hidden" id="workflowMethodSelect" value="manual">
+                </div>
+
+                <div class="modal-footer-modern"
+                    style="background: var(--color-surface-alt); border-top: 1px solid var(--color-border-light); padding: 24px; display: flex; justify-content: flex-end; gap: 12px; align-items: center;">
+                    <button type="button" onclick="closeStartWorkflowModal()" class="btn-modal-cancel"
+                        style="padding: 12px 24px; border-radius: var(--radius-md); font-weight: 600; font-size: 15px; background: var(--color-surface); color: var(--color-text-muted); border: 1px solid var(--color-border); cursor: pointer; transition: var(--transition); min-width: 120px;"
+                        onmouseover="this.style.background='var(--color-border-light)'; this.style.color='var(--color-text)'; this.style.borderColor='var(--color-border)';"
+                        onmouseout="this.style.background='var(--color-surface)'; this.style.color='var(--color-text-muted)'; this.style.borderColor='var(--color-border)';">
+                        <i class="fas fa-times me-2"></i>Kapat
+                    </button>
+                    <button type="button" onclick="window.confirmStartWorkflow()" class="btn-modal-primary"
+                        style="padding: 12px 32px; border-radius: var(--radius-md); font-weight: 600; font-size: 15px; background: var(--color-primary); color: white; border: none; cursor: pointer; transition: var(--transition); min-width: 140px; box-shadow: var(--shadow-md);"
+                        onmouseover="this.style.background='var(--color-primary-dark)'; this.style.transform='translateY(-1px)'; this.style.boxShadow='var(--shadow-lg)';"
+                        onmouseout="this.style.background='var(--color-primary)'; this.style.transform='translateY(0)'; this.style.boxShadow='var(--shadow-md)';">
+                        <i class="fas fa-rocket me-2"></i>İşi Başlat
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- [BUGFIX] Bug 5: workflowModal Dark Mode compatibility in index.html -->
+        <div id="workflowModal" class="modern-modal"
+            style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
+            <div class="modern-modal-content"
+                style="background:var(--color-surface); color:var(--color-text); margin:40px auto; padding:20px; width:50%; max-width:95vw; border-radius:14px; overflow:hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.25);">
+                <div class="d-flex justify-content-between align-items-center p-3 border-bottom" style="background:var(--color-surface-alt); border-bottom-color:var(--color-border-light) !important;">
+                    <h4 class="mb-0 fw-bold" style="color: var(--color-text);"><i class="fas fa-stream me-2"></i>İş Akışı Takibi
+                    </h4>
+                    <span onclick="closeWorkflowModal()"
+                        style="cursor:pointer; font-size: 22px; line-height: 1; color: var(--color-text-muted);">&times;</span>
+                </div>
+                <div id="workflowBody" class="p-4" style="max-height: 75vh; overflow-y: auto;"></div>
+            </div>
+        </div>
+
+        <!-- 2. Satın Alma Detay/Düzenleme Modalı (purchaseModal) -->
+        <div id="purchaseModal" class="modern-modal"
+            style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100%; height:100%; background:rgba(15, 23, 42, 0.6); backdrop-filter: blur(8px);">
+            <div class="modern-modal-content modal-purchase-compact shadow-2xl" style="position: relative;">
+                <!-- Başlık Alanı -->
+                <div
+                    class="p-4 border-bottom d-flex justify-content-between align-items-center bg-white sticky-top rounded-top">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="header-icon-mini shadow-sm"
+                            style="width: 42px; height: 42px; font-size: 1.1rem; background: var(--color-primary-light); color: var(--color-primary);">
+                            <i class="fas fa-shopping-cart"></i>
+                        </div>
+                        <h5 class="mb-0 fw-bold text-dark"
+                            style="letter-spacing: -0.5px; color: var(--color-secondary) !important;">Satın Alma Talebi
+                        </h5>
+                    </div>
+                    <button type="button" onclick="closePurchaseModal()" class="close-btn-circle shadow-sm"
+                        title="Kapat">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+
+                <form id="purchaseForm" onsubmit="window.savePurchaseRequest(event)" autocomplete="off">
+                    <div class="modal-body p-5" style="max-height: 75vh; overflow-y: auto;">
+
+                        <!-- Grup 1: Temel Bilgiler (Otomatik) -->
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-4">
+                                <label class="modern-label-slim ms-1">EVRAK NO</label>
+                                <input type="text" id="purDocName"
+                                    class="form-control modern-input-v2 bg-light border-0 fw-bold"
+                                    style="color: #475569;" readonly>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="modern-label-slim ms-1">TALEP TARİHİ</label>
+                                <input type="text" id="purDate"
+                                    class="form-control modern-input-v2 bg-light border-0 fw-bold"
+                                    style="color: #475569;" readonly>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="modern-label-slim ms-1">TALEP EDEN</label>
+                                <input type="text" id="purUser"
+                                    class="form-control modern-input-v2 bg-light border-0 fw-bold"
+                                    style="color: #475569;" readonly>
+                            </div>
+                        </div>
+
+                        <!-- Grup 2: Ürün ve Birim -->
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-8">
+                                <label class="modern-label-slim ms-1">ÜRÜN ADI / MODEL (KONU)</label>
+                                <input type="text" id="purName" class="form-control modern-input-v2"
+                                    placeholder="Talebin konusu..." required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="modern-label-slim ms-1">İLGİLİ BİRİM</label>
+                                <select id="purUnit" class="form-select modern-input-v2" required>
+                                    <option value="">Seçiniz...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Grup 3: Detaylar -->
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-3">
+                                <label class="modern-label-slim ms-1">ADET</label>
+                                <input type="number" id="purQty" class="form-control modern-input-v2" value="1" min="1"
+                                    required>
+                            </div>
+                            <div class="col-md-5">
+                                <label class="modern-label-slim ms-1">BELGE / ÜRÜN TÜRÜ</label>
+                                <select id="purType" class="form-select modern-input-v2" required>
+                                    <option value="">Seçiniz...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="modern-label-slim ms-1">ÖNCELİK</label>
+                                <select id="purPriority" class="form-select modern-input-v2">
+                                    <option value="Normal">Normal</option>
+                                    <option value="Hızlı">Hızlı</option>
+                                    <option value="Acil">Acil 🔥</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Grup 4: Bütçe ve Açıklama -->
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-12">
+                                <label class="modern-label-slim ms-1">ÖDENEK TUTARI (₺)</label>
+                                <input type="number" id="purBudget" class="form-control modern-input-v2"
+                                    placeholder="0.00" step="0.01">
+                            </div>
+                            <div class="col-md-12">
+                                <label class="modern-label-slim ms-1">AÇIKLAMA / GEREKÇE</label>
+                                <textarea id="purDesc" class="form-control modern-input-v2" rows="2"
+                                    placeholder="Talebin detaylarını belirtiniz..."></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Grup 5: Ekler -->
+                        <div class="mb-0">
+                            <label class="modern-label-slim ms-1">EKLER / BELGELER</label>
+                            <div class="purchase-dropzone-v2" onclick="document.getElementById('purchaseFile').click()">
+                                <i class="fas fa-paperclip"></i>
+                                <span>Belge eklemek için tıklayın</span>
+                                <input type="file" id="purchaseFile" style="display: none;" multiple
+                                    accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.png"
+                                    onchange="window.handlePurchaseFileChange(this)">
+                            </div>
+                            <div id="purFileList" class="file-list-compact"></div>
+                            <div id="purUploadedFilesList" style="display:none; margin-top:10px;"></div>
+                            <div id="purWorkflowSection" style="display:none; margin-top:10px;"></div>
+                        </div>
+
+                    </div>
+
+                    <div class="modal-footer-compact rounded-bottom">
+                        <button type="button" onclick="closePurchaseModal()"
+                            class="btn btn-link text-decoration-none text-muted fw-bold px-3">İptal</button>
+                        <button type="submit" id="purSaveBtn" class="btn-premium-save">
+                            <i class="fas fa-paper-plane"></i> Talebi Kaydet
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Çıkış Modal -->
+        <div id="exitModal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeExitModal()">&times;</span>
+                <h2 id="exitModalTitle">Envanter Çıkışı Yap</h2>
+                <form id="exitForm" onsubmit="window.saveExit(event)" autocomplete="off">
+                    <label>Ürün Ara: <input type="text" id="exitSearch" onkeyup="window.searchForExit()"
+                            autocomplete="off"></label>
+                    <div class="product-list" id="productList"></div>
+                    <!-- Arama yaptıktan sonra tıkladığın ürünün bilgilerini tutacak "hafıza" görevi -->
+                    <div id="selectedProduct" class="hidden" data-name="" data-type="" data-shelf="" data-qty=""
+                        style="margin: 10px 0; border-radius: 4px;">
+                    </div>
+
+                    <label>Raf No: <input type="text" id="exitShelfNo" readonly></label>
+                    <label>Adet: <input type="number" id="exitQty" value="1" min="1" required></label> <label>SN /
+                        BioPro / Itsm: <input type="text" id="exitSn" required></label>
+                    <label>Gerekçesi/ Notu: <input type="text" id="exitNote" required></label>
+                    <label>Alan Kişi: <input type="text" id="exitPerson" readonly></label>
+
+                    <button type="submit" class="save-btn">Çıkışı Onayla</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Toplu Çıkış (Sepet) Modalı -->
+        <div id="cartModal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeModal('cartModal')">&times;</span>
+                <h2>Toplu Envanter Çıkışı (Sepet)</h2>
+
+                <div class="form-group" style="position: relative; margin-bottom: 15px;">
+                    <label>Ürün Ara ve Sepete Ekle:</label>
+                    <input type="text" id="cartSearch" style="padding: 0 !important;"
+                        placeholder="B1 ve B2'de ürün ara..." onkeyup="window.searchForCart()" autocomplete="off">
+                    <div id="cartProductList" class="product-list"
+                        style="display:none; position:absolute; width:100%; z-index:10; background:var(--color-surface); border:1px solid var(--color-border); max-height:250px; overflow-y:auto; border-radius: 4px; box-shadow: var(--shadow-lg);">
+                    </div>
+                </div>
+
+                <div id="cartItemsContainer"
+                    style="margin-bottom: 15px; max-height: 200px; overflow-y: auto; border: 1px solid var(--color-border); padding: 10px; border-radius: 4px; background: var(--color-surface);">
+                    <p style="color: var(--color-text-muted); text-align: center; margin: 0;" id="emptyCartMsg">Sepet
+                        boş. Ürün arayarak listeye ekleyin.</p>
+                </div>
+
+                <form id="cartForm" onsubmit="window.saveCartExit(event)" autocomplete="off">
+                    <label>SN / BioPro / Itsm: <input type="text" id="cartSn" required></label>
+                    <label>Gerekçesi/ Notu: <input type="text" id="cartNote" required></label>
+                    <label>Alan Kişi: <input type="text" id="cartPerson" readonly></label>
+                    <button type="submit" class="save-btn" style="background:#f39c12;">Toplu Çıkışı Onayla</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Ürün Talep Et Modal -->
+        <div id="requestModal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeRequestModal()">&times;</span>
+                <h2>Envanter Talep Et</h2>
+                <div class="form-group" style="position: relative; margin-bottom: 10px;">
+                    <label style="font-weight: 400; color: #2c3e50;">🔍 Hızlı Ürün Seçimi</label>
+                    <input type="text" id="reqSearch" placeholder="Ürün adı, marka veya raf no yazın..."
+                        onkeyup="window.searchForRequest()"
+                        style="width: 100%; padding: 4px; border: 2px solid #dfe6e9; border-radius: 8px; transition: all 0.3s;"
+                        autocomplete="off">
+
+                    <div id="reqProductList" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; 
+                        background: white; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); 
+                        z-index: 1000; max-height: 250px; overflow-y: auto; border: 1px solid #eee; margin-top: 5px;">
+                    </div>
+                </div>
+                <form id="requestForm" onsubmit="window.saveRequest(event)" autocomplete="off">
+                    <label>Ürün / Model:</label>
+                    <input type="text" id="reqProdName" required>
+                    <label>Adet:</label>
+                    <input type="number" id="reqQty" value="1" min="1" required>
+
+                    <!-- 🔷 ITSM: Talep Türü -->
+                    <label style="margin-top:10px; font-weight:600; color:var(--color-primary);">Talep Türü:</label>
+                    <select id="reqType" onchange="window.onReqTypeChange()"
+                        style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--color-border); margin-bottom:8px; background:var(--color-surface); color:var(--color-text);">
+                        <option value="Kalıcı Zimmet">📦 Kalıcı Zimmet</option>
+                        <option value="Geçici Zimmet">🔄 Geçici Zimmet (Ödünç)</option>
+                        <option value="Sarf Malzeme İhtiyacı">🗂️ Sarf Malzeme İhtiyacı</option>
+                    </select>
+
+                    <!-- 🔷 ITSM: Öncelik Seviyesi -->
+                    <label style="font-weight:600; color:var(--color-primary);">Öncelik Seviyesi:</label>
+                    <select id="reqPriority"
+                        style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--color-border); margin-bottom:8px; background:var(--color-surface); color:var(--color-text);">
+                        <option value="Düşük">🟢 Düşük</option>
+                        <option value="Orta" selected>🟡 Orta</option>
+                        <option value="Yüksek">🟠 Yüksek</option>
+                        <option value="Kritik">🔴 Kritik</option>
+                    </select>
+
+                    <!-- 🔷 ITSM: Planlanan İade Tarihi (sadece Geçici Zimmet'te görünür) -->
+                    <div id="reqReturnDateContainer" style="display:none;">
+                        <label style="font-weight:600; color:var(--color-warning);">📅 Planlanan İade Tarihi:</label>
+                        <input type="date" id="reqReturnDate"
+                            style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--color-border); margin-bottom:8px; background:var(--color-surface); color:var(--color-text);">
+                    </div>
+
+                    <label>Gerekçesi/ Notu:</label>
+                    <input type="text" id="reqNote" required>
+                    <button type="submit" class="save-btn" style="background:#3498db;">Talebi Gönder</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Ürün Türü ve Limit Tanımla -->
+        <div id="productTypeModal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeModal('productTypeModal')">&times;</span>
+                <h2>Ürün Türü ve Limit Tanımla</h2>
+                <p><small>Örn: "Monitör" yazıp "Demirbaş" seçin ve limit "5" girin. Sistem tüm "Monitör" geçenleri
+                        sayacaktır.</small></p>
+
+                <form onsubmit="saveProductType(event)" autocomplete="off">
+                    <label>Ürün Adı (Anahtar Kelime):</label>
+                    <input type="text" id="typeKeyName" placeholder="Örn: Monitör, Kablo, Mouse" required>
+
+                    <label>Kategori:</label>
+                    <select id="typeCategory">
+                        <option value="Demirbaş">Demirbaş</option>
+                        <option value="Sarf">Sarf Malzeme</option>
+                        <option value="Çevre Birimi">Çevre Birimi</option>
+                        <option value="Bileşen">Bileşen</option>
+                    </select>
+
+                    <label>Kritik Stok Limiti:</label>
+                    <input type="number" id="typeLimit" value="5" required>
+
+                    <button type="submit" class="save-btn">Tanımla / Güncelle</button>
+                </form>
+
+                <hr>
+                <h3>Tanımlı Türler</h3>
+                <div id="definedTypesList"></div>
+            </div>
+        </div>
+
+        <!-- Personel Modal -->
+        <div id="personelModal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closePersonelModal()">&times;</span>
+                <h2 id="personelModalTitle">Personel Düzenle</h2>
+                <form id="personelForm" autocomplete="off">
+                    <label>Ad Soyad: <input type="text" id="personelName" required></label>
+                    <label>Oturum Kodu: <input type="text" id="personelCode" readonly></label>
+                    <button type="submit" class="save-btn">Kaydet</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Giriş Modal -->
+        <div id="loginModal" class="modal" style="display: flex !important; align-items: center !important; justify-content: center !important;">
+            <div class="modal-content login-special-style">
+                <div class="login-header-bar"></div>
+                <div class="login-inner-body">
+                    <div class="login-icon-box">📦</div>
+                    <h2 id="loginModalTitle">Envanter Yönetimi</h2>
+                    <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Erişim sağlamak için 5 haneli
+                        kodu giriniz.</p>
+
+<form id="loginForm" onsubmit="event.preventDefault(); handleLogin(event);" autocomplete="off">
+                            <div class="modern-input-group">
+                                <input type="text" id="access-val-node" required maxlength="5" placeholder="•••••"
+                                    autocomplete="off">
+                                <script>
+                                    // [R-IMM]
+                                    (function () {
+                                        const iv = setInterval(() => {
+                                            if (window._dx) {
+                                                window._dx._s('access-val-node');
+                                                clearInterval(iv);
+                                            }
+                                        }, 10);
+                                    })();
+                                </script>
+                            </div>
+
+                            <div id="loginStatus">
+                                <div class="sync-loader">☁️ Veriler Senkronize Ediliyor...</div>
+                            </div>
+
+                            <button type="submit" id="login-submit-btn" class="btn-login-new">
+                                Sisteme Giriş Yap
+                            </button>
+
+                            <div class="login-divider"><span>VEYA</span></div>
+
+                            <button type="button" class="btn-admin-panel" onclick="checkAdminAndGo()">
+                                🛡️ Yönetici Paneli
+                            </button>
+
+                            <!-- [DECOMMISSIONED] Return to Launchpad Button Removed -->
+                        </form>
+                </div>
+                <div class="login-mini-footer">CR Envanter v2.0</div>
+            </div>
+        </div>
+
+        <!-- Ürün Ekle/Düzenle Modal -->
+        <div id="productModal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeProductModal()">&times;</span>
+                <h2 id="modalTitle">Ürün Ekle</h2>
+                <form id="productForm" onsubmit="window.saveProduct(event);" autocomplete="off">
+                    <input type="hidden" id="editIndex">
+
+                    <div class="form-group">
+                        <label>Sütun/Bölge:</label>
+                        <select id="prodColumn" required></select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Raf:</label>
+                        <select id="prodShelf" required></select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Ürün Türü:</label>
+                        <select id="prodType" class="dynamic-type-select" onchange="window.handleTypeChange(this)"
+                            required></select>
+                        <div class="fixture-note">
+                            <label>
+                                <input type="checkbox" id="isDemirbas">
+                                <span id="fixtureLabel">Bu ürün demirbaş olarak kaydedilecek.</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Ürün Adı/Model:</label>
+                        <input type="text" id="prodName" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Marka:</label>
+                        <input type="text" id="prodBrand">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Adet:</label>
+                        <input type="number" id="prodQty" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Durumu:</label>
+                        <select id="prodStatus" class="form-control"
+                            style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ddd;">
+                            <option value="Sıfır">Sıfır</option>
+                            <option value="Kullanıma Hazır" selected>Kullanıma Hazır</option>
+                            <option value="Alternatif Cihaz">Alternatif Cihaz</option>
+                            <option value="Eski Cihaz">Eski Cihaz</option>
+                            <option value="Hurda">Hurda</option>
+                            <option value="Servis Sürecinde">Servis Sürecinde</option>
+                            <option value="Yedek Parça">Yedek Parça</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Açıklama:</label>
+                        <input type="text" id="prodDesc">
+                    </div>
+
+                    <button type="submit" class="save-btn">Kaydet</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Sevk Et Modal -->
+        <div id="transferModal" class="modal">
+            <div class="modal-content" style="padding: 15px; max-width: 450px;">
+                <span class="close" onclick="closeTransferModal()">&times;</span>
+                <h2 style="margin-bottom: 15px; font-size: 1.2em;">📦 Ürün Sevk / Transfer</h2>
+
+                <form id="transferForm" onsubmit="event.preventDefault(); window.confirmTransfer();" autocomplete="off">
+                    <input type="hidden" id="transIndex">
+                    <input type="hidden" id="transSourceRepo">
+
+                    <div
+                        style=" padding: 10px; border-radius: 5px; margin-bottom: 10px; font-size: 0.9em; border: 1px solid #eee;">
+                        <strong>Ürün:</strong> <span id="transProdName"></span><br>
+                        <strong>Mevcut Konum:</strong> <span id="transCurrentLoc"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Hedef / İşlem:</label>
+                        <select id="transTarget" required onchange="handleTransferTargetChange(this)"
+                            style="width: 100%; padding: 8px;">
+                            <option value="">Seçiniz...</option>
+                        </select>
+                    </div>
+
+                    <div id="internalTransferOptions"
+                        style="display: none; margin-top: 10px; padding: 10px; background: #eef2f3; border-radius: 5px;">
+                        <label style="font-size: 0.85em; font-weight: bold;">Yeni Konum Bilgileri:</label>
+                        <div style="display: flex; gap: 10px; margin-top: 5px;">
+                            <select id="transNewCol" style="flex: 1; padding: 5px;">
+                                <option>Sütun Seç</option>
+                            </select>
+                            <select id="transNewShelf" style="flex: 1; padding: 5px;">
+                                <option>Raf Seç</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 10px;">
+                        <label>Sevk Notu / Açıklama:</label>
+                        <input type="text" id="transNote" placeholder="Örn: Arızalı olduğu için servise gitti." required
+                            style="width: 100%; padding: 8px;">
+                    </div>
+
+                    <button type="submit" class="save-btn" style="background-color: #e67e22; margin-top: 10px;">🚀
+                        İşlemi Tamamla</button>
+                </form>
+            </div>
+        </div>
+
+        <div id="productTypeModal" class="modal"
+            style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000;">
+            <div class="modal-content"
+                style="background:white; width:400px; margin:10% auto; padding:20px; border-radius:8px;">
+                <span class="close" onclick="document.getElementById('productTypeModal').style.display='none'"
+                    style="float:right; cursor:pointer; font-size:20px;">&times;</span>
+                <h2>Limit Tanımla</h2>
+                <form onsubmit="saveProductType(event)">
+                    <label>Anahtar Kelime (Örn: Monitör):</label>
+                    <input type="text" id="typeKeyName" style="width:100%; margin-bottom:10px; padding:8px;" required>
+
+                    <label>Kategori:</label>
+                    <select id="typeCategory" style="width:100%; margin-bottom:10px; padding:8px;">
+                        <option value="Demirbaş">Demirbaş</option>
+                        <option value="Sarf">Sarf Malzeme</option>
+                    </select>
+
+                    <label>Kritik Adet:</label>
+                    <input type="number" id="typeLimit" value="5" style="width:100%; margin-bottom:10px; padding:8px;"
+                        required>
+
+                    <button type="submit"
+                        style="background:#27ae60; color:white; border:none; padding:10px; width:100%;">Kaydet</button>
+                </form>
+                <hr>
+                <div id="definedTypesList"></div>
+            </div>
+        </div>
+
+        <div id="custom-tooltip"></div>
+
+    <!-- 
+      [WHY]: Tarayıcı cache'i eski dosyaları okumaya zorladığı için canlı DB'ye yazma ve login (hash) hataları alıyorduk.
+      [HOW]: Script çağrılarının sonuna ?v=1.0.5 ekleyerek (Cache Busting) tarayıcıyı en güncel sürümü indirmeye zorluyoruz. 
+    -->
+    <script src="security.js?v=1.0.5"></script>
+    <script src="db.js"></script>
+    <script src="src/utils/alert.js"></script>
+    <script src="src/utils/timer.js?v=1.0.5"></script>
+    <script src="personel.js"></script>
+    <script src="pdf-generator.js"></script>
+    <script type="module" src="src/services/firebase-handler.js?v=1782473897744"></script>
+    <script type="module" src="src/services/data-loader.js?v=1.0.5"></script>
+    <script type="module" src="src/services/purchase-servises.js?v=1.0.5"></script>
+    <script type="module" src="src/modules/edm-workflow.js?v=1.0.5"></script>
+    <script type="module" src="src/modules/main.js"></script>
+    <!-- v3.1 ESM Modüler Mimari — Phase 1 & 2 -->
+    <!-- utils.js: getTurkiyeSaati, getTurkiyeTarihi, tsToTurkiye -->
+    <script type="module" src="src/utils/utils.js?v=3.1.0"></script>
+    <!-- auth-engine.js: checkIsAdmin, checkAuth, handleLogin, updateNavbarUI, setupUI -->
+    <!-- YÜKLEME SIRASI KRİTİK: security.js, alert.js ve timer.js'den sonra gelmeli -->
+    <!-- [SECURITY_GUARD] Biometric module must load BEFORE auth-engine.js -->
+    <script type="module" src="security-biometrics.js?v=1.0.0"></script>
+    <script type="module" src="src/modules/auth-engine.js?v=3.1.0"></script>
+    <!-- table-engine.js: renderTable, renderSearchResults, renderMobileCards, searchTable, sortTable, getProcessedData, tooltips -->
+    <script type="module" src="src/ui/table-engine.js?v=3.1.0"></script>
+    <!-- inventory-logic.js: saveProduct, deleteItem, saveExit, bulkDelete, deleteB3Row, toggleWatch, toggleStatus -->
+    <!-- window.AppModules.Inventory namespace'i burada kurulur -->
+    <script type="module" src="src/modules/inventory-logic.js?v=3.1.0"></script>
+    <!-- ui-components.js: Modal, FAB, BottomSheet, RowSelection — Phase 5 -->
+    <!-- window.AppModules.UI namespace'i burada kurulur -->
+    <script type="module" src="src/ui/ui-components.js?v=3.1.0"></script>
+    <!-- self-approval-reporter.js: Denetim ve Kendi Kendini Onaylama Raporlama Ekranı -->
+    <script type="module" src="src/modules/self-approval-reporter.js?v=3.1.0"></script>
+    <script src="script.js?v=1.0.5"></script>
+
+
+
+
+    <script src="filter-module.js"></script>
+    <script src="src/modules/admin/admin-backup.js"></script>
+
+    <script>
+        // BURASI GARANTİ ALANI: Diğer dosyalar yüklense de yüklenmese de bu çalışacak
+        window.addEventListener('load', () => {
+            console.log("🛠️ Manuel Bağlantı Kontrolü Başladı...");
+
+            // Eğer purchase-services.js içindeki fonksiyonu bulamazsa, buraya yedek bir tane tanımlayalım
+            if (typeof window.savePurchaseRequest === 'undefined') {
+                console.warn("⚠️ Fonksiyon bulunamadı, manuel enjekte ediliyor...");
+                window.savePurchaseRequest = async function (e) {
+                    if (e) e.preventDefault();
+                    alert("Dosya yükleme hatası! Lütfen sayfayı yenileyip tekrar deneyin.");
+                    location.reload();
+                };
+            }
+        });
+    </script>
+
+    <!-- ===================================================
+         FLOATING ACTION BAR (Masaüstü: Bağlamsal Aksiyon Çubuğu)
+         [WHY]: Tablo satırında İşlemler sütunu kaldırıldı. Satır seçildiğinde
+                ekranın altında glassmorphism bir FAB beliriyor.
+         [HOW]: script.js içindeki updateFloatingBar() bu elementi
+                yönetir. Seçim sayısına göre (tekil/çoklu) butonlar dinamik oluşturulur.
+    =================================================== -->
+    <div id="floatingActionBar" class="fab-container" aria-live="polite">
+        <div class="fab-inner">
+            <div id="fabSelectionLabel" class="fab-label">
+                <i class="fas fa-layer-group me-1"></i>
+                <span id="fabSelectionCount">1 kayıt seçili</span>
+            </div>
+            <div id="fabButtons" class="fab-buttons"></div>
+            <button class="fab-close-btn" onclick="window.clearRowSelection()" title="Seçimi Kapat">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- ===================================================
+         MOBILE BOTTOM SHEET (Mobil: Ekrandan Kayan Menü)
+         [WHY]: Mobil ekranlarda FAB dar gelir. Touch-First UX için
+                alt kısımdan kayan bir panel açılır.
+         [HOW]: Dar viewport'ta (max-width:768px) satıra tıklanınca
+                showMobileBottomSheet() bu elementi aktive eder.
+    =================================================== -->
+    <div id="mobileBottomSheetOverlay" class="bs-overlay" onclick="window.closeMobileBottomSheet()"></div>
+    <div id="mobileBottomSheet" class="bs-container">
+        <div class="bs-handle"></div>
+        <div class="bs-header">
+            <div id="bsProductName" class="bs-product-name">Ürün Adı</div>
+            <button class="bs-close-btn" onclick="window.closeMobileBottomSheet()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="bsButtons" class="bs-buttons"></div>
+    </div>
+</body>
+
+</html>

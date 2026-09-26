@@ -1,0 +1,25 @@
+{
+  "step": "Adım 3 - Phase 3: Gereksiz JS Temizliği ve Admin Modül Ayrıştırması",
+  "root_cause_analysis": "Kök dizinde hem aktif ana uygulama motoru (script.js, security.js vb.) hem admin paneline bağlı modüller (admin-dashboard.js, admin-system-control.js vb.) hem de çalışmayan/debug amaçlı dosyalar (puppeteer_debug.js, launchpad.js, cache-buster.js) karışık haldedir. Proje mimari standartlarımıza göre admin modüllerinin ayrıştırılması ve atıl dosyaların scratch/ altına taşınması gerekmektedir.",
+  "files_to_move_to_scratch": [
+    "puppeteer_debug.js -> scratch/puppeteer_debug.js",
+    "launchpad.js -> scratch/launchpad.js",
+    "cache-buster.js -> scratch/cache-buster.js"
+  ],
+  "files_to_move_to_admin_module": [
+    "admin-dashboard.js -> src/modules/admin/admin-dashboard.js",
+    "admin-purchase-render.js -> src/modules/admin/admin-purchase-render.js",
+    "admin-system-control.js -> src/modules/admin/admin-system-control.js",
+    "admin-sitemap.js -> src/modules/admin/admin-sitemap.js",
+    "admin-backup.js -> src/modules/admin/admin-backup.js",
+    "inventory-management.js -> src/modules/admin/inventory-management.js",
+    "system-tips.js -> src/modules/admin/system-tips.js"
+  ],
+  "files_to_update_references": [
+    "admin.html (src/modules/admin/... yolları)",
+    "index.html (src/modules/admin/admin-backup.js yolu)",
+    "src/modules/admin/admin-dashboard.js (firebase-handler.js import yolu)",
+    "scratch/cache-buster.js (güncel path ve regexler)"
+  ],
+  "verification_strategy": "PowerShell Test-Path betiği ile index.html ve admin.html içerisindeki tüm script referanslarının ve ES modül importlarının doğrulanması."
+}

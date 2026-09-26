@@ -1,0 +1,1711 @@
+import { getStorage, ref, uploadBytes, getDownloadURL }
+    from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+
+const PAGE_SIZE = 8;
+let currentPurchasePage = 1;
+
+// =========================
+// GLOBAL PURCHASE STATE
+// =========================
+window.purchaseState = {
+    page: 1,
+    pageSize: 8,
+    search: "",
+    isAdmin: false
+};
+
+// DATA INIT
+window.data = window.data || {};
+window.data.purchaseOrders = window.data.purchaseOrders || [];
+window.data.serviceRecords = window.data.serviceRecords || [];
+
+
+console.log("🚀");
+// -----------------------------
+// DOSYA SEÇİMİ İŞLEYİCİSİ
+// -----------------------------
+window.handlePurchaseFileChange = function (input) {
+    const list = document.getElementById('purFileList');
+    if (!list) return;
+
+    list.innerHTML = "";
+    if (input.files && input.files.length > 0) {
+        Array.from(input.files).forEach(file => {
+            const tag = document.createElement('div');
+            tag.className = 'file-tag-slim';
+            tag.innerHTML = `<i class="fas fa-file"></i> ${file.name}`;
+            list.appendChild(tag);
+        });
+    }
+};
+console.log("🚀 purchase-services.js yüklendi");
+// -----------------------------
+// DATA INIT
+// -----------------------------
+if (!window.data) window.data = {};
+if (!window.data.purchaseOrders) window.data.purchaseOrders = [];
+
+// [BUGFIX] Bug 4: Full modal state reset before opening for a new request.
+// [WHY]: openPurchaseDetail() mutates form fields, disables inputs, changes purSaveBtn.onclick,
+//        and stores dataset.editId. Without a reset, clicking "New Request" re-opens a filled form
+//        that would UPDATE an existing record instead of CREATING a new one.
+// [HOW]: Mirror the cleanup logic in closePurchaseModal() — re-enable inputs, clear form,
+//        delete editId, restore purSaveBtn.onclick to savePurchaseRequest, then populate fresh values.
+window.openNewPurchaseModal = function () {
+    const modal = document.getElementById('purchaseModal');
+    if (!modal) return;
+
+    const form = document.getElementById('purchaseForm');
+    const saveBtn = document.getElementById('purSaveBtn');
+    const title = document.getElementById('purModalTitle');
+    const filesDiv = document.getElementById('purUploadedFilesList');
+    const wfDiv = document.getElementById('purWorkflowSection');
+    const fileArea = document.getElementById('purFileInputArea');
+    const rejectBtn = document.getElementById('purRejectBtn');
+
+    // 1. Re-enable all fields (may have been disabled by openPurchaseDetail 'view' mode)
+    if (form) {
+        form.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = false; });
+        form.reset();
+        delete form.dataset.editId;
+        form.onsubmit = (e) => window.savePurchaseRequest(e);
+    }
+
+    // 2. Reset save button to "New Request" state
+    if (saveBtn) {
+        saveBtn.style.display = 'block';
+        saveBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i> Talebi Kaydet';
+        saveBtn.classList.remove('btn-success');
+        saveBtn.classList.add('btn-modern-save');
+        // [CRITICAL] Override any lingering onclick from openPurchaseDetail's "Onayla" binding
+        saveBtn.onclick = null;
+    }
+
+    // 3. Reset title
+    if (title) title.innerHTML = '<i class="fas fa-file-invoice me-2"></i> Yeni Satın Alma Talebi';
+
+    // 4. Hide injected sections
+    if (filesDiv) { filesDiv.style.display = 'none'; filesDiv.innerHTML = ''; }
+    if (wfDiv) { wfDiv.style.display = 'none'; wfDiv.innerHTML = ''; }
+    if (fileArea) fileArea.style.display = 'block';
+    if (rejectBtn) rejectBtn.style.display = 'none';
+
+    // 5. Populate fresh auto-generated values
+    const now = new Date();
+    const docCode =
+        `SAT-${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const elDoc = document.getElementById('purDocName');
+    const elDate = document.getElementById('purDate');
+    const elUser = document.getElementById('purUser');
+    if (elDoc) elDoc.value = docCode;
+    if (elDate) elDate.value = now.toLocaleDateString('tr-TR');
+    if (elUser) elUser.value = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+
+    fillPurchaseSelects();
+
+    modal.style.display = "block";
+};
+
+// -----------------------------
+// SELECT DOLDUR
+// -----------------------------
+function fillPurchaseSelects() {
+
+    const unitSelect = document.getElementById('purUnit');
+    const typeSelect = document.getElementById('purType');
+
+    if (unitSelect) {
+        const units = window.data.units || [];
+        unitSelect.innerHTML =
+            '<option value="">Birim Seçiniz</option>' +
+            units.map(u => {
+                const name = typeof u === "object" ? u.name : u;
+                return `<option value="${name}">${name}</option>`;
+            }).join('');
+    }
+
+    if (typeSelect) {
+        const types = window.data.productTypes || [];
+        typeSelect.innerHTML =
+            '<option value="">Tür Seçiniz</option>' +
+            types.map(t => {
+                const name = typeof t === "object" ? t.name : t;
+                return `<option value="${name}">${name}</option>`;
+            }).join('');
+    }
+}
+
+// -----------------------------
+// KAYDET
+// -----------------------------
+window.savePurchaseRequest = async function (e) {
+    if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    console.log("🚀 savePurchaseRequest tetiklendi...");
+
+    const fileInput = document.getElementById("purchaseFile");
+    let uploadedFiles = [];
+
+    try {
+        if (fileInput?.files?.length) {
+            console.log(`📂 ${fileInput.files.length} adet dosya yükleniyor...`);
+            uploadedFiles = await window.uploadFiles(fileInput.files);
+            console.log("✅ Dosya yükleme tamamlandı.");
+        }
+
+        const newRequest = {
+            id: Date.now(),
+            evrakNo: document.getElementById('purDocName')?.value || "",
+            tarih: document.getElementById('purDate')?.value || "",
+            talepEden: document.getElementById('purUser')?.value || window.currentUser?.name || "",
+            urun: document.getElementById('purName')?.value || "",
+            adet: parseFloat(document.getElementById('purQty')?.value) || 1,
+            butce: parseFloat(document.getElementById('purBudget')?.value) || 0,
+            birim: document.getElementById('purUnit')?.value || "",
+            tur: document.getElementById('purType')?.value || "",
+            oncelik: document.getElementById('purPriority')?.value || "Normal",
+            aciklama: document.getElementById('purDesc')?.value || "",
+            createdBy: String(window.currentUser?.code || window.currentUser?.id || "unknown"),
+            createdByName: window.currentUser?.name || "Bilinmeyen",
+            durum: "Onay Bekliyor",
+            createdAt: Date.now(),
+            files: uploadedFiles.map(f => ({
+                name: f.name,
+                url: f.url,
+                uploadedAt: new Date().toLocaleString('tr-TR'),
+                uploadedBy: window.currentUser?.name || 'Bilinmeyen'
+            })),
+            akis: [
+                {
+                    islem: "Talep Oluşturuldu",
+                    yapan: window.currentUser?.name,
+                    tarih: new Date().toLocaleString('tr-TR')
+                }
+            ],
+            workflow: { started: false, currentStep: 0, steps: [] }
+        };
+
+        console.log("📦 Yeni talep nesnesi oluşturuldu:", newRequest);
+
+        if (!window.data.purchaseOrders) window.data.purchaseOrders = [];
+        window.data.purchaseOrders.unshift(newRequest);
+
+        console.log("💾 Veritabanına kaydediliyor...");
+        // [BUGFIX] Bug 5: Targeted save to prevent quota exceeded & permission denied
+        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        console.log("✅ Kayıt başarılı.");
+
+        document.getElementById('purchaseModal').style.display = "none";
+        document.getElementById('purchaseForm').reset();
+
+        if (window.renderPurchaseModule) window.renderPurchaseModule();
+        if (typeof showAppAlert === 'function') showAppAlert("Talep başarıyla oluşturuldu", "success");
+
+    } catch (err) {
+        console.error("❌ savePurchaseRequest Hatası:", err);
+        alert("Talep kaydedilemedi: " + err.message);
+    }
+
+    return false;
+};
+
+// DURUM BADGE PAGE CHANGE
+window.changePurchasePage = function (dir) {
+    const total = (window.data.purchaseOrders || []).length;
+    const maxPage = Math.ceil(total / PAGE_SIZE);
+
+    // purchaseState içindeki page değerini güncelliyoruz
+    window.purchaseState.page += dir;
+
+    if (window.purchaseState.page < 1) window.purchaseState.page = 1;
+    if (window.purchaseState.page > maxPage) window.purchaseState.page = maxPage;
+
+    window.renderPurchaseModule();
+};
+
+// DURUM BADGE HELPER - EBYS State Machine Uyumlu
+function getStatusBadge(item) {
+    if (!item.workflow) return `<span class="badge-soft badge-secondary"><i class="fas fa-file-draft me-1"></i>DRAFT</span>`;
+
+    const currentState = item.workflow.currentState;
+
+    // 0. İptal Durumu
+    if (currentState === window.WorkflowEngine?.states?.CANCELLED || item.durum === "İptal Edildi") {
+        return `<span class="badge-soft bg-danger text-white"><i class="fas fa-times-circle me-1"></i> İptal Edildi</span>`;
+    }
+
+    // 1. Başlangıç durumu
+    if (currentState === window.WorkflowEngine?.states?.INITIATION || !item.workflow?.started) {
+        return `<span class="badge-soft badge-secondary"><i class="fas fa-file-alt me-1"></i> Başlatılmadı</span>`;
+    }
+
+    // 2. Tamamlanmış durumlar
+    if (currentState === window.WorkflowEngine?.states?.COMPLETED || item.durum === "Onaylandı") {
+        return `<span class="badge-soft bg-success text-white"><i class="fas fa-check-circle me-1"></i> Onaylandı</span>`;
+    }
+
+    // 3. Aktif state'ler
+    const steps = item.workflow?.steps || [];
+    const currentStep = item.workflow?.currentStep || 0;
+    const step = steps[currentStep];
+    return `<span class="badge-soft bg-warning text-dark"><i class="fas fa-clock me-1"></i> ${step?.user || "Sorumlu"} Bekliyor</span>`;
+}
+
+// KPI (Sayaçlar) → Dinamik + Minimal + Canlı
+window.renderPurchaseStats = function () {
+    const orders = window.data.purchaseOrders || [];
+    const services = window.data.serviceRecords || [];
+
+    // Filtrelemeleri güvenli yapalım
+    const pending = orders.filter(x => x.durum === "Onay Bekliyor").length;
+    const completed = orders.filter(x => x.durum === "Onaylandı").length;
+    const inService = services.length; // Servistekiler gerçek servis tablosundan gelmeli
+
+    const elPending = document.getElementById("totalPendingPurchase");
+    const elCompleted = document.getElementById("totalCompletedAction");
+    const elService = document.getElementById("totalInService");
+
+    if (elPending) elPending.innerText = pending;
+    if (elCompleted) elCompleted.innerText = completed;
+    if (elService) elService.innerText = inService;
+};
+
+// renderServicesModule içindeki tablo çizim kısmında düzeltme:
+// window.data.purchaseOrders zaten bir dizi (array) olduğu için Object.values'a gerek yok.
+const pData = Array.isArray(window.data.purchaseOrders) ? window.data.purchaseOrders : [];
+window.renderPurchaseModule = function (options = {}) {
+
+    // Options: { showAll: true/false, isAdmin: true/false }
+    const showAllRequests = options.showAll || false;
+    const isAdminMode = options.isAdmin || false;
+
+    // Panel modunu belirle
+    if (showAllRequests || isAdminMode || window.location.pathname.includes('admin')) {
+        window.isAdminPanel = true;
+    } else {
+        window.isAdminPanel = false;
+    }
+
+    const tbody = document.getElementById('purchaseTableBody');
+    if (!tbody) return;
+
+    let data = Array.isArray(window.data.purchaseOrders)
+        ? window.data.purchaseOrders
+        : (window.data.purchaseOrders ? Object.values(window.data.purchaseOrders) : []);
+
+    // --------------------------------------------------
+    // 🔍 SEARCH (ilk filtre)
+    // --------------------------------------------------
+    const search = document
+        .getElementById("purchaseSearch")?.value
+        ?.toLocaleLowerCase('tr-TR') || "";
+
+    if (search) {
+        data = data.filter(item =>
+            item.evrakNo?.toLocaleLowerCase('tr-TR').includes(search) ||
+            item.urun?.toLocaleLowerCase('tr-TR').includes(search) ||
+            item.talepEden?.toLocaleLowerCase('tr-TR').includes(search) ||
+            item.birim?.toLocaleLowerCase('tr-TR').includes(search)
+        );
+    }
+
+    // --------------------------------------------------
+    // 👤 PERSONEL PANELİ FİLTRE
+    // (kendi talepleri + onay bekleyenler - onaylananlar dahil)
+    // --------------------------------------------------
+    if (!window.isAdminPanel) {
+        const currentMe = (window.currentUser?.name || "").trim().toLocaleLowerCase('tr-TR');
+        const currentCode = String(window.currentUser?.code || window.currentUser?.id || "");
+
+        console.log(`🔍 EBYS Filtreleme Başladı. Aktif: ${currentMe}`);
+
+        data = data.filter(item => {
+            const itemCreatedBy = String(item.createdBy || "");
+            const ownRequest = itemCreatedBy === currentCode;
+
+            // Onay bekleyen kontrolü
+            let waitingApproval = false;
+            if (item.workflow?.started && !item.workflow.finished) {
+                const steps = item.workflow?.steps || [];
+                const currentStep = item.workflow?.currentStep || 0;
+                const currentStepIndex = Math.min(currentStep, Math.max(0, steps.length - 1));
+                const step = steps[currentStepIndex];
+                const stepUser = (step?.user || "").trim().toLocaleLowerCase('tr-TR');
+                if (stepUser === currentMe && step.status !== 'approved') {
+                    waitingApproval = true;
+                }
+            }
+
+            // Kullanıcı kendi talebi veya onay bekleyen bir talep ise göster
+            const shouldShow = ownRequest || waitingApproval;
+            if (item.evrakNo?.includes('8146')) {
+                console.log(`🧐 [DEBUG] 8146 Talebi Kontrolü: ownRequest=${ownRequest}, waitingApproval=${waitingApproval}, itemCreatedBy=${itemCreatedBy}, currentCode=${currentCode}`);
+            }
+            return shouldShow;
+        });
+        console.log(`✅ Filtre Sonrası Talep Sayısı: ${data.length}`);
+    }
+
+    // --------------------------------------------------
+    // 🔥 UX SIRALAMA (en kritik)
+    // aktif > başlamamış > onaylandı > reddedildi
+    // --------------------------------------------------
+    data.sort((a, b) => {
+
+        const getPriority = (item) => {
+            let rowClass = "";
+            if (item.durum === "Reddedildi") rowClass = "row-rejected";
+            if (item.durum === "Onaylandı") rowClass = "row-approved";
+
+            if (item.workflow?.started) return 0;
+            return 1;
+        };
+
+        return getPriority(a) - getPriority(b)
+            || (b.createdAt - a.createdAt);
+    });
+
+    // --------------------------------------------------
+    // 📄 PAGINATION (EN SON!)
+    // --------------------------------------------------
+    window.purchasePage = window.purchasePage || 1;
+
+    const start = (window.purchasePage - 1) * PAGE_SIZE;
+    const pagedData = data.slice(start, start + PAGE_SIZE);
+
+    // --------------------------------------------------
+    // 🧾 TABLE RENDER
+    // --------------------------------------------------
+    tbody.innerHTML =
+        pagedData.length > 0
+            ? pagedData.map(item => {
+                try {
+                    const durumHTML = getStatusBadge(item);
+                    const isCancelled = item.durum === "İptal Edildi";
+                    const isStarted = item.workflow?.started === true;
+
+                    return `
+                    <tr class="align-middle ${isCancelled ? 'passive-row' : ''}">
+                        <td>
+                            <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${item.evrakNo || "-"}</div>
+                        </td>
+                        <td>
+                            <div style="font-size:12px; color:#64748b; font-weight:500;">${item.tarih || "-"}</div>
+                        </td>
+                        <td>
+                            <div style="font-size:13px; font-weight:600; color:#1e293b;">${item.talepEden || item.createdByName || "-"}</div>
+                            <small class="text-muted" style="font-size:10px;">EBYS Birimi</small>
+                        </td>
+                        <td>
+                            <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${item.urun || "-"}</div>
+                            <div style="font-size:11px; color:#94a3b8; font-weight:500; margin-top:2px;">
+                                <i class="fas fa-building me-1"></i> ${item.birim || "Genel"}
+                            </div>
+                        </td>
+                        <td>${durumHTML}</td>
+                        <td class="text-end">
+                            <div class="d-flex justify-content-end gap-1">
+                                <!-- Görüntüle -->
+                                <button onclick="window.openPurchaseDetail(${item.id}, 'view')" class="btn-action btn-passive" title="Görüntüle">
+                                    <i class="fas fa-eye fa-xs"></i>
+                                </button>
+            
+                                ${window.isAdminPanel ? `
+                                    <!-- Düzenle (Admin için her zaman açık) -->
+                                    <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                            class="btn-action btn-edit" 
+                                            title="Düzenle">
+                                        <i class="fas fa-edit fa-xs"></i>
+                                    </button>
+                                    
+                                    ${!isStarted ? `
+                                        <!-- Akışı Başlat -->
+                                        <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                            <i class="fas fa-play fa-xs"></i>
+                                        </button>
+                                    ` : `
+                                        <!-- Akışı Görüntüle -->
+                                        <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                            <i class="fas fa-stream fa-xs"></i>
+                                        </button>
+                                    `}
+                                    
+                                    ${!isCancelled ? `
+                                        <!-- [BUGFIX] Admin Geri Çek / İptal (cancelPurchaseRequest) butonu -->
+                                        <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                            <i class="fas fa-ban fa-xs"></i>
+                                        </button>
+                                    ` : ''}
+
+                                    <!-- Sil -->
+                                    <button onclick="window.deletePurchaseRequest('${item.id}')" class="btn-action btn-danger" title="Sil">
+                                        <i class="fas fa-trash-alt fa-xs"></i>
+                                    </button>
+                                ` : `
+                                    ${!isCancelled ? `
+                                        <!-- Düzenle -->
+                                        <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                                class="btn-action btn-edit" 
+                                                ${isStarted ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
+                                                title="${isStarted ? 'Süreç başladığı için düzenlenemez' : 'Düzenle'}">
+                                            <i class="fas fa-edit fa-xs"></i>
+                                        </button>
+                    
+                                        ${!isStarted ? `
+                                            <!-- Akışı Başlat -->
+                                            <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                                <i class="fas fa-play fa-xs"></i>
+                                            </button>
+                                        ` : `
+                                            <!-- Akışı Görüntüle -->
+                                            <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                                <i class="fas fa-stream fa-xs"></i>
+                                            </button>
+                                        `}
+                                        
+                                        <!-- İptal Et / Geri Çek -->
+                                        <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                            <i class="fas fa-ban fa-xs"></i>
+                                        </button>
+                                    ` : ''}
+                                `}
+                            </div>
+                        </td>
+                    </tr>
+                    `;
+                } catch (err) {
+                    console.error("❌ Satır render hatası:", err, item);
+                    return `<tr><td colspan="6" style="color:red; font-size:10px;">Veri hatası (ID: ${item.id})</td></tr>`;
+                }
+            }).join("")
+            : `
+            <tr>
+                <td colspan="6" class="text-center">
+                    Kayıt yok
+                </td>
+            </tr>
+            `;
+
+    // --------------------------------------------------
+    // 📊 STATS (null check ekledik)
+    // --------------------------------------------------
+    if (typeof renderPurchaseStats === "function") {
+        renderPurchaseStats();
+    }
+
+    // --------------------------------------------------
+    // 🔢 PAGINATION UI (sonradan bağlayacağız)
+    // --------------------------------------------------
+    if (typeof renderPurchasePagination === "function") {
+        renderPurchasePagination(data.length);
+    }
+};
+
+
+window.renderServicesModule = function () {
+    const pBody = document.getElementById('purchaseTableBody');
+    const sBody = document.getElementById('serviceTableBody');
+
+    // 1. Satın Alma Tablosu (Soldaki)
+    if (pBody) {
+        const pData = window.data.purchaseOrders ? Object.values(window.data.purchaseOrders) : [];
+
+        pBody.innerHTML = pData.length > 0 ? pData.map(item => {
+            const isStarted = item.workflow?.started === true;
+            const isCancelled = item.durum === 'İptal Edildi';
+            const durumHTML = getStatusBadge(item);
+            
+            // Reddedildi durumu için hafif arka plan
+            const isReddedildi = item.durum === 'Reddedildi';
+            const rowStyle = isReddedildi ? 'style="background-color: #fff5f5;"' : '';
+
+            return `
+                <tr ${rowStyle} class="align-middle ${isCancelled ? 'passive-row' : ''}">
+                    <td>
+                        <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${item.evrakNo || "-"}</div>
+                    </td>
+                    <td>
+                        <div style="font-size:12px; color:#64748b; font-weight:500;">${item.tarih || "-"}</div>
+                    </td>
+                    <td>
+                        <div style="font-size:13px; font-weight:600; color:#1e293b;">${item.talepEden || item.createdByName || "-"}</div>
+                        <small class="text-muted" style="font-size:10px;">EBYS Birimi</small>
+                    </td>
+                    <td>
+                        <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${item.urun || "-"}</div>
+                        <div style="font-size:11px; color:#94a3b8; font-weight:500; margin-top:2px;">
+                            <i class="fas fa-building me-1"></i> ${item.birim || "Genel"}
+                        </div>
+                    </td>
+                    <td>${durumHTML}</td>
+                    <td class="text-end">
+                        <div class="d-flex justify-content-end gap-1">
+                            <!-- Görüntüle -->
+                            <button onclick="window.openPurchaseDetail(${item.id}, 'view')" class="btn-action btn-passive" title="Görüntüle">
+                                <i class="fas fa-eye fa-xs"></i>
+                            </button>
+        
+                            ${window.isAdminPanel ? `
+                                <!-- Düzenle (Admin için her zaman açık) -->
+                                <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                        class="btn-action btn-edit" 
+                                        title="Düzenle">
+                                    <i class="fas fa-edit fa-xs"></i>
+                                </button>
+                                
+                                ${!isStarted ? `
+                                    <!-- Akışı Başlat -->
+                                    <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                        <i class="fas fa-play fa-xs"></i>
+                                    </button>
+                                ` : `
+                                    <!-- Akışı Görüntüle -->
+                                    <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                        <i class="fas fa-stream fa-xs"></i>
+                                    </button>
+                                `}
+                                
+                                ${!isCancelled ? `
+                                    <!-- [BUGFIX] Admin Geri Çek / İptal (cancelPurchaseRequest) butonu -->
+                                    <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                        <i class="fas fa-ban fa-xs"></i>
+                                    </button>
+                                ` : ''}
+
+                                <!-- Sil -->
+                                <button onclick="window.deletePurchaseRequest('${item.id}')" class="btn-action btn-danger" title="Sil">
+                                    <i class="fas fa-trash-alt fa-xs"></i>
+                                </button>
+                            ` : `
+                                ${!isCancelled ? `
+                                    <!-- Düzenle -->
+                                    <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                            class="btn-action btn-edit" 
+                                            ${isStarted ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
+                                            title="${isStarted ? 'Süreç başladığı için düzenlenemez' : 'Düzenle'}">
+                                        <i class="fas fa-edit fa-xs"></i>
+                                    </button>
+                
+                                    ${!isStarted ? `
+                                        <!-- Akışı Başlat -->
+                                        <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                            <i class="fas fa-play fa-xs"></i>
+                                        </button>
+                                    ` : `
+                                        <!-- Akışı Görüntüle -->
+                                        <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                            <i class="fas fa-stream fa-xs"></i>
+                                        </button>
+                                    `}
+                                    
+                                    <!-- İptal Et / Geri Çek -->
+                                    <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                        <i class="fas fa-ban fa-xs"></i>
+                                    </button>
+                                ` : ''}
+                            `}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('') : '<tr><td colspan="6" class="text-center text-muted p-4">Bekleyen talep yok.</td></tr>';
+    }
+
+    // 2. Servis & Dış Sevk Tablosu (Sağdaki)
+    if (sBody) {
+        const sData = window.data.serviceRecords || [];
+        console.log("🛠️ Servis Tablosu Çiziliyor, Veri Adedi:", sData.length);
+
+        const _statusStyle = (durum) => {
+            const map = {
+                'Servis Sürecinde Bekliyor': { bg: '#fff3cd', color: '#048578' },
+                'Serviste / Yolda': { bg: '#fff3cd', color: '#856404' },
+                'Tamir Tamamlandı': { bg: '#d1e7dd', color: '#0a3622' },
+                'Parça Bekleniyor': { bg: '#ffe0b2', color: '#7c3200' },
+                'Dış Birimde': { bg: '#cfe2ff', color: '#0a367a' },
+                'İptal / Hurda': { bg: '#f8d7da', color: '#58151c' },
+            };
+            return map[durum] || { bg: '#fff3cd', color: '#856404' };
+        };
+
+        sBody.innerHTML = sData.length > 0 ? sData.map(item => {
+            const sc = _statusStyle(item.durum);
+            return `
+            <tr>
+                <td>
+                    <div class="fw-bold text-dark">${item.urunAciklama || 'İsimsiz Ürün'}</div>
+                    <small class="text-muted">${item.marka || ''}${item.sn ? ' — SN: ' + item.sn : ''}</small>
+                    ${item.sevkTarihi ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">📅 ${item.sevkTarihi}</div>` : ''}
+                </td>
+                <td>
+                    <div style="font-size:10px;color:#888;margin-bottom:3px;">🏢 ${item.hedef || '-'}</div>
+                    <span style="background:${sc.bg};color:${sc.color};padding:2px 10px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">
+                        ${item.durum || 'Serviste'}
+                    </span>
+                </td>
+                <td class="text-end" style="white-space:nowrap;">
+                    <button onclick="window.viewServiceItem(${item.id})"
+                            class="btn btn-sm btn-outline-secondary"
+                            title="Görüntüle" style="margin-right:3px;">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button onclick="window.updateServiceStatus(${item.id})"
+                            class="btn btn-sm btn-outline-warning"
+                            title="Durum Güncelle" style="margin-right:3px;">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button onclick="window.receiveFromService(${item.id})"
+                            class="btn btn-sm btn-outline-success"
+                            title="Depoya Geri Al">
+                        <i class="fas fa-warehouse"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+        }).join('') : '<tr><td colspan="3" class="text-center text-muted">Şu an serviste ürün yok.</td></tr>';
+    }
+
+    // Sayaç Güncellemeleri
+    const pCount = document.getElementById('totalPendingPurchase');
+    const sCount = document.getElementById('totalInService');
+    if (pCount) pCount.innerText = (window.data.purchaseOrders || []).length;
+    if (sCount) sCount.innerText = (window.data.serviceRecords || []).length;
+};
+
+// 3. Servisten Geri Al
+window.receiveFromService = async function (serviceId) {
+    const recordIndex = window.data.serviceRecords.findIndex(r => r.id === serviceId);
+    if (recordIndex === -1) return;
+
+    const record = window.data.serviceRecords[recordIndex];
+    const targetRepo = record.kaynakDepo || 'b1';
+
+    // Ürünü orijinal verisiyle geri yükle
+    const recoveredItem = record.originalData ? { ...record.originalData } : {
+        ürün: record.urunAciklama || record.urun,
+        tür: record.urunTuru || "Servis Çıkışlı",
+        adet: record.adet || 1,
+        sn: record.sn || "-"
+    };
+
+    recoveredItem.durumu = "Kullanıma Hazır";
+    recoveredItem.açıklama = "Servisten Döndü: " + (record.not || "");
+
+    if (!window.data[targetRepo]) window.data[targetRepo] = [];
+    window.data[targetRepo].push(recoveredItem);
+
+    // Servis kaydını sil
+    window.data.serviceRecords.splice(recordIndex, 1);
+
+    // [BUGFIX] Bug 5: Targeted save to prevent batch permission denied across non-admin collections
+    await window.saveData(targetRepo, window.data[targetRepo]);
+    await window.saveData('serviceRecords', window.data.serviceRecords);
+    // Realtime sync otomatik render edecek ama garantiye alalım:
+    if (typeof window.renderPurchaseModule === 'function') window.renderPurchaseModule();
+
+    if (typeof showAppAlert === 'function') showAppAlert("Ürün depoya geri alındı.", "success");
+
+    renderServicesModule();
+};
+
+// ─────────────────────────────────────────────────────────────
+// SERVİS KAYDI GÖRÜNTÜLE (Salt Okunur Modal)
+// ─────────────────────────────────────────────────────────────
+window.viewServiceItem = function (serviceId) {
+    const record = (window.data.serviceRecords || []).find(r => r.id === serviceId);
+    if (!record) return;
+
+    // Modal yoksa oluştur
+    let modal = document.getElementById('serviceViewModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'serviceViewModal';
+        modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);justify-content:center;align-items:center;';
+        modal.innerHTML = `
+            <div style="background:#fff;border-radius:14px;padding:28px 32px;width:500px;max-width:95vw;max-height:85vh;overflow-y:auto;position:relative;box-shadow:0 20px 60px rgba(0,0,0,0.25);">
+                <button onclick="document.getElementById('serviceViewModal').style.display='none'"
+                    style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:22px;cursor:pointer;color:#aaa;line-height:1;">&times;</button>
+                <div id="serviceViewContent"></div>
+            </div>`;
+        document.body.appendChild(modal);
+    }
+
+    const dem = record.isDemirbas === true || record.isDemirbas === 'true';
+    const orig = record.originalData || {};
+
+    const _f = (label, value) => `
+        <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;">
+            <label style="display:block;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;margin-bottom:3px;">${label}</label>
+            <span style="font-size:13px;color:#2c3e50;font-weight:500;">${value}</span>
+        </div>`;
+
+    const statusColors = {
+        'Servis Sürecinde Bekliyor': { bg: '#fff3cd', color: '#048578' },
+        'Serviste / Yolda': { bg: '#fff3cd', color: '#856404' },
+        'Tamir Tamamlandı': { bg: '#d1e7dd', color: '#0a3622' },
+        'Parça Bekleniyor': { bg: '#ffe0b2', color: '#7c3200' },
+        'Dış Birimde': { bg: '#cfe2ff', color: '#0a367a' },
+        'İptal / Hurda': { bg: '#f8d7da', color: '#58151c' },
+    };
+    const sc = statusColors[record.durum] || { bg: '#fff3cd', color: '#856404' };
+
+    document.getElementById('serviceViewContent').innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px;">
+            <div style="width:44px;height:44px;background:#3498db;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <i class="fas fa-tools" style="color:white;font-size:17px;"></i>
+            </div>
+            <div>
+                <h3 style="margin:0;font-size:16px;color:#1a1a2e;font-weight:700;">${record.urunAciklama || 'İsimsiz Ürün'}</h3>
+                <small style="color:#888;">${record.marka || ''}${record.sn ? ' — SN: ' + record.sn : ''}</small>
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+            ${_f('Hedef / Gönderilen', record.hedef || '-')}
+            ${_f('Kaynak Depo', (record.kaynakDepo || '-').toUpperCase())}
+            ${_f('Sevk Tarihi', record.sevkTarihi || '-')}
+            ${_f('Demirbaş', dem ? '✅ Evet' : '❌ Hayır')}
+            ${_f('Marka', record.marka || '-')}
+            ${_f('Seri No', record.sn || '-')}
+        </div>
+
+        <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:12px;">
+            <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Güncel Durum</label>
+            <div style="margin-top:6px;">
+                <span style="background:${sc.bg};color:${sc.color};padding:4px 14px;border-radius:20px;font-size:13px;font-weight:600;">
+                    ${record.durum || 'Serviste'}
+                </span>
+            </div>
+        </div>
+
+        ${record.not ? `
+        <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:12px;">
+            <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Sevk Notu</label>
+            <p style="margin:6px 0 0;color:#333;font-size:13px;">${record.not}</p>
+        </div>` : ''}
+
+        ${orig.açıklama ? `
+        <div style="background:#f8f9fa;border-radius:8px;padding:12px;">
+            <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Orijinal Açıklama</label>
+            <p style="margin:6px 0 0;color:#333;font-size:13px;">${orig.açıklama}</p>
+        </div>` : ''}
+    `;
+
+    modal.style.display = 'flex';
+};
+
+// ─────────────────────────────────────────────────────────────
+// SERVİS DURUM GÜNCELLE
+// ─────────────────────────────────────────────────────────────
+window.updateServiceStatus = function (serviceId) {
+    const record = (window.data.serviceRecords || []).find(r => r.id === serviceId);
+    if (!record) return;
+
+    // Modal yoksa oluştur
+    let modal = document.getElementById('serviceStatusModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'serviceStatusModal';
+        modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);justify-content:center;align-items:center;';
+        modal.innerHTML = `
+            <div style="background:#fff;border-radius:14px;padding:28px 32px;width:400px;max-width:95vw;position:relative;box-shadow:0 20px 60px rgba(0,0,0,0.25);">
+                <button onclick="document.getElementById('serviceStatusModal').style.display='none'"
+                    style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:22px;cursor:pointer;color:#aaa;line-height:1;">&times;</button>
+                <h3 style="margin:0 0 4px;font-size:16px;color:#1a1a2e;font-weight:700;">Durum Güncelle</h3>
+                <p id="svcStatusProdName" style="margin:0 0 20px;color:#888;font-size:13px;"></p>
+
+                <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:6px;">Yeni Durum</label>
+                <select id="svcStatusSelect"
+                    style="width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;margin-bottom:16px;outline:none;">
+                    <option value="Servis Sürecinde Bekliyor">Servis Sürecinde Bekliyor</option>
+                    <option value="Serviste / Yolda">Serviste / Yolda</option>
+                    <option value="Tamir Tamamlandı">Tamir Tamamlandı</option>
+                    <option value="Parça Bekleniyor">Parça Bekleniyor</option>
+                    <option value="Dış Birimde">Dış Birimde</option>
+                    <option value="İptal / Hurda">İptal / Hurda</option>
+                </select>
+
+                <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:6px;">Not (opsiyonel)</label>
+                <textarea id="svcStatusNote" rows="3"
+                    placeholder="Durumla ilgili not..."
+                    style="width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:13px;resize:vertical;box-sizing:border-box;margin-bottom:20px;"></textarea>
+
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button onclick="document.getElementById('serviceStatusModal').style.display='none'"
+                        style="padding:9px 20px;border:1.5px solid #ddd;background:white;border-radius:8px;cursor:pointer;font-size:13px;">İptal</button>
+                    <button id="svcStatusSaveBtn"
+                        style="padding:9px 20px;background:#3498db;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">Kaydet</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    }
+
+    // Mevcut değerleri yerleştir
+    document.getElementById('svcStatusProdName').innerText = record.urunAciklama || 'İsimsiz Ürün';
+    document.getElementById('svcStatusNote').value = '';
+    const select = document.getElementById('svcStatusSelect');
+    [...select.options].forEach(opt => { opt.selected = opt.value === record.durum; });
+
+    // Kaydet butonu
+    document.getElementById('svcStatusSaveBtn').onclick = async function () {
+        const newStatus = document.getElementById('svcStatusSelect').value;
+        const note = document.getElementById('svcStatusNote').value.trim();
+
+        const idx = (window.data.serviceRecords || []).findIndex(r => r.id === serviceId);
+        if (idx === -1) return;
+
+        window.data.serviceRecords[idx].durum = newStatus;
+        if (note) {
+            const prev = window.data.serviceRecords[idx].not || '';
+            window.data.serviceRecords[idx].not = prev ? prev + ' | ' + note : note;
+        }
+
+        try {
+            // [BUGFIX] Bug 5: Targeted save only for serviceRecords
+            await window.saveData('serviceRecords', window.data.serviceRecords);
+            document.getElementById('serviceStatusModal').style.display = 'none';
+            if (typeof renderServicesModule === 'function') renderServicesModule();
+            if (typeof showAppAlert === 'function') showAppAlert('Durum güncellendi.', 'success');
+        } catch (e) {
+            if (typeof showAppAlert === 'function') showAppAlert('Kayıt hatası!', 'error');
+        }
+    };
+
+    modal.style.display = 'flex';
+};
+
+// Veriyi 8'erli bölmek için basit bir logic:
+function renderPurchaseTable(data) {
+    const start = (currentPurchasePage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    const paginatedData = data.slice(start, end);
+
+    const tbody = document.getElementById('purchaseTableBody');
+    // Satın Alma Talepleri JS Render Örneği
+    tbody.innerHTML = paginatedData.map(item => `
+        <tr>
+            <td><strong>${item.evrakNo || '-'}</strong></td>
+            <td><span class="text-muted">${item.tarih || '-'}</span></td>
+            <td>${item.talepEden || '-'}</td>
+            <td>${item.urun || '-'}</td>
+            <td>
+                <span class="badge-soft bg-soft-warning">
+                    ${item.durum || 'Bekliyor'}
+                </span>
+            </td>
+            <td class="text-end">
+                <button class="action-btn">Detay</button>
+                <button class="action-btn">Akış</button>
+            </td>
+        </tr>
+    `).join('');
+
+    renderPaginationControls(data.length, 'purchasePagination');
+}
+
+function renderPaginationControls(totalItems, containerId) {
+    const pageCount = Math.ceil(totalItems / PAGE_SIZE);
+    let html = '';
+    for (let i = 1; i <= pageCount; i++) {
+        html += `<button class="${i === currentPurchasePage ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
+    }
+    document.getElementById(containerId).innerHTML = html;
+}
+
+// 1. Modalı Kapatma
+window.closeEditModal = function () {
+    document.getElementById("editRequestModal").style.display = "none";
+};
+
+// 2. Modalı Açma ve Verileri Doldurma
+window.editRequest = function (id) {
+    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    if (!item) return;
+
+    // Inputları aç
+    const inputs = document.querySelectorAll("#purchaseForm .modern-input");
+    inputs.forEach(input => input.disabled = false);
+
+    // Verileri doldur
+    document.getElementById("purDocName").value = item.evrakNo;
+    document.getElementById("purName").value = item.urun;
+    // ... diğer alanları yukarıdaki gibi doldur ...
+
+    // Kaydet butonunu göster ve modalı aç
+    document.querySelector(".btn-modern-save").style.display = "block";
+    document.getElementById("purchaseModal").style.display = "block";
+
+    // Form submit olayını "Update" olarak değiştir
+    const form = document.getElementById("purchaseForm");
+    form.onsubmit = (e) => window.updatePurchaseRequest(e, id);
+};
+
+// 3. Form Gönderildiğinde Kaydetme
+document.getElementById("editRequestForm")?.addEventListener("submit", async function (e) {
+    e.preventDefault();
+
+    const id = document.getElementById("edit_id").value;
+    const itemIndex = window.data.purchaseOrders.findIndex(x => Number(x.id) === Number(id));
+
+    if (itemIndex !== -1) {
+        // Veriyi güncelle
+        window.data.purchaseOrders[itemIndex].urun = document.getElementById("edit_urun").value;
+
+        // Log ekle
+        window.data.purchaseOrders[itemIndex].akis.push({
+            islem: "Talep güncellendi",
+            yapan: window.currentUser?.name,
+            tarih: new Date().toLocaleString()
+        });
+
+        // Kaydet ve Arayüzü Yenile
+        // [BUGFIX] Bug 5: Targeted save for purchaseOrders
+        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        window.closeEditModal();
+
+        // Admin tablosunu yenilemek için kullandığın ana fonksiyonu çağır
+        if (typeof renderAdminDashboard === "function") renderAdminDashboard();
+
+        // Başarı mesajı (opsiyonel)
+        if (window.showToast) window.showToast("Kayıt başarıyla güncellendi.");
+    }
+});
+
+window.viewRequest = function (id) {
+    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    if (!item) return;
+
+    // Modalı Görüntüleme Modunda Doldur
+    document.getElementById("purDocName").value = item.evrakNo || "";
+    document.getElementById("purDate").value = item.tarih || "-";
+    document.getElementById("purUser").value = item.personel || "-";
+    document.getElementById("purName").value = item.urun || "";
+    document.getElementById("purBudget").value = item.butce || "0";
+    document.getElementById("purPriority").value = item.oncelik || "Normal";
+    document.getElementById("purDesc").value = item.aciklama || "";
+
+    // Selectbox'ları doldur (Eğer admin panelinde seçenekler yüklü değilse metin olarak ekle)
+    const unitSelect = document.getElementById("purUnit");
+    unitSelect.innerHTML = `<option>${item.birim}</option>`;
+
+    const typeSelect = document.getElementById("purType");
+    typeSelect.innerHTML = `<option>${item.kategori || "Genel"}</option>`;
+
+    // Görüntüleme modunda inputları kilitle
+    const inputs = document.querySelectorAll("#purchaseForm .modern-input");
+    inputs.forEach(input => input.disabled = true);
+
+    // Kaydet butonunu gizle, modalı aç
+    document.querySelector(".btn-modern-save").style.display = "none";
+    document.getElementById("purchaseModal").style.display = "block";
+};
+
+window.closePurchaseModal = function () {
+    document.getElementById("purchaseModal").style.display = "none";
+    // Input kilitlerini kaldır (bir sonraki açılış için temizlik)
+    const inputs = document.querySelectorAll("#purchaseForm .modern-input");
+    inputs.forEach(input => input.disabled = false);
+};
+
+window.uploadFiles = async function (files) {
+
+    const storage = getStorage();
+    const urls = [];
+
+    try {
+        for (const file of files) {
+
+            const fileRef = ref(
+                storage,
+                "purchaseFiles/" + Date.now() + "_" + file.name
+            );
+
+            await uploadBytes(fileRef, file);
+
+            const url = await getDownloadURL(fileRef);
+
+            urls.push({
+                name: file.name,
+                url: url
+            });
+        }
+
+        return urls;
+
+    } catch (error) {
+        console.warn('⚠️ Firebase Storage CORS hatası - Simülasyon modu aktif:', error.message);
+
+        // CORS hatası için geçici simülasyon - Test amaçlı
+        for (const file of files) {
+            // Simüle edilmiş dosya URL'i (gerçek dosya yüklenmez)
+            const simulatedUrl = `data:application/pdf;base64,simulated_${Date.now()}_${file.name}`;
+
+            urls.push({
+                name: file.name,
+                url: simulatedUrl,
+                simulated: true, // Simüle edilmiş olduğunu işaretle
+                error: error.message
+            });
+        }
+
+        // Kullanıcıya bilgilendirme
+        if (typeof showAppAlert === 'function') {
+            showAppAlert('⚠️ Dosya yükleme CORS hatası nedeniyle simülasyon modunda çalışıyor. Test için devam edilebilir.', 'warning');
+        }
+
+        return urls;
+    }
+}
+
+window.archiveOldRequests = async function () {
+
+    const active = [];
+    const archive = [];
+
+    (window.data.purchaseOrders || []).forEach(item => {
+
+        if (
+            item.durum === "Onaylandı" ||
+            item.durum === "Reddedildi"
+        ) {
+            archive.push(item);
+        } else {
+            active.push(item);
+        }
+    });
+
+    window.data.purchaseOrders = active;
+
+    if (!window.data.archive)
+        window.data.archive = [];
+
+    window.data.archive.push(...archive);
+
+    // [BUGFIX] Bug 5: Targeted save for purchaseOrders and archive individually
+    await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    await window.saveData('archive', window.data.archive);
+
+    renderPurchaseModule();
+}
+
+// ─────────────────────────────────────────────────────────────
+// TALEP DETAY MODAL — GÖRÜNTÜLE / DÜZENLE
+// ─────────────────────────────────────────────────────────────
+window.openPurchaseDetail = function (id, mode) {
+    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    if (!item) return;
+
+    const modal = document.getElementById('purchaseModal');
+    const form = document.getElementById('purchaseForm');
+    const saveBtn = document.getElementById('purSaveBtn');
+    const title = document.getElementById('purModalTitle');
+    if (!modal) return;
+
+    // Başlık
+    if (title) {
+        title.innerHTML = mode === 'view'
+            ? '<i class="fas fa-file-alt me-2"></i> Talep Detayı'
+            : '<i class="fas fa-edit me-2"></i> Talebi Düzenle';
+    }
+
+    // Alanları doldur
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+    set('purDocName', item.evrakNo);
+    set('purDate', item.tarih);
+    set('purUser', item.talepEden || item.createdByName);
+    set('purName', item.urun);
+    set('purQty', item.adet || 1);
+    set('purBudget', item.butce);
+    set('purDesc', item.aciklama);
+
+    // Select'leri doldur sonra seç
+    fillPurchaseSelects();
+    setTimeout(() => {
+        const sel = (selId, val) => {
+            const el = document.getElementById(selId);
+            if (el) [...el.options].forEach(o => { o.selected = o.value === val; });
+        };
+        sel('purUnit', item.birim);
+        sel('purType', item.tur);
+        sel('purPriority', item.oncelik || 'Normal');
+    }, 60);
+
+    // Dosya input alanı
+    const fileArea = document.getElementById('purFileInputArea');
+    const fileInput = document.getElementById('purchaseFile');
+
+    // Mevcut dosya listesi + akış geçmişi bölümleri
+    const filesDiv = document.getElementById('purUploadedFilesList');
+    const workflowDiv = document.getElementById('purWorkflowSection');
+
+    if (mode === 'view') {
+        // Alanları kilitle
+        form.querySelectorAll('input:not([type="file"]), select, textarea')
+            .forEach(el => { el.disabled = true; });
+        if (fileArea) fileArea.style.display = 'none';
+        if (saveBtn) saveBtn.style.display = 'none';
+
+        // Mevcut dosyalar
+        if (filesDiv) {
+            filesDiv.style.display = 'block';
+            filesDiv.innerHTML = _purFilesHTML(item, true);
+        }
+        // Akış geçmişi
+        if (workflowDiv) {
+            workflowDiv.style.display = 'block';
+            workflowDiv.innerHTML = _purWorkflowHTML(item);
+        }
+
+        // Form submit engelle
+        form.onsubmit = (e) => e.preventDefault();
+
+        // --- ONAY/RED AKSİYONLARI ---
+        const me = window.currentUser?.name;
+        const isTurn = item.workflow?.started && !item.workflow?.finished &&
+            item.workflow.steps[item.workflow.currentStep]?.user === me;
+
+        if (isTurn) {
+            if (saveBtn) {
+                saveBtn.style.display = 'block';
+                saveBtn.classList.remove('btn-modern-save');
+                saveBtn.classList.add('btn-success');
+                saveBtn.innerHTML = '<i class="fas fa-check me-2"></i> Onayla';
+                saveBtn.onclick = (e) => { e.preventDefault(); window.approveStep(item.id); };
+            }
+            // Red butonu ekle (footer'da iptal yanına)
+            const footer = modal.querySelector('.modern-modal-footer');
+            if (footer) {
+                let rejectBtn = document.getElementById('purRejectBtn');
+                if (!rejectBtn) {
+                    rejectBtn = document.createElement('button');
+                    rejectBtn.id = 'purRejectBtn';
+                    rejectBtn.className = 'btn btn-danger shadow-sm ms-2';
+                    rejectBtn.style.padding = '10px 25px';
+                    rejectBtn.style.borderRadius = '10px';
+                    rejectBtn.innerHTML = '<i class="fas fa-times me-2"></i> Reddet';
+                    footer.insertBefore(rejectBtn, footer.firstChild);
+                }
+                rejectBtn.style.display = 'block';
+                rejectBtn.onclick = (e) => { e.preventDefault(); window.rejectStep(item.id); };
+            }
+        } else {
+            const rejectBtn = document.getElementById('purRejectBtn');
+            if (rejectBtn) rejectBtn.style.display = 'none';
+        }
+
+    } else { // edit
+        form.querySelectorAll('input:not([readonly]):not([type="file"]), select, textarea')
+            .forEach(el => { el.disabled = false; });
+        if (fileArea) fileArea.style.display = 'block';
+        if (fileInput) fileInput.value = '';
+        if (saveBtn) {
+            saveBtn.style.display = 'block';
+            saveBtn.innerHTML = '<i class="fas fa-save me-2"></i> Değişiklikleri Kaydet';
+        }
+
+        // Mevcut dosyaları göster (silinebilir)
+        if (filesDiv) {
+            filesDiv.style.display = 'block';
+            filesDiv.innerHTML = _purFilesHTML(item, window.isAdminPanel);
+        }
+        if (workflowDiv) {
+            workflowDiv.style.display = 'block';
+            workflowDiv.innerHTML = _purWorkflowHTML(item);
+        }
+        // Form submit → güncelle
+        form.onsubmit = (e) => window.updatePurchaseRequest(e, id);
+    }
+
+    modal.style.display = 'block';
+};
+
+// Mevcut dosyalar HTML yardımcısı
+function _purFilesHTML(item, canDelete) {
+    const files = item.files || [];
+    if (files.length === 0 && !canDelete) return '';
+
+    const header = `
+        <hr style="margin:14px 0 10px;">
+        <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">
+            <i class="fas fa-paperclip me-1"></i> Ekler (${files.length})
+        </div>`;
+
+    if (files.length === 0) return header + '<p style="color:#aaa;font-size:12px;margin:0;">Henüz dosya eklenmedi.</p>';
+
+    const rows = files.map((f, i) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f1f5f9;font-size:13px;">
+            <i class="fas fa-file-alt" style="color:#94a3b8;flex-shrink:0;"></i>
+            <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${f.name}">${f.name}</span>
+            <small style="color:#cbd5e1;flex-shrink:0;">${f.uploadedAt || ''}</small>
+            <a href="${f.url}" target="_blank"
+               style="padding:3px 9px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;color:#475569;text-decoration:none;">
+                <i class="fas fa-download"></i>
+            </a>
+            ${canDelete ? `
+            <button onclick="window.deleteRequestFile(${item.id}, ${i})"
+                style="padding:3px 9px;font-size:11px;border:1px solid #fca5a5;border-radius:5px;background:none;color:#ef4444;cursor:pointer;">
+                <i class="fas fa-trash"></i>
+            </button>` : ''}
+        </div>`).join('');
+
+    return header + rows;
+}
+
+// [BUGFIX] Bug 4: Chronological sorting via regex-first parsing & scrollable compact UI container with toggle
+window.togglePurWorkflowLogs = function (btn) {
+    const container = btn.previousElementSibling;
+    if (!container) return;
+    const hiddenRows = container.querySelectorAll('.pur-log-hidden');
+    const isShowingAll = btn.getAttribute('data-shown') === 'true';
+    if (isShowingAll) {
+        hiddenRows.forEach(el => el.style.display = 'none');
+        btn.setAttribute('data-shown', 'false');
+        btn.innerHTML = `<i class="fas fa-chevron-down me-1"></i> Tümünü Gör (${hiddenRows.length} adım daha)`;
+    } else {
+        hiddenRows.forEach(el => el.style.display = 'flex');
+        btn.setAttribute('data-shown', 'true');
+        btn.innerHTML = `<i class="fas fa-chevron-up me-1"></i> Daralt`;
+    }
+};
+
+// [BUGFIX] Bug 4: Enhanced timestamp parsing with robust fallback chain
+// [WHY]: Mixed timestamp formats (ISO, tr-TR, Unix ms) cause incorrect sorting and missing logs.
+// [HOW]: Use a multi-strategy parser that tries ISO → tr-TR → Unix timestamp, with consistent fallback.
+function _purWorkflowHTML(item) {
+    const ebysHistory = item.workflow?.history || [];
+    const oldAkis = item.akis || [];
+
+    // [BUGFIX] Bug 4: Chronological timestamp parser with fallback chain
+    // Priority: ISO string → tr-TR DD.MM.YYYY → Unix timestamp → fallback
+    const parseRawDate = (str, fallbackMs) => {
+        if (str === null || str === undefined) return fallbackMs || Date.now();
+        if (typeof str === 'number') return str;
+        
+        const strVal = String(str).trim();
+        
+        // Try ISO 8601 format first (e.g., 2024-01-15T10:30:00.000Z)
+        if (strVal.includes('T') && strVal.includes('Z')) {
+            const isoDate = new Date(strVal);
+            if (!isNaN(isoDate.getTime())) return isoDate.getTime();
+        }
+        
+        // Try tr-TR format: DD.MM.YYYY HH:mm:ss or DD/MM/YYYY HH:mm:ss
+        const trTRMatch = strVal.match(/(\d{1,2})[\.\/](\d{1,2})[\.\/](\d{4})[^\d]*(\d{1,2})[:\s](\d{1,2})(?::(\d{1,2}))?/);
+        if (trTRMatch) {
+            const [, day, month, year, hour, minute, second] = trTRMatch;
+            const date = new Date(year, parseInt(month, 10) - 1, day, parseInt(hour, 10), parseInt(minute, 10), second ? parseInt(second, 10) : 0);
+            if (!isNaN(date.getTime())) return date.getTime();
+        }
+        
+        // Try Unix timestamp (milliseconds)
+        const unixTime = parseInt(strVal, 10);
+        if (!isNaN(unixTime) && unixTime > 1000000000000) {
+            return unixTime;
+        }
+        
+        // Final fallback to Date constructor
+        const parsed = new Date(strVal);
+        if (!isNaN(parsed.getTime())) return parsed.getTime();
+        
+        return fallbackMs || Date.now();
+    };
+
+    // [BUGFIX] Bug 4: Ensure every step transition is logged
+    // Merge EBYS history and legacy akis, normalizing both to a unified log format
+    const allLogs = [
+        ...ebysHistory.map((h, idx) => ({
+            tarih: new Date(h.timestamp).toLocaleString('tr-TR'),
+            yapan: h.actor || 'Sistem',
+            islem: `${h.action === 'transition' ? '🔄 State Geçişi' :
+                h.action === 'checkpoint' ? '📍 Checkpoint' :
+                    h.action === 'rollback' ? '🔙 Rollback' :
+                        h.action === 'create' ? '📋 Oluşturuldu' :
+                            h.action === 'withdraw' ? '⏸️ Geri Çekildi' :
+                                h.action === 'approve' ? '✅ Onaylandı' :
+                                    h.action === 'reject' ? '❌ Reddedildi' : '📝 İşlem'}: ${h.note || ''}`,
+            not: h.metadata?.checkpointReason || h.metadata?.reason || '',
+            type: 'ebys',
+            rawDate: parseRawDate(h.timestamp, Date.now() - idx),
+            source: 'ebys_history'
+        })),
+        ...oldAkis.map((a, idx) => ({
+            ...a,
+            // [BUGFIX] Bug 4: Fix potential duplicate 'note' field
+            not: a.not || a.note || '',
+            type: 'legacy',
+            rawDate: parseRawDate(a.tarih, Date.now() - idx),
+            source: 'legacy_akis'
+        }))
+    ].sort((a, b) => b.rawDate - a.rawDate);
+
+    if (allLogs.length === 0) return '';
+
+    // [BUGFIX] Bug 4: Fixed hidden row count - show first 3 logs, hide rest (total - 3)
+    const visibleCount = 3;
+    const rows = allLogs.map((a, idx) => `
+        <div class="${idx >= visibleCount ? 'pur-log-hidden' : ''}" style="display:${idx >= visibleCount ? 'none' : 'flex'};flex-direction:column;padding:8px 0;border-bottom:1px solid #f8fafc;font-size:12px;">
+            <div style="display:flex;gap:10px;">
+                <span style="color:#94a3b8;min-width:130px;flex-shrink:0;">${a.tarih || ''}</span>
+                <span style="color:#64748b;min-width:90px;flex-shrink:0;font-weight:600;">${a.yapan || ''}</span>
+                <span style="color:#1e293b;">${a.islem || ''}</span>
+                ${a.type === 'ebys' ? '<span style="background:#e0e7ff;color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:8px;">EBYS</span>' : ''}
+            </div>
+            ${a.not ? `<div style="margin-top:4px;padding:6px 10px;background:#f8fafc;border-radius:6px;color:#475569;font-style:italic;font-size:11px;">
+                💬 ${a.not}
+            </div>` : ''}
+        </div>`).join('');
+
+    // [BUGFIX] Bug 4c: max-height ve overflow-y:auto ile kompakt UI kısıtlaması, varsayılan son 3 adım ve Tümünü Gör butonu
+    const remainingCount = allLogs.length - visibleCount;
+    const toggleBtn = allLogs.length > visibleCount ? `
+        <button type="button" class="btn btn-sm btn-link text-primary p-0 mt-2" data-shown="false" onclick="window.togglePurWorkflowLogs(this)" style="font-size:11px;text-decoration:none;font-weight:600;">
+            <i class="fas fa-chevron-down me-1"></i> Tümünü Gör (${remainingCount > 0 ? remainingCount : allLogs.length - visibleCount} adım daha)
+        </button>` : '';
+
+    return `
+        <hr style="margin:14px 0 10px;">
+        <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">
+            <i class="fas fa-history me-1"></i> Süreç Geçmişi (${allLogs.length} kayıt)
+        </div>
+        <div style="max-height: 220px; overflow-y: auto; padding-right: 4px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            ${rows}
+        </div>
+        ${toggleBtn}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// TALEP GÜNCELLE (edit modunda kaydet)
+// ─────────────────────────────────────────────────────────────
+window.updatePurchaseRequest = async function (e, id) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+
+    const idx = window.data.purchaseOrders.findIndex(x => Number(x.id) === Number(id));
+    if (idx === -1) return;
+
+    const item = window.data.purchaseOrders[idx];
+
+    // Yeni dosya yükleme
+    const fileInput = document.getElementById('purchaseFile');
+    if (fileInput?.files?.length) {
+        try {
+            const newFiles = await window.uploadFiles(fileInput.files);
+            const mapped = newFiles.map(f => ({
+                name: f.name, url: f.url,
+                uploadedAt: new Date().toLocaleString('tr-TR'),
+                uploadedBy: window.currentUser?.name || 'Bilinmeyen'
+            }));
+            if (!item.files) item.files = [];
+            item.files.push(...mapped);
+        } catch (err) {
+            console.error('Dosya yükleme hatası:', err);
+        }
+    }
+
+    // Alanları güncelle
+    item.urun = document.getElementById('purName')?.value || item.urun;
+    item.adet = parseFloat(document.getElementById('purQty')?.value) || item.adet || 1;
+    item.birim = document.getElementById('purUnit')?.value || item.birim;
+    item.tur = document.getElementById('purType')?.value || item.tur;
+    item.butce = parseFloat(document.getElementById('purBudget')?.value) || item.butce;
+    item.oncelik = document.getElementById('purPriority')?.value || item.oncelik;
+    item.aciklama = document.getElementById('purDesc')?.value || item.aciklama;
+
+    // Log
+    if (!item.akis) item.akis = [];
+    item.akis.push({
+        islem: 'Talep güncellendi',
+        yapan: window.currentUser?.name || 'Kullanıcı',
+        tarih: new Date().toLocaleString('tr-TR')
+    });
+
+    try {
+        // [BUGFIX] Bug 5: Targeted save for purchaseOrders
+        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        window.closePurchaseModal();
+        if (typeof renderPurchaseModule === 'function') renderPurchaseModule();
+        if (typeof showAppAlert === 'function') showAppAlert('Talep başarıyla güncellendi.', 'success');
+    } catch (err) {
+        console.error('Güncelleme hatası:', err);
+        if (typeof showAppAlert === 'function') showAppAlert('Kayıt hatası oluştu!', 'error');
+    }
+};
+
+// ─────────────────────────────────────────────────────────────
+// GERİ ÇEK / DURDUR — Personel akışı durdurur, taslak moduna alır
+// ─────────────────────────────────────────────────────────────
+// [BUGFIX] Bug 1: Complete workflow state reset & targeted save on withdraw
+window.withdrawWorkflow = async function (id) {
+    const onay = await showCustomConfirm(
+        'Akışı Durdur',
+        'Talebi geri çekip taslak moduna almak istediğinize emin misiniz? Akış durdurulacak.'
+    );
+    if (!onay) return;
+
+    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    if (!item) return;
+
+    // Tam sıfırlama (Finished, currentState, ve adımlar temizleniyor)
+    item.durum = 'Taslak';
+    const prevHistory = item.workflow?.history || [];
+    const prevAkis = item.akis || [];
+
+    item.workflow = {
+        id: item.workflow?.id || ('workflow_' + Date.now()),
+        started: false,
+        finished: false,
+        currentStep: 0,
+        currentState: window.WorkflowEngine?.states?.INITIATION || 'initiation',
+        status: 'draft',
+        steps: [],
+        history: [
+            ...prevHistory,
+            {
+                action: 'withdraw',
+                actor: window.currentUser?.name || 'Kullanıcı',
+                timestamp: new Date().toISOString(),
+                from: item.workflow?.currentState || 'active',
+                to: window.WorkflowEngine?.states?.INITIATION || 'initiation',
+                note: 'Talep geri çekildi (Taslak moduna alındı)'
+            }
+        ]
+    };
+
+    item.akis = [
+        ...prevAkis,
+        {
+            islem: 'İş akışı durduruldu (Taslak moduna alındı)',
+            yapan: window.currentUser?.name || 'Kullanıcı',
+            tarih: new Date().toLocaleString('tr-TR')
+        }
+    ];
+
+    // [BUGFIX] Bug 5: Yalnızca purchaseOrders kaydediliyor (Yetki reddini önler)
+    await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    if (typeof refreshUI === 'function') refreshUI();
+    if (typeof showAppAlert === 'function') showAppAlert('Talep başarıyla geri çekildi. Düzenleyip tekrar başlatabilirsiniz.', 'info');
+};
+
+// ─────────────────────────────────────────────────────────────
+// DOSYA SİL — Admin, showCustomConfirm ile sorar
+// ─────────────────────────────────────────────────────────────
+window.deleteRequestFile = async function (requestId, fileIndex) {
+    const onay = await showCustomConfirm(
+        'Dosyayı Sil',
+        'Bu dosya kalıcı olarak silinecektir. Emin misiniz?'
+    );
+    if (!onay) return;
+
+    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(requestId));
+    if (!item || !item.files) return;
+
+    item.files.splice(fileIndex, 1);
+
+    if (!item.akis) item.akis = [];
+    item.akis.push({
+        islem: 'Ek dosya silindi',
+        yapan: window.currentUser?.name || 'Admin',
+        tarih: new Date().toLocaleString('tr-TR')
+    });
+
+    // [BUGFIX] Bug 5: Targeted save for purchaseOrders
+    await window.saveData('purchaseOrders', window.data.purchaseOrders);
+
+    // Modal açıksa dosya listesini yerinde güncelle
+    const filesDiv = document.getElementById('purUploadedFilesList');
+    if (filesDiv && filesDiv.style.display !== 'none') {
+        filesDiv.innerHTML = _purFilesHTML(item, true);
+    }
+    if (typeof showAppAlert === 'function') showAppAlert('Dosya silindi.', 'success');
+};
+
+// ─────────────────────────────────────────────────────────────
+// TALEBİ SİL — Sadece Admin, showCustomConfirm ile sorar
+// ─────────────────────────────────────────────────────────────
+window.deletePurchaseRequest = async function (id) {
+    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    if (!item) return;
+
+    const onay = await showCustomConfirm(
+        'Talebi Kalıcı Sil',
+        `"${item.urun || item.evrakNo}" talebi kalıcı olarak silinecektir. Bu işlem geri alınamaz. Onaylıyor musunuz?`
+    );
+    if (!onay) return;
+
+    const idx = window.data.purchaseOrders.findIndex(x => Number(x.id) === Number(id));
+    window.data.purchaseOrders.splice(idx, 1);
+
+    // [BUGFIX] Bug 5: Targeted save for purchaseOrders
+    await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    if (typeof renderPurchaseModule === 'function') renderPurchaseModule();
+    if (typeof showAppAlert === 'function') showAppAlert('Talep silindi.', 'success');
+};
+
+// ─────────────────────────────────────────────────────────────
+// TALEBİ İPTAL ET — Kullanıcı talebi pasife çeker, silmez.
+// ─────────────────────────────────────────────────────────────
+// [BUGFIX] Bug 1: Complete reset & correct 'Taslak' status when withdrawing started workflow
+window.cancelPurchaseRequest = async function (id) {
+    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    if (!item) return;
+
+    const isStarted = item.workflow?.started === true;
+
+    if (isStarted) {
+        const onay = await showCustomConfirm(
+            'Talebi Geri Çek',
+            `"${item.urun || item.evrakNo}" talebini geri çekip taslak moduna almak istediğinize emin misiniz?`
+        );
+        if (!onay) return;
+
+        item.durum = 'Taslak';
+        const prevHistory = item.workflow?.history || [];
+        const prevAkis = item.akis || [];
+
+        item.workflow = {
+            id: item.workflow?.id || ('workflow_' + Date.now()),
+            started: false,
+            finished: false,
+            currentStep: 0,
+            currentState: window.WorkflowEngine?.states?.INITIATION || 'initiation',
+            status: 'draft',
+            steps: [],
+            history: [
+                ...prevHistory,
+                {
+                    action: 'withdraw',
+                    actor: window.currentUser?.name || 'Kullanıcı',
+                    timestamp: new Date().toISOString(),
+                    from: item.workflow?.currentState || 'active',
+                    to: window.WorkflowEngine?.states?.INITIATION || 'initiation',
+                    note: 'Talep geri çekildi (Taslak moduna alındı)'
+                }
+            ]
+        };
+
+        item.akis = [
+            ...prevAkis,
+            {
+                islem: 'Talep Geri Çekildi (Taslak Moduna Alındı)',
+                yapan: window.currentUser?.name || 'Kullanıcı',
+                tarih: new Date().toLocaleString('tr-TR')
+            }
+        ];
+
+        // [BUGFIX]: root /workflows koleksiyonu ya da global saveData yerine targeted save
+        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+
+        if (typeof refreshUI === 'function') {
+            refreshUI();
+        } else if (typeof renderPurchaseModule === 'function') {
+            renderPurchaseModule();
+        }
+
+        if (typeof showAppAlert === 'function') showAppAlert('Talep geri çekildi (Taslak moduna alındı).', 'info');
+    } else {
+        const onay = await showCustomConfirm(
+            'Talebi Kalıcı Olarak İptal Et',
+            `"${item.urun || item.evrakNo}" talebini tamamen iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.`
+        );
+        if (!onay) return;
+
+        item.durum = 'İptal Edildi';
+        if (item.workflow) {
+            item.workflow.started = false;
+            item.workflow.finished = true;
+            item.workflow.currentState = window.WorkflowEngine?.states?.CANCELLED || 'cancelled';
+            if (Array.isArray(item.workflow.steps)) {
+                item.workflow.steps.forEach(step => { step.status = 'cancelled'; });
+            }
+        }
+
+        if (!item.akis) item.akis = [];
+        item.akis.push({
+            islem: 'Talep İptal Edildi',
+            yapan: window.currentUser?.name || 'Kullanıcı',
+            tarih: new Date().toLocaleString('tr-TR')
+        });
+
+        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+
+        if (typeof refreshUI === 'function') refreshUI();
+        if (typeof showAppAlert === 'function') showAppAlert('Talep iptal edildi.', 'success');
+    }
+};
+
+// ─────────────────────────────────────────────────────────────
+// MODAL KAPAT — State temizle
+// ─────────────────────────────────────────────────────────────
+window.closePurchaseModal = function () {
+    const modal = document.getElementById('purchaseModal');
+    const form = document.getElementById('purchaseForm');
+    const saveBtn = document.getElementById('purSaveBtn');
+    const title = document.getElementById('purModalTitle');
+    const filesDiv = document.getElementById('purUploadedFilesList');
+    const wfDiv = document.getElementById('purWorkflowSection');
+    const fileArea = document.getElementById('purFileInputArea');
+
+    if (modal) modal.style.display = 'none';
+
+    // Alanları sıfırla
+    if (form) {
+        form.reset();
+        form.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = false; });
+        form.onsubmit = (e) => window.savePurchaseRequest(e);
+        delete form.dataset.editId;
+    }
+
+    // Dinamik bölümleri gizle
+    if (filesDiv) { filesDiv.style.display = 'none'; filesDiv.innerHTML = ''; }
+    if (wfDiv) { wfDiv.style.display = 'none'; wfDiv.innerHTML = ''; }
+    if (fileArea) fileArea.style.display = 'block';
+    if (saveBtn) {
+        saveBtn.style.display = 'block';
+        saveBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i> Talebi Kaydet';
+    }
+    if (title) title.innerHTML = '<i class="fas fa-file-invoice me-2"></i> Satın Alma Talebi';
+
+    const rejectBtn = document.getElementById('purRejectBtn');
+    if (rejectBtn) rejectBtn.style.display = 'none';
+
+    if (saveBtn) {
+        saveBtn.classList.remove('btn-success');
+        saveBtn.classList.add('btn-modern-save');
+        saveBtn.onclick = null; // updatePurchaseRequest'e form submit bakıyor zaten
+    }
+};
+
+window.refreshPurchaseModule = function () {
+    window.state = {
+        purchasePage: window.purchasePage || 1,
+        search: document.getElementById("purchaseSearch")?.value || ""
+    };
+
+    const data = getFilteredPurchaseData(window.data.purchaseOrders, window.state);
+
+    renderPurchaseTable(data);
+    renderStats(data);
+    renderPagination(data.length);
+};
+
+// [BUGFIX] Bug 6: Wire renderServicesModule to the PubSub data event.
+// [WHY]: The KPI counter correctly shows 9 items (populated from window.data.serviceRecords
+//        via renderPurchaseStats), but serviceTableBody stays empty because renderServicesModule
+//        is only called on tab-click (showAdminTab → purchaseTab). If the user is already on
+//        the tab when Firebase data arrives, no re-render is triggered.
+// [HOW]: Listen for the 'onInventoryDataUpdated' CustomEvent (fired by firebase-handler.js
+//        startRealtimeSync for every snapshot). When serviceRecords or purchaseOrders change,
+//        call renderServicesModule() so the table always reflects live data.
+window.addEventListener('onInventoryDataUpdated', function (e) {
+    const { collection } = e.detail || {};
+    if (collection === 'serviceRecords' || collection === 'purchaseOrders') {
+        if (typeof window.renderServicesModule === 'function') {
+            window.renderServicesModule();
+        }
+        if (typeof window.renderPurchaseStats === 'function') {
+            window.renderPurchaseStats();
+        }
+    }
+});

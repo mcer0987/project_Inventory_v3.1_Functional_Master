@@ -1,0 +1,95 @@
+/* MODÜL ÞARTELLERÝ KARTI TASARIMI */
+.toggle-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 15px;
+    padding: 10px 0;
+}
+
+.toggle-item {
+    background: rgba(10, 15, 30, 0.6);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 12px;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    text-align: center;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+
+.toggle-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    border-color: rgba(255,255,255,0.1);
+}
+
+.toggle-icon-wrap {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    transition: all 0.4s ease;
+}
+
+/* Aktif (Açýk) Durum */
+.toggle-item.active .toggle-icon-wrap {
+    background: rgba(0, 255, 136, 0.15);
+    color: var(--vip-matrix);
+    box-shadow: 0 0 15px rgba(0,255,136,0.2);
+}
+
+/* Pasif (Kapalý) Durum */
+.toggle-item.inactive .toggle-icon-wrap {
+    background: rgba(255, 45, 85, 0.15);
+    color: var(--vip-danger);
+    box-shadow: 0 0 15px rgba(255,45,85,0.2);
+}
+
+.toggle-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+}
+
+.toggle-status-badge {
+    font-size: 0.7rem;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.toggle-item.active .toggle-status-badge {
+    background: rgba(0, 255, 136, 0.1);
+    color: var(--vip-matrix);
+    border: 1px solid rgba(0,255,136,0.3);
+}
+
+.toggle-item.inactive .toggle-status-badge {
+    background: rgba(255, 45, 85, 0.1);
+    color: var(--vip-danger);
+    border: 1px solid rgba(255,45,85,0.3);
+}
+
+/* SÝSTEM AKSÝYONLARI RESPONSIVE GRID */
+.action-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+.action-grid .btn {
+    margin-top: 0 !important;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}

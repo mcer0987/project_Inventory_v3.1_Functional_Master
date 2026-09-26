@@ -1,0 +1,2002 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard | Envanter Yönetimi</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="admin-add-style.css">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="dark-theme.css">
+    <link rel="stylesheet" href="admin-dark-fix.css">
+    <script src="dark-mode-toggle.js"></script>
+    <link rel="stylesheet" href="todo-module.css">
+    <script src="todo-module.js"></script>
+
+    <!-- VIP System Control & SortableJS -->
+    <link rel="stylesheet" href="admin-system-control.css">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
+    <script type="module">
+        import { checkAdminAuth } from './src/services/firebase-handler.js?v=1782473897707';
+
+        // Sayfa yüklenmeden önce kontrol et
+        const authData = localStorage.getItem('admin_auth');
+        const now = new Date().getTime();
+
+        if (!authData) {
+            // Oturum yoksa direkt index'e at (orada loginModal açılacak)
+            window.location.replace('index.html');
+        } else {
+            const auth = JSON.parse(authData);
+            if (now > auth.expiry) {
+                localStorage.removeItem('admin_auth');
+                window.location.replace('index.html');
+            }
+        }
+
+        // Süreyi her saniye kontrol et
+        setInterval(() => {
+            const authData = localStorage.getItem('admin_auth');
+            const now = new Date().getTime();
+
+            if (authData) {
+                const auth = JSON.parse(authData);
+                const timeLeft = auth.expiry - now;
+
+                // 1. UYARI: Süre azalınca (örn. 1 dk kala) sarı barı göster
+                const warningDiv = document.getElementById('sessionWarning');
+                if (warningDiv) {
+                    if (timeLeft > 0 && timeLeft < (window.SessionConfig?.WARNING_BEFORE || 60000)) {
+                        warningDiv.style.display = 'block';
+                    } else {
+                        warningDiv.style.display = 'none';
+                    }
+                }
+
+                // 2. KİLİT: Süre dolduysa
+                if (timeLeft <= 0) {
+                    const lockModal = document.getElementById('adminLockModal');
+                    if (lockModal && lockModal.style.display !== 'flex') {
+                        lockModal.style.display = 'flex';
+                        if (typeof window.showAppAlert === 'function') {
+                            window.showAppAlert("Güvenlik nedeniyle oturum kapatıldı.", "info");
+                        }
+                    }
+                }
+            }
+        }, window.SessionConfig?.CHECK_INTERVAL || 1000);
+
+        // Modaldan şifre girildiğinde çalışacak fonksiyon
+        window.unlockAdmin = async function () {
+            // [R-SYS]
+            const pass = window._dx ? window._dx._g('lock-val-node') : document.getElementById('lock-val-node').value;
+            const isAuthenticated = await SecurityConfig.authenticate(pass);
+
+            if (isAuthenticated) {
+                const expiry = new Date().getTime() + (window.SessionConfig?.ADMIN_LOCK_TIME || 180000);
+                localStorage.setItem('admin_auth', JSON.stringify({ expiry: expiry }));
+
+                // 🔥 KRİTİK: activeUser eksikse admin olarak tanımla
+                if (!localStorage.getItem('activeUser')) {
+                    localStorage.setItem('activeUser', JSON.stringify({ name: 'Admin', role: 'admin' }));
+                }
+
+                document.getElementById('adminLockModal').style.display = 'none';
+                if (window._dx) window._dx._r('lock-val-node');
+            } else {
+                alert("Hatalı şifre!");
+            }
+        };
+
+        // Oturumu tamamen kapatıp ana sayfaya döndüren fonksiyon
+        window.adminForceLogout = function () {
+            if (typeof logout === 'function') {
+                logout();
+            } else {
+                localStorage.removeItem('activeUser');
+                localStorage.removeItem('admin_auth');
+                window.location.replace('index.html');
+            }
+        };
+
+        // [R-SYS] Init
+        window.addEventListener('load', () => {
+            if (window._dx) window._dx._s('lock-val-node');
+        });
+    </script>
+
+    <!-- [WHY]: admin.html içindeki yerel <style> bloğu kaldırıldı.
+         Tüm :root token ve layout kuralları admin-add-style.css içinde
+         aynı değerlerle tanımlı; çakışma ve CSS kaskad bozukluğu riski giderildi.
+         Dark Mode override'ları dark-theme.css'te eksiksiz karşılanmaktadır. -->
+</head>
+
+
+<body>
+    <!-- sidebar-backdrop: status-bar hamburger ile tetiklenir (V3 Phase 3 rev) -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop" role="presentation"></div>
+
+    <!-- 🚀 Premium Loading Overlay -->
+    <div id="admin-premium-loader">
+        <div class="loader-content">
+            <div class="loader-logo">🛡️</div>
+            <div class="loader-spinner"></div>
+            <div class="loader-text">Yönetici Paneli Hazırlanıyor</div>
+            <div class="loader-subtext">Veriler ve grafikler senkronize ediliyor...</div>
+        </div>
+    </div>
+
+    <!-- 🔐 Admin Lock Modal -->
+    <div id="adminLockModal" style="display:none; position:fixed; inset:0;
+         background:rgba(0,0,0,0.75); backdrop-filter:blur(6px);
+         z-index:9999; justify-content:center; align-items:center;">
+
+        <div id="adminLockCard" style="
+            background: var(--color-surface, #1e293b);
+            border: 1px solid var(--color-border, #334155);
+            border-radius: 20px;
+            padding: 40px 36px 32px;
+            width: 340px;
+            box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+            text-align: center;
+            position: relative;
+            animation: lockCardIn 0.35s cubic-bezier(0.34,1.56,0.64,1);">
+
+            <!-- Kilit ikonu -->
+            <div style="width:64px;height:64px;border-radius:50%;
+                background:rgba(239,68,68,0.15);border:2px solid rgba(239,68,68,0.35);
+                display:flex;align-items:center;justify-content:center;
+                margin: 0 auto 20px; font-size:26px; color:#f87171;">
+                <i class="fas fa-lock"></i>
+            </div>
+
+            <h2 style="margin:0 0 6px; font-size:1.25rem;
+                color: var(--color-text, #e2e8f0); font-weight:700;">
+                Oturum Süresi Doldu
+            </h2>
+            <p style="margin:0 0 24px; font-size:0.875rem;
+                color: var(--color-text-muted, #94a3b8);">
+                Devam etmek için yönetici şifresini girin.
+            </p>
+
+            <!-- Şifre input -->
+            <div style="position:relative; margin-bottom:16px;">
+                <i class="fas fa-key" style="position:absolute;left:14px;top:50%;
+                    transform:translateY(-50%); color:#64748b; font-size:13px;"></i>
+                <input type="text" id="lock-val-node" placeholder="••••••" style="width:100%; box-sizing:border-box;
+                        padding:12px 14px 12px 38px;
+                        background: var(--color-surface-alt, #1a2535);
+                        color: var(--color-text, #e2e8f0);
+                        border: 1px solid var(--color-border, #334155);
+                        border-radius:10px; font-size:14px;
+                        outline:none; transition: border-color 0.2s;" onkeydown="if(event.key==='Enter') unlockAdmin()"
+                    autocomplete="off" />
+            </div>
+
+            <!-- Hata mesajı -->
+            <p id="lockErrorMsg" style="display:none; color:#f87171;
+                font-size:0.8rem; margin:-8px 0 12px;">Hatalı şifre, tekrar deneyin.</p>
+
+            <!-- Kilidi Aç butonu -->
+            <button onclick="unlockAdmin()" style="
+                width:100%; padding:12px;
+                background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+                color:#fff; border:none; border-radius:10px;
+                font-size:14px; font-weight:600; cursor:pointer;
+                transition: opacity 0.2s; letter-spacing:0.3px;" onmouseover="this.style.opacity='0.85'"
+                onmouseout="this.style.opacity='1'">
+                <i class="fas fa-unlock-alt" style="margin-right:6px;"></i>Kilidi Aç
+            </button>
+
+            <!-- Çıkış yap bağlantısı -->
+            <button onclick="adminForceLogout()" style="
+                margin-top:14px; background:none; border:none;
+                color: var(--color-text-muted, #94a3b8);
+                font-size:0.8rem; cursor:pointer; text-decoration:underline;
+                text-underline-offset:3px;">Oturumu Kapat</button>
+        </div>
+    </div>
+
+    <style>
+        @keyframes lockCardIn {
+            from {
+                opacity: 0;
+                transform: scale(0.88) translateY(16px);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        #lock-val-node:focus {
+            border-color: #3b82f6 !important;
+        }
+    </style>
+
+    <div class="sidebar admin-content-hidden">
+        <div class="sidebar-header">🛡️ Admin Panel</div>
+        <button class="theme-toggle-btn" onclick="toggleTheme()" title="Koyu Temaya Geç" id="themeToggleAdmin">
+            <i class="fas fa-moon"></i> <span>Tema</span>
+        </button>
+        <div class="nav-item active" id="nav-dashboard" onclick="showAdminTab('dashboard-content')">📊 Dashboard</div>
+        <div class="nav-item" onclick="showAdminTab('productTypeSettings')">⚙️ Ürün Türü Ayarları</div>
+        <!-- <div class="nav-item" onclick="window.location.href='index.html'">⬅️ Depoya Dön</div> -->
+        <div class="nav-item" onclick="showAdminTab('purchaseTab')">
+            <i class="fas fa-shopping-cart"></i>
+            <span>Talep Ve Süreçler</span>
+        </div>
+        <div class="nav-item" onclick="showAdminTab('workflowTemplatesTab')">
+            <i class="fas fa-sitemap" style="color: var(--color-purple);"></i>
+            <span>Akış Şablonları</span>
+        </div>
+        <div class="nav-item" onclick="showAdminTab('definitionsTab')">
+            <i class="fas fa-cog" style="color: var(--color-info);"></i>
+            <span>Tanımlar</span>
+        </div>
+        <div class="nav-item" onclick="showAdminTab('todoTab')">
+            <i class="fas fa-tasks" style="color: var(--color-warning);"></i>
+            <span>TODO Paneli</span>
+        </div>
+        <div class="nav-item" id="nav-inventoryManagement" onclick="showAdminTab('inventoryManagementTab')">
+            <i class="fas fa-boxes" style="color: var(--color-success);"></i>
+            <span>Envanter Yönetimi</span>
+        </div>
+        <div class="nav-item vip-nav-item" id="nav-systemControl" onclick="showAdminTab('systemControlTab')">
+            <i class="fas fa-shield-alt"></i>
+            <span>Sistem Kontrol (VIP)</span>
+        </div>
+
+        <!-- =========================================================
+             FOOTER TO SIDEBAR MIGRATION (Premium UX)
+             [WHY]: Alt kısımdaki sabit footer mobilde gereksiz yer kaplıyordu.
+             [HOW]: Sitemap butonu ve sürüm bilgisi sidebar'ın en altına
+                    sabitlendi (margin-top: auto ile flex içinde aşağı itilir).
+             ========================================================= -->
+        <div class="nav-item sitemap-nav-item" onclick="openSitemapModal()" 
+             style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); border-bottom: none; color: var(--vip-matrix, #00ff88); font-weight: 600;">
+            <i class="fas fa-project-diagram"></i>
+            <span>Sistem Kılavuzu</span>
+        </div>
+        <div style="font-size: 0.65rem; text-align: center; color: rgba(255,255,255,0.3); padding-bottom: 15px; letter-spacing: 1px;">
+            ITSM Envanter v2.0 <br> VIP Mode
+        </div>
+    </div>
+
+    <div class="main-content admin-content-hidden">
+        <div id="sessionWarning"
+            style="display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #ff9800; color: white; padding: 15px 30px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 9999; font-weight: bold;">
+            ⚠️ Oturumunuz 1 dakika içinde kapatılacak! Devam etmek için sayfaya tıklayın.
+        </div>
+
+        <div class="admin-status-bar mb-4" style="color: var(--color-text);">
+            <div class="status-left">
+                <div id="liveTime" class="digital-clock" style="color: var(--color-text);">--:--:--</div>
+                <div id="liveDate" class="live-date" style="color: var(--color-text-muted);">Loading...</div>
+            </div>
+
+            <div class="status-center">
+                <span class="welcome-text" style="color: var(--color-text);">WELCOME, <span
+                        style="color:var(--color-primary)">MUHAMMED</span></span>
+            </div>
+
+            <div class="status-right" style="display:flex; align-items:center;">
+                <!-- ================================================================
+                     MOBİL KONTROL GRUBU (V3 Phase 3 Premium UX Revizyonu)
+                     [WHY]: Floating hamburger UX'i bozuyordu: sidebar ile aynı anda
+                            görünüyordu, ekran dışındaydı ve context'e yabancıydı.
+                     [HOW]: Hamburger ve dark mode toggle, zaten var olan status-right
+                            içine entegre edildi. Mobilde status-right sola ötelenip
+                            bu iki buton öne çıkar. Masaüstünde bu grup display:none.
+                     ================================================================ -->
+                <div class="status-mobile-controls" id="statusMobileControls">
+                    <!-- Hamburger: sidebar'ı aç/kapat -->
+                    <button class="btn-status-action" id="sidebarToggleBtn"
+                            aria-label="Menüyü Aç/Kapat" aria-expanded="false"
+                            title="Menü">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <!-- Dark Mode: context içinde doğal konumu -->
+                    <button class="btn-status-action" onclick="toggleTheme()"
+                            title="Tema Değiştir" id="themeToggleMobile">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </div>
+
+                <div class="action-buttons me-3" style="display: flex; gap: 10px; align-items: center;">
+                    <!-- 🔔 Admin Genel Görev Bildirimi -->
+                    <div class="todo-nav-badge-container is-passive" id="admin-nav-todo-badge"
+                        onclick="showAdminTab('todoTab')" title="Sistem Genelindeki Bekleyen Görevler"
+                        style="margin-right: 5px;">
+                        <i class="fas fa-tasks todo-nav-icon" style="font-size: 1.1rem; color: var(--color-text);"></i>
+                        <span class="todo-nav-badge badge-hidden" id="admin-nav-todo-count">0</span>
+                    </div>
+
+                    <button onclick="localStorage.setItem('launchpadBypassed', 'true'); window.location.href='index.html'" class="btn-status-action"
+                        title="Ana Sayfaya Dön">
+                        <i class="fas fa-home"></i>
+                    </button>
+                    <!-- [DECOMMISSIONED] Launchpad Go Button Removed -->
+                    <button onclick="window.adminLogout()" class="btn-status-action logout" title="Güvenli Çıkış">
+                        <i class="fas fa-power-off"></i>
+                    </button>
+                </div>
+                <div class="sync-status">
+                    <span id="syncIndicator" class="sync-dot online"></span>
+                    <span id="syncText" style="color: var(--color-text); font-weight: 800; letter-spacing: 1px;">LIVE
+                        SYNC</span>
+                    <small id="lastSyncTime" class="text-muted ms-2">Just now</small>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // [WHY]: CSS specificity savaşı: .admin-content-visible sınıfının
+            //        transform:translateY(0) scale(1) !important kuralı, bizim
+            //        CSS @media bloğumuzu eziyor. Sidebar açılmıyor.
+            // [HOW]: Mobilde sidebar'ın transform'unu CSS'e değil doğrudan
+            //        element.style'a yazıyoruz. Inline style CSS'ten her zaman önce
+            //        gelir — specificity savaşı imkansız hale gelir.
+            //        Masaüstünde inline style temizlenir; normal CSS devreye girer.
+            document.addEventListener('DOMContentLoaded', function () {
+                var btn      = document.getElementById('sidebarToggleBtn');
+                var sidebar  = document.querySelector('.sidebar');
+                var backdrop = document.getElementById('sidebarBackdrop');
+                if (!btn || !sidebar || !backdrop) return;
+
+                // Mobil mi? Ekran genişliğine göre kontrol
+                function isMobile() {
+                    return window.innerWidth <= 768;
+                }
+
+                // Mobil başlangıç kurulumu: sidebar'ı inline style ile ekran dışına al
+                function setupMobile() {
+                    if (isMobile()) {
+                        sidebar.style.transform    = 'translateX(-100%)';
+                        sidebar.style.transition   = 'transform 0.26s cubic-bezier(0.4, 0, 0.2, 1)';
+                        sidebar.style.position     = 'fixed';
+                        sidebar.style.top          = '0';
+                        sidebar.style.left         = '0';
+                        sidebar.style.height       = '100vh';
+                        sidebar.style.zIndex       = '1200';
+                        sidebar.style.opacity      = '1';
+                        sidebar.style.filter       = 'none';
+                        sidebar.style.width        = '270px';
+                        sidebar.style.overflowY    = 'auto';
+                    } else {
+                        // Masaüstünde inline style'ı temizle; CSS devreye girsin
+                        sidebar.style.transform    = '';
+                        sidebar.style.transition   = '';
+                        sidebar.style.position     = '';
+                        sidebar.style.top          = '';
+                        sidebar.style.left         = '';
+                        sidebar.style.height       = '';
+                        sidebar.style.zIndex       = '';
+                        sidebar.style.opacity      = '';
+                        sidebar.style.filter       = '';
+                        sidebar.style.width        = '';
+                        sidebar.style.overflowY    = '';
+                    }
+                }
+
+                function openSidebar() {
+                    if (!isMobile()) return;
+                    sidebar.style.transform = 'translateX(0)';
+                    sidebar.style.boxShadow = '6px 0 24px rgba(0,0,0,0.35)';
+                    sidebar.classList.add('sidebar-open');
+                    backdrop.classList.add('active');
+                    document.body.style.overflow = 'hidden';
+                    btn.setAttribute('aria-expanded', 'true');
+                }
+
+                function closeSidebar() {
+                    sidebar.style.transform = 'translateX(-100%)';
+                    sidebar.style.boxShadow = 'none';
+                    sidebar.classList.remove('sidebar-open');
+                    backdrop.classList.remove('active');
+                    document.body.style.overflow = '';
+                    btn.setAttribute('aria-expanded', 'false');
+                }
+
+                // İlk kurulum
+                setupMobile();
+
+                // Reveal animasyonu bittikten sonra tekrar uygula
+                // (admin-content-visible class'ı eklendikten sonra da geçerli olsun)
+                setTimeout(setupMobile, 1800);
+
+                btn.addEventListener('click', function () {
+                    if (sidebar.classList.contains('sidebar-open')) {
+                        closeSidebar();
+                    } else {
+                        openSidebar();
+                    }
+                });
+
+                backdrop.addEventListener('click', closeSidebar);
+
+                document.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape') closeSidebar();
+                });
+
+                // Premium UX: nav-item tıklanınca mobilde otomatik kapat
+                sidebar.querySelectorAll('.nav-item').forEach(function (item) {
+                    item.addEventListener('click', function () {
+                        if (isMobile()) closeSidebar();
+                    });
+                });
+
+                // Ekran boyutu değişince (döndürme vb.) yeniden ayarla
+                window.addEventListener('resize', setupMobile);
+            });
+        </script>
+
+
+
+
+        <div id="dashboard-content" class="admin-tab-content" style="display: block;">
+
+            <!-- 🔵 ÜST SATIR: 2 KART YAN YANA -->
+            <div class="dashboard-grid" style="display:flex; gap:20px; flex-wrap:wrap;">
+
+                <div class="card" style="flex:1; min-width:300px;">
+                    <div class="card-header">
+                        <h3>🛡️ Demirbaş Stok Durumu</h3>
+                        <div class="chart-toggles">
+                            <button onclick="setBarChartFilter('b1', this)" class="chart-toggle-btn">B1</button>
+                            <button onclick="setBarChartFilter('b2', this)" class="chart-toggle-btn">B2</button>
+                            <button onclick="setBarChartFilter('all', this)"
+                                class="chart-toggle-btn active">Toplu</button>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="dashDemirbasChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card" style="flex:1; min-width:300px;">
+                    <div class="card-header">
+                        <h3>📦 Envanter Dağılımı (Sarf / Demirbaş)</h3>
+                        <div class="chart-toggles">
+                            <button onclick="setPieChartFilter('b1', this)" class="chart-toggle-btn">B1</button>
+                            <button onclick="setPieChartFilter('b2', this)" class="chart-toggle-btn">B2</button>
+                            <button onclick="setPieChartFilter('all', this)"
+                                class="chart-toggle-btn active">Toplu</button>
+                            <button onclick="setPieChartFilter('sarf', this)" class="chart-toggle-btn">Sarf</button>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="dashSarfChart"></canvas>
+                    </div>
+                </div>
+
+
+
+            </div>
+
+
+            <!-- 🔵 ORTA SATIR: ÖZEL İZLEME + EK ALAN -->
+            <div class="row" style="display:flex; gap:20px; flex-wrap:wrap; margin-top:20px;">
+
+                <div class="col-lg-6 col-md-12" style="flex:1; min-width:300px;">
+                    <div class="card shadow-sm border-0 h-100">
+                        <div class="card-header bg-white py-3">
+                            <h3 class="m-0 font-weight-bold">
+                                <i class="fas fa-eye"></i> Özel İzleme Listesi
+                            </h3>
+                        </div>
+                        <div class="card-body p-3">
+
+                            <div class="table-responsive hide-scrollbar" style="max-height: 250px;">
+                                <table id="customWatchTable" class="table table-sm table-hover mb-0">
+                                    <thead class="bg-light sticky-top">
+                                        <tr>
+                                            <th>Ürün</th>
+                                            <th class="text-center">Stok</th>
+                                            <th>Durum</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <!-- Sadece ışık ekliyoruz, orijinal yapıya dokunmuyoruz -->
+                            <div id="watchListGlow" class="scroll-glow-line"></div>
+
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 📌 EK ALAN (SONRADAN GENİŞLETİLECEK) -->
+                <div class="col-lg-6 col-md-12" style="flex:1; min-width:300px;">
+                    <div class="card shadow-sm border-0 h-100">
+                        <div class="card-header bg-white py-3">
+                            <h3 class="m-0 font-weight-bold text-secondary">📌 Ek Panel (Geliştirme Alanı)</h3>
+                        </div>
+                        <div class="card-body">
+                            <p style="color:#7f8c8d;">
+                                Bu alan ileride yeni analiz / widget modülleri için ayrılmıştır.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+
+            <!-- 🟡 KRİTİK ALAN (FULL WIDTH) -->
+            <!-- PM NOTU: Bu bölüm stok güvenliği açısından en kritik kontrol noktasıdır.
+             Buradaki veriler düşük stok alarm mantığı ile çalışır ve doğrudan satın alma/ikmal sürecini tetikleyebilir. -->
+            <div class="row" style="margin-top:20px;">
+
+                <div class="col-12">
+
+                    <div class="card shadow-sm border-0">
+
+                        <div
+                            class="card-header bg-white py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <h3 class="m-0 font-weight-bold text-primary" style="font-size: 1.25rem;">🚨 Kritik Stok
+                                Takibi</h3>
+                            <button type="button" class="btn btn-sm btn-outline-secondary fw-bold"
+                                id="criticalToggleFilterBtn" onclick="window.cycleCriticalFilter()">Filtre:
+                                Tümü</button>
+                        </div>
+
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table id="criticalStockTable" class="table table-hover mb-0">
+                                    <thead class="bg-light">
+                                        <tr>
+                                            <th>Ürün</th>
+                                            <th class="text-center">Stok</th>
+                                            <th class="text-center">Durum</th>
+                                            <th class="text-end px-3">İşlemler</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- Ürün Türü Ayarları -->
+        <div id="productTypeSettings" class="admin-tab-content" style="display: none;">
+            <div class="admin-section-header mb-4">
+                <h2 class="fw-bold">Ürün Türü & Çıkış Analizi</h2>
+            </div>
+
+            <div class="row" style="display: flex; gap: 20px; align-items: flex-start;">
+                <div style="flex: 2; display: flex; flex-direction: column; gap: 20px;">
+
+                    <div class="card shadow-sm border-0">
+                        <div class="card-header bg-white py-3">
+                            <h3 class="m-0 font-weight-bold text-primary">⚙️ Dinamik Ürün Türü Yönetimi</h3>
+                        </div>
+                        <div class="p-3">
+                            <div class="input-group mb-4 shadow-sm custom-input-group"
+                                style="border-radius: 10px; overflow: hidden;">
+                                <input type="text" id="newProductType" class="form-control"
+                                    placeholder="Yeni Tür (Örn: Access Point)" autocomplete="off">
+
+                                <div class="input-group-text">
+                                    <div class="d-flex align-items-center justify-content-center">
+                                        <input class="form-check-input m-0" type="checkbox" id="isDemirbasCheck"
+                                            style="width: 18px; height: 18px;">
+                                        <label class="ms-2 mb-0 text-dark small fw-bold" for="isDemirbasCheck"
+                                            style="cursor: pointer;">
+                                            🛡️ DEMİRBAŞ
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <button onclick="addNewProductType()" class="btn btn-dark fw-bold">
+                                    EKLE
+                                </button>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle">
+                                    <thead class="bg-light">
+                                    </thead>
+                                    <tbody id="productTypeTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm border-0">
+                        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                            <h3 class="m-0 font-weight-bold text-danger">📨 Bekleyen Envanter Talepleri</h3>
+                            <span class="badge rounded-pill bg-danger shadow-sm" id="pendingRequestCount">0</span>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0 align-middle">
+                                    <thead class="bg-light">
+                                        <tr>
+                                            <th class="ps-3">Tarih</th>
+                                            <th>Personel</th>
+                                            <th>Ürün</th>
+                                            <th class="text-center">Durum</th>
+                                            <th class="text-end pe-3">İşlem</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="adminPendingRequestsBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 20px;">
+                    <div class="card shadow-sm border-0">
+                        <div class="card-header bg-white py-3">
+                            <h3 class="m-0 font-weight-bold text-secondary">🛡️ Demirbaş Çıkış Analizi</h3>
+                        </div>
+                        <div class="p-3 text-center">
+                            <canvas id="exitDemirbasChart" style="max-height: 220px;"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm border-0">
+                        <div class="card-header bg-white py-3">
+                            <h3 class="m-0 font-weight-bold text-secondary">📦 Sarf Çevre Çıkış Analizi</h3>
+                        </div>
+                        <div class="p-3 text-center">
+                            <canvas id="exitSarfChart" style="max-height: 220px;"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📦 Satın Alma Yönetimi -->
+        <div id="purchaseTab" class="admin-tab-content">
+            <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                <div>
+                    <h2 class="fw-bold mb-0">📦 Satın Alma & Servis</h2>
+                    <small class="text-muted">Operasyonel Takip Paneli</small>
+                </div>
+                <button onclick="window.openNewPurchaseModal()"
+                    class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                    <i class="fas fa-plus me-2"></i>Yeni Talep
+                </button>
+            </div>
+
+            <!-- MİNİMAL KPI BAR -->
+            <div class="kpi-container">
+                <div class="dashboard-card card-blue">
+                    <i class="fas fa-clock"></i>
+                    <div class="dashboard-info">
+                        <span class="dashboard-title">BEKLEYEN</span>
+                        <span id="totalPendingPurchase" class="dashboard-value">4</span>
+                    </div>
+                </div>
+                <div class="dashboard-card card-yellow">
+                    <i class="fas fa-tools"></i>
+                    <div class="dashboard-info">
+                        <span class="dashboard-title">SERVİSTE</span>
+                        <span id="totalInService" class="dashboard-value">0</span>
+                    </div>
+                </div>
+                <div class="dashboard-card card-green">
+                    <i class="fas fa-check-circle"></i>
+                    <div class="dashboard-info">
+                        <span class="dashboard-title">TAMAMLANAN</span>
+                        <span id="totalCompletedAction" class="dashboard-value">12</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TABLOLAR YAN YANA (Modern Yapı) -->
+            <div class="row g-4 mt-2">
+
+                <!-- SOL TABLO: TALEPLER -->
+                <div class="col-xl-8 col-lg-12">
+                    <div class="modern-card">
+                        <h6 class="modern-card-title">
+                            <i class="fas fa-list-ul me-2 text-primary"></i> Satın Alma Talepleri
+                        </h6>
+                        <div class="table-responsive" style="min-height: 350px;">
+                            <table class="modern-table" id="purchaseRequestTable">
+                                <thead>
+                                    <tr>
+                                        <!-- JS tarafından gelecek 6 adet veri hücresine (td) karşılık gelen 6 başlık -->
+                                        <th>Evrak No</th>
+                                        <th>Tarih</th>
+                                        <th>Talep Eden</th>
+                                        <th>Ürün / Birim</th>
+                                        <th>Durum</th>
+                                        <th class="text-end">İşlem</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="purchaseTableBody">
+                                    <!-- JS ile kayıtlar basılacak -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="purchasePagination" class="pagination-container mt-auto"></div>
+                    </div>
+                </div>
+
+                <!-- SAĞ TABLO: SERVİS TAKİP -->
+                <div class="col-xl-4 col-lg-12">
+                    <div class="modern-card">
+                        <h6 class="modern-card-title">
+                            <i class="fas fa-truck-fast me-2 text-warning"></i> Servis Takip
+                        </h6>
+                        <div class="table-responsive" style="min-height: 350px;">
+                            <table class="modern-table">
+                                <thead>
+                                    <tr>
+                                        <th>Cihaz</th>
+                                        <th>Durum</th>
+                                        <th class="text-end">İşlem</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="serviceTableBody">
+                                    <!-- Dinamik İçerik -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="servicePagination" class="pagination-container mt-auto"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- 📄 İş Akışı Şablonları -->
+        <div id="workflowTemplatesTab" class="admin-tab-content" style="display: none;">
+            <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                <div>
+                    <h2 class="fw-bold mb-0">📄 İş Akışı Şablonları</h2>
+                    <small class="text-muted">Hazır Onay Süreçleri Yönetimi</small>
+                </div>
+                <button onclick="window.openTemplateModal()"
+                    class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                    <i class="fas fa-plus me-2"></i>Yeni Şablon
+                </button>
+            </div>
+
+            <div class="modern-card">
+                <div class="table-responsive" style="min-height: 400px;">
+                    <table class="modern-table">
+                        <thead>
+                            <tr>
+                                <th>Şablon Adı</th>
+                                <th>Adım Sayısı</th>
+                                <th>Yetkili Kullanıcılar</th>
+                                <th class="text-end">İşlem</th>
+                            </tr>
+                        </thead>
+                        <!-- Burası renderTemplateList fonksiyonu tarafından doldurulacak -->
+                        <tbody id="templateTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⚙️ Tanımlar Sekmesi -->
+        <div id="definitionsTab" class="admin-tab-content" style="display: none;">
+
+            <!-- Sekme Navigasyonu -->
+            <div class="mb-4 d-flex gap-2 p-1"
+                style="background: var(--color-surface, #fff); border-radius: 12px; border: 1px solid var(--color-border); width: fit-content;">
+                <button class="btn def-nav-btn active" onclick="switchDefTab('mahal')"
+                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Mahaller</button>
+                <button class="btn def-nav-btn" onclick="switchDefTab('products')"
+                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Ürün
+                    Türleri</button>
+                <button class="btn def-nav-btn" onclick="switchDefTab('units')"
+                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Birimler</button>
+                <button class="btn def-nav-btn" onclick="switchDefTab('workflows')"
+                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">İş
+                    Akışları</button>
+            </div>
+
+            <!-- 1. MAHAL SEKMESİ -->
+            <div id="defTab-mahal" class="def-tab-content active">
+                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                    <div>
+                        <h2 class="fw-bold mb-0">🏢 Mahal Yönetimi</h2>
+                        <small class="text-muted">Yerleşke ve Bölüm Tanımlamaları</small>
+                    </div>
+                    <button onclick="window.openLocationModal()"
+                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                        <i class="fas fa-plus me-2"></i>Yeni Mahal Ekle
+                    </button>
+                </div>
+                <div class="modern-card">
+                    <div class="table-responsive" style="min-height: 400px;">
+                        <table class="modern-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 20%;">Mahal Kodu</th>
+                                    <th style="width: 25%;">Birim / Bölüm</th>
+                                    <th style="width: 20%;">Kampüs / Koridor</th>
+                                    <th style="width: 25%;">Tanımlı Kişiler</th>
+                                    <th style="width: 10%;" class="text-end">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="locationTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. ÜRÜN TÜRLERİ SEKMESİ -->
+            <div id="defTab-products" class="def-tab-content" style="display: none;">
+                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                    <div>
+                        <h2 class="fw-bold mb-0">📦 Ürün Türleri</h2>
+                        <small class="text-muted">Dinamik Ürün Türü ve Demirbaş Ayarları</small>
+                    </div>
+                </div>
+
+                <!-- 🚀 Yeni Şık Ekleme Alanı -->
+                <div class="modern-card p-4 mb-4"
+                    style="background: rgba(255,255,255,0.05); border: 1px dashed var(--color-border);">
+                    <div class="row align-items-center g-3">
+                        <div class="col-lg-5">
+                            <label class="small fw-bold text-muted mb-2 text-uppercase"
+                                style="letter-spacing: 1px;">Ürün Türü Adı</label>
+                            <input type="text" id="defNewProductType" class="form-control modern-input-slim"
+                                placeholder="Örn: Monitör, Yazıcı, Klavye..."
+                                style="border-radius: 12px; padding: 12px 15px;">
+                        </div>
+                        <div class="col-lg-4 d-flex align-items-center" style="padding-top: 28px;">
+                            <div class="d-flex align-items-center bg-glass p-2 px-3 rounded-pill border shadow-sm">
+                                <div class="form-check m-0 d-flex align-items-center">
+                                    <input class="form-check-input me-2" type="checkbox" id="defIsDemirbasCheck"
+                                        style="width: 18px; height: 18px; cursor: pointer;">
+                                    <label class="form-check-label fw-bold small text-dark" for="defIsDemirbasCheck"
+                                        style="cursor: pointer; user-select: none;">
+                                        🛡️ DEMİRBAŞ OLARAK TANIMLA
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-lg-3 text-end" style="padding-top: 28px;">
+                            <button onclick="window.defAddNewProductType()"
+                                class="btn btn-info text-white fw-bold rounded-pill px-5 py-2 shadow-lg w-100">
+                                <i class="fas fa-plus-circle me-2"></i> LİSTEYE EKLE
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modern-card">
+                    <div class="table-responsive" style="min-height: 300px;">
+                        <table class="modern-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 35%;">Tür Adı</th>
+                                    <th style="width: 20%;">Kategori</th>
+                                    <th style="width: 35%;">Durum</th>
+                                    <th style="width: 10%;" class="text-end">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminDefProductTypeTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. BİRİMLER SEKMESİ -->
+            <div id="defTab-units" class="def-tab-content" style="display: none;">
+                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                    <div>
+                        <h2 class="fw-bold mb-0">👥 Birim Yönetimi</h2>
+                        <small class="text-muted">Departman ve Organizasyon Yapısı</small>
+                    </div>
+                    <button onclick="window.openUnitModal()"
+                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                        <i class="fas fa-plus me-2"></i>Yeni Birim Ekle
+                    </button>
+                </div>
+                <div class="modern-card">
+                    <div class="table-responsive" style="min-height: 400px;">
+                        <table class="modern-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 30%;">Birim Adı</th>
+                                    <th style="width: 20%;">Bağlı Bölüm</th>
+                                    <th style="width: 40%;">Atanan Personeller</th>
+                                    <th style="width: 10%;" class="text-end">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminDefUnitTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. İŞ AKIŞLARI SEKMESİ -->
+            <div id="defTab-workflows" class="def-tab-content" style="display: none;">
+                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                    <div>
+                        <h2 class="fw-bold mb-0">📄 İş Akışı Şablonları</h2>
+                        <small class="text-muted">Hazır Onay Süreçleri ve Şablonlar</small>
+                    </div>
+                    <button onclick="window.openTemplateModal()"
+                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                        <i class="fas fa-plus me-2"></i>Yeni Şablon
+                    </button>
+                </div>
+                <div class="modern-card">
+                    <div class="table-responsive" style="min-height: 400px;">
+                        <table class="modern-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 30%;">Şablon Adı</th>
+                                    <th style="width: 20%;">Adım Sayısı</th>
+                                    <th style="width: 40%;">Yetkili Kullanıcılar</th>
+                                    <th style="width: 10%;" class="text-end">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminDefTemplateTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <style>
+                .def-nav-btn.active {
+                    background: var(--color-info) !important;
+                    color: white !important;
+                    box-shadow: 0 4px 10px rgba(52, 152, 219, 0.3);
+                }
+            </style>
+
+            <script>
+                function switchDefTab(tabId) {
+                    document.querySelectorAll('.def-tab-content').forEach(el => el.style.display = 'none');
+                    document.getElementById('defTab-' + tabId).style.display = 'block';
+
+                    document.querySelectorAll('.def-nav-btn').forEach(btn => btn.classList.remove('active'));
+                    event.target.classList.add('active');
+
+                    // [FIX-BUG5]: Alt sekme geçişlerinde ilgili render fonksiyonlarını tetikle
+                    if (tabId === 'workflows' && typeof window.renderTemplateList === 'function') {
+                        window.renderTemplateList();
+                    } else if (tabId === 'units' && typeof window.renderUnitManagement === 'function') {
+                        window.renderUnitManagement();
+                    } else if (tabId === 'products' && typeof window.renderProductTypesTable === 'function') {
+                        window.renderProductTypesTable();
+                    } else if (tabId === 'mahal' && typeof window.renderLocationsTable === 'function') {
+                        window.renderLocationsTable();
+                    }
+
+                    // 💡 Contextual tip for definitions sub-tabs
+                    if (typeof window.TipManager === 'object' && typeof window.TipManager.showTipForTab === 'function') {
+                        window.TipManager.showTipForTab(tabId);
+                    }
+                }
+            </script>
+        </div>
+
+        <!-- ✅ TODO PANELI SEKMESİ (Burası Ana İçerik Alanı) -->
+        <div id="todoTab" class="admin-tab-content" style="display: none;">
+            <div class="todo-container p-4">
+                <div
+                    class="todo-header bg-white shadow-sm p-3 rounded-3 mb-4 d-flex justify-content-between align-items-center">
+                    <div>
+                        <h2 class="fw-bold mb-0">📝 TODO Paneli</h2>
+                        <small class="text-muted">Görevler yükleniyor veya henüz veri girişi yapılmadı...</small>
+                    </div>
+                    <button onclick="todoModule.openNewTaskModal('admin')" class="todo-btn-premium">
+                        <i class="fas fa-plus"></i> Yeni Görev Ata
+                    </button>
+                </div>
+                <div class="task-grid text-center p-5 text-muted">
+                    <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+                    <p>Görevler listeleniyor...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📦 Envanter Yönetimi Sekmesi (inventory-management.js tarafından doldurulacak) -->
+        <div id="inventoryManagementTab" class="admin-tab-content" style="display: none;">
+            <!-- İçerik inventory-management.js tarafından dinamik olarak çizilecektir -->
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- 🌌 SİSTEM KONTROL MERKEZİ (VIP) — Premium Exclusive Tab  -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <div id="systemControlTab" class="admin-tab-content" style="display: none;">
+
+            <!-- VIP Başlık -->
+            <div class="vip-header">
+                <div>
+                    <h2><i class="fas fa-satellite-dish me-2"></i>Sistem Kontrol Merkezi</h2>
+                    <small>▸ VIP Sürükle-Bırak Yönetim Paneli — v2.0</small>
+                </div>
+                <div class="vip-header-actions">
+                    <button class="vip-btn-reset" onclick="resetVipLayout()">
+                        <i class="fas fa-sync-alt me-1"></i>Dizilimi Sıfırla
+                    </button>
+                </div>
+            </div>
+
+            <!-- VIP Widget Grid (Sürüklenebilir) -->
+            <div class="vip-grid" id="vipGrid">
+
+                <!-- ═══ WIDGET 1: Canlı Sistem Terminali ═══ -->
+                <div class="vip-card" data-id="widget-terminal">
+                    <div class="vip-card-header">
+                        <div class="header-left">
+                            <i class="fas fa-terminal" style="color: var(--vip-matrix);"></i>
+                            <span>Canlı Sistem Terminali</span>
+                        </div>
+                        <div class="header-right">
+                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                            <i class="fas fa-grip-vertical grip-icon"></i>
+                        </div>
+                    </div>
+                    <div class="vip-card-body" style="padding: 0;">
+                        <div class="vip-terminal" id="vipLogTerminal">
+                            <div class="vip-terminal-bar">
+                                <span class="vip-terminal-dot red"></span>
+                                <span class="vip-terminal-dot yellow"></span>
+                                <span class="vip-terminal-dot green"></span>
+                                <span class="vip-terminal-title">system.log — live</span>
+                                <div class="vip-terminal-filters">
+                                    <button class="vip-filter-btn active"
+                                        onclick="vipFilterLogs('all', this)">Tümü</button>
+                                    <button class="vip-filter-btn filter-info"
+                                        onclick="vipFilterLogs('info', this)">Info <span
+                                            id="vipLogCountInfo">0</span></button>
+                                    <button class="vip-filter-btn filter-warn"
+                                        onclick="vipFilterLogs('warn', this)">Warn <span
+                                            id="vipLogCountWarn">0</span></button>
+                                    <button class="vip-filter-btn filter-error"
+                                        onclick="vipFilterLogs('error', this)">Error <span
+                                            id="vipLogCountError">0</span></button>
+                                    <button class="vip-terminal-clear" onclick="vipClearTerminal()"><i
+                                            class="fas fa-broom"></i></button>
+                                </div>
+                            </div>
+                            <!-- Log girdileri JS tarafından eklenir -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ WIDGET 2: Sistem Sağlık Monitörü ═══ -->
+                <div class="vip-card" data-id="widget-health">
+                    <div class="vip-card-header">
+                        <div class="header-left">
+                            <i class="fas fa-heartbeat" style="color: var(--vip-danger);"></i>
+                            <span>Sistem Sağlık Monitörü</span>
+                        </div>
+                        <div class="header-right">
+                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                            <i class="fas fa-grip-vertical grip-icon"></i>
+                        </div>
+                    </div>
+                    <div class="vip-card-body">
+                        <div class="health-metric">
+                            <span class="health-metric-label"><i class="fas fa-clock"></i> Uptime</span>
+                            <span class="health-metric-value" id="vipUptime"
+                                style="color: var(--vip-matrix);">00:00:00</span>
+                        </div>
+                        <div class="health-metric">
+                            <span class="health-metric-label"><i class="fas fa-memory"></i> Bellek (Heap)</span>
+                            <span class="health-metric-value" id="vipMemoryText"
+                                style="color: var(--vip-neon-blue);">--</span>
+                        </div>
+                        <div class="health-bar">
+                            <div class="health-bar-fill good" id="vipMemoryBar" style="width: 0%;"></div>
+                        </div>
+                        <div class="health-metric">
+                            <span class="health-metric-label"><i class="fas fa-wifi"></i> Ağ Durumu</span>
+                            <span class="health-metric-value" id="vipNetwork"
+                                style="color: var(--vip-warning);">--</span>
+                        </div>
+                        <div class="health-metric">
+                            <span class="health-metric-label"><i class="fas fa-fire"></i> Firebase</span>
+                            <span class="health-metric-value">
+                                <span class="heartbeat-dot online" id="vipFirebaseDot"></span>
+                                <span id="vipFirebaseText"
+                                    style="margin-left: 8px; color: var(--vip-matrix);">Bağlı</span>
+                            </span>
+                        </div>
+                        <div class="health-metric">
+                            <span class="health-metric-label"><i class="fas fa-database"></i> Veri Boyutu</span>
+                            <span class="health-metric-value" id="vipDataSize"
+                                style="color: var(--vip-neon-purple);">--</span>
+                        </div>
+                        <div class="health-metric">
+                            <span class="health-metric-label"><i class="fas fa-code"></i> DOM Düğümleri</span>
+                            <span class="health-metric-value" id="vipDomNodes"
+                                style="color: var(--vip-text-muted);">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ WIDGET 3: Operasyon Raporu ═══ -->
+                <div class="vip-card" data-id="widget-ops">
+                    <div class="vip-card-header">
+                        <div class="header-left">
+                            <i class="fas fa-chart-bar" style="color: var(--vip-neon-blue);"></i>
+                            <span>Operasyon Raporu</span>
+                        </div>
+                        <div class="header-right">
+                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                            <i class="fas fa-grip-vertical grip-icon"></i>
+                        </div>
+                    </div>
+                    <div class="vip-card-body">
+                        <div class="ops-grid">
+                            <div class="ops-card blue">
+                                <div class="ops-icon">📦</div>
+                                <div class="ops-value" id="opsProducts">0</div>
+                                <div class="ops-label">Toplam Ürün</div>
+                            </div>
+                            <div class="ops-card green">
+                                <div class="ops-icon">🏗️</div>
+                                <div class="ops-value" id="opsStock">0</div>
+                                <div class="ops-label">Toplam Stok</div>
+                            </div>
+                            <div class="ops-card purple">
+                                <div class="ops-icon">📤</div>
+                                <div class="ops-value" id="opsExits">0</div>
+                                <div class="ops-label">Çıkış İşlemi</div>
+                            </div>
+                            <div class="ops-card red">
+                                <div class="ops-icon">⏳</div>
+                                <div class="ops-value" id="opsPending">0</div>
+                                <div class="ops-label">Bekleyen Talep</div>
+                            </div>
+                            <div class="ops-card red">
+                                <div class="ops-icon">🚨</div>
+                                <div class="ops-value" id="opsCritical">0</div>
+                                <div class="ops-label">Kritik Stok</div>
+                            </div>
+                            <div class="ops-card purple">
+                                <div class="ops-icon">🏷️</div>
+                                <div class="ops-value" id="opsTypes">0</div>
+                                <div class="ops-label">Ürün Türü</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ WIDGET 4: Debug & Hata Takip Paneli ═══ -->
+                <div class="vip-card" data-id="widget-debug">
+                    <div class="vip-card-header">
+                        <div class="header-left">
+                            <i class="fas fa-bug" style="color: var(--vip-warning);"></i>
+                            <span>Debug & Hata Takip</span>
+                        </div>
+                        <div class="header-right">
+                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                            <i class="fas fa-grip-vertical grip-icon"></i>
+                        </div>
+                    </div>
+                    <div class="vip-card-body">
+                        <ul class="debug-list" id="vipDebugList">
+                            <!-- JS tarafından doldurulur -->
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- ═══ WIDGET 5: Platform & Donanım Analizi ═══ -->
+                <div class="vip-card" data-id="widget-platform">
+                    <div class="vip-card-header">
+                        <div class="header-left">
+                            <i class="fas fa-microchip" style="color: var(--vip-neon-purple);"></i>
+                            <span>Platform & Donanım</span>
+                        </div>
+                        <div class="header-right">
+                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                            <i class="fas fa-grip-vertical grip-icon"></i>
+                        </div>
+                    </div>
+                    <div class="vip-card-body">
+                        <div class="platform-info-grid">
+                            <div class="platform-chip">
+                                <div class="platform-chip-label">Tarayıcı Motor</div>
+                                <div class="platform-chip-value" id="vipBrowserEngine">--</div>
+                            </div>
+                            <div class="platform-chip">
+                                <div class="platform-chip-label">İşletim Sistemi</div>
+                                <div class="platform-chip-value" id="vipOS">--</div>
+                            </div>
+                            <div class="platform-chip">
+                                <div class="platform-chip-label">Ekran Çözünürlüğü</div>
+                                <div class="platform-chip-value" id="vipScreenRes">--</div>
+                            </div>
+                            <div class="platform-chip">
+                                <div class="platform-chip-label">Viewport</div>
+                                <div class="platform-chip-value" id="vipViewport">--</div>
+                            </div>
+                            <div class="platform-chip">
+                                <div class="platform-chip-label">Dil</div>
+                                <div class="platform-chip-value" id="vipLanguage">--</div>
+                            </div>
+                            <div class="platform-chip">
+                                <div class="platform-chip-label">CPU Çekirdek</div>
+                                <div class="platform-chip-value" id="vipCores">--</div>
+                            </div>
+                            <div class="platform-chip">
+                                <div class="platform-chip-label">LocalStorage</div>
+                                <div class="platform-chip-value" id="vipLocalStorage">--</div>
+                            </div>
+                            <div class="platform-chip">
+                                <div class="platform-chip-label">Çerezler</div>
+                                <div class="platform-chip-value" id="vipCookies">--</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ WIDGET 6: Oturum & Güvenlik ═══ -->
+                <div class="vip-card" data-id="widget-session">
+                    <div class="vip-card-header">
+                        <div class="header-left">
+                            <i class="fas fa-shield-halved" style="color: var(--vip-matrix);"></i>
+                            <span>Oturum & Güvenlik</span>
+                        </div>
+                        <div class="header-right">
+                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                            <i class="fas fa-grip-vertical grip-icon"></i>
+                        </div>
+                    </div>
+                    <div class="vip-card-body">
+                        <div class="session-countdown">
+                            <div class="session-time" id="vipSessionTime">--:--</div>
+                            <div class="session-label">Kalan Oturum Süresi</div>
+                        </div>
+                        <div class="session-detail">
+                            <span class="session-detail-label">Aktif Kullanıcı</span>
+                            <span class="session-detail-value" id="vipActiveUser">Admin</span>
+                        </div>
+                        <div class="session-detail">
+                            <span class="session-detail-label">Son Giriş</span>
+                            <span class="session-detail-value" id="vipLastLogin">--</span>
+                        </div>
+                        <div class="session-detail">
+                            <span class="session-detail-label">Güvenlik Seviyesi</span>
+                            <div class="security-level" id="vipSecurityLevel">
+                                <div class="security-bar"></div>
+                                <div class="security-bar"></div>
+                                <div class="security-bar"></div>
+                                <div class="security-bar"></div>
+                                <div class="security-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ WIDGET 7: Sistem Aksiyonları (Acil Durum) ═══ -->
+                <div class="vip-card" data-id="widget-actions">
+                    <div class="vip-card-header">
+                        <div class="header-left">
+                            <i class="fas fa-bolt" style="color: var(--vip-warning);"></i>
+                            <span>Sistem Aksiyonları</span>
+                        </div>
+                        <div class="header-right">
+                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                            <i class="fas fa-grip-vertical grip-icon"></i>
+                        </div>
+                    </div>
+                    <div class="vip-card-body" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
+                        <button class="btn w-100 fw-bold" onclick="window.vipBackupDatabase()"
+                            style="background: rgba(0,255,136,0.1); color: var(--vip-matrix); border: 1px solid var(--vip-matrix); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-database me-2"></i>1-Tık DB Snapshot
+                        </button>
+                        <button class="btn w-100 fw-bold" disabled
+                            id="vipToggleLaunchpadBtn"
+                            style="background: rgba(128,128,128,0.05); color: #64748b; border: 1px solid #475569; padding: 12px; border-radius: 8px; cursor: not-allowed; display: flex; align-items: center; justify-content: center;"
+                            title="Launchpad modülü devre dışı bırakıldı.">
+                            <i class="fas fa-rocket me-2"></i>Launchpad: Askıda
+                        </button>
+                        <button class="btn w-100 fw-bold" onclick="window.toggleSystemTips()"
+                            id="vipToggleTipsBtn"
+                            style="background: rgba(14,165,233,0.1); color: var(--color-info); border: 1px solid var(--color-info); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-comment-dots me-2"></i>İpuçları: Açık
+                        </button>
+                        <button class="btn w-100 fw-bold" onclick="window.vipToggleKillSwitch()"
+                            id="vipKillSwitchBtn"
+                            style="background: rgba(255,45,85,0.1); color: var(--vip-danger); border: 1px solid var(--vip-danger); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-power-off me-2"></i>GLOBAL KILL SWITCH
+                        </button>
+                        <button class="btn w-100 fw-bold" onclick="window.vipCleanDuplicates()"
+                            style="background: rgba(168,85,247,0.1); color: #c084fc; border: 1px solid #c084fc; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-magic me-2"></i>Tekerrürleri Temizle
+                        </button>
+                    </div>
+                </div>
+
+                <!-- * WIDGET 8: God-Eye Radari v2 * -->
+                <div class="vip-card" data-id="widget-godeye">
+                    <div class="vip-card-header">
+                        <div class="header-left">
+                            <i class="fas fa-eye" style="color: var(--vip-neon-blue);"></i>
+                            <span>God-Eye (Canli Radar)</span>
+                        </div>
+                        <div class="header-right">
+                            <button id="godEyeHeatmapToggle" onclick="window.vipToggleHeatmap(this)" title="Heatmap Moduna Gec">
+                                <i class="fas fa-fire-flame-curved"></i> HEATMAP
+                            </button>
+                            <button class="vip-collapse-btn" title="Kucult"><i class="fas fa-chevron-up"></i></button>
+                            <i class="fas fa-grip-vertical grip-icon"></i>
+                        </div>
+                    </div>
+                    <div class="vip-card-body" style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding-bottom: 16px;">
+                        <!-- Radar Gorunumu -->
+                        <div id="godEyeRadarContainer">
+                            <div class="god-eye-radar" id="godEyeRadarInner">
+                                <div class="radar-scanner"></div>
+                                <div class="radar-dot" data-user-id="user-1" data-user-name="Ahmet Yilmaz" data-user-module="B1 Depo" style="top: 30%; left: 40%;"></div>
+                                <div class="radar-dot" data-user-id="user-2" data-user-name="Ayse Kaya" data-user-module="Satin Alma" style="top: 70%; left: 60%; animation-delay: 1s;"></div>
+                                <div class="radar-dot" data-user-id="user-3" data-user-name="Mehmet Demir" data-user-module="Personel" style="top: 50%; left: 20%; animation-delay: 2.5s;"></div>
+                            </div>
+                            <!-- Heatmap SVG (baslangicta gizli, JS ile doldurulur) -->
+                            <svg id="godEyeHeatmapSVG" viewBox="-110 -110 220 220" xmlns="http://www.w3.org/2000/svg">
+                            </svg>
+                        </div>
+                        <!-- Durum Bilgisi -->
+                        <div style="font-size: 0.7rem; color: var(--vip-text-muted); text-align: center; letter-spacing: 0.5px;">
+                            <span id="godEyeStatusText"><i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>3 aktif oturum izleniyor</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Kullanici Aktivite Paneli Overlay -->
+                <div id="userActivityOverlay" onclick="window.vipCloseUserPanel()"></div>
+
+            </div><!-- /vipGrid -->
+        </div><!-- /systemControlTab -->
+    </div>
+
+    <!-- Mahal Ekle/Düzenle Modal -->
+    <!-- Mahal Ekle/Düzenle Modal -->
+    <div id="locationModal" class="modern-modal"
+        style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100%; height:100%; background:rgba(15, 23, 42, 0.6); backdrop-filter: blur(8px); align-items:center; justify-content:center;">
+        <div class="modern-modal-content shadow-2xl"
+            style="max-width: 550px; width:95%; border-radius: 24px; overflow:hidden; border: 1px solid rgba(255,255,255,0.1);">
+            <div class="p-4 d-flex justify-content-between align-items-center border-bottom bg-glass"
+                style="background: rgba(255,255,255,0.05);">
+                <h5 id="locationModalTitle" class="fw-bold mb-0"
+                    style="color: var(--color-text, #1e293b); font-size: 1.25rem;">
+                    <i class="fas fa-map-marker-alt text-info me-2"></i> Yeni Mahal Tanımla
+                </h5>
+                <button type="button" onclick="closeLocationModal()" class="btn-close"
+                    style="filter: var(--invert-icon, none); border:none; background:none; font-size: 1.2rem; cursor:pointer; color: var(--color-text);">&times;</button>
+            </div>
+
+            <form id="locationForm" onsubmit="window.saveLocation(event)" class="p-4">
+                <input type="hidden" id="loc_id">
+
+                <div class="mb-4">
+                    <label class="modern-label-slim"
+                        style="font-size: 12px; letter-spacing: 1px; color: var(--color-text-muted, #64748b); font-weight: 700; text-transform: uppercase; margin-bottom: 8px; display: block;">MAHAL
+                        KODU</label>
+                    <input type="text" id="loc_code" class="form-control modern-input-slim" placeholder="Örn: M-101"
+                        required
+                        style="border-radius: 12px; padding: 12px 15px; background: var(--color-bg-input, #fff); color: var(--color-text); border: 1px solid var(--color-border);">
+                </div>
+
+                <div class="mb-4">
+                    <label class="modern-label-slim"
+                        style="font-size: 12px; letter-spacing: 1px; color: var(--color-text-muted, #64748b); font-weight: 700; text-transform: uppercase; margin-bottom: 8px; display: block;">AİT
+                        OLDUĞU BİRİM</label>
+                    <select id="loc_unit" class="form-select modern-input-slim" required
+                        style="border-radius: 12px; padding: 12px 15px; background: var(--color-bg-input, #fff); color: var(--color-text); border: 1px solid var(--color-border);"></select>
+                </div>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <label class="modern-label-slim"
+                            style="font-size: 12px; letter-spacing: 1px; color: var(--color-text-muted, #64748b); font-weight: 700; text-transform: uppercase; margin-bottom: 8px; display: block;">KAMPÜS</label>
+                        <select id="loc_campus" class="form-select modern-input-slim" required
+                            style="border-radius: 12px; padding: 12px 15px; background: var(--color-bg-input, #fff); color: var(--color-text); border: 1px solid var(--color-border);">
+                            <option value="GÜNEY KAMPÜS">GÜNEY KAMPÜS</option>
+                            <option value="KUZEY KAMPÜS">KUZEY KAMPÜS</option>
+                            <option value="UNKAPANI">UNKAPANI</option>
+                            <option value="MEGA">MEGA</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="modern-label-slim"
+                            style="font-size: 12px; letter-spacing: 1px; color: var(--color-text-muted, #64748b); font-weight: 700; text-transform: uppercase; margin-bottom: 8px; display: block;">KORİDOR</label>
+                        <select id="loc_corridor" class="form-select modern-input-slim" required
+                            style="border-radius: 12px; padding: 12px 15px; background: var(--color-bg-input, #fff); color: var(--color-text); border: 1px solid var(--color-border);">
+                            <option value="A">A KORİDORU</option>
+                            <option value="B">B KORİDORU</option>
+                            <option value="C">C KORİDORU</option>
+                            <option value="D">D KORİDORU</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="modern-label-slim"
+                        style="font-size: 12px; letter-spacing: 1px; color: var(--color-text-muted, #64748b); font-weight: 700; text-transform: uppercase; margin-bottom: 8px; display: block;">TANIMLI
+                        KİŞİLER (OPSİYONEL)</label>
+                    <div class="position-relative">
+                        <input type="text" id="loc_personSearch" class="form-control modern-input-slim"
+                            placeholder="Personel ara..." onkeyup="window.searchPersonnelForLocation(this.value)"
+                            style="border-radius: 12px; padding: 12px 15px; background: var(--color-bg-input, #fff); color: var(--color-text); border: 1px solid var(--color-border);">
+                        <div id="loc_personResults" class="search-results-popover shadow-lg border-0 mt-1"
+                            style="z-index: 1050; border-radius: 12px;"></div>
+                    </div>
+                    <div id="loc_selectedPersons" class="d-flex flex-wrap gap-2 mt-3"
+                        style="max-height: 100px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="d-flex justify-content-end gap-3 mt-2 pt-4 border-top">
+                    <button type="button" onclick="closeLocationModal()" class="btn btn-light px-4 py-2"
+                        style="border-radius: 12px; font-weight: 600;">Vazgeç</button>
+                    <button type="submit" class="btn btn-info px-5 py-2 text-white shadow-lg"
+                        style="border-radius: 12px; background: #0ea5e9; font-weight: 600;">Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Talep Düzenleme Modalı -->
+    <div id="editRequestModal" class="modern-modal"
+        style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6);">
+        <div class="modern-modal-content"
+            style="background:#fff; margin:5% auto; padding:25px; width:500px; border-radius:15px;">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">📝 Talebi Düzenle</h5>
+                <button onclick="closeEditModal()" class="btn-close"
+                    style="border:none; background:none; font-size:24px; cursor:pointer;">&times;</button>
+            </div>
+            <hr>
+            <form id="editRequestForm" autocomplete="off">
+                <input type="hidden" id="edit_id">
+                <div class="mb-3">
+                    <label class="form-label">Ürün / Kategori</label>
+                    <input type="text" id="edit_urun" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Birim</label>
+                    <input type="text" id="edit_birim" class="form-control" readonly style="background:#f8fafc;">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Evrak No</label>
+                    <input type="text" id="edit_evrakNo" class="form-control" readonly style="background:#f8fafc;">
+                </div>
+                <div class="d-grid gap-2 mt-4">
+                    <button type="submit" class="btn btn-primary">Değişiklikleri Kaydet</button>
+                    <button type="button" onclick="closeEditModal()" class="btn btn-light">İptal</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- purchaseModal -->
+    <div id="purchaseModal" class="modal" style="display:none; background: rgba(0,0,0,0.4);">
+        <div class="modal-content modern-modal-content" style="max-width: 650px; margin: 50px auto;">
+
+            <div class="modern-modal-header">
+                <h3 id="purModalTitle"><i class="fas fa-file-invoice me-2"></i> Satın Alma Talebi</h3>
+                <span class="close" onclick="closePurchaseModal()"
+                    style="cursor:pointer; font-size: 24px;">&times;</span>
+            </div>
+
+            <form id="purchaseForm" onsubmit="window.savePurchaseRequest(event)" autocomplete="off">
+                <div class="modal-body p-4">
+
+                    <!-- Otomatik Bilgiler Satırı -->
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label class="modern-label">EVRAK ADI</label>
+                            <input type="text" id="purDocName" class="form-control modern-input" readonly>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="modern-label">TARİH</label>
+                            <input type="text" id="purDate" class="form-control modern-input" readonly>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="modern-label">TALEP EDEN</label>
+                            <input type="text" id="purUser" class="form-control modern-input" readonly>
+                        </div>
+                    </div>
+
+                    <!-- Ana Alanlar -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-9">
+                            <label class="modern-label">ÜRÜN ADI / MODEL (KONU)</label>
+                            <input type="text" id="purName" class="form-control modern-input"
+                                placeholder="Örn: Dell XPS 15 Laptop" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="modern-label">ADET / MİKTAR</label>
+                            <input type="number" id="purQty" class="form-control modern-input" value="1" min="1"
+                                required>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="modern-label">İLGİLİ BİRİM</label>
+                            <select id="purUnit" class="form-select modern-input" required></select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="modern-label">BELGE / ÜRÜN TÜRÜ</label>
+                            <select id="purType" class="form-select modern-input" required></select>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="modern-label text-primary">ÖDENEK TUTARI (₺)</label>
+                            <input type="number" id="purBudget" class="form-control modern-input border-primary-subtle"
+                                placeholder="0.00" step="0.01">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="modern-label">ÖNCELİK DERECESİ</label>
+                            <select id="purPriority" class="form-select modern-input">
+                                <option value="Normal">Tasniş Dışı (Normal)</option>
+                                <option value="Hızlı">Hızlı</option>
+                                <option value="Acil">Acil 🔥</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="modern-label">AÇIKLAMA / GEREKÇE</label>
+                        <textarea id="purDesc" class="form-control modern-input" rows="3"
+                            placeholder="Talebin detaylarını belirtiniz..."></textarea>
+                    </div>
+
+                    <div class="mb-2" id="purFileInputArea">
+                        <label class="modern-label">İÇERİK / DOSYA EKLE</label>
+                        <input type="file" id="purchaseFile" class="form-control modern-input" multiple
+                            accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.png">
+                        <p style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Teknik şartname, proforma fatura
+                            ekleyebilirsiniz (çoklu seçim).</p>
+                    </div>
+                    <!-- Mevcut dosyalar (görüntüleme/düzenleme modunda gösterilir) -->
+                    <div id="purUploadedFilesList" style="display:none; margin-top:10px;"></div>
+                    <!-- Akış + Süreç Geçmişi (görüntüleme modunda gösterilir) -->
+                    <div id="purWorkflowSection" style="display:none; margin-top:10px;"></div>
+                </div>
+
+                <div class="modern-modal-footer">
+                    <button type="submit" id="purSaveBtn" class="btn-modern-save shadow-sm">
+                        <i class="fas fa-paper-plane me-2"></i> Talebi Kaydet
+                    </button>
+                    <div class="text-center mt-3">
+                        <span class="text-muted small" style="cursor:pointer;" onclick="closePurchaseModal()">İptal
+                            Et</span>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Akış Başlatma Seçenekleri Modalı -->
+    <div id="startWorkflowModal" class="modern-modal"
+        style="display:none; position:fixed; z-index:10001; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6);">
+        <div class="modern-modal-content modal-modern-teal"
+            style="background:#f8f9fa; margin:5% auto; padding:0; width:800px; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <div class="p-4 bg-gradient-primary border-bottom d-flex justify-content-between align-items-center"
+                style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                <h3 class="mb-0 fw-bold text-white">🚀 İş Akışını Başlat</h3>
+                <button type="button" onclick="closeStartWorkflowModal()" class="btn-close btn-close-white"
+                    style="border:none; background:none; font-size:28px; cursor:pointer; opacity:0.8;">&times;</button>
+            </div>
+            <div class="modal-body-teal p-4" style="background:#f8f9fa;">
+                <input type="hidden" id="startWorkflowReqId">
+
+                <div class="mb-4">
+                    <label class="form-label fw-bold text-primary mb-3" style="font-size:16px;">📋 İş Akışı
+                        Seçimi</label>
+                    <div class="d-flex gap-3 align-items-center">
+                        <div class="flex-grow-1">
+                            <select id="tplSelectDropdown" class="form-select form-select-lg w-100"
+                                onchange="window.toggleWorkflowMethod(this.value)"
+                                style="border-radius:8px; border:2px solid #e2e8f0; padding:12px;">
+                                <option value="manual">-- Yeni Özel İş Akışı (Manuel) --</option>
+                                <option value="tpl_1">Satın Alma Standart</option>
+                                <option value="tpl_2">Üst Yönetim Onayı</option>
+                                <!-- JS ile şablonlar eklenecek -->
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-primary btn-lg rounded-circle"
+                            onclick="window.addManualStep()" title="Adım Ekle"
+                            style="width:50px; height:50px; display:flex; align-items:center; justify-content:center;">
+                            <i class="fas fa-user-plus"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-3 shadow-sm border border-light p-3">
+                    <div class="mb-3">
+                        <h5 class="fw-bold text-primary mb-3">👥 Onay Akışı Adımları</h5>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 5%;">#</th>
+                                    <th style="width: 45%;">👤 Personel</th>
+                                    <th style="width: 35%;">✍️ İmza Türü</th>
+                                    <th style="width: 15%;" class="text-center">⚙️ İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="manualStepsContainer">
+                                <!-- JS ile dolacak -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="workflowPreview" class="mt-3 p-3 rounded bg-light"
+                        style="font-size:13px; border-left:4px solid #667eea;">
+                    </div>
+                </div>
+
+                <!-- Seçilmeyen/Eski Yapıya Uyumluluk için Gizli input -->
+                <input type="hidden" id="workflowMethodSelect" value="manual">
+            </div>
+
+            <div class="p-4 bg-white border-top d-flex justify-content-start gap-3">
+                <button type="button" onclick="closeStartWorkflowModal()" class="btn btn-secondary btn-lg px-4">
+                    <i class="fas fa-times me-2"></i>Kapat
+                </button>
+                <button type="button" onclick="window.confirmStartWorkflow()" class="btn btn-primary btn-lg px-4">
+                    <i class="fas fa-save me-2"></i>Kaydet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- [BUGFIX] Bug 5: workflowModal Dark Mode compatibility in admin.html -->
+    <!-- workflowModal -->
+    <div id="workflowModal" class="modern-modal"
+        style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
+        <div class="modern-modal-content"
+            style="background:var(--color-surface); color:var(--color-text); margin:40px auto; padding:40px; width:50%; max-width:95vw; border-radius:14px; overflow:hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.25);">
+            <div class="d-flex justify-content-between align-items-center p-3 border-bottom" style="background:var(--color-surface-alt); border-bottom-color:var(--color-border-light) !important;">
+                <h4 class="mb-0 fw-bold" style="color: var(--color-text);"><i class="fas fa-stream me-2"></i>İş Akışı Takibi</h4>
+                <span onclick="closeWorkflowModal()"
+                    style="cursor:pointer; font-size: 22px; line-height: 1; color: var(--color-text-muted);">&times;</span>
+            </div>
+            <div id="workflowBody" class="p-4" style="max-height: 75vh; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <!-- Ürün Türü Ekle / Düzenle Modal -->
+    <div id="editProductTypeModal" class="app-modal">
+        <div class="app-modal-card">
+            <div class="app-modal-header">
+                <div class="app-modal-title"><i class="fas fa-edit"></i> Tür Düzenle</div>
+                <button class="app-modal-close" onclick="closeEditModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="app-modal-body">
+                <input type="hidden" id="editTypeId">
+                <input type="hidden" id="editTypeIndex">
+                <label class="app-label">Ürün Türü Adı</label>
+                <div class="app-input">
+                    <i class="fas fa-tag"></i>
+                    <input type="text" id="editTypeName" placeholder="Örn: Notebook" autocomplete="off">
+                </div>
+                <div class="app-switch">
+                    <div>
+                        <div class="app-switch-title"><i class="fas fa-shield-alt"></i> Demirbaş Statüsü</div>
+                        <div class="app-switch-desc">İşaretlenirse zimmet listesinde görünür</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="editIsDemirbas">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="app-modal-footer">
+                    <button class="btn-save" onclick="saveProductTypeUpdate()"><i class="fas fa-save"></i>
+                        Kaydet</button>
+                    <button class="btn-cancel" onclick="closeEditModal()">İptal</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Şablon Ekle/Düzenle Modal -->
+    <div id="templateModal" class="modern-modal"
+        style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100%; height:100%; background:rgba(15, 23, 42, 0.6); backdrop-filter: blur(8px);">
+        <div class="modern-modal-content shadow-2xl">
+
+            <!-- Başlık Alanı -->
+            <div class="p-4 d-flex justify-content-between align-items-center">
+                <div class="header-icon-mini shadow-sm">
+                    <i class="fas fa-sitemap"></i>
+                </div>
+                <button type="button" onclick="closeTemplateModal()" class="close-btn-circle shadow-sm">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="px-4 pb-2">
+                <h5 id="templateModalTitle" class="modal-main-title">
+                    <i class="far fa-file-alt text-muted"></i> Yeni Şablon Oluştur
+                </h5>
+            </div>
+
+            <div class="modal-body p-4 pt-3">
+
+                <!-- Şablon Adı Satırı (Yan Yana) -->
+                <div class="d-flex align-items-center gap-3 mb-4">
+                    <label class="modern-label-slim mb-0"
+                        style="font-size: 0.75rem; letter-spacing: 0.5px; color: #475569; font-weight: 700; min-width: 200px;">ŞABLON
+                        ADI</label>
+                    <input type="text" id="tplName" class="form-control"
+                        style="padding: 6px 12px; font-size: 0.9rem; border: 1px solid #cbd5e1; border-radius: 6px; flex: 1; max-width:350px;"
+                        placeholder="Örn: Standart Onay" autocomplete="off">
+                </div>
+
+                <!-- Yetki Satırı (Yan Yana) -->
+                <div class="mb-4">
+                    <div class="d-flex align-items-center gap-3">
+                        <label class="modern-label-slim mb-0"
+                            style="font-size: 0.75rem; letter-spacing: 0.5px; color: #475569; font-weight: 700; min-width: 200px;">BU
+                            ŞABLONU KİMLER KULLANABİLİR?</label>
+                        <div class="position-relative flex-1">
+                            <div class="input-group"
+                                style="border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; background: #fff; max-width: 380px;">
+                                <span class="input-group-text bg-white border-0 pe-2 text-muted"
+                                    style="padding-left: 12px;">
+                                    <i class="fas fa-search"></i>
+                                </span>
+                                <input type="text" id="tplAuthSearch" class="form-control border-0 bg-white"
+                                    style="font-size: 0.9rem; padding: 8px 10px 8px 0; box-shadow: none;"
+                                    placeholder="Personel ara ve ekle..."
+                                    onkeyup="window.searchPersonnelForTemplate(this.value, 'auth')" autocomplete="off">
+                            </div>
+                            <div id="tplAuthResults" class="search-results-popover shadow-lg border-0 mt-1"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Seçili Kişiler Listesi -->
+                <div class="mb-4">
+                    <div id="tplAuthList" class="d-flex flex-wrap gap-2"></div>
+                </div>
+
+                <hr style="border: 0; height: 1px; background: #e2e8f0; margin: 1.5rem 0;">
+
+                <!-- Onay Adımları Bölümü -->
+                <div class="mb-3">
+                    <label class="modern-label-slim mb-1 d-block justify-content-end"
+                        style="font-size: 0.75rem; letter-spacing: 0.5px; color: #475569; font-weight: 700;">ONAY
+                        ADIMLARI (AKIŞ SIRASI)</label>
+
+                    <button type="button" onclick="window.addStepToTemplate()" class="btn btn-sm"
+                        style="background: #f1f5f9; color: #1e293b; font-weight: 600; border-radius: 8px; padding: 6px 14px; font-size: 0.8rem; border: none;">
+                        <i class="fas fa-plus-circle" style="color: #334155;"></i> ADIM EKLE
+                    </button>
+                    <p class="text-muted mb-3" style="font-size: 0.6rem;">Sürükle-bırak ile sıralama yakında
+                        eklenecektir.</p>
+                </div>
+
+                <!-- Tablo -->
+                <div class="workflow-table-container">
+                    <table class="workflow-table mb-0 w-100"
+                        style="border-top: 1px solid #e2e8f0; border-left: none; border-right: none;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid #e2e8f0;">
+                                <th style="width: 5%; font-size: 0.7rem; letter-spacing: 0.5px; color: #64748b;"
+                                    class="text-center">#</th>
+                                <th
+                                    style="width: 55%; font-size: 0.7rem; letter-spacing: 0.5px; color: #64748b; border-left: 1px solid #e2e8f0;">
+                                    SORUMLU PERSONEL</th>
+                                <th
+                                    style="width: 30%; font-size: 0.7rem; letter-spacing: 0.5px; color: #64748b; border-left: 1px solid #e2e8f0;">
+                                    İŞLEM TÜRÜ</th>
+                                <th style="width: 10%; border-left: 1px solid #e2e8f0;" class="text-center"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="templateStepsArea">
+                            <!-- JS ile dolacak -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="selectedTemplateName" class="mt-3 small text-muted text-end fw-medium"></div>
+            </div>
+
+            <!-- Alt Butonlar -->
+            <div class="p-3 bg-white d-flex justify-content-end gap-2 align-items-center"
+                style="border-radius: 0 0 16px 16px;">
+                <button type="button" onclick="closeTemplateModal()" class="btn"
+                    style="background: #f1f5f9; color: #475569; font-weight: 600; font-size: 0.85rem; padding: 8px 16px; border-radius: 6px;">Vazgeç</button>
+                <button type="button" onclick="window.saveTemplateData()" class="btn btn-primary"
+                    style="background: var(--color-info); border: none; font-weight: 600; font-size: 0.85rem; padding: 8px 16px; border-radius: 6px; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);">
+                    <i class="fas fa-save me-1"></i> Şablonu Kaydet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .search-results-popover {
+            max-height: 200px;
+            overflow-y: auto;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .tpl-step-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 15px;
+            position: relative;
+        }
+
+        .tpl-step-remove {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: #ef4444;
+            cursor: pointer;
+        }
+    </style>
+
+    <!-- 🌌 Eski VIP sekmesi kaldırıldı — yeni sürüm main-content içinde -->
+    <!-- 🗺️ FULL WIDTH FOOTER kaldırıldı (İçeriği sidebar en altına taşındı) -->
+
+    <!-- SITEMAP MODAL -->
+    <div id="sitemapModal"
+        style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 10000; align-items: center; justify-content: center; backdrop-filter: blur(10px);">
+        <div
+            style="background: #0f172a; width: 80%; max-width: 900px; height: 80vh; border-radius: 16px; border: 1px solid #3b82f6; box-shadow: 0 0 40px rgba(59, 130, 246, 0.3); display: flex; flex-direction: column; overflow: hidden;">
+            <div
+                style="padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: rgba(59, 130, 246, 0.1);">
+                <h3 style="margin: 0; color: #60a5fa;"><i class="fas fa-code-branch me-2"></i>Etkileşimli Geliştirici
+                    Haritası</h3>
+                <button onclick="document.getElementById('sitemapModal').style.display='none'"
+                    style="background: none; border: none; color: white; font-size: 24px; cursor: pointer; transition: color 0.3s;"
+                    onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='white'"><i
+                        class="fas fa-times"></i></button>
+            </div>
+            <div style="flex: 1; overflow-y: auto; padding: 20px;" id="sitemapContainer" class="hide-scrollbar">
+                <!-- Sitemap ağacı buraya JS ile basılacak -->
+            </div>
+        </div>
+    </div>
+
+    <div id="customAlertOverlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
+        <div
+            style="background: white; padding: 25px; border-radius: 15px; width: 350px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+            <h4 id="alertTitle" class="text-primary mb-3" style="font-weight: 700;"></h4>
+            <p id="alertMessage" class="text-muted mb-4"></p>
+            <div class="d-flex gap-2 justify-content-center">
+                <button id="alertCancelBtn" class="btn btn-light px-4" style="border-radius: 8px;">Vazgeç</button>
+                <button id="alertConfirmBtn" class="btn btn-primary px-4" style="border-radius: 8px;">Onayla</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="src/utils/alert.js"></script>
+    <script src="src/modules/admin/system-tips.js?v=1.0.0"></script>
+    <script src="src/utils/timer.js"></script>
+    <script src="security.js"></script>
+    <script type="module" src="src/modules/admin/admin-dashboard.js?v=1.0.5"></script>
+    <script type="module" src="src/services/purchase-servises.js?v=1.0.4"></script>
+    <script type="module" src="src/modules/edm-workflow.js?v=1.0.4"></script>
+    <script src="script.js"></script>
+    <script type="module" src="src/modules/admin/admin-purchase-render.js?v=1.0.4"></script>
+    <script type="module" src="src/modules/admin/inventory-management.js?v=1.0.0"></script>
+    <script src="src/modules/admin/admin-system-control.js?v=1782473897707"></script>
+    <script src="src/modules/admin/admin-sitemap.js"></script>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- KULLANICI AKTİVİTE PANELİ (God-Eye v2 Slide-in Panel)      -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div id="userActivityPanel">
+        <!-- Panel Header -->
+        <div class="uap-header">
+            <div class="uap-header-info">
+                <div class="uap-avatar" id="uapAvatar">?</div>
+                <div>
+                    <div class="uap-user-name" id="uapUserName">Kullanici Adi</div>
+                    <div class="uap-user-meta">
+                        <span id="uapUserModule"><i class="fas fa-cube me-1"></i>Modul</span>
+                        <span class="uap-live-badge">
+                            <span class="uap-live-dot"></span>
+                            CANLI
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <button class="uap-close-btn" onclick="window.vipCloseUserPanel()" title="Kapat">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <!-- Panel Body -->
+        <div class="uap-body">
+
+            <!-- Istatistikler -->
+            <div>
+                <div class="uap-section-label"><i class="fas fa-chart-bar me-1"></i>Oturum Istatistikleri</div>
+                <div class="uap-stats-grid">
+                    <div class="uap-stat-card">
+                        <div class="uap-stat-value" id="uapStatActions">--</div>
+                        <div class="uap-stat-label">Islem Sayisi</div>
+                    </div>
+                    <div class="uap-stat-card">
+                        <div class="uap-stat-value" id="uapStatSession">--</div>
+                        <div class="uap-stat-label">Oturum Suresi</div>
+                    </div>
+                    <div class="uap-stat-card">
+                        <div class="uap-stat-value" id="uapStatModule" style="font-size:0.9rem;">--</div>
+                        <div class="uap-stat-label">Aktif Modul</div>
+                    </div>
+                    <div class="uap-stat-card">
+                        <div class="uap-stat-value" id="uapStatRisk" style="color: var(--vip-matrix);">LOW</div>
+                        <div class="uap-stat-label">Risk Skoru</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Son Aktiviteler -->
+            <div>
+                <div class="uap-section-label"><i class="fas fa-history me-1"></i>Son Aktiviteler</div>
+                <ul class="uap-activity-list" id="uapActivityList">
+                    <li class="uap-activity-item">
+                        <i class="fas fa-spinner fa-spin uap-activity-icon"></i>
+                        <div>
+                            <div>Veriler yukleniyor...</div>
+                            <div class="uap-activity-time">--:--</div>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Sistem Mesaji Gonder -->
+            <div>
+                <div class="uap-section-label"><i class="fas fa-paper-plane me-1"></i>Sistem Mesaji Gonder</div>
+                <div class="uap-msg-form">
+                    <textarea class="uap-msg-textarea" id="uapSystemMessage" placeholder="Kullaniciya gonderilecek sistem mesajini yazin..."></textarea>
+                    <button class="uap-action-btn uap-btn-msg" id="uapSendMsgBtn" onclick="window.vipSendSystemMessage()">
+                        <i class="fas fa-paper-plane"></i>
+                        Sistem Mesaji Gonder
+                    </button>
+                </div>
+            </div>
+
+            <!-- Zorla Oturumu Kapat -->
+            <div>
+                <div class="uap-section-label"><i class="fas fa-shield-exclamation me-1"></i>Guvenlik Aksiyonu</div>
+                <button class="uap-action-btn uap-btn-logout" id="uapForceLogoutBtn" onclick="window.vipForceLogoutConfirm()">
+                    <i class="fas fa-right-from-bracket"></i>
+                    Force Logout Uygula
+                </button>
+            </div>
+
+        </div>
+
+        <!-- Panel Footer -->
+        <div class="uap-footer">
+            <i class="fas fa-lock me-1"></i>
+            Bu aksiyon Firestore uzerinden kayit altina alinir.
+        </div>
+    </div>
+</body>
+
+</html>

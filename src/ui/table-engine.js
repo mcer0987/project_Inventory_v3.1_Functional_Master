@@ -1,0 +1,669 @@
+/**
+ * table-engine.js — Medipol Envanter Takip Sistemi
+ * ==================================================
+ * v3.1 ESM Modüler Mimari — Phase 3: Tablo ve Kart Görünüm Motoru
+ *
+ * [WHY]: script.js monolith'indeki tüm rendering (görselleştirme) ve DOM güncelleme
+ *        fonksiyonları TableEngine çatısı altında toplanarak, global namespace kirliliği önlenir.
+ * [HOW]: Tüm fonksiyonlar TableEngine nesnesinde toplanır, window.AppModules.Table'a
+ *        bağlanır ve legacy HTML onclick vb. çağrılar için bridge'ler kurulur.
+ *
+ * // [STATUS]: TableEngine Namespace'i window.AppModules.Table'a bağlandı. Legacy köprüleri (bridge) kuruldu.
+ */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODÜL KAPSAMLI STATE (sort ve sayfalama)
+// ─────────────────────────────────────────────────────────────────────────────
+let _sortColumn = 'lastUpdate';
+let _isAscending = false;
+let _currentPage = 1;
+const PAGE_SIZE = 25;
+
+// Mirror to window for legacy sync script.js compatibility
+Object.defineProperty(window, 'currentSortColumn', {
+    get() { return _sortColumn; },
+    set(v) { _sortColumn = v; },
+    configurable: true
+});
+Object.defineProperty(window, 'isAscending', {
+    get() { return _isAscending; },
+    set(v) { _isAscending = v; },
+    configurable: true
+});
+Object.defineProperty(window, 'currentPage', {
+    get() { return _currentPage; },
+    set(v) { _currentPage = v; },
+    configurable: true
+});
+window.pageSize = PAGE_SIZE;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Yardımcı Helper Fonksiyonları
+// ─────────────────────────────────────────────────────────────────────────────
+function _buildQtyDisplay(itemQty, updateDate) {
+    if (window.innerWidth <= 768) {
+        return `${itemQty} <span class="mobile-info-trigger" onclick="window.showMobileTooltip(event, '${updateDate}')" style="margin-left: 6px; cursor: pointer; color: #3498db; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.85em; transition: opacity 0.2s;"><i class="fas fa-info-circle"></i></span>`;
+    }
+    return String(itemQty);
+}
+
+function _buildRowInnerHtml(depo, item, realIndex, qtyDisplay) {
+    if (depo === 'b1' || depo === 'b2') {
+        const itemType = item.tür || item.type || item.prodType || '-';
+        return `
+            <td><input type="checkbox" class="row-select" data-index="${realIndex}"></td>
+            <td>${item.sütun || '-'}</td>
+            <td>${item.raf || '-'}</td>
+            <td>${item.ürün || '-'}</td>
+            <td>${item.marka || '-'}</td>
+            <td class="js-qty-cell">${qtyDisplay}</td>
+            <td class="js-status-cell">${item.durumu || '-'}</td>
+            <td>${itemType}</td>`;
+    }
+    return `
+        <td><input type="checkbox" class="row-select"></td>
+        <td>${item.ürün || item.name || '-'}</td>
+        <td>${item.tür || item.type || '-'}</td>
+        <td>${item.raf || item.shelf || '-'}</td>
+        <td class="js-status-cell">${item.durumu || item.status || '-'}</td>
+        <td class="js-qty-cell">${qtyDisplay}</td>`;
+}
+
+function _buildRowHtml(depo, item, realIndex) {
+    const updateDate = (typeof tsToTurkiye === 'function')
+        ? tsToTurkiye(item.lastUpdate)
+        : (item.lastUpdate ? String(item.lastUpdate) : 'Tarih bilgisi yok');
+    const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
+    const qtyDisplay = _buildQtyDisplay(itemQty, updateDate);
+    const innerHtml = _buildRowInnerHtml(depo, item, realIndex, qtyDisplay);
+    const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+    const rowClass = isPassive ? 'passive-row' : '';
+    const safeName = (item.ürün || item.name || '-').replace(/"/g, '&quot;');
+
+    return `<tr class="${rowClass} selectable-row"
+                data-id="${item.id ?? ''}"
+                data-depo="${depo}"
+                data-index="${realIndex}"
+                data-name="${safeName}"
+                onmouseenter="window.showRowTooltip(event, '${updateDate}')"
+                onmousemove="window.moveRowTooltip(event)"
+                onmouseleave="window.hideRowTooltip()">
+                ${innerHtml}
+            </tr>`;
+}
+
+function _renderLoadMoreButton(depo) {
+    let loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (loadMoreBtn) loadMoreBtn.remove();
+
+    const totalCount = (window.data && window.data[depo]) ? window.data[depo].length : 0;
+
+    if (totalCount > _currentPage * PAGE_SIZE) {
+        loadMoreBtn = document.createElement('button');
+        loadMoreBtn.id = 'loadMoreBtn';
+        loadMoreBtn.innerText = 'Daha Fazla Yükle...';
+        loadMoreBtn.className = 'add-btn';
+        loadMoreBtn.style.margin = '20px auto';
+        loadMoreBtn.style.display = 'block';
+
+        loadMoreBtn.onclick = () => {
+            _currentPage++;
+            window.renderTable(depo, true);
+        };
+
+        const tableElement = document.querySelector(`#table${depo.toUpperCase()}`);
+        if (tableElement) tableElement.after(loadMoreBtn);
+    }
+}
+
+function _setupCardViewSelection(container) {
+    if (!container || container._cardFabListenerAttached) return;
+    container._cardFabListenerAttached = true;
+
+    container.addEventListener('click', function (e) {
+        if (e.target.type === 'checkbox') return;
+
+        const item = e.target.closest('.selectable-row[data-index]');
+        if (!item) return;
+
+        const { depo, index, id, name } = item.dataset;
+        const key = `${depo}-${index}`;
+
+        if (item.classList.contains('selected-row')) {
+            item.classList.remove('selected-row');
+            if (window._selectedRows) window._selectedRows.delete(key);
+        } else {
+            item.classList.add('selected-row');
+            if (window._selectedRows) window._selectedRows.add(key);
+            item._fabData = { depo, index: parseInt(index), id, name };
+        }
+
+        if (typeof window.updateFloatingBar === 'function') {
+            window.updateFloatingBar();
+        }
+
+        if (window.innerWidth <= 768 && item.classList.contains('selected-row')) {
+            if (typeof window.showMobileBottomSheet === 'function') {
+                window.showMobileBottomSheet(item._fabData || { depo, index: parseInt(index), id, name });
+            }
+        }
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core Rendering & Search Functions (TableEngine)
+// ─────────────────────────────────────────────────────────────────────────────
+export const getProcessedData = function (depo) {
+    if (!window.data || !window.data[depo]) return [];
+
+    let rawData = window.data[depo].map((item, index) => {
+        let copy = JSON.parse(JSON.stringify(item));
+        copy.__index = index;
+        return copy;
+    });
+
+    if (typeof window.getFilteredB1Data === 'function') {
+        rawData = window.getFilteredB1Data(depo, rawData);
+    }
+
+    rawData.sort((a, b) => {
+        let key = _sortColumn;
+        let valA = a[key] || '';
+        let valB = b[key] || '';
+
+        if (key === 'adet') {
+            return _isAscending
+                ? (Number(valA) - Number(valB))
+                : (Number(valB) - Number(valA));
+        }
+
+        let strA = String(valA).toLocaleLowerCase('tr-TR');
+        let strB = String(valB).toLocaleLowerCase('tr-TR');
+
+        return _isAscending
+            ? strA.localeCompare(strB, 'tr')
+            : strB.localeCompare(strA, 'tr');
+    });
+
+    return rawData;
+};
+
+export const renderTable = function (depo, append = false, customLimit = null) {
+    if (!depo) return;
+
+    if (window._cardViewActive && window._cardViewActive[depo] && !append) {
+        window.renderMobileCards(depo);
+        return;
+    }
+
+    const searchInput = document.getElementById(`search${depo.toUpperCase()}`);
+    if (searchInput && searchInput.value.trim() !== '' && !append) {
+        window.searchTable(depo);
+        return;
+    }
+
+    const tableId = `table${depo.toUpperCase()}`;
+    const tableContainer = document.getElementById(tableId);
+    if (!tableContainer) return;
+
+    const tbody = tableContainer.querySelector('tbody');
+    if (!tbody) return;
+
+    const rawData = window.data[depo];
+    const allData = getProcessedData(depo);
+
+    if (!append) {
+        tbody.innerHTML = '';
+        if (!customLimit) _currentPage = 1;
+    }
+
+    const start = append ? (_currentPage - 1) * PAGE_SIZE : 0;
+    const end = customLimit ? customLimit : (_currentPage * PAGE_SIZE);
+
+    const displayData = allData.slice(start, end);
+
+    const rowsHtml = displayData.map((item) => {
+        const realIndex = item.__index ??
+            rawData.findIndex(x =>
+                (x.id && item.id && x.id === item.id) ||
+                (x.ürün === item.ürün && x.raf === item.raf && x.sütun === item.sütun)
+            );
+        return _buildRowHtml(depo, item, realIndex);
+    });
+
+    if (append) {
+        tbody.insertAdjacentHTML('beforeend', rowsHtml.join(''));
+    } else {
+        tbody.innerHTML = rowsHtml.join('');
+    }
+
+    _renderLoadMoreButton(depo);
+
+    if (typeof window.setupRowSelection === 'function') {
+        window.setupRowSelection(tableContainer);
+    }
+};
+
+export const searchTable = function (depo) {
+    const input = document.getElementById(`search${depo.toUpperCase()}`);
+    if (!input) return;
+
+    const searchTerm = input.value.toLocaleLowerCase('tr-TR');
+
+    if (searchTerm === '') {
+        if (window._cardViewActive && window._cardViewActive[depo]) {
+            window.renderMobileCards(depo);
+        } else {
+            renderTable(depo);
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            if (loadMoreBtn) loadMoreBtn.style.display = 'block';
+        }
+        return;
+    }
+
+    const allData = getProcessedData(depo);
+    const filteredResults = allData.filter(item => {
+        return [
+            item.ürün, item.marka, item.açıklama, item.name, item.model, item.raf, item.tür
+        ].some(val => (val || '').toLocaleLowerCase('tr-TR').includes(searchTerm));
+    });
+
+    renderSearchResults(depo, filteredResults);
+};
+
+export const renderSearchResults = function (depo, results) {
+    if (!depo) return;
+
+    if (window._cardViewActive && window._cardViewActive[depo]) {
+        window.renderCardSearchResults(depo, results);
+        return;
+    }
+
+    const tableId = `table${depo.toUpperCase()}`;
+    const tableContainer = document.getElementById(tableId);
+    if (!tableContainer) return;
+
+    const tbody = tableContainer.querySelector('tbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    const rawData = window.data[depo];
+
+    const rowsHtml = results.map((item) => {
+        const realIndex = item.__index !== undefined ? item.__index :
+            rawData.findIndex(x => x.id === item.id);
+
+        if (realIndex === -1) return '';
+        return _buildRowHtml(depo, item, realIndex);
+    }).join('');
+
+    tbody.innerHTML = rowsHtml;
+
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (loadMoreBtn) loadMoreBtn.style.display = 'none';
+
+    if (typeof window.setupRowSelection === 'function') {
+        window.setupRowSelection(tableContainer);
+    }
+};
+
+export const renderCardSearchResults = function (depo, results) {
+    const cardContainer = document.getElementById(`cardView${depo.toUpperCase()}`);
+    if (!cardContainer) return;
+
+    const rawData = window.data[depo] || [];
+
+    if (results.length === 0) {
+        cardContainer.innerHTML = `
+            <div class="card-empty-state">
+                <i class="fas fa-search"></i>
+                <p>Arama sonucu bulunamadı.</p>
+            </div>`;
+        return;
+    }
+
+    const itemsHtml = results.map(item => {
+        const realIndex = item.__index !== undefined ? item.__index
+            : rawData.findIndex(x =>
+                (x.id && item.id && x.id === item.id) ||
+                (x.ürün === item.ürün && x.raf === item.raf)
+            );
+        if (realIndex === -1) return '';
+
+        const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
+        const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+        const isWatched = item.isWatched;
+        const qtyClass = itemQty === 0 ? 'qty-zero' : (itemQty <= 3 ? 'qty-low' : 'qty-ok');
+        const safeName = (item.ürün || item.name || '-').replace(/"/g, '&quot;');
+        const turAdi = item.tür || item.type || item.prodType || 'Diğer';
+
+        return `
+            <div class="product-card-item ${isPassive ? 'card-item-passive' : ''} selectable-row"
+                 data-id="${item.id ?? ''}"
+                 data-depo="${depo}"
+                 data-index="${realIndex}"
+                 data-name="${safeName}"
+                 role="button"
+                 tabindex="0">
+                <div class="pci-left">
+                    <input type="checkbox" class="row-select card-checkbox"
+                           data-index="${realIndex}"
+                           onclick="event.stopPropagation()">
+                    <div class="pci-info">
+                        <span class="pci-name">${item.ürün || item.name || '-'}</span>
+                        <span class="pci-meta">
+                            <span class="pci-meta-tag"><i class="fas fa-layer-group"></i> ${turAdi}</span>
+                            <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${item.raf || '-'}</span>
+                            ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${item.marka}</span>` : ''}
+                        </span>
+                    </div>
+                </div>
+                <div class="pci-right">
+                    <span class="pci-qty-badge ${qtyClass}">${itemQty}</span>
+                    ${isWatched ? '<span class="pci-watch-dot" title="Takipte"><i class="fas fa-eye"></i></span>' : ''}
+                    ${isPassive ? '<span class="pci-passive-tag">Pasif</span>' : ''}
+                </div>
+            </div>`;
+    }).join('');
+
+    cardContainer.innerHTML = `
+        <div class="card-search-header">
+            <i class="fas fa-search"></i>
+            <span>${results.length} sonuç bulundu</span>
+        </div>
+        <div class="type-group-card">
+            <div class="type-group-body expanded">
+                ${itemsHtml}
+            </div>
+        </div>`;
+
+    const freshContainer = document.getElementById(`cardView${depo.toUpperCase()}`);
+    if (freshContainer) {
+        freshContainer._cardFabListenerAttached = false;
+        _setupCardViewSelection(freshContainer);
+    }
+};
+
+export const renderMobileCards = function (depo) {
+    if (!depo || (depo !== 'b1' && depo !== 'b2')) return;
+
+    const cardContainer = document.getElementById(`cardView${depo.toUpperCase()}`);
+    if (!cardContainer) return;
+
+    const rawData = window.data[depo] || [];
+    const allData = getProcessedData(depo);
+
+    if (allData.length === 0) {
+        cardContainer.innerHTML = `
+            <div class="card-empty-state">
+                <i class="fas fa-box-open"></i>
+                <p>Bu depoda kayıt bulunmuyor.</p>
+            </div>`;
+        return;
+    }
+
+    const groups = allData.reduce((acc, item) => {
+        const turKey = item.tür || item.type || item.prodType || 'Diğer';
+        if (!acc[turKey]) acc[turKey] = [];
+        const realIndex = item.__index !== undefined ? item.__index
+            : rawData.findIndex(x =>
+                (x.id && item.id && x.id === item.id) ||
+                (x.ürün === item.ürün && x.raf === item.raf)
+            );
+        acc[turKey].push({ ...item, _realIndex: realIndex });
+        return acc;
+    }, {});
+
+    const groupKeys = Object.keys(groups).sort();
+
+    const cardsHtml = groupKeys.map((turAdi, groupIdx) => {
+        const items = groups[turAdi];
+        const totalStock = items.reduce((sum, it) => {
+            return sum + (it.adet !== undefined ? Number(it.adet) : (Number(it.qty) || 0));
+        }, 0);
+
+        const itemsHtml = items.map(item => {
+            const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
+            const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+            const isWatched = item.isWatched;
+            const qtyClass = itemQty === 0 ? 'qty-zero' : (itemQty <= 3 ? 'qty-low' : 'qty-ok');
+            const safeDepo = depo.replace(/'/g, '');
+            const safeName = (item.ürün || item.name || '-').replace(/"/g, '&quot;');
+
+            return `
+                <div class="product-card-item ${isPassive ? 'card-item-passive' : ''} selectable-row"
+                     data-id="${item.id ?? ''}"
+                     data-depo="${safeDepo}"
+                     data-index="${item._realIndex}"
+                     data-name="${safeName}"
+                     role="button"
+                     tabindex="0">
+                    <div class="pci-left">
+                        <input type="checkbox" class="row-select card-checkbox"
+                               data-index="${item._realIndex}"
+                               onclick="event.stopPropagation()">
+                        <div class="pci-info">
+                            <span class="pci-name">${item.ürün || item.name || '-'}</span>
+                            <span class="pci-meta">
+                                <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${item.raf || '-'}</span>
+                                ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${item.marka}</span>` : ''}
+                                ${item.sütun ? `<span class="pci-meta-tag"><i class="fas fa-columns"></i> ${item.sütun}</span>` : ''}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="pci-right">
+                        <span class="pci-qty-badge js-qty-cell ${qtyClass}">${itemQty}</span>
+                        ${isWatched ? '<span class="pci-watch-dot" title="Takipte"><i class="fas fa-eye"></i></span>' : ''}
+                        ${isPassive ? '<span class="pci-passive-tag js-status-cell">Pasif</span>' : '<span class="js-status-cell" style="display:none;"></span>'}
+                    </div>
+                </div>`;
+        }).join('');
+
+        return `
+            <div class="type-group-card" id="typeGroup_${depo}_${groupIdx}">
+                <div class="type-group-header"
+                     onclick="window._toggleCardGroup('typeGroupBody_${depo}_${groupIdx}', 'typeGroupIcon_${depo}_${groupIdx}')">
+                    <div class="tgh-left">
+                        <i class="fas fa-layer-group tgh-icon"></i>
+                        <span class="tgh-name">${turAdi}</span>
+                        <span class="tgh-count">${items.length} ürün</span>
+                    </div>
+                    <div class="tgh-right">
+                        <span class="tgh-stock-badge">
+                            <i class="fas fa-cubes"></i> ${totalStock} adet
+                        </span>
+                        <i class="fas fa-chevron-down tgh-chevron" id="typeGroupIcon_${depo}_${groupIdx}"></i>
+                    </div>
+                </div>
+                <div class="type-group-body" id="typeGroupBody_${depo}_${groupIdx}">
+                    ${itemsHtml}
+                </div>
+            </div>`;
+    }).join('');
+
+    cardContainer.innerHTML = cardsHtml;
+    _setupCardViewSelection(cardContainer);
+};
+
+export const changePage = function (depo, page) {
+    _currentPage = page;
+    renderTable(depo);
+    window.scrollTo(0, 0);
+};
+
+export const sortTable = function (columnName, depo) {
+    if (_sortColumn === columnName) {
+        _isAscending = !_isAscending;
+    } else {
+        _sortColumn = columnName;
+        _isAscending = true;
+    }
+
+    const currentLimit = _currentPage * PAGE_SIZE;
+    renderTable(depo, false, currentLimit);
+};
+
+export const toggleCardView = function (depo) {
+    window._cardViewActive[depo] = !window._cardViewActive[depo];
+
+    const tableWrapper = document.querySelector(`#${depo} .table-responsive-wrapper`);
+    const cardContainer = document.getElementById(`cardView${depo.toUpperCase()}`);
+    const toggleBtn = document.getElementById(`viewToggle${depo.toUpperCase()}`);
+
+    if (window._cardViewActive[depo]) {
+        if (tableWrapper) tableWrapper.style.display = 'none';
+        if (cardContainer) cardContainer.style.display = 'block';
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '<i class="fas fa-table"></i>';
+            toggleBtn.title = 'Tablo Görünümüne Geç';
+            toggleBtn.classList.add('view-toggle-active');
+        }
+        renderMobileCards(depo);
+    } else {
+        if (tableWrapper) tableWrapper.style.display = '';
+        if (cardContainer) cardContainer.style.display = 'none';
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '<i class="fas fa-th-large"></i>';
+            toggleBtn.title = 'Kart Görünümüne Geç';
+            toggleBtn.classList.remove('view-toggle-active');
+        }
+        renderTable(depo);
+    }
+};
+
+export const patchDOMForCollection = function (colName, changes) {
+    if (!changes || changes.length === 0) return;
+
+    changes.forEach(change => {
+        const id = change.id;
+        const data = change.data;
+        const itemQty = data.adet !== undefined ? data.adet : (data.qty || 0);
+        const itemStatus = data.durumu || data.status || '-';
+        const isPassive = (itemStatus === 'Pasif');
+
+        const rowEl = document.querySelector(`tr[data-depo="${colName}"][data-id="${id}"]`);
+        if (rowEl) {
+            const qtyCell = rowEl.querySelector('.js-qty-cell');
+            const statusCell = rowEl.querySelector('.js-status-cell');
+
+            if (qtyCell) qtyCell.textContent = itemQty;
+            if (statusCell) statusCell.textContent = itemStatus;
+
+            if (isPassive) {
+                rowEl.classList.add('passive-row');
+            } else {
+                rowEl.classList.remove('passive-row');
+            }
+        }
+
+        const cardEl = document.querySelector(`div.product-card-item[data-depo="${colName}"][data-id="${id}"]`);
+        if (cardEl) {
+            const qtyBadge = cardEl.querySelector('.js-qty-cell');
+            const statusTag = cardEl.querySelector('.js-status-cell');
+
+            if (qtyBadge) {
+                qtyBadge.textContent = itemQty;
+                qtyBadge.classList.remove('qty-zero', 'qty-low', 'qty-ok');
+                const qtyClass = itemQty === 0 ? 'qty-zero' : (itemQty <= 3 ? 'qty-low' : 'qty-ok');
+                qtyBadge.classList.add(qtyClass);
+            }
+
+            if (statusTag) {
+                if (isPassive) {
+                    statusTag.style.display = 'inline-block';
+                    cardEl.classList.add('card-item-passive');
+                } else {
+                    statusTag.style.display = 'none';
+                    cardEl.classList.remove('card-item-passive');
+                }
+            }
+        }
+    });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tooltip Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+export const showRowTooltip = function (event, updateDate) {
+    if (window.innerWidth <= 768) return;
+    const tt = document.getElementById('custom-tooltip');
+    if (tt) {
+        tt.innerHTML = `🕒 Son Güncelleme: <span style="color:#f1c40f">${updateDate}</span>`;
+        tt.style.display = 'block';
+    }
+};
+
+export const moveRowTooltip = function (event) {
+    if (window.innerWidth <= 768) return;
+    const tt = document.getElementById('custom-tooltip');
+    if (tt) {
+        tt.style.left = (event.clientX + 15) + 'px';
+        tt.style.top = (event.clientY + 15) + 'px';
+    }
+};
+
+export const hideRowTooltip = function () {
+    if (window.innerWidth <= 768) return;
+    const tt = document.getElementById('custom-tooltip');
+    if (tt) tt.style.display = 'none';
+};
+
+export const showMobileTooltip = function (event, updateDate) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    if (typeof window.showAppAlert === 'function') {
+        window.showAppAlert(`🕒 Son Güncelleme: ${updateDate}`, 'info');
+    } else {
+        alert(`🕒 Son Güncelleme: ${updateDate}`);
+    }
+};
+
+export const toggleCardGroup = function (bodyId, iconId) {
+    const body = document.getElementById(bodyId);
+    if (!body) return;
+    const isOpen = body.classList.toggle('expanded');
+    const icon = document.getElementById(iconId);
+    if (icon) icon.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Namespace Object & Bridges Assignment
+// ─────────────────────────────────────────────────────────────────────────────
+export const TableEngine = {
+    renderTable,
+    renderSearchResults,
+    renderCardSearchResults,
+    renderMobileCards,
+    searchTable,
+    changePage,
+    sortTable,
+    getProcessedData,
+    patchDOMForCollection,
+    toggleCardView,
+    showRowTooltip,
+    moveRowTooltip,
+    hideRowTooltip,
+    showMobileTooltip
+};
+
+window.AppModules = window.AppModules || {};
+window.AppModules.Table = TableEngine;
+
+// Legacy Backward Compatibility Bridges
+window.renderTable = window.AppModules.Table.renderTable;
+window.renderSearchResults = window.AppModules.Table.renderSearchResults;
+window.renderCardSearchResults = window.AppModules.Table.renderCardSearchResults;
+window.renderMobileCards = window.AppModules.Table.renderMobileCards;
+window.searchTable = window.AppModules.Table.searchTable;
+window.changePage = window.AppModules.Table.changePage;
+window.sortTable = window.AppModules.Table.sortTable;
+window.getProcessedData = window.AppModules.Table.getProcessedData;
+window.patchDOMForCollection = window.AppModules.Table.patchDOMForCollection;
+window.toggleCardView = window.AppModules.Table.toggleCardView;
+window.showRowTooltip = window.AppModules.Table.showRowTooltip;
+window.moveRowTooltip = window.AppModules.Table.moveRowTooltip;
+window.hideRowTooltip = window.AppModules.Table.hideRowTooltip;
+window.showMobileTooltip = window.AppModules.Table.showMobileTooltip;
+window._toggleCardGroup = toggleCardGroup;
