@@ -7,7 +7,7 @@
 //        İlk tam render LoadingCoordinator.reveal() tarafından yapıldığı için reveal'dan önceki olaylar yok sayılır.
 
 const ROUTES = [
-    { cols: ['b1', 'b2', 'productTypes'], renders: ['renderDashboardStats', 'renderCriticalStockTable', 'renderProductTypesTable'] },
+    { cols: ['b1', 'b2', 'productTypes'], renders: ['renderDashboardStats', 'renderCriticalStockTable', 'renderProductTypesTable', 'updateProductTypeDropdowns'] },
     { cols: ['requests', 'b3'], renders: ['renderAdminRequestTable', 'renderExitCharts'] },
     { cols: ['locations'], renders: ['renderLocationsTable'] },
     { cols: ['units'], renders: ['renderUnitManagement'] },

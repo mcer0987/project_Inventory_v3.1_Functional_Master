@@ -338,33 +338,7 @@ window.renderAdminRequestTable = function () {
 // Artık tüm veriler firebase-handler.js içindeki tek bir noktadan dinlenmekte ve
 // 'onInventoryDataUpdated' eventi ile UI güncellemeleri tetiklenmektedir (PubSub mimarisi).
 
-// Ürün Türlerini (Ayarlar Dökümanını) Ayrı Dinle
-import { onSnapshot as onDocSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-onDocSnapshot(doc(window.fireDb, "settings", "productTypes"), (docSnap) => {
-    if (docSnap.exists()) {
-        const data = docSnap.data();
-        // Dökümanın içindeki 'list' dizisini alıyoruz
-        window.data.productTypes = data.list || [];
-
-        console.log("⚡ Ürün türleri güncellendi:", window.data.productTypes);
-
-        if (window.renderProductTypesTable) window.renderProductTypesTable();
-        if (window.updateProductTypeDropdowns) window.updateProductTypeDropdowns();
-        if (typeof window.renderExitCharts === 'function') window.renderExitCharts();
-
-        // ✅ Ayarlar yüklendi olarak işaretle
-        if (window.LoadingCoordinator) {
-            window.LoadingCoordinator.markLoaded("settings");
-        }
-    }
-}, (err) => {
-    if (err.code === "permission-denied") {
-        console.warn("⏳ [Güvenlik] Firebase yetki onayı bekleniyor (productTypes)...");
-    } else {
-        console.error("Dinleme hatası (productTypes):", err);
-    }
-});
+// [WHY]: Kök settings/productTypes dinleyicisi kaldırıldı; ürün türleri firebase-handler üzerinden ${COLLECTION_ROOT}/productTypes/items'tan gelir (ADM-02).
 
 // 1. ÜRÜN TÜRÜ KURALI (Sarf geçmiyorsa demirbaş say)
 window.processIsDemirbas = function (item) {
@@ -480,7 +454,6 @@ window.renderProductTypesTable = function () {
         if (!type.id) return;
 
         const isDemirbas = type.isDemirbas === true || type.isDemirbas === "true";
-        const typeNameForJS = type.name.replace(/'/g, "\\'");
 
         // --- ESKİ TABLO (3 Sütunlu) ---
         if (listBody) {
@@ -500,7 +473,7 @@ window.renderProductTypesTable = function () {
                     </td>
                     <td class="text-end pe-3">
                         <div class="action-buttons justify-content-end">
-                            <button onclick="editProductType(${jsArg(String(type.id))}, '${typeNameForJS}', ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                            <button onclick="editProductType(${jsArg(String(type.id))}, ${jsArg(String(type.name))}, ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                                 <i class="fa-solid fa-arrows-rotate"></i>
                             </button>
                             <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
@@ -533,7 +506,7 @@ window.renderProductTypesTable = function () {
                     </td>
                     <td class="text-end pe-3">
                         <div class="action-buttons justify-content-end">
-                            <button onclick="editProductType(${jsArg(String(type.id))}, '${typeNameForJS}', ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                            <button onclick="editProductType(${jsArg(String(type.id))}, ${jsArg(String(type.name))}, ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
@@ -570,177 +543,98 @@ window.editProductType = function (id, name, isDemirbas) {
 };
 
 // 2. Modalı Kapat
-window.closeEditModal = function () {
+// [WHY]: Aynı adlı closeEditModal purchase-servises'te ölü bir modal için tanımlıydı ve bunu eziyordu; ürün türü modalı
+//        hiç kapanmıyor, açık overlay sayfayı ve zaman aşımını kilitliyordu (ADM-03).
+window.closeProductTypeModal = function () {
     const modal = document.getElementById('editProductTypeModal');
     if (modal) modal.style.display = 'none';
 };
 
-// --- 1. YENİ TÜR EKLEME ---
-window.addNewProductType = async function () {
-    const nameInput = document.getElementById('newProductType');
-    const isDemirbasCheck = document.getElementById('isDemirbasCheck');
-    const name = nameInput.value.trim();
-    const isDemirbas = isDemirbasCheck.checked;
-
-    if (!name) {
-        showAppAlert("Tür adı giriniz", "warning");
-        return;
-    }
-
-    try {
-        const { collection, addDoc } = window.FirebaseModules;
-
-        // Doğrudan "productTypes" koleksiyonuna ekliyoruz!
-        await addDoc(collection(window.fireDb, "productTypes"), {
-            name: name,
-            isDemirbas: isDemirbas,
-            createdAt: Date.now()
-        });
-
-        // Formu temizle
-        nameInput.value = '';
-        isDemirbasCheck.checked = false;
-
-        showAppAlert("Yeni tür başarıyla eklendi.", "success");
-        // Not: Tabloyu ve dropdown'ı yenilemeye gerek yok, script.js'deki onSnapshot tetiklenecek!
-    } catch (err) {
-        console.error("❌ Ekleme hatası:", err);
-        showAppAlert("Tür eklenirken bir hata oluştu.", "danger");
-    }
+// [WHY]: Ürün türleri kök 'productTypes' koleksiyonuna yazılıyordu; kurallar reddediyor, arayüz ise
+//        ${COLLECTION_ROOT}/productTypes/items'ı okuduğu için değişiklik görünmüyordu (ADM-02, RULE-03).
+// [HOW]: Tüm işlemler aktif ortamın productTypes/items yoluna, açık id ile yapılır (id listeye veriyle birlikte gelir).
+const _productTypeDoc = (id) => {
+    const { doc } = window.FirebaseModules;
+    return doc(window.fireDb, window.AppEnv.COLLECTION_ROOT, 'productTypes', 'items', String(id));
 };
 
-// --- TANIMLAR SEKMESİ İÇİN YENİ TÜR EKLEME ---
-/**
- * Bu fonksiyon teknik olarak window.addNewProductType ile aynı işlevi görür.
- * Ancak "Tanımlar" sekmesindeki yeni modern arayüze ait input ID'lerini (defNewProductType, defIsDemirbasCheck) 
- * kullandığı için ayrıştırılmıştır. Veri tabanı (Firebase) tarafında aynı koleksiyonu günceller.
- */
-window.defAddNewProductType = async function () {
-    const nameInput = document.getElementById('defNewProductType');
-    const isDemirbasCheck = document.getElementById('defIsDemirbasCheck');
+async function _createProductType(nameInput, isDemirbasCheck) {
     const name = nameInput.value.trim();
     const isDemirbas = isDemirbasCheck.checked;
+    if (!name) { showAppAlert("Tür adı giriniz", "warning"); return; }
 
-    if (!name) {
-        showAppAlert("Tür adı giriniz", "warning");
-        return;
-    }
+    const exists = (window.data.productTypes || []).some(t =>
+        String(t.name || '').trim().toLocaleLowerCase('tr-TR') === name.toLocaleLowerCase('tr-TR'));
+    if (exists) { showAppAlert("Bu ürün türü zaten mevcut!", "warning"); return; }
 
     try {
-        const { collection, addDoc } = window.FirebaseModules;
-
-        await addDoc(collection(window.fireDb, "productTypes"), {
-            name: name,
-            isDemirbas: isDemirbas,
-            createdAt: Date.now()
-        });
-
-        // Formu temizle
+        const { setDoc } = window.FirebaseModules;
+        const id = `pt_${Date.now()}`;
+        await setDoc(_productTypeDoc(id), { id, name, isDemirbas, createdAt: Date.now() });
         nameInput.value = '';
         isDemirbasCheck.checked = false;
-
         showAppAlert("Yeni tür başarıyla eklendi.", "success");
     } catch (err) {
         console.error("❌ Ekleme hatası:", err);
-        showAppAlert("Tür eklenirken bir hata oluştu.", "danger");
+        showAppAlert("Tür eklenirken bir hata oluştu.", "error");
     }
+}
+
+// --- 1. YENİ TÜR EKLEME ---
+window.addNewProductType = function () {
+    return _createProductType(document.getElementById('newProductType'), document.getElementById('isDemirbasCheck'));
+};
+
+// --- TANIMLAR SEKMESİ İÇİN YENİ TÜR EKLEME (farklı input id'leri, aynı veri yolu) ---
+window.defAddNewProductType = function () {
+    return _createProductType(document.getElementById('defNewProductType'), document.getElementById('defIsDemirbasCheck'));
 };
 
 // --- 2. GÜNCELLEME (DEĞİŞİKLİKLERİ KAYDET) ---
 window.saveProductTypeUpdate = async function () {
-    const idInput = document.getElementById('editTypeId'); // Firebase Doc ID burada
+    const idInput = document.getElementById('editTypeId');
     const nameInput = document.getElementById('editTypeName');
     const checkInput = document.getElementById('editIsDemirbas');
-
     if (!idInput || !nameInput) return;
 
     const docId = idInput.value;
     const newName = nameInput.value.trim();
     const newIsDemirbas = checkInput.checked;
-
-    if (!newName) {
-        showAppAlert("Tür adı boş olamaz!", "danger");
-        return;
-    }
+    if (!newName) { showAppAlert("Tür adı boş olamaz!", "error"); return; }
 
     try {
-        const { doc, updateDoc } = window.FirebaseModules;
-        const firestoreDb = window.fireDb;
+        const { updateDoc } = window.FirebaseModules;
+        await updateDoc(_productTypeDoc(docId), { name: newName, isDemirbas: newIsDemirbas });
 
-        // Sadece ilgili dökümanı güncelliyoruz
-        const typeDocRef = doc(firestoreDb, "productTypes", docId);
-        await updateDoc(typeDocRef, {
-            name: newName,
-            isDemirbas: newIsDemirbas
-        });
-
-        // 🔥 ürünlerde eski type adını güncelle
         const oldName = window.cachedEditingTypeName;
-
         if (oldName && oldName !== newName) {
-            await window.syncProductTypesToProducts(oldName, newName);
+            const synced = await window.syncProductTypesToProducts(oldName, newName);
+            if (synced === false) showAppAlert("Tür güncellendi ancak ürünlerdeki tür adı kaydedilemedi.", "warning");
         }
 
-        // 🔥 UI'yı anında yenile
-        await window.forceProductTypeSync();
-
-        closeEditModal();
+        window.forceProductTypeSync();
+        window.closeProductTypeModal();
         showAppAlert("Ürün türü güncellendi.", "success");
     } catch (error) {
         console.error("❌ Kayıt hatası:", error);
-        showAppAlert("Güncelleme başarısız.", "danger");
+        showAppAlert("Güncelleme başarısız.", "error");
     }
 };
 
 // --- 3. SİLME İŞLEMİ ---
 window.deleteProductType = async function (docId) {
-    if (!confirm("Bu ürün türünü silmek istediğinize emin misiniz?")) return;
+    const type = (window.data.productTypes || []).find(t => String(t.id) === String(docId));
+    const onay = await showCustomConfirm('Ürün Türünü Sil', `"${type ? type.name : docId}" ürün türü silinecek. Onaylıyor musunuz?`);
+    if (!onay) return;
 
     try {
-        const { doc, deleteDoc } = window.FirebaseModules;
-
-        // ID'sine göre doğrudan dökümanı siliyoruz
-        const typeDocRef = doc(window.fireDb, "productTypes", docId);
-        await deleteDoc(typeDocRef);
-
-        showAppAlert("Ürün türü silindi.", "danger");
+        const { deleteDoc } = window.FirebaseModules;
+        await deleteDoc(_productTypeDoc(docId));
+        showAppAlert("Ürün türü silindi.", "success");
     } catch (error) {
         console.error("❌ Silme hatası:", error);
+        showAppAlert("Ürün türü silinemedi.", "error");
     }
-};
-
-// Yeni bir ürün türü yaratmak. Bu isimde ürün var mı?" diye kontrol eder (mükerrer kayıt engelleme).
-window.saveNewProductType = async function () {
-    const nameInput = document.getElementById('newTypeName');
-    const isDemirbasInput = document.getElementById('newTypeIsDemirbas');
-    const name = nameInput.value.trim();
-    const isDemirbas = isDemirbasInput.checked;
-
-    if (!name) {
-        if (typeof showAppAlert === 'function') showAppAlert("Lütfen bir ürün türü adı girin.", "warning");
-        return;
-    }
-
-    const currentTypes = window.getActiveProductTypes();
-    if (currentTypes.find(t => t.name.toLowerCase() === name.toLowerCase())) {
-        if (typeof showAppAlert === 'function') showAppAlert("Bu ürün türü zaten mevcut!", "warning");
-        return;
-    }
-
-    currentTypes.push({ name: name, isDemirbas: isDemirbas });
-
-    // Firebase'e kaydet (firebase-handler'daki methoduna göre)
-    if (typeof window.firebaseOperations !== 'undefined' && window.firebaseOperations.updateData) {
-        await window.firebaseOperations.updateData('productTypes', currentTypes);
-    } else {
-        window.data.productTypes = currentTypes;
-    }
-
-    if (typeof showAppAlert === 'function') showAppAlert(`"${name}" başarıyla eklendi!`, "success");
-    nameInput.value = '';
-    isDemirbasInput.checked = false;
-
-    renderProductTypesTable();
 };
 
 window.checkExitIsDemirbas = function (exit) {
@@ -1523,21 +1417,24 @@ window.updateProductTypeDropdowns = function () {
     });
 };
 
-window.syncProductTypesToProducts = function (oldName, newName) {
-
-    ['b1', 'b2'].forEach(depo => {
-
-        (window.data?.[depo] || []).forEach(item => {
-
-            if (item.tür === oldName) item.tür = newName;
-            if (item.type === oldName) item.type = newName;
-            if (item.prodType === oldName) item.prodType = newName;
-
+// [WHY]: Ad değişikliği b1/b2 ürünlerinde yalnız bellekte yapılıyordu; kaydedilmediği için snapshot ile geri geliyordu (ADM-02).
+window.syncProductTypesToProducts = async function (oldName, newName) {
+    let ok = true;
+    for (const depo of ['b1', 'b2']) {
+        let changed = false;
+        const items = (window.data?.[depo] || []).map(item => {
+            if (item.tür !== oldName && item.type !== oldName && item.prodType !== oldName) return item;
+            changed = true;
+            const next = { ...item };
+            if (next.tür === oldName) next.tür = newName;
+            if (next.type === oldName) next.type = newName;
+            if (next.prodType === oldName) next.prodType = newName;
+            return next;
         });
-
-    });
-
+        if (changed && await window.saveData(depo, items) === false) ok = false;
+    }
     console.log(`✔ Tür güncellendi: ${oldName} → ${newName}`);
+    return ok;
 };
 
 // "Özel Takip" Dashboard'u

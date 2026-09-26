@@ -916,64 +916,7 @@ function renderPaginationControls(totalItems, containerId) {
     document.getElementById(containerId).innerHTML = html;
 }
 
-// 1. Modalı Kapatma
-window.closeEditModal = function () {
-    document.getElementById("editRequestModal").style.display = "none";
-};
-
-// 2. Modalı Açma ve Verileri Doldurma
-window.editRequest = function (id) {
-    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
-    if (!item) return;
-
-    // Inputları aç
-    const inputs = document.querySelectorAll("#purchaseForm .modern-input");
-    inputs.forEach(input => input.disabled = false);
-
-    // Verileri doldur
-    document.getElementById("purDocName").value = item.evrakNo;
-    document.getElementById("purName").value = item.urun;
-    // ... diğer alanları yukarıdaki gibi doldur ...
-
-    // Kaydet butonunu göster ve modalı aç
-    document.querySelector(".btn-modern-save").style.display = "block";
-    document.getElementById("purchaseModal").style.display = "block";
-
-    // Form submit olayını "Update" olarak değiştir
-    const form = document.getElementById("purchaseForm");
-    form.onsubmit = (e) => window.updatePurchaseRequest(e, id);
-};
-
-// 3. Form Gönderildiğinde Kaydetme
-document.getElementById("editRequestForm")?.addEventListener("submit", async function (e) {
-    e.preventDefault();
-
-    const id = document.getElementById("edit_id").value;
-    const itemIndex = window.data.purchaseOrders.findIndex(x => Number(x.id) === Number(id));
-
-    if (itemIndex !== -1) {
-        // Veriyi güncelle
-        window.data.purchaseOrders[itemIndex].urun = document.getElementById("edit_urun").value;
-
-        // Log ekle
-        window.data.purchaseOrders[itemIndex].akis.push({
-            islem: "Talep güncellendi",
-            yapan: window.currentUser?.name,
-            tarih: new Date().toLocaleString()
-        });
-
-        // Kaydet ve Arayüzü Yenile
-        // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
-        window.closeEditModal();
-
-        // Admin tablosunu yenilemek için kullandığın ana fonksiyonu çağır
-        if (typeof renderAdminDashboard === "function") renderAdminDashboard();
-
-        // Başarı mesajı (opsiyonel)
-        if (window.showToast) window.showToast("Kayıt başarıyla güncellendi.");
-    }
-});
+// [WHY]: Hiç açılmayan #editRequestModal için closeEditModal/editRequest ve form dinleyicisi kaldırıldı; aynı ad ürün türü modalının kapanmasını engelliyordu (ADM-03).
 
 window.viewRequest = function (id) {
     const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));

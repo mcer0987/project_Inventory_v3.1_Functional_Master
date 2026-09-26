@@ -1304,35 +1304,9 @@ window.onclick = function (event) {
     if (event.target == modal) closeProductModal();
 };
 
-// PM NOTU: Firebase hazır olduktan sonra listener başlatılır
+// Bağlantı durumu bildirimleri
 window.addEventListener("load", () => {
-    const startFirebase = () => {
-        if (!window.fireDb || !window.fbFunctions) { setTimeout(startFirebase, 100); return; }
-        try {
-            const { collection, onSnapshot } = window.fbFunctions;
-            if (!window.fireDb || typeof window.fireDb !== 'object') { setTimeout(startFirebase, 200); return; }
-            onSnapshot(collection(window.fireDb, "productTypes"), (snapshot) => {
-                const types = [];
-                snapshot.forEach(doc => { types.push({ id: doc.id, ...doc.data() }); });
-                if (!window.data) window.data = {};
-                window.data.productTypes = types;
-                window.isFirebaseLoaded = true;
-                if (typeof window.updateProductTypeDropdowns === 'function') window.updateProductTypeDropdowns();
-                if (typeof window.renderProductTypesTable === 'function') window.renderProductTypesTable();
-                if (typeof window.renderExitCharts === 'function') window.renderExitCharts();
-                if (!window._initialRenderDone) {
-                    window._initialRenderDone = true;
-                    setTimeout(() => {
-                        const activeEl = document.querySelector('.tab-content.active');
-                        const activeId = activeEl ? activeEl.id : 'b1';
-                        if (typeof switchTab === "function") switchTab(activeId);
-                        if (typeof renderDashboard === "function") renderDashboard();
-                    }, 50);
-                }
-            }, (err) => { if(err.code === "permission-denied") console.warn("⏳ [Güvenlik] Firebase yetki onayı bekleniyor (productTypes)..."); else console.error("Dinleme hatası:", err); });
-        } catch (e) { console.error("❌ Bağlantı hatası:", e); }
-    };
-    startFirebase();
+    // [WHY]: Kök 'productTypes' dinleyicisi kaldırıldı (kurallar reddediyordu); ürün türleri ${COLLECTION_ROOT}/productTypes/items'tan gelir (ADM-02).
     window.addEventListener('online', () => { if (typeof showAppAlert === 'function') showAppAlert("Bağlantı sağlandı.", "info"); });
     window.addEventListener('offline', () => { if (typeof showAppAlert === 'function') showAppAlert("İnternet bağlantısı koptu.", "warning"); });
 });

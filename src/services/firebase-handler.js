@@ -186,7 +186,8 @@ window.startRealtimeSync = function () {
 
             const items = [];
             snapshot.forEach(docSnap => {
-                items.push(docSnap.data());
+                // Kayıtta id alanı yoksa doküman id'si kullanılır; aksi halde düzenleme/silme hedefsiz kalıyor ve kayıt temp_ id ile çoğalıyordu.
+                items.push({ id: docSnap.id, ...docSnap.data() });
             });
 
             // Veriyi global hafızaya ve Mirror'a (kopya) al
