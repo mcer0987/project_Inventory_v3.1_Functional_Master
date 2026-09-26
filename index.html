@@ -1420,40 +1420,20 @@
 
         <div id="custom-tooltip"></div>
 
-    <!-- 
-      [WHY]: Tarayıcı cache'i eski dosyaları okumaya zorladığı için canlı DB'ye yazma ve login (hash) hataları alıyorduk.
-      [HOW]: Script çağrılarının sonuna ?v=1.0.5 ekleyerek (Cache Busting) tarayıcıyı en güncel sürümü indirmeye zorluyoruz. 
-    -->
-    <script src="security.js?v=1.0.5"></script>
+    <!-- [WHY]: Aynı modül farklı URL ile (?v= ile/siz) yüklenince tarayıcı onu iki kez çalıştırıyordu (ARC-01).
+         [HOW]: Her modül tek URL; utils/security-biometrics/auth-engine/table/inventory/ui/self-approval yalnız main.js import'uyla yüklenir. -->
+    <script src="security.js"></script>
     <script src="db.js"></script>
     <script src="src/utils/alert.js"></script>
-    <script src="src/utils/timer.js?v=1.0.5"></script>
+    <script src="src/utils/timer.js"></script>
     <script src="personel.js"></script>
     <script src="pdf-generator.js"></script>
-    <script type="module" src="src/services/firebase-handler.js?v=1782473897744"></script>
-    <script type="module" src="src/services/data-loader.js?v=1.0.5"></script>
-    <script type="module" src="src/services/purchase-servises.js?v=1.0.5"></script>
-    <script type="module" src="src/modules/edm-workflow.js?v=1.0.5"></script>
+    <script type="module" src="src/services/firebase-handler.js"></script>
+    <script type="module" src="src/services/data-loader.js"></script>
+    <script type="module" src="src/services/purchase-servises.js"></script>
+    <script type="module" src="src/modules/edm-workflow.js"></script>
     <script type="module" src="src/modules/main.js"></script>
-    <!-- v3.1 ESM Modüler Mimari — Phase 1 & 2 -->
-    <!-- utils.js: getTurkiyeSaati, getTurkiyeTarihi, tsToTurkiye -->
-    <script type="module" src="src/utils/utils.js?v=3.1.0"></script>
-    <!-- auth-engine.js: checkIsAdmin, checkAuth, handleLogin, updateNavbarUI, setupUI -->
-    <!-- YÜKLEME SIRASI KRİTİK: security.js, alert.js ve timer.js'den sonra gelmeli -->
-    <!-- [SECURITY_GUARD] Biometric module must load BEFORE auth-engine.js -->
-    <script type="module" src="security-biometrics.js?v=1.0.0"></script>
-    <script type="module" src="src/modules/auth-engine.js?v=3.1.0"></script>
-    <!-- table-engine.js: renderTable, renderSearchResults, renderMobileCards, searchTable, sortTable, getProcessedData, tooltips -->
-    <script type="module" src="src/ui/table-engine.js?v=3.1.0"></script>
-    <!-- inventory-logic.js: saveProduct, deleteItem, saveExit, bulkDelete, deleteB3Row, toggleWatch, toggleStatus -->
-    <!-- window.AppModules.Inventory namespace'i burada kurulur -->
-    <script type="module" src="src/modules/inventory-logic.js?v=3.1.0"></script>
-    <!-- ui-components.js: Modal, FAB, BottomSheet, RowSelection — Phase 5 -->
-    <!-- window.AppModules.UI namespace'i burada kurulur -->
-    <script type="module" src="src/ui/ui-components.js?v=3.1.0"></script>
-    <!-- self-approval-reporter.js: Denetim ve Kendi Kendini Onaylama Raporlama Ekranı -->
-    <script type="module" src="src/modules/self-approval-reporter.js?v=3.1.0"></script>
-    <script src="script.js?v=1.0.5"></script>
+    <script src="script.js"></script>
 
 
 

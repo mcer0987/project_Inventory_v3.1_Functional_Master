@@ -26,22 +26,10 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 
     <script type="module">
-        import { checkAdminAuth } from './src/services/firebase-handler.js?v=1782473897707';
+        // [WHY]: Query'li URL ikinci bir firebase-handler instance'ı yaratıyordu (ARC-02: çift dinleyici, 26 okuma).
+        import { checkAdminAuth } from './src/services/firebase-handler.js';
 
-        // Sayfa yüklenmeden önce kontrol et
-        const authData = localStorage.getItem('admin_auth');
-        const now = new Date().getTime();
-
-        if (!authData) {
-            // Oturum yoksa direkt index'e at (orada loginModal açılacak)
-            window.location.replace('index.html');
-        } else {
-            const auth = JSON.parse(authData);
-            if (now > auth.expiry) {
-                localStorage.removeItem('admin_auth');
-                window.location.replace('index.html');
-            }
-        }
+        checkAdminAuth();
 
         // Süreyi her saniye kontrol et
         setInterval(() => {
@@ -1892,16 +1880,12 @@
 
 
     <script src="src/utils/alert.js"></script>
-    <script src="src/modules/admin/system-tips.js?v=1.0.0"></script>
+    <script src="src/modules/admin/system-tips.js"></script>
     <script src="src/utils/timer.js"></script>
     <script src="security.js"></script>
-    <script type="module" src="src/modules/admin/admin-dashboard.js?v=1.0.5"></script>
-    <script type="module" src="src/services/purchase-servises.js?v=1.0.4"></script>
-    <script type="module" src="src/modules/edm-workflow.js?v=1.0.4"></script>
+    <script type="module" src="src/modules/admin/admin-main.js"></script>
     <script src="script.js"></script>
-    <script type="module" src="src/modules/admin/admin-purchase-render.js?v=1.0.4"></script>
-    <script type="module" src="src/modules/admin/inventory-management.js?v=1.0.0"></script>
-    <script src="src/modules/admin/admin-system-control.js?v=1782473897707"></script>
+    <script src="src/modules/admin/admin-system-control.js"></script>
     <script src="src/modules/admin/admin-sitemap.js"></script>
 
     <!-- ═══════════════════════════════════════════════════════════ -->

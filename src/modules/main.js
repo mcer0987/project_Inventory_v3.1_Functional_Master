@@ -9,6 +9,7 @@ window.AppModules = window.AppModules || {};
 
 // 2. Import in the correct order
 import * as Utils from '../utils/utils.js';
+import '../../security-biometrics.js';                      // [SECURITY_GUARD] must run BEFORE auth-engine
 import * as Auth from './auth-engine.js';
 import { TableEngine } from '../ui/table-engine.js';
 import { InventoryLogic } from './inventory-logic.js';
