@@ -23,6 +23,10 @@
  *   - window._dx               ← script.js (güvenli kod input maskeleyici)
  */
 
+// [WHY]: WebAuthn adımı kayıt akışı olmadan çalışıyor; bir cihaz sınıfında girişi engelliyor, diğerlerinde güvenlik sağlamıyor (AUTH-03).
+// [HOW]: K2 kararı gelene kadar kapalı. true yapmak eski davranışı (kod + biyometrik) geri getirir.
+const ENABLE_BIOMETRIC_LOGIN = false;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // checkIsAdmin
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,11 +47,8 @@ export const checkIsAdmin = function () {
         const user = window.getActiveUser();
         if (user) window.currentUser = user;
 
-        // GÜVENLİK BARİYERİ: Gerçek kararı Firebase Auth objesi verir
-        if (window.userAuth && window.userAuth.uid) {
-            return true;
-        }
-        return false;
+        // [WHY]: Personelin anonim oturumu da uid taşıdığı için eski kontrol herkesi admin sayıyordu (AUTH-02).
+        return window.isDbAdmin();
     } catch (e) {
         return false;
     }
@@ -235,7 +236,7 @@ export const checkAuth = function () {
     let isAuthValid = false;
 
     // GERÇEK GÜVENLİK BARİYERİ: Firebase'den oturum yoksa kapı duvar.
-    if (window.userAuth && !window.userAuth.isAnonymous) {
+    if (window.isDbAdmin()) {
         isAuthValid = true;
 
         // Yardımcı modüller için UI state'lerini yenile (Güvenli şekilde)
@@ -325,13 +326,9 @@ window.checkAuth = checkAuth;
  * @function handleLogin
  * @param {Event} event - Form submit eventi
  *
- * [WHY]: SecurityConfig.hash frontend'e sızdırılması güvenlik açığıydı.
- *        Şifre doğrulaması tamamen backend (Cloud Functions) üzerinden yapılmalıdır.
- * [HOW]: SecurityConfig.authenticate çağrısı, girilen kodu backend'e (Firebase Admin SDK)
- *        göndererek "Görünmez E-posta İllüzyonu" ile doğrular. Başarılıysa admin yetkisi
- *        verilir; değilse personel listesinden personel kodu aranır.
- * [SECURITY_GUARD]: Biyometrik doğrulama entegrasyonu - 5 haneli kod geçerliyse
- *                   oturum açmak için OS seviyesinde doğrulama (Windows Hello/TouchID/FaceID) gereklidir.
+ * [WHY]: Personel girişi. Admin girişi ayrı akıştadır (checkAdminAndGo).
+ * [HOW]: 5 haneli kod personel listesinde aranır; bulunursa Session Store'a yazılır.
+ *        Biyometrik adım ENABLE_BIOMETRIC_LOGIN ile kontrol edilir.
  */
 export const handleLogin = async function (event) {
     if (event) { event.preventDefault(); event.stopPropagation(); }
@@ -351,69 +348,50 @@ export const handleLogin = async function (event) {
         return;
     }
 
-    // [WHY]: SecurityConfig global nesneye (security.js tarafından tanımlanır) bağımlıyız.
-    //        ESM import yerine window üzerinden lazy-resolve ediyoruz; çünkü security.js
-    //        klasik <script> tag ile yüklenip window.SecurityConfig olarak tanımlanır.
-    const isAdminPass = await window.SecurityConfig.authenticate(code);
-
-    let user;
-
-    if (isAdminPass) {
-        // [WHY]: Backend Admin onayladıysa personel listesinden admin kullanıcıyı bul.
-        //        Listede yoksa sanal bir admin objesi oluştur (yeni sistemde geçici destek).
-        user = window.data.personel.find(p => p.name === 'Muhammed Cer' || p.name === 'Admin');
-        if (!user) user = { name: 'Admin', code: 'ADMIN', yetki: 'admin' };
-    } else {
-        // [WHY]: Admin değilse, 5 haneli personel kodunu kontrol et.
-        //        Personel okuma yetkisine sahiptir (Anonim oturum) ama yazma yetkisi yoktur.
-        user = window.data.personel.find(p => p.code === code);
-    }
+    // [WHY]: Her personel girişi admin hesabına bir parola denemesi yapıyordu (AUTH-04).
+    // [HOW]: Bu form yalnız personel kodunu doğrular; admin girişi yalnız "Yönetici Paneli" (checkAdminAndGo) akışındadır.
+    const user = window.data.personel.find(p => p.code === code);
 
     if (user) {
-        // [SECURITY_GUARD]: Biyometrik doğrulama gerekli - OS seviyesinde yetki kontrolü
-        if (typeof window.verifyBiometrics !== 'function') {
-            console.error('[auth-engine] Biometric module not loaded!');
-            if (statusDiv) {
-                statusDiv.innerHTML = "<span style='color:var(--danger-color)'>❌ Güvenlik modülü yüklenemedi!</span>";
+        // [SECURITY_GUARD]: K2 kararına kadar biyometrik adım bayrakla kapalı (bkz. ENABLE_BIOMETRIC_LOGIN).
+        if (ENABLE_BIOMETRIC_LOGIN) {
+            if (typeof window.verifyBiometrics !== 'function') {
+                console.error('[auth-engine] Biometric module not loaded!');
+                if (statusDiv) {
+                    statusDiv.innerHTML = "<span style='color:var(--danger-color)'>❌ Güvenlik modülü yüklenemedi!</span>";
+                }
+                return;
             }
-            return;
-        }
 
-        // [BUGFIX] Bug 8: Secure WebAuthn Cancel/Failure handling
-        // [WHY]: If WebAuthn fails or is cancelled, the UI might stay in a half-logged-in state.
-        //        We must abort the session fully, revert DOM modifications, and force user back to login modal.
-        // [HOW]: Wrap verification in a try-catch. If it returns false or throws, execute window.handleLogout('manual')
-        //        and alert "Yetkili oturum açmanız gerekmektedir."
-        let biometricSuccess = false;
-        try {
-            biometricSuccess = await window.verifyBiometrics({ timeout: 60000 });
-        } catch (error) {
-            console.error('[auth-engine] WebAuthn exception during login verification:', error);
-            biometricSuccess = false;
-        }
-        
-        if (!biometricSuccess) {
-            if (statusDiv) {
-                statusDiv.innerHTML = "<span style='color:var(--danger-color)'>❌ Biyometrik doğrulama başarısız!</span>";
+            // [BUGFIX] Bug 8: WebAuthn iptal/başarısızlıkta oturum tamamen geri alınır.
+            let biometricSuccess = false;
+            try {
+                biometricSuccess = await window.verifyBiometrics({ timeout: 60000 });
+            } catch (error) {
+                console.error('[auth-engine] WebAuthn exception during login verification:', error);
+                biometricSuccess = false;
             }
-            if (codeInput) {
-                codeInput.value = '';
-                codeInput.focus();
+
+            if (!biometricSuccess) {
+                if (statusDiv) {
+                    statusDiv.innerHTML = "<span style='color:var(--danger-color)'>❌ Biyometrik doğrulama başarısız!</span>";
+                }
+                if (codeInput) {
+                    codeInput.value = '';
+                    codeInput.focus();
+                }
+                if (typeof window.handleLogout === 'function') {
+                    await window.handleLogout('manual');
+                } else if (typeof window.logout === 'function') {
+                    await window.logout('manual');
+                }
+                if (typeof window.showAppAlert === 'function') {
+                    window.showAppAlert('Yetkili oturum açmanız gerekmektedir.', 'error');
+                } else {
+                    alert('Yetkili oturum açmanız gerekmektedir.');
+                }
+                return;
             }
-            
-            // Abort login state and reset UI entirely
-            if (typeof window.handleLogout === 'function') {
-                await window.handleLogout('manual');
-            } else if (typeof window.logout === 'function') {
-                await window.logout('manual');
-            }
-            
-            if (typeof window.showAppAlert === 'function') {
-                window.showAppAlert('Yetkili oturum açmanız gerekmektedir.', 'error');
-            } else {
-                alert('Yetkili oturum açmanız gerekmektedir.');
-            }
-            return;
         }
 
         // ─── BAŞARILI GİRİŞ (KOD + BIYOMETRIK) ───
@@ -424,13 +402,6 @@ export const handleLogin = async function (event) {
         // Güvenlik timer'ını başlat (timer.js)
         if (typeof window.startSessionTimer === 'function') {
             window.startSessionTimer();
-        }
-
-        if (isAdminPass) {
-            const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
-            // [SECURITY_GUARD]: admin_auth değil, secure olarak saklandı
-            const adminData = { expiry, verified: true };
-            localStorage.setItem('admin_auth', JSON.stringify(adminData));
         }
 
         if (loginModal) loginModal.style.setProperty('display', 'none', 'important');
@@ -505,27 +476,26 @@ export const checkAdminAndGo = async function () {
     const isAdminPass = await window.SecurityConfig.authenticate(code);
 
     if (isAdminPass) {
-        const user = window.data.personel.find(
+        // [WHY]: Personel listesinde admin kaydı yoksa (ör. boş demo DB) giriş sessizce hiçbir şey yapmıyordu.
+        const user = (window.data.personel || []).find(
             p => p.name === 'Muhammed Cer' || p.name === 'Admin'
-        );
-        if (!user) return;
+        ) || { name: 'Admin', code: 'ADMIN', yetki: 'admin' };
 
-        // [SECURITY_GUARD]: Biyometrik doğrulama admin panel geçişi için zorunlu
-        if (typeof window.verifyBiometrics !== 'function') {
-            console.error('[auth-engine] Biometric module not loaded!');
-            if (typeof window.showAppAlert === 'function') {
-                window.showAppAlert('Güvenlik modülü yüklenemedi!', 'error');
+        if (ENABLE_BIOMETRIC_LOGIN) {
+            if (typeof window.verifyBiometrics !== 'function') {
+                console.error('[auth-engine] Biometric module not loaded!');
+                if (typeof window.showAppAlert === 'function') {
+                    window.showAppAlert('Güvenlik modülü yüklenemedi!', 'error');
+                }
+                return;
             }
-            return;
-        }
-
-        const biometricSuccess = await window.verifyBiometrics({ timeout: 60000 });
-        
-        if (!biometricSuccess) {
-            if (typeof window.showAppAlert === 'function') {
-                window.showAppAlert('Biyometrik doğrulama başarısız!', 'error');
+            const biometricSuccess = await window.verifyBiometrics({ timeout: 60000 });
+            if (!biometricSuccess) {
+                if (typeof window.showAppAlert === 'function') {
+                    window.showAppAlert('Biyometrik doğrulama başarısız!', 'error');
+                }
+                return;
             }
-            return;
         }
 
         window.setActiveUser(user);

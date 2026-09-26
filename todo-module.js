@@ -94,7 +94,7 @@ window.todoModule = {
 
         this.state.personnelFilter = filterType;
         const currentUser = window.currentUser ? window.currentUser.name : "";
-        if (!window.userAuth || window.userAuth.isAnonymous) return;
+        if (!window.isAppLoggedIn()) return;
         const allTasks = this.getAllTasks();
 
         let tasks = allTasks.filter(t => t.assigneeId === currentUser);
@@ -580,7 +580,7 @@ window.todoModule = {
     openNewTaskModal: function (mode) {
         const personnelList = Array.isArray(window.data.personel) ? window.data.personel : Object.values(window.data.personel || {});
         const currentUser = window.currentUser ? window.currentUser.name : "";
-        if (!window.userAuth || window.userAuth.isAnonymous) return;
+        if (!window.isAppLoggedIn()) return;
 
         let modalTitle = "Yeni Görev Ata";
         let assigneeLabel = "Atanan Personel / Havuz";
@@ -729,7 +729,7 @@ window.todoModule = {
     /** Bekleyen görevleri kontrol et ve bildirim gönder */
     checkPendingTasks: async function () {
         const currentUser = window.currentUser ? window.currentUser.name : "";
-        if (!window.userAuth || window.userAuth.isAnonymous) return;
+        if (!window.isAppLoggedIn()) return;
         if (!currentUser) return;
 
         // 🔔 Rozeti her zaman güncelliyoruz (Sessiz güncelleme)
@@ -790,7 +790,7 @@ window.todoModule = {
     /** Navbar Rozetini Güncelle */
     updateNavBadge: function () {
         const currentUser = window.currentUser ? window.currentUser.name : "";
-        if (!window.userAuth || window.userAuth.isAnonymous) return;
+        if (!window.isAppLoggedIn()) return;
         if (!currentUser) return;
 
         const allTasks = this.getAllTasks();
