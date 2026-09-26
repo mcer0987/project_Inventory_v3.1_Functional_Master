@@ -727,6 +727,7 @@ window.editPersonnelInventoryRequest = function (index) {
     const req = window.data.requests[index];
     if (!req) return;
     window.editingReqIndex = index;
+    window.editingReqId = req.id;
     const nameInput = document.getElementById('reqProdName');
     const qtyInput = document.getElementById('reqQty');
     const noteInput = document.getElementById('reqNote');

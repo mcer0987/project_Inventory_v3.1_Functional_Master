@@ -354,6 +354,65 @@ export const toggleWatch = async function (depo, index) {
     console.groupEnd();
 };
 
+// [WHY]: ESM geçişinde saveRequest kayboldu; "Envanter Talep Et" formu var olmayan bir fonksiyonu çağırıp sayfayı yeniliyordu (ITSM-01).
+// [HOW]: Form alanları doğrulanır; yeni talep eklenir veya düzenlenen talep id ile bulunup birleştirilir; yalnız 'requests' yazılır.
+export const saveRequest = async function (event) {
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+
+    const alert = (msg, type) => { if (typeof window.showAppAlert === 'function') window.showAppAlert(msg, type); };
+    const user = window.getActiveUser();
+    if (!user) { alert('Talep oluşturmak için giriş yapmalısınız.', 'error'); return; }
+
+    const val = id => (document.getElementById(id)?.value || '').trim();
+    const urun = val('reqProdName');
+    const adet = parseInt(val('reqQty'), 10);
+    const talepTuru = val('reqType') || 'Kalıcı Zimmet';
+    const oncelik = val('reqPriority') || 'Orta';
+    const iadeTarihi = val('reqReturnDate');
+    const not = val('reqNote');
+
+    if (!urun) { alert('Lütfen talep edilen ürünü yazın.', 'warning'); return; }
+    if (!Number.isInteger(adet) || adet < 1) { alert('Adet en az 1 olmalıdır.', 'warning'); return; }
+    if (talepTuru === 'Geçici Zimmet') {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        if (!iadeTarihi || new Date(iadeTarihi + 'T00:00:00') <= today) {
+            alert('Geçici zimmet için bugünden sonraki bir iade tarihi seçin.', 'warning');
+            return;
+        }
+    }
+
+    const formFields = {
+        ürün: urun, adet, talepTuru, oncelik, not,
+        iadeTarihi: talepTuru === 'Geçici Zimmet' ? iadeTarihi : '',
+    };
+
+    const requests = [...(window.data.requests || [])];
+    const editId = window.editingReqId;
+    if (editId !== null && editId !== undefined) {
+        const idx = requests.findIndex(r => String(r.id) === String(editId));
+        if (idx === -1) { alert('Düzenlenen talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        requests[idx] = { ...requests[idx], ...formFields };
+    } else {
+        requests.unshift({
+            id: Date.now(),
+            ...formFields,
+            personel: user.name,
+            personelKodu: user.code || '',
+            durum: 'Beklemede',
+            tarih: typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR'),
+        });
+    }
+
+    await window.saveData('requests', requests);
+
+    window.editingReqId = null;
+    window.editingReqIndex = null;
+    document.getElementById('requestForm')?.reset();
+    if (typeof window.closeRequestModal === 'function') window.closeRequestModal();
+    if (typeof window.renderMyRequestsTable === 'function') window.renderMyRequestsTable();
+    alert(editId != null ? 'Talebiniz güncellendi.' : 'Talebiniz iletildi.', 'success');
+};
+
 export const receiveProduct = async function (index) {
     if (!window.data || !window.data.requests) return;
     const req = window.data.requests[index];
@@ -493,6 +552,7 @@ export const InventoryLogic = {
     bulkDelete,
     saveProduct,
     toggleWatch,
+    saveRequest,
     receiveProduct,
     deleteB3Row,
     toggleStatus,
@@ -511,6 +571,7 @@ window.deleteItem = window.AppModules.Inventory.deleteItem;
 window.bulkDelete = window.AppModules.Inventory.bulkDelete;
 window.saveProduct = window.AppModules.Inventory.saveProduct;
 window.toggleWatch = window.AppModules.Inventory.toggleWatch;
+window.saveRequest = window.AppModules.Inventory.saveRequest;
 window.receiveProduct = window.AppModules.Inventory.receiveProduct;
 window.deleteB3Row = window.AppModules.Inventory.deleteB3Row;
 window.toggleStatus = window.AppModules.Inventory.toggleStatus;

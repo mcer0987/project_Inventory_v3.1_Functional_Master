@@ -471,6 +471,7 @@ export const UIComponents = {
             const form = document.getElementById('requestForm');
             if (form) form.reset();
             window.editingReqIndex = null;
+            window.editingReqId = null;
             if (title) title.innerText = 'Envanter Talep Et';
 
             // ITSM alanlarını sıfırla
