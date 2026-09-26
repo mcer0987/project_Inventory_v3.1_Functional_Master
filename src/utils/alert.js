@@ -222,15 +222,12 @@ window.adminBypassMaintenance = async function () {
     if (typeof SecurityConfig !== 'undefined' && SecurityConfig.authenticate) {
         const success = await SecurityConfig.authenticate(code);
         if (success) {
-            const expiry = new Date().getTime() + (180 * 60 * 1000); // 3 saat vize süresi (admin.html ile aynı)
+            const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
             localStorage.setItem('admin_auth', JSON.stringify({ expiry: expiry }));
-            
-            // Personel listesinden admin bulup activeUser olarak ata
-            const adminUser = (window.data && window.data.personel) 
-                ? window.data.personel.find(p => p.name === 'Muhammed Cer' || p.name === 'Admin') 
-                : { name: 'Admin', role: 'admin' };
-            
-            localStorage.setItem('activeUser', JSON.stringify(adminUser));
+
+            const adminUser = (window.data && window.data.personel || []).find(p => p.name === 'Muhammed Cer' || p.name === 'Admin')
+                || { name: 'Admin', role: 'admin' };
+            window.setActiveUser(adminUser);
             localStorage.removeItem("system_maintenance_mode");
             window.location.href = 'admin.html';
         } else {

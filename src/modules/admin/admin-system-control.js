@@ -482,12 +482,8 @@
 
         // Aktif kullanÄ±cÄ±
         if (userEl) {
-            try {
-                const user = JSON.parse(localStorage.getItem('activeUser') || '{}');
-                userEl.textContent = user.name || 'Admin';
-            } catch (e) {
-                userEl.textContent = 'Admin';
-            }
+            const user = window.getActiveUser();
+            userEl.textContent = (user && user.name) || 'Admin';
         }
 
         // GÃ¼venlik seviyesi (5 barlÄ±)

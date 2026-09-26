@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="dark-theme.css">
     <link rel="stylesheet" href="admin-dark-fix.css">
     <script src="dark-mode-toggle.js"></script>
+    <script src="src/utils/session-store.js"></script>
     <link rel="stylesheet" href="todo-module.css">
     <script src="todo-module.js"></script>
 
@@ -70,13 +71,10 @@
             const isAuthenticated = await SecurityConfig.authenticate(pass);
 
             if (isAuthenticated) {
-                const expiry = new Date().getTime() + (window.SessionConfig?.ADMIN_LOCK_TIME || 180000);
+                const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
                 localStorage.setItem('admin_auth', JSON.stringify({ expiry: expiry }));
 
-                // 🔥 KRİTİK: activeUser eksikse admin olarak tanımla
-                if (!localStorage.getItem('activeUser')) {
-                    localStorage.setItem('activeUser', JSON.stringify({ name: 'Admin', role: 'admin' }));
-                }
+                if (!window.getActiveUser()) window.setActiveUser({ name: 'Admin', role: 'admin' });
 
                 document.getElementById('adminLockModal').style.display = 'none';
                 if (window._dx) window._dx._r('lock-val-node');

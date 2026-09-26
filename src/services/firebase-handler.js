@@ -80,7 +80,7 @@ window.loginAsAdmin = async function (enteredCode) {
     if (typeof SecurityConfig !== 'undefined' && SecurityConfig.authenticate) {
         const success = await SecurityConfig.authenticate(enteredCode);
         if (success) {
-            const expiry = new Date().getTime() + (3 * 60 * 1000);
+            const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
             localStorage.setItem('admin_auth', JSON.stringify({ expiry: expiry }));
             window.location.href = 'admin.html';
         } else {
@@ -290,9 +290,7 @@ window.startRealtimeSync = function () {
 
                 // 🛡️ NULL-GUARD: window.currentUser henüz yüklenmemiş olabilir (async Firebase init race condition).
                 // localStorage'dan da okuyarak ikincil güvenlik ağı kuruyoruz.
-                const localUser = window.currentUser || (() => {
-                    try { return JSON.parse(localStorage.getItem('activeUser')); } catch (e) { return null; }
-                })();
+                const localUser = window.currentUser || window.getActiveUser();
 
                 if (localUser) {
                     const isMatch = (
@@ -307,10 +305,7 @@ window.startRealtimeSync = function () {
                             window.logout('force_logout');
                         } else {
                             // Fallback: logout fonksiyonu henüz yüklenmemişse manuel temizle
-                            localStorage.removeItem('activeUser');
-                            localStorage.removeItem('admin_auth');
-                            sessionStorage.removeItem('adminVizesi');
-                            localStorage.removeItem('launchpadBypassed');
+                            window.clearSession();
                             window.location.replace('index.html');
                         }
                     }
@@ -329,10 +324,8 @@ window.startRealtimeSync = function () {
         if (docSnap.exists()) {
             const data = docSnap.data();
             
-            const localUser = window.currentUser || (() => {
-                try { return JSON.parse(localStorage.getItem('activeUser')); } catch (e) { return null; }
-            })();
-            
+            const localUser = window.currentUser || window.getActiveUser();
+
             if (localUser && data.timestamp && data.message) {
                 const targetId = data.target_user_id;
                 const isMatch = (

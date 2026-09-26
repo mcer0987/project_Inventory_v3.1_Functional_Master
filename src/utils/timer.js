@@ -160,10 +160,7 @@ function logout(reason = 'manual') {
     if (warningDiv) warningDiv.style.display = 'none';
 
     // 2. Kimlik verilerini temizle
-    localStorage.removeItem('activeUser');
-    localStorage.removeItem('admin_auth');
-    sessionStorage.removeItem('adminVizesi');
-    localStorage.removeItem('launchpadBypassed');
+    window.clearSession();
 
     // [WHY]: Clear the Firebase Auth session to prevent automatic re-login on page refresh.
     // [HOW]: Invoke window.SecurityConfig.logout() or dynamically import the auth SDK and sign out.

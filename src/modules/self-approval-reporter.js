@@ -392,10 +392,7 @@ const initializeSecurityProxies = function () {
             const creator = item.createdBy || item.createdByCode;
             const currentUser = window.currentUser?.name;
             let currentCode = null;
-            let activeUserObj = typeof window.secureRetrieve === 'function' ? window.secureRetrieve('activeUser') : null;
-            if (!activeUserObj && localStorage.getItem('activeUser')) {
-                try { activeUserObj = JSON.parse(localStorage.getItem('activeUser')); } catch (e) { }
-            }
+            const activeUserObj = window.getActiveUser();
             if (activeUserObj) currentCode = activeUserObj.code;
 
             const isSelfApproval = (creator && (String(creator) === String(currentCode) || String(creator).toLowerCase() === String(currentUser).toLowerCase()));

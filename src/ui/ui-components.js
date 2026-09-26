@@ -413,8 +413,24 @@ export const UIComponents = {
         const modal = document.getElementById('exitModal');
         if (!modal) return;
 
+        // [WHY]: Önceki açılıştan kalan seçim, çıkışı yanlış ürüne/depoya yönlendiriyordu (INV-02).
+        // [HOW]: Seçim her açılışta sıfırlanır; B1/B2 satırından açıldıysa o ürün ön-seçilir.
+        const selectedDiv = document.getElementById('selectedProduct');
+        if (selectedDiv) {
+            Object.keys(selectedDiv.dataset).forEach(k => delete selectedDiv.dataset[k]);
+            selectedDiv.innerHTML = '';
+            selectedDiv.classList.add('hidden');
+        }
+        const rowRepo = window.currentExitRepo;
+        const rowItem = (rowRepo === 'b1' || rowRepo === 'b2') && index !== undefined && index !== null && index !== ''
+            ? (window.data[rowRepo] || [])[index] : null;
+        if (rowItem) {
+            this.selectProduct(rowItem.ürün || rowItem.name, rowItem.tür || rowItem.type || rowItem.marka,
+                rowItem.raf || rowItem.shelf, rowItem.adet ?? rowItem.qty ?? 0, rowRepo, index);
+        }
+
         // Aktif kullanıcı adını forma yaz
-        const activeUser  = JSON.parse(localStorage.getItem('activeUser') || 'null');
+        const activeUser  = window.getActiveUser();
         const personInput = document.getElementById('exitPerson');
         if (personInput && activeUser) personInput.value = activeUser.name;
 

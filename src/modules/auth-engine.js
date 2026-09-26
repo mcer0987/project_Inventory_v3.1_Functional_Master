@@ -40,13 +40,7 @@
  */
 export const checkIsAdmin = function () {
     try {
-        // [SECURITY_GUARD]: secureRetrieve ile maskeli veri güvenli şekilde okunur
-        let user = null;
-        if (typeof window.secureRetrieve === 'function') {
-            user = window.secureRetrieve('activeUser');
-        } else {
-            try { user = JSON.parse(localStorage.getItem('activeUser')); } catch (e) { }
-        }
+        const user = window.getActiveUser();
         if (user) window.currentUser = user;
 
         // GÜVENLİK BARİYERİ: Gerçek kararı Firebase Auth objesi verir
@@ -106,16 +100,7 @@ window.validateAdminAction = validateAdminAction;
  *        İki özel buton (adminRequestsBtn, btnAdminPanel) ayrıca ele alınır.
  */
 export const setupUI = function () {
-    // [SECURITY_GUARD]: secureRetrieve ile maskeli veri güvenli şekilde okunur
-    let userObj = null;
-    if (typeof window.secureRetrieve === 'function') {
-        userObj = window.secureRetrieve('activeUser');
-    } else {
-        const userStr = localStorage.getItem('activeUser');
-        if (userStr) {
-            try { userObj = JSON.parse(userStr); } catch (e) { }
-        }
-    }
+    const userObj = window.getActiveUser();
     if (!userObj) return;
 
     const isAdmin = checkIsAdmin();
@@ -241,16 +226,7 @@ window.updateNavbarUI = updateNavbarUI;
  */
 export const checkAuth = function () {
     const authData = localStorage.getItem('admin_auth');
-    // [SECURITY_GUARD]: secureRetrieve ile maskeli veri güvenli okunur
-    let activeUser = null;
-    if (typeof window.secureRetrieve === 'function') {
-        activeUser = window.secureRetrieve('activeUser');
-    } else {
-        const userStr = localStorage.getItem('activeUser');
-        if (userStr) {
-            try { activeUser = JSON.parse(userStr); } catch (e) { }
-        }
-    }
+    const activeUser = window.getActiveUser();
     const adminVizesi = sessionStorage.getItem('adminVizesi') === 'true';
 
     const loginModal = document.getElementById('loginModal');
@@ -263,15 +239,7 @@ export const checkAuth = function () {
         isAuthValid = true;
 
         // Yardımcı modüller için UI state'lerini yenile (Güvenli şekilde)
-        // [SECURITY_GUARD]: secureStore ile veri maskelenir
-        if (!activeUser) {
-            const adminUserData = { name: 'Admin', role: 'admin' };
-            if (typeof window.secureStore === 'function') {
-                window.secureStore('activeUser', adminUserData);
-            } else {
-                localStorage.setItem('activeUser', JSON.stringify(adminUserData));
-            }
-        }
+        if (!activeUser) window.setActiveUser({ name: 'Admin', role: 'admin' });
         if (!adminVizesi) sessionStorage.setItem('adminVizesi', 'true');
     }
 
@@ -449,9 +417,7 @@ export const handleLogin = async function (event) {
         }
 
         // ─── BAŞARILI GİRİŞ (KOD + BIYOMETRIK) ───
-        // [SECURITY_GUARD]: secureStore ile veri maskelenir, rol manipülasyonu önlenir
-        await window.secureStore('activeUser', user);
-        window.currentUser = user;
+        window.setActiveUser(user);
 
         document.body.classList.add('logged-in');
 
@@ -461,7 +427,7 @@ export const handleLogin = async function (event) {
         }
 
         if (isAdminPass) {
-            const expiry = new Date().getTime() + (10 * 60 * 1000); // 10 dk
+            const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
             // [SECURITY_GUARD]: admin_auth değil, secure olarak saklandı
             const adminData = { expiry, verified: true };
             localStorage.setItem('admin_auth', JSON.stringify(adminData));
@@ -562,9 +528,8 @@ export const checkAdminAndGo = async function () {
             return;
         }
 
-        // [SECURITY_GUARD]: secureStore ile veri maskelenir
-        await window.secureStore('activeUser', user);
-        const expiry = new Date().getTime() + (10 * 60 * 1000);
+        window.setActiveUser(user);
+        const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
         localStorage.setItem('admin_auth', JSON.stringify({ expiry }));
 
         if (typeof updateNavbarUI === 'function') updateNavbarUI(user);
@@ -594,15 +559,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 1. OPTIMISTIC NAVBAR RENDER (İyimser Çizim)
     // [WHY]: Firebase Auth asenkron; kullanıcı veri yüklenene kadar navbar boş kalır.
     // [HOW]: LocalStorage önbelleği ile anında UI çiziyoruz. Güvenlik firebase-handler'da.
-    // [SECURITY_GUARD]: secureRetrieve ile maskeli veri güvenli okunur
     try {
-        let cachedUser = null;
-        if (typeof window.secureRetrieve === 'function') {
-            cachedUser = window.secureRetrieve('activeUser');
-        } else {
-            const cachedUserStr = localStorage.getItem('activeUser');
-            if (cachedUserStr) cachedUser = JSON.parse(cachedUserStr);
-        }
+        const cachedUser = window.getActiveUser();
         if (cachedUser) {
             updateNavbarUI(cachedUser);
         } else if (localStorage.getItem('admin_auth') || sessionStorage.getItem('adminVizesi') === 'true') {
@@ -621,18 +579,10 @@ document.addEventListener('DOMContentLoaded', () => {
 //        navbar güncellenmeden eski kullanıcı bilgisini gösterir.
 // [HOW]: localStorage'daki 'activeUser' değişikliklerini dinleyerek navbar
 //        anında senkronize edilir.
-// [SECURITY_GUARD]: secureRetrieve ile maskeli veri güvenli okunur
 window.addEventListener('storage', () => {
-    if (typeof window.secureRetrieve === 'function') {
-        const user = window.secureRetrieve('activeUser');
-        if (user) {
-            try { updateNavbarUI(user); } catch (e) { }
-        }
-    } else {
-        const user = localStorage.getItem('activeUser');
-        if (user) {
-            try { updateNavbarUI(JSON.parse(user)); } catch (e) { }
-        }
+    const user = window.getActiveUser();
+    if (user) {
+        try { updateNavbarUI(user); } catch (e) { }
     }
 });
 
@@ -682,13 +632,9 @@ export const handleLogout = async function (reason = 'manual') {
     if (warningDiv) warningDiv.style.display = 'none';
 
     // 2. Kimlik verilerini ve önbelleği temizle
-    localStorage.removeItem('activeUser');
-    localStorage.removeItem('admin_auth');
-    sessionStorage.removeItem('adminVizesi');
-    localStorage.removeItem('launchpadBypassed');
+    window.clearSession();
 
     // 3. Küresel Uygulama State'lerini Sıfırla
-    window.currentUser = null;
     window.userAuth = null;
     window._initialRenderDone = false;
     window.isFirebaseLoaded = false;

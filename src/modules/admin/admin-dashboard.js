@@ -1668,12 +1668,8 @@ window.onload = function () {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-    try {
-        const user = localStorage.getItem("activeUser");
-        if (user) updateNavbarUI(JSON.parse(user));
-    } catch (e) {
-        console.warn('⚠️ [admin-dashboard] activeUser parse hatası:', e.message);
-    }
+    const user = window.getActiveUser();
+    if (user && typeof updateNavbarUI === 'function') updateNavbarUI(user);
     startAdminStatusTimer();
 });
 

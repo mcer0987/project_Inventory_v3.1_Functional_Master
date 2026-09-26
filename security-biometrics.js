@@ -1,27 +1,6 @@
 // [SECURITY_GUARD] Premium OS-Level Biometric Verification Module
 // Implements WebAuthn-based biometric authentication with localStorage hardening
 
-const BIOMETRIC_SALT = 'x9k2mP@7vQ3sT1wZ';
-
-function _xorEncrypt(data, salt) {
-    const str = typeof data === 'string' ? data : JSON.stringify(data);
-    let result = '';
-    for (let i = 0; i < str.length; i++) {
-        const charCode = str.charCodeAt(i) ^ salt.charCodeAt(i % salt.length);
-        result += String.fromCharCode(charCode);
-    }
-    return result;
-}
-
-function _xorDecrypt(encrypted, salt) {
-    let result = '';
-    for (let i = 0; i < encrypted.length; i++) {
-        const charCode = encrypted.charCodeAt(i) ^ salt.charCodeAt(i % salt.length);
-        result += String.fromCharCode(charCode);
-    }
-    return result;
-}
-
 // [SECURITY_GUARD] Check if biometric authentication is available on this device
 export async function isBiometricAvailable() {
     if (!window.PublicKeyCredential) {
@@ -117,58 +96,29 @@ export function generateBiometricChallenge() {
     return challenge;
 }
 
-// [SECURITY_GUARD] Mask user data with Base64 + XOR salt for localStorage storage
+// [WHY]: activeUser formatının tek sahibi Session Store (src/utils/session-store.js); ikinci bir maskeleme uygulaması formatları ayrıştırıyordu.
+// [HOW]: Bu dört fonksiyon yalnızca Session Store'a delege eden uyumluluk sarmalayıcılarıdır.
+const _session = () => window.AppModules.Session;
+
 export function maskUserData(obj) {
-    if (!obj || typeof obj !== 'object') {
-        return null;
-    }
-    
-    try {
-        const sanitized = { ...obj };
-        delete sanitized.password;
-        delete sanitized.token;
-        
-        const encrypted = _xorEncrypt(sanitized, BIOMETRIC_SALT);
-        return btoa(encrypted);
-    } catch (e) {
-        console.error('[security-biometrics] Masking failed:', e);
-        return null;
-    }
+    return _session().maskUserData(obj);
 }
 
-// [SECURITY_GUARD] Unmask user data from Base64 + XOR salt
 export function unmaskUserData(str) {
-    if (!str || typeof str !== 'string') {
-        return null;
-    }
-    
-    try {
-        const encrypted = atob(str);
-        const decrypted = _xorDecrypt(encrypted, BIOMETRIC_SALT);
-        return JSON.parse(decrypted);
-    } catch (e) {
-        console.error('[security-biometrics] Unmasking failed:', e);
-        return null;
-    }
+    return _session().unmaskUserData(str);
 }
 
-// [SECURITY_GUARD] Secure storage wrapper that auto-masks user data
 export async function secureStore(key, data) {
+    if (key === 'activeUser') return _session().setActiveUser(data);
     const masked = maskUserData(data);
-    if (masked) {
-        localStorage.setItem(key, masked);
-        return true;
-    }
-    return false;
+    if (!masked) return false;
+    localStorage.setItem(key, masked);
+    return true;
 }
 
-// [SECURITY_GUARD] Secure retrieval wrapper that auto-unmasks user data
 export function secureRetrieve(key) {
-    const stored = localStorage.getItem(key);
-    if (stored) {
-        return unmaskUserData(stored);
-    }
-    return null;
+    if (key === 'activeUser') return _session().getActiveUser();
+    return unmaskUserData(localStorage.getItem(key));
 }
 
 // [SECURITY_GUARD] Integrated 2FA authentication flow (code + biometric)
