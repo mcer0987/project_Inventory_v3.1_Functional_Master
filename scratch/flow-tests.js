@@ -223,6 +223,22 @@ const SCENARIOS = {
         });
     },
 
+    // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
+    async systemConfigScope(page) {
+        return page.evaluate(async () => {
+            const fs = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+            const tryOp = async fn => { try { await fn(); return 'ALLOWED'; } catch (e) { return e.code || e.message; } };
+            const ref = window.systemConfigRef('admin_settings');
+            return {
+                settingsPath: ref.path,
+                messagesPath: window.systemConfigRef('admin_messages').path,
+                readScoped: await tryOp(() => fs.getDoc(ref)),
+                staffWriteScoped: await tryOp(() => fs.setDoc(window.systemConfigRef('flowtest_probe'), { x: 1 })),
+                readLegacyRoot: await tryOp(() => fs.getDoc(fs.doc(window.fireDb, 'system_config', 'admin_settings'))),
+            };
+        });
+    },
+
     // C6 · SEC-01 — payloads written by an anonymous (staff) session must not execute in admin.html
     async xssAdminPanel(page, browser) {
         const ids = await page.evaluate(async () => {

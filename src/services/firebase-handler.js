@@ -126,6 +126,10 @@ export const fireDb = initializeFirestore(app, {
 // PM NOTU: global scriptler için db window'a bağlandı
 window.fireDb = fireDb;
 
+// [WHY]: system_config kökte ortam ayrımsızdı; localhost'tan kill switch / force logout / mesaj testi canlı kullanıcıları etkiliyordu (RULE-04, VIP-05).
+// [HOW]: Tüm sistem ayarları ${COLLECTION_ROOT}/system_config/items/{admin_settings|admin_messages} altında. Kural: oturumlu okur, admin yazar.
+export const systemConfigRef = window.systemConfigRef = (name) => doc(fireDb, COLLECTION_ROOT, 'system_config', 'items', name);
+
 if (!window.data) {
     window.data = { b1: [], b2: [], b3: [], personel: [], requests: [], productTypes: [], tasks: [], config: {}, assignments: [] };
 }
@@ -236,7 +240,7 @@ window.startRealtimeSync = function () {
     });
 
     // B. SİSTEM AYARLARINI DİNLE
-    _syncUnsubscribers.push(onSnapshot(doc(fireDb, "system_config", "admin_settings"), (docSnap) => {
+    _syncUnsubscribers.push(onSnapshot(systemConfigRef("admin_settings"), (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
             window.data.config = data;
@@ -322,7 +326,7 @@ window.startRealtimeSync = function () {
     // C. SİSTEM MESAJLARINI DİNLE
     // [WHY]: God-Eye panelinden gönderilen yönetici mesajlarını gerçek zamanlı yakalamak için.
     // [HOW]: system_config/admin_messages belgesindeki target_user_id ile mevcut kullanıcının id/code/name alanlarını karşılaştırır ve eşleşirse alert gösterir.
-    _syncUnsubscribers.push(onSnapshot(doc(fireDb, "system_config", "admin_messages"), (docSnap) => {
+    _syncUnsubscribers.push(onSnapshot(systemConfigRef("admin_messages"), (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
             

@@ -792,7 +792,7 @@
         try {
             const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
             const db = window.fireDb;
-            const settingsRef = doc(db, "system_config", "admin_settings");
+            const settingsRef = window.systemConfigRef("admin_settings");
             
             const snap = await getDoc(settingsRef);
             let isMaintenance = false;
@@ -897,7 +897,7 @@ window.toggleLaunchpadGlobal = async function() {
     try {
         if(!window.fireDb) return;
         const { doc, getDoc, setDoc } = window.fbFunctions;
-        const settingsRef = doc(window.fireDb, "system_config", "admin_settings");
+        const settingsRef = window.systemConfigRef("admin_settings");
         const snap = await getDoc(settingsRef);
         
         let newState = true;
@@ -1158,7 +1158,7 @@ window.vipSendSystemMessage = async function() {
         if (!window.fireDb) throw new Error('Firestore baÄŸlantÄ±sÄ± yok');
 
         const { doc, setDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
-        const msgRef = doc(window.fireDb, "system_config", "admin_messages");
+        const msgRef = window.systemConfigRef("admin_messages");
         await setDoc(msgRef, {
             target_user_id: userId,
             target_user_name: userName,
@@ -1237,7 +1237,7 @@ window.vipForceLogout = async function() {
         // [WHY]: force_logout_user_id alanÄ±nÄ± Firestore'a yaz.
         // [HOW]: firebase-handler.js bu alanÄ± onSnapshot ile dinleyerek
         //        hedef kullanÄ±cÄ±nÄ±n oturumunu client-side sonlandÄ±rÄ±r.
-        const settingsRef = doc(window.fireDb, "system_config", "admin_settings");
+        const settingsRef = window.systemConfigRef("admin_settings");
         await setDoc(settingsRef, {
             force_logout_user_id: userId,
             force_logout_user_name: userName,
