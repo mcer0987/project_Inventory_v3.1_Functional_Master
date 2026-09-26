@@ -162,7 +162,8 @@ window.showCustomConfirm = showCustomConfirm;
 
 // [WHY]: Replaces legacy, error-prone window.prompt dialogs for warehouse return selection.
 // [HOW]: Creates a modern DOM-overlay modal with custom styled buttons, returning a Promise that resolves with the selected warehouse code ('b1' or 'b2') or null if cancelled.
-window.showWarehousePromptModal = function () {
+// options.allowNoReturn: "Depoya iade etmeden kapat" seçeneği ekler ve 'none' döner; iptal her zaman null döner (ZIM-02).
+window.showWarehousePromptModal = function (options = {}) {
     return new Promise((resolve) => {
         // Modal Overlay
         const overlay = document.createElement('div');
@@ -178,6 +179,7 @@ window.showWarehousePromptModal = function () {
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <button id="btnReturnB1" style="padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #0f172a;">🏢 B1 Deposu</button>
             <button id="btnReturnB2" style="padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #0f172a;">🏢 B2 Deposu</button>
+            ${options.allowNoReturn ? '<button id="btnReturnNone" style="padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff7ed; font-weight: 600; cursor: pointer; color: #9a3412;">📄 Depoya iade etmeden kapat</button>' : ''}
             <button id="btnReturnCancel" style="padding: 10px; border: none; border-radius: 8px; background: #ef4444; color: white; font-weight: 600; cursor: pointer; transition: all 0.2s; margin-top: 8px;">İşlemi İptal Et</button>
           </div>
         `;
@@ -208,6 +210,8 @@ window.showWarehousePromptModal = function () {
         document.getElementById('btnReturnB1').onclick = () => cleanup('b1');
         document.getElementById('btnReturnB2').onclick = () => cleanup('b2');
         document.getElementById('btnReturnCancel').onclick = () => cleanup(null);
+        const noneBtn = document.getElementById('btnReturnNone');
+        if (noneBtn) noneBtn.onclick = () => cleanup('none');
     });
 };
 

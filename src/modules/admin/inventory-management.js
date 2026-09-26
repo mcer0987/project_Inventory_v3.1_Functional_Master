@@ -35,7 +35,10 @@ window.inventoryManagementModule = {
 
     // --- KAYNAK 1: requests (onaylanan veya teslim alınan talepler) ---
     const requests = window.data?.requests || [];
+    // [WHY]: Onay aynı zimmet için b3'e requestId'li ikiz kayıt yazar; talep ayrıca sayılınca KPI çift sayıyordu (ITSM-06).
+    const twinRequestIds = new Set((window.data?.b3 || []).filter(b => b.requestId != null).map(b => String(b.requestId)));
     requests.forEach((req, idx) => {
+      if (twinRequestIds.has(String(req.id))) return;
       const rawDurum = (req.durum || '').trim().toUpperCase();
       const isCompleted = rawDurum === 'COMPLETED' || rawDurum === 'TESLİM ALINDI' || rawDurum === 'TESLIM ALINDI';
       const isApproved = rawDurum === 'APPROVED' || rawDurum === 'ONAYLANDI';
@@ -51,7 +54,7 @@ window.inventoryManagementModule = {
         tarih: req.tarih || '-',
         not: req.not || '-',
         sn: req.sn || '-',
-        durum: isCompleted ? 'Teslim Alındı' : 'Onaylandı',
+        durum: req.iadeEdildi ? 'İade Edildi' : (isCompleted ? 'Teslim Alındı' : 'Onaylandı'),
         talepTuru: req.talepTuru || 'Kalıcı Zimmet',
         oncelik: req.oncelik || 'Orta',
         iadeTarihi: req.iadeTarihi || null,
@@ -589,9 +592,7 @@ window.inventoryManagementModule = {
     productSel.innerHTML = '<option value="">-- Ürün Seç --</option>' +
       fixtures
         .map((p, origIdx) => {
-          // Orijinal index'i data-orig-idx ile sakla (depo splice yapmadan)
-          const realIdx = products.indexOf(p);
-          return `<option value="${realIdx}" data-max="${escapeHtml(p.adet)}">${escapeHtml(p.ürün || p.name)} (Stok: ${escapeHtml(p.adet)})</option>`;
+          return `<option value="${escapeHtml(p.id)}" data-max="${escapeHtml(p.adet)}">${escapeHtml(p.ürün || p.name)} (Stok: ${escapeHtml(p.adet)})</option>`;
         })
         .join('');
   },
@@ -607,203 +608,190 @@ window.inventoryManagementModule = {
   // ──────────────────────────────────────────
   // 9. ZİMMET KAYDET
   // ──────────────────────────────────────────
+  // [WHY]: Zimmet atama istemci tarafında stok düşüyor, ondalıklı id üretiyor, tüm DB'yi yazıyor ve her durumda başarı diyordu;
+  //        ürün dizi indeksiyle seçildiği için modal açıkken sıralama değişirse yanlış ürüne zimmet yapılıyordu (ZIM-01, ZIM-03).
+  // [HOW]: Ürün id ile çözülür; satırlar doğrulanıp aynı ürün birleştirilir; stok runStockTransaction ile atomik düşülür ve
+  //        hata olursa geri alınır; yalnız b3 + assignments yazılır; çift tıklama kilidi.
   saveAssignment: async function () {
+    if (this._savingAssignment) return;
+    const alert = (m, t) => { if (typeof showAppAlert === 'function') showAppAlert(m, t); };
     const personnelName = document.getElementById('assignPersonnel')?.value?.trim();
     const talepTuru = document.getElementById('assignType')?.value || 'Kalıcı Zimmet';
     const oncelik = document.getElementById('assignPriority')?.value || 'Orta';
     const iadeTarihi = document.getElementById('assignReturnDate')?.value || null;
     const not = document.getElementById('assignNote')?.value?.trim() || '';
 
-    if (!personnelName) {
-      if (typeof showAppAlert === 'function') showAppAlert('Lütfen personel seçiniz!', 'warning');
-      return;
+    if (!personnelName) { alert('Lütfen personel seçiniz!', 'warning'); return; }
+    if (talepTuru === 'Geçici Zimmet' && !iadeTarihi) { alert('Geçici zimmet için iade tarihi zorunludur!', 'warning'); return; }
+
+    const merged = new Map();
+    for (const row of document.querySelectorAll('#assignRowsContainer .assign-product-row')) {
+      const warehouse = row.querySelector('.assign-warehouse-sel')?.value;
+      const productId = row.querySelector('.assign-product-sel')?.value;
+      if (!warehouse || !productId) continue;
+      const qty = Number(row.querySelector('.assign-qty-inp')?.value);
+      if (!Number.isInteger(qty) || qty < 1) { alert('Adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+      const product = (window.data?.[warehouse] || []).find(p => String(p.id) === String(productId));
+      if (!product) { alert('Seçilen ürün bulunamadı; liste güncellenmiş olabilir. Satırı yeniden seçin.', 'error'); return; }
+      const sn = row.querySelector('.assign-sn-inp')?.value?.trim() || '-';
+      const key = `${warehouse}|${product.id}`;
+      const prev = merged.get(key);
+      if (prev) { prev.qty += qty; if (sn !== '-') prev.sn = prev.sn === '-' ? sn : `${prev.sn}, ${sn}`; }
+      else merged.set(key, { warehouse, product, qty, sn });
+    }
+    const items = [...merged.values()];
+    if (items.length === 0) { alert('Lütfen en az bir ürün ekleyiniz!', 'warning'); return; }
+    for (const it of items) {
+      const stock = Number(it.product.adet ?? it.product.qty ?? 0);
+      if (it.qty > stock) { alert(`${it.product.ürün || it.product.name} için yeterli stok yok! (Mevcut: ${stock}, İstenen: ${it.qty})`, 'error'); return; }
     }
 
-    if (talepTuru === 'Geçici Zimmet' && !iadeTarihi) {
-      if (typeof showAppAlert === 'function') showAppAlert('Geçici zimmet için iade tarihi zorunludur!', 'warning');
-      return;
-    }
-
-    const rows = document.querySelectorAll('#assignRowsContainer .assign-product-row');
-    const items = [];
-
-    for (const row of rows) {
-      const warehouseSel = row.querySelector('.assign-warehouse-sel');
-      const productSel = row.querySelector('.assign-product-sel');
-      const qtyInp = row.querySelector('.assign-qty-inp');
-
-      const warehouse = warehouseSel?.value;
-      const productIdx = parseInt(productSel?.value);
-      const qty = parseInt(qtyInp?.value) || 1;
-      // [A] SN alanını oku
-      const snInp = row.querySelector('.assign-sn-inp');
-      const sn = snInp?.value?.trim() || '-';
-
-      if (!warehouse || isNaN(productIdx) || !productSel?.value) continue;
-
-      const product = window.data?.[warehouse]?.[productIdx];
-      if (!product) continue;
-
-      if ((product.adet || 0) < qty) {
-        if (typeof showAppAlert === 'function') showAppAlert(`${product.ürün} için yeterli stok yok! (Mevcut: ${product.adet})`, 'error');
-        return;
+    this._savingAssignment = true;
+    const deducted = [];
+    const rollback = async () => {
+      for (const d of deducted.reverse()) {
+        try { await window.runStockTransaction(d.warehouse, d.product.id, d.qty); } catch (e) { console.error('❌ Stok geri alma hatası:', e); }
+      }
+    };
+    try {
+      for (const it of items) {
+        await window.runStockTransaction(it.warehouse, it.product.id, -it.qty);
+        deducted.push(it);
       }
 
-      items.push({ warehouse, productIdx, product, qty, sn });
-    }
-
-    if (items.length === 0) {
-      if (typeof showAppAlert === 'function') showAppAlert('Lütfen en az bir ürün ekleyiniz!', 'warning');
-      return;
-    }
-
-    try {
       const now = typeof getTurkiyeTarihi === 'function' ? getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
-
-      for (const item of items) {
-        // Stok düş
-        window.data[item.warehouse][item.productIdx].adet -= item.qty;
-
-        // Benzersiz zimmet ID
-        const assignmentId = Date.now() + Math.random();
-
-        // B3'e kayıt ekle
-        const b3Entry = {
-          id: assignmentId,
-          shelfNo: item.product.raf || '-',
-          productType: item.product.ürün || item.product.name || '-',
-          description: item.product.açıklama || '-',
-          sn: item.sn || '-',          // [A] SN artık satırdan geliyor
-          sarfAdet: item.qty,
+      const baseId = Date.now();
+      const b3Entries = [], assignmentEntries = [];
+      items.forEach((it, i) => {
+        const id = baseId + i;
+        const common = {
+          sn: it.sn, talepTuru, oncelik, isDemirbas: true, iadeEdildi: false,
+          productId: it.product.id, sourceRepo: it.warehouse,
+          ...(iadeTarihi ? { iadeTarihi } : {}),
+        };
+        b3Entries.push({
+          id, ...common,
+          shelfNo: it.product.raf || '-',
+          productType: it.product.ürün || it.product.name || '-',
+          description: it.product.açıklama || '-',
+          sarfAdet: it.qty,
           note: not || `Admin Zimmeti (${talepTuru})`,
           alanKisi: personnelName,
           date: now,
-          talepTuru: talepTuru,
-          oncelik: oncelik,
-          sourceRepo: item.warehouse,
-          isDemirbas: true,            // [B] Sadece demirbaş zimmetlenir
-          ...(iadeTarihi ? { iadeTarihi: iadeTarihi } : {}),
-          iadeEdildi: false
-        };
+        });
+        assignmentEntries.push({
+          id, ...common,
+          ürün: it.product.ürün || it.product.name || '-',
+          personel: personnelName, tarih: now, adet: it.qty, not, tip: 'zimmet',
+        });
+      });
 
-        if (!window.data.b3) window.data.b3 = [];
-        window.data.b3.unshift(b3Entry);
-
-        // [H] assignments koleksiyonuna da yaz (sorgulanabilir zimmet log'u)
-        const assignmentEntry = {
-          id: assignmentId,
-          sn: item.sn || '-',
-          ürün: item.product.ürün || item.product.name || '-',
-          personel: personnelName,
-          tarih: now,
-          talepTuru: talepTuru,
-          oncelik: oncelik,
-          adet: item.qty,
-          sourceRepo: item.warehouse,
-          not: not || '',
-          isDemirbas: true,
-          ...(iadeTarihi ? { iadeTarihi: iadeTarihi } : {}),
-          iadeEdildi: false,
-          tip: 'zimmet'   // 'zimmet' | 'iade' | 'talep'
-        };
-
-        if (!window.data.assignments) window.data.assignments = [];
-        window.data.assignments.unshift(assignmentEntry);
+      if (await window.saveData('b3', [...b3Entries, ...(window.data.b3 || [])]) === false) {
+        await rollback();
+        alert('Zimmet kaydedilemedi; stok geri alındı.', 'error');
+        return;
       }
-
-      await window.saveData(window.data);
+      if (await window.saveData('assignments', [...assignmentEntries, ...(window.data.assignments || [])]) === false) {
+        alert('Zimmet oluşturuldu ancak zimmet geçmişi (assignments) yazılamadı.', 'warning');
+      } else {
+        alert(`${personnelName} adına ${items.length} kalem zimmet başarıyla oluşturuldu.`, 'success');
+      }
       this.closeAssignModal();
       this.renderTable();
-
-      if (typeof showAppAlert === 'function') showAppAlert(`${personnelName} adına ${items.length} kalem zimmet başarıyla oluşturuldu.`, 'success');
     } catch (err) {
       console.error('Zimmet kayıt hatası:', err);
-      if (typeof showAppAlert === 'function') showAppAlert('Zimmet kaydedilemedi! Detaylar için konsolu inceleyin.', 'error');
+      await rollback();
+      alert(`Zimmet kaydedilemedi: ${err.message}`, 'error');
+    } finally {
+      this._savingAssignment = false;
     }
   },
 
   // ──────────────────────────────────────────
   // 10. ZİMMETTEN DÜŞME & İADE
   // ──────────────────────────────────────────
+  // [WHY]: Seçilen depo talep zimmetlerinde yok sayılıyordu; b3 stoku ürün adıyla bulunup istemcide artırılıyordu;
+  //        assignments hiç güncellenmiyordu; planlanan iade tarihi eziliyordu; "Vazgeç" yine zimmeti kapatıyordu (ZIM-02).
+  // [HOW]: Depo sorusu yalnız stok bağlantısı olan (b1/b2 kaynaklı) zimmette sorulur; ürün productId ile (eski kayıtlarda
+  //        hedef depoda tek eşleşen adla) bulunur ve runStockTransaction(+adet) ile atomik artırılır; iptal gerçekten iptaldir;
+  //        gerçekleşen iade ayrı alana yazılır; b3, assignments ve bağlı talep güncellenir.
   removeAssignment: async function (id, sourceTable) {
-    const confirmed = await (typeof showCustomConfirm === 'function'
-      ? showCustomConfirm('Zimmetten Düş', 'Bu ürünü zimmetten düşmek istiyor musunuz?')
-      : Promise.resolve(window.confirm('Bu ürünü zimmetten düşmek istiyor musunuz?')));
+    const alert = (m, t) => { if (typeof showAppAlert === 'function') showAppAlert(m, t); };
+    const today = typeof getTurkiyeTarihi === 'function' ? getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
+    const sameId = x => String(x.id) === String(id);
 
-    if (!confirmed) return;
-
-    // Depo iadesi sormak için
-    const returnToWarehouse = await (typeof showCustomConfirm === 'function'
-      ? showCustomConfirm('Depo İadesi', 'Ürünü depoya iade etmek istiyor musunuz?')
-      : Promise.resolve(window.confirm('Ürünü depoya iade etmek istiyor musunuz?\n(İptal: Sadece kaydı kapat)')));
-    let targetWarehouse = null;
-
-    if (returnToWarehouse) {
-      if (typeof window.showWarehousePromptModal === 'function') {
-        targetWarehouse = await window.showWarehousePromptModal();
-        if (!targetWarehouse) {
-          if (typeof showAppAlert === 'function') showAppAlert('İade işlemi iptal edildi.', 'warning');
-          return;
-        }
-      } else {
-        targetWarehouse = window.prompt('Hangi depoya iade edilsin?\nB1 için "b1", B2 için "b2" yazın:', 'b1')?.toLowerCase()?.trim();
-        if (targetWarehouse !== 'b1' && targetWarehouse !== 'b2') {
-          if (typeof showAppAlert === 'function') showAppAlert('Geçersiz depo adı. İşlem iptal edildi.', 'warning');
-          return;
-        }
-      }
-    }
-
-    try {
-      const parsedId = parseFloat(id);
-
-      if (sourceTable === 'b3') {
-        const item = window.data.b3?.find(i => i.id === parsedId);
-        if (item) {
-          item.iadeEdildi = true;
-          item.iadeDepo = targetWarehouse || null;
-          item.iadeTarihi = new Date().toLocaleDateString('tr-TR');
-
-          // Depo stok artışı
-          if (targetWarehouse && window.data[targetWarehouse]) {
-            const productName = item.productType || item.ürünTürü;
-            const existing = window.data[targetWarehouse].find(p =>
-              (p.ürün || p.name || '').toLowerCase() === (productName || '').toLowerCase()
-            );
-            if (existing) {
-              existing.adet = (existing.adet || 0) + (item.sarfAdet || item.adet || 1);
-            }
-          }
-        }
-      } else if (sourceTable === 'request') {
-        const item = window.data.requests?.find(r => r.id === parsedId);
-        if (item) {
-          item.iadeEdildi = true;
-          item.durum = 'İade Edildi';
-        }
-      }
-
-      // [WHY]: Tüm veritabanı objesini saveData(window.data) ile kaydetmek başka kullanıcıların verilerini ezebilir (Race Condition).
-      // [HOW]: Sadece değişen koleksiyonları (b3, depo veya requests) hedefli saveData çağrıları ile asenkron kaydediyoruz.
-      if (sourceTable === 'b3') {
-        await window.saveData('b3', window.data.b3);
-        if (targetWarehouse) {
-          await window.saveData(targetWarehouse, window.data[targetWarehouse]);
-        }
-      } else if (sourceTable === 'request') {
-        await window.saveData('requests', window.data.requests);
-      }
-
+    if (sourceTable === 'request') {
+      const req = (window.data.requests || []).find(sameId);
+      if (!req) { alert('Kayıt bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+      if (req.iadeEdildi) { alert('Bu zimmet zaten iade edilmiş.', 'info'); return; }
+      const ok = await (typeof showCustomConfirm === 'function'
+        ? showCustomConfirm('Zimmetten Düş', 'Talep kaynaklı zimmet kapatılacak (stok bağlantısı olmadığı için depo stoğu değişmez). Onaylıyor musunuz?')
+        : Promise.resolve(window.confirm('Talep kaynaklı zimmet kapatılsın mı?')));
+      if (!ok) return;
+      const updated = { ...req, iadeEdildi: true, iadeEdildiTarihi: today };
+      const saved = await window.saveData('requests', window.data.requests.map(r => sameId(r) ? updated : r));
+      if (saved === false) { alert('İade kaydedilemedi.', 'error'); return; }
       this.renderTable();
-
-      const msg = targetWarehouse
-        ? `Zimmet başarıyla düşüldü ve ${targetWarehouse.toUpperCase()} deposuna iade edildi.`
-        : 'Zimmet kaydı kapatıldı (depo iadesi yapılmadı).';
-      if (typeof showAppAlert === 'function') showAppAlert(msg, 'success');
-    } catch (err) {
-      console.error('İade hatası:', err);
-      if (typeof showAppAlert === 'function') showAppAlert('İşlem sırasında bir hata oluştu!', 'error');
+      alert('Zimmet kaydı kapatıldı.', 'success');
+      return;
     }
+
+    const item = (window.data.b3 || []).find(sameId);
+    if (!item) { alert('Kayıt bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+    if (item.iadeEdildi) { alert('Bu zimmet zaten iade edilmiş.', 'info'); return; }
+
+    const qty = Number(item.sarfAdet || item.adet || 1);
+    const stockLinked = item.sourceRepo === 'b1' || item.sourceRepo === 'b2';
+    let target = null;
+    if (stockLinked) {
+      const choice = await window.showWarehousePromptModal({ allowNoReturn: true });
+      if (choice === null) { alert('İşlem iptal edildi.', 'info'); return; }
+      target = choice === 'none' ? null : choice;
+    } else {
+      const ok = await (typeof showCustomConfirm === 'function'
+        ? showCustomConfirm('Zimmetten Düş', 'Bu zimmetin stok bağlantısı yok; yalnız kayıt kapatılacak. Onaylıyor musunuz?')
+        : Promise.resolve(window.confirm('Zimmet kaydı kapatılsın mı?')));
+      if (!ok) return;
+    }
+
+    let product = null;
+    if (target) {
+      const list = window.data[target] || [];
+      product = item.productId != null ? list.find(p => String(p.id) === String(item.productId)) : null;
+      if (!product) {
+        const name = String(item.productType || item.ürünTürü || '').trim().toLocaleLowerCase('tr-TR');
+        const byName = list.filter(p => String(p.ürün || p.name || '').trim().toLocaleLowerCase('tr-TR') === name);
+        if (byName.length === 1) product = byName[0];
+      }
+      if (!product) { alert(`${target.toUpperCase()} deposunda bu ürün tek ve kesin olarak bulunamadı; iade yapılmadı.`, 'error'); return; }
+      try {
+        await window.runStockTransaction(target, product.id, qty);
+      } catch (e) {
+        alert(`Stok iadesi başarısız: ${e.message}`, 'error');
+        return;
+      }
+    }
+
+    const updatedItem = { ...item, iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today };
+    if (await window.saveData('b3', window.data.b3.map(b => sameId(b) ? updatedItem : b)) === false) {
+      if (target && product) { try { await window.runStockTransaction(target, product.id, -qty); } catch (e) { console.error(e); } }
+      alert('İade kaydedilemedi; stok değişikliği geri alındı.', 'error');
+      return;
+    }
+
+    const assignments = window.data.assignments || [];
+    if (assignments.some(sameId)) {
+      await window.saveData('assignments', assignments.map(a => sameId(a) ? { ...a, iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today } : a));
+    }
+    if (item.requestId != null) {
+      const reqs = window.data.requests || [];
+      if (reqs.some(r => String(r.id) === String(item.requestId))) {
+        await window.saveData('requests', reqs.map(r => String(r.id) === String(item.requestId) ? { ...r, iadeEdildi: true, iadeEdildiTarihi: today } : r));
+      }
+    }
+
+    this.renderTable();
+    alert(target ? `Zimmet düşüldü ve ${target.toUpperCase()} deposuna iade edildi.` : 'Zimmet kaydı kapatıldı (depo iadesi yapılmadı).', 'success');
   },
 
   // ──────────────────────────────────────────
