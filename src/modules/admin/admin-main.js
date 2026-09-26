@@ -12,4 +12,9 @@ import './inventory-management.js';
 
 window.AppModules = window.AppModules || {};
 
+// [WHY]: admin.html'de window.currentUser hiç set edilmiyordu; onay/red ve TODO kimliksiz kalıyordu (EBYS-08, TODO-03).
+window.currentUser = window.getActiveUser();
+const welcomeEl = document.getElementById('welcomeUserName');
+if (welcomeEl) welcomeEl.textContent = ((window.currentUser && window.currentUser.name) || 'Admin').toLocaleUpperCase('tr-TR');
+
 console.log('✅ [admin-main.js] Admin giriş modülü yüklendi.');
