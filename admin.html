@@ -84,14 +84,13 @@
         };
 
         // Oturumu tamamen kapatıp ana sayfaya döndüren fonksiyon
-        window.adminForceLogout = function () {
-            if (typeof logout === 'function') {
-                logout();
-            } else {
-                localStorage.removeItem('activeUser');
-                localStorage.removeItem('admin_auth');
-                window.location.replace('index.html');
+        // [WHY]: logout() admin.html'de kilit kartını yeniden gösteriyordu; "Oturumu Kapat" kullanıcıyı kartta bırakıyordu (AUTH-08).
+        window.adminForceLogout = async function () {
+            window.clearSession();
+            if (window.SecurityConfig && typeof window.SecurityConfig.logout === 'function') {
+                await window.SecurityConfig.logout();
             }
+            window.location.replace('index.html');
         };
 
         // [R-SYS] Init

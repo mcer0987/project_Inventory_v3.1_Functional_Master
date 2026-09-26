@@ -43,7 +43,7 @@ function showAppAlert(message, type = 'info') {
     };
 
     alertDiv.style.cssText = `
-        background-color: ${colors[type]};
+        background-color: ${colors[type] || colors.error};
         color: white;
         padding: 15px 25px;
         border-radius: 8px;

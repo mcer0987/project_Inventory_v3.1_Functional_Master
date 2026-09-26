@@ -177,6 +177,10 @@ function logout(reason = 'manual') {
         }
     }
 
+    // [WHY]: admin.html'de bu yol kullanılıyor ve olay yayınlanmadığı için firebase-handler senkronu sıfırlamıyor,
+    //        signOut ile ölen dinleyiciler kilit açıldıktan sonra yeniden başlamıyordu (AUTH-08).
+    window.dispatchEvent(new CustomEvent('onAppLogout', { detail: { reason } }));
+
     // 3. CSS Sınıfını Kaldır
     document.body.classList.remove('logged-in');
     window._launchpadTriggered = false;

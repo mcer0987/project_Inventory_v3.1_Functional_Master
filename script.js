@@ -1208,27 +1208,9 @@ function showCustomConfirm(title, message, callback) {
 }
 window.showCustomConfirm = showCustomConfirm;
 
-function loadData() {
-    try {
-        const saved = localStorage.getItem('inventoryData');
-        if (saved) {
-            const decompressed = LZString.decompressFromUTF16(saved);
-            const parsed = JSON.parse(decompressed || saved);
-            window.data = parsed;
-            return parsed;
-        }
-    } catch (e) { }
-    return { b1: [], b2: [], b3: [], personel: [], requests: [], productTypes: [] };
-}
-window.data = loadData();
-
-window.optimizeStorage = function () {
-    try {
-        localStorage.removeItem('inventoryData');
-        showAppAlert("Bellek temizlendi, sistem IndexedDB üzerinden yenileniyor...", "success");
-        setTimeout(() => location.reload(), 2000);
-    } catch (e) { showAppAlert("Temizleme başarısız!", "error"); }
-};
+// [WHY]: Eski localStorage önbelleği window.data'yı Firebase'den önce eksik/bayat veriyle eziyordu (DATA-07).
+// [HOW]: Tek kaynak Firestore snapshot'larıdır; kalmış önbellek bir kez silinir.
+localStorage.removeItem('inventoryData');
 
 window.loadFromDB = function (storeName) {
     return new Promise((resolve) => {
@@ -1239,18 +1221,6 @@ window.loadFromDB = function (storeName) {
         request.onsuccess = () => resolve(request.result || []);
         request.onerror = () => resolve([]);
     });
-};
-
-window.initData = async function () {
-    const b1 = await new Promise(res => loadFromDB('b1', res));
-    if (b1 && b1.length > 0) {
-        window.data.b1 = b1;
-        window.data.b2 = await new Promise(res => loadFromDB('b2', res));
-        window.data.b3 = await new Promise(res => loadFromDB('b3', res));
-        window.data.personel = await new Promise(res => loadFromDB('personel', res));
-    } else {
-        data = loadData();
-    }
 };
 
 function checkPermission(event) {
@@ -1296,19 +1266,6 @@ window.onclick = function (event) {
     const modal = document.getElementById('productModal');
     if (event.target == modal) closeProductModal();
 };
-
-window.addEventListener('pageshow', () => {
-    const activeUser = localStorage.getItem('activeUser');
-    const authScreen = document.getElementById('loginModal');
-    const appContainer = document.getElementById('appContainer');
-    if (activeUser) {
-        if (authScreen) authScreen.style.display = 'none';
-        if (appContainer) appContainer.style.display = 'block';
-    } else {
-        if (authScreen) authScreen.style.display = 'block';
-        if (appContainer) appContainer.style.display = 'none';
-    }
-});
 
 // PM NOTU: Firebase hazır olduktan sonra listener başlatılır
 window.addEventListener("load", () => {

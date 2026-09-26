@@ -205,6 +205,9 @@ export const updateNavbarUI = function (user) {
     if (window.todoModule && typeof window.todoModule.updateNavBadge === 'function') {
         window.todoModule.updateNavBadge();
     }
+
+    // [WHY]: auth-engine bu fonksiyonu içeriden çağırdığı için window.updateNavbarUI sarmalayıcıları hiç çalışmıyordu (EBYS-05).
+    window.dispatchEvent(new CustomEvent('onNavbarRendered', { detail: { user } }));
 };
 
 // [COMPATIBILITY_BRIDGE]: handleLogin, firebase-handler.js ve storage event listener
@@ -604,8 +607,7 @@ export const handleLogout = async function (reason = 'manual') {
     // 2. Kimlik verilerini ve önbelleği temizle
     window.clearSession();
 
-    // 3. Küresel Uygulama State'lerini Sıfırla
-    window.userAuth = null;
+    // 3. Küresel Uygulama State'lerini Sıfırla (userAuth'u yalnız onAuthStateChanged yönetir — AUTH-10)
     window._initialRenderDone = false;
     window.isFirebaseLoaded = false;
     window._launchpadTriggered = false;
