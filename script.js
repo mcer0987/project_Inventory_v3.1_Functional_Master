@@ -717,7 +717,8 @@ window.withdrawInventoryRequest = async function (index) {
     const onay = await showCustomConfirm("Talebi Geri Çek", `${req.ürün} talebinizi geri çekmek (taslağa almak) istediğinize emin misiniz?`);
     if (onay === true) {
         req.durum = 'draft';
-        await window.saveData(window.data);
+        // [WHY]: Tam kayıt personel oturumunda b1'de reddedilip hiçbir şeyi kaydetmiyordu (ITSM-03, DATA-03).
+        await window.saveData('requests', window.data.requests);
         if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
         showAppAlert("Talebiniz geri çekildi ve TASLAK moduna alındı.", "info");
     }
@@ -751,7 +752,7 @@ window.sendDraftInventoryRequest = async function (index) {
     if (!req) return;
     req.durum = 'Beklemede';
     req.tarih = getTurkiyeTarihi();
-    await window.saveData(window.data);
+    await window.saveData('requests', window.data.requests);
     if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
     showAppAlert("Talebiniz başarıyla onaya gönderildi.", "success");
 };

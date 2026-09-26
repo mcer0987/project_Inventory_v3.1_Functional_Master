@@ -79,6 +79,41 @@ const SCENARIOS = {
             return out;
         });
     },
+
+    // C2 · ITSM-03 / DATA-03 — staff (anonymous) session
+    async staffRequestActions(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+            window.showCustomConfirm = async () => true;
+            window.openRequestModal(false);
+            ft.set('reqProdName', 'Mouse ' + ft.MARKER); ft.set('reqQty', '1'); ft.set('reqType', 'Kalıcı Zimmet'); ft.set('reqNote', ft.MARKER);
+            await window.saveRequest(new Event('submit'));
+            await ft.waitFor(async () => (await ft.readMarked('requests')).length === 1);
+            const id = (await ft.readMarked('requests'))[0].id;
+            const idx = () => window.data.requests.findIndex(r => String(r.id) === String(id));
+            const durum = async () => (await ft.readMarked('requests'))[0].durum;
+            await ft.waitFor(async () => idx() !== -1);
+
+            await window.withdrawInventoryRequest(idx());
+            out.withdraw = await ft.waitFor(async () => (await durum()) === 'draft') ? 'draft ✔' : await durum();
+
+            await window.sendDraftInventoryRequest(idx());
+            out.sendDraft = await ft.waitFor(async () => (await durum()) === 'Beklemede') ? 'Beklemede ✔' : await durum();
+
+            // simulate admin approval on the request only (staff may write requests)
+            window.data.requests[idx()].durum = 'approved';
+            await window.saveData('requests', window.data.requests);
+            await ft.waitFor(async () => (await durum()) === 'approved');
+
+            const b3Before = (await ft.readAll('b3')).length;
+            await window.receiveProduct(idx());
+            out.receive = await ft.waitFor(async () => (await durum()) === 'completed') ? 'completed ✔' : await durum();
+            out.teslimTarihi = !!(await ft.readMarked('requests'))[0].teslimTarihi;
+            out.b3Untouched = (await ft.readAll('b3')).length === b3Before;
+            return out;
+        });
+    },
 };
 
 (async () => {
@@ -98,6 +133,8 @@ const SCENARIOS = {
         console.log(`pre-cleanup removed: ${pre}`);
         for (const name of wanted) {
             try {
+                await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
+                await new Promise(r => setTimeout(r, 1500));
                 console.log(`\n=== ${name} ===\n` + JSON.stringify(await SCENARIOS[name](page), null, 1));
             } catch (e) { failed = true; console.log(`\n=== ${name} FAILED: ${e.message}`); }
         }

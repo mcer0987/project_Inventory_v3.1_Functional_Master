@@ -418,49 +418,18 @@ export const receiveProduct = async function (index) {
     const req = window.data.requests[index];
     if (!req) return;
 
-    if (typeof window.sendArchiveEmail === 'function') {
-        window.sendArchiveEmail(req);
-    }
-
-    if (typeof window.showAppAlert === 'function') {
-        window.showAppAlert("Ürünü teslim aldığınızı onayladınız. Talep Sonlandırıldı.", "info");
-    }
-
+    // [WHY]: Tam kayıt personel oturumunda reddediliyor, "Teslim Aldım" hiç kaydolmuyordu (ITSM-03, DATA-03).
+    // [HOW]: Yalnız talep durumu yazılır. Zimmet (b3) kaydını admin onay adımı (confirmRequest) yazar; personel b3'e yazamaz.
     req.durum = 'completed';
-
-    const now = typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
-    const alreadyInB3 = (window.data.b3 || []).some(b =>
-        (b.person === req.personel || b.alanKisi === req.personel) &&
-        (b.productType === req.ürün) &&
-        !b.iadeEdildi
-    );
-
-    if (!alreadyInB3) {
-        if (!window.data.b3) window.data.b3 = [];
-        window.data.b3.unshift({
-            id: Date.now(),
-            shelfNo: 'TALEP',
-            productType: req.ürün || '-',
-            description: 'Teslim Alındı (Otomatik Zimmet)',
-            sn: req.sn || '-',
-            sarfAdet: req.adet || 1,
-            note: req.not || 'Personel tarafından teslim alındı',
-            person: req.personel,
-            alanKisi: req.personel,
-            date: now,
-            tarih: now,
-            isDemirbas: req.isDemirbas || false,
-            talepTuru: req.talepTuru || 'Kalıcı Zimmet',
-            oncelik: req.oncelik || 'Orta',
-            ...(req.iadeTarihi ? { iadeTarihi: req.iadeTarihi } : {}),
-            iadeEdildi: false,
-            sourceRepo: 'TALEP'
-        });
-    }
+    req.teslimTarihi = typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
 
     try {
-        await window.saveData(window.data);
+        await window.saveData('requests', window.data.requests);
+        if (typeof window.sendArchiveEmail === 'function') window.sendArchiveEmail(req);
         if (typeof window.renderMyRequestsTable === 'function') window.renderMyRequestsTable();
+        if (typeof window.showAppAlert === 'function') {
+            window.showAppAlert("Ürünü teslim aldığınızı onayladınız. Talep Sonlandırıldı.", "info");
+        }
     } catch (e) {
         console.error("Hata:", e);
     }
