@@ -1020,7 +1020,8 @@ window.approveStep = async function (id) {
             item.workflow.id,
             nextState,
             actor,
-            `${step?.tip || 'Adım'} onaylandı`
+            `${step?.tip || 'Adım'} onaylandı`,
+            { persist: false }
         );
 
         // 5. İNDEKSİ GÜNCELLE VE SENKRONİZE ET
@@ -1053,7 +1054,8 @@ window.approveStep = async function (id) {
         // [WHY]: window.saveData(window.data) attempts a batch write across ALL collections.
         //        Non-admin users have permission only on specific collections, so the batch fails.
         // [HOW]: We pass the collection name + its array directly so only purchaseOrders is written.
-        const saved = await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        // Snapshot dizisi değişmiş olabilir; değiştirilmiş talep güncel dizideki yerine konularak tek seferde yazılır.
+        const saved = await window.saveData('purchaseOrders', (window.data.purchaseOrders || []).map(x => String(x.id) === String(id) ? item : x));
         window.closeWorkflowModal();
         if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
 
@@ -1103,7 +1105,8 @@ window.rejectStep = async function (id) {
             item.workflow.id,
             window.WorkflowEngine.states.CANCELLED,
             actor,
-            `Reddedildi: ${note.trim()}`
+            `Reddedildi: ${note.trim()}`,
+            { persist: false }
         );
 
         // Adımı ve durumu güncelle
@@ -1155,7 +1158,8 @@ window.rejectStep = async function (id) {
         // [BUGFIX] Bug 3: Targeted save to purchaseOrders only.
         // [WHY]: Same permission issue as approveStep — non-admins can't overwrite the full DB snapshot.
         // [HOW]: Only the purchaseOrders collection is written, matching the collection-level Firestore rules.
-        const saved = await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        // Snapshot dizisi değişmiş olabilir; değiştirilmiş talep güncel dizideki yerine konularak tek seferde yazılır.
+        const saved = await window.saveData('purchaseOrders', (window.data.purchaseOrders || []).map(x => String(x.id) === String(id) ? item : x));
         window.closeWorkflowModal();
         if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
 
@@ -1734,7 +1738,9 @@ window.createWorkflowFromTemplate = function (tpl) {
 };
 
 // State transition engine - Tek state management
-window.transitionWorkflowState = async function (workflowId, targetState, actor, note = '') {
+// options.persist=false: çağıran (approveStep/rejectStep) talebi tek seferde kaydeder. Ara kayıt, dönen snapshot'ın
+// window.data.purchaseOrders'ı yenilemesine ve çağıranın sonraki değişikliklerinin bayat nesnede kaybolmasına yol açıyordu.
+window.transitionWorkflowState = async function (workflowId, targetState, actor, note = '', options = {}) {
     const workflow = await window.getWorkflow(workflowId);
     if (!workflow) {
         throw new Error('Workflow bulunamadı: ' + workflowId);
@@ -1761,8 +1767,7 @@ window.transitionWorkflowState = async function (workflowId, targetState, actor,
         action: 'transition',
         note: note,
         metadata: {
-            userAgent: navigator.userAgent,
-            ip: await window.getClientIP()
+            userAgent: navigator.userAgent
         }
     };
 
@@ -1773,8 +1778,10 @@ window.transitionWorkflowState = async function (workflowId, targetState, actor,
     // Update backward compatibility fields
     window.updateBackwardCompatibility(workflow, targetState);
 
-    // Save to Firebase
-    await window.saveWorkflow(workflow);
+    // Save to Firebase (purchaseOrders); başarısızlık onayı "başarılı" gösterilmesin diye hata olarak yükselir
+    if (options.persist !== false && !(await window.saveWorkflow(workflow))) {
+        throw new Error('Akış durumu kaydedilemedi.');
+    }
 
     // Trigger events
     window.onWorkflowStateChanged(workflow, transition);
@@ -1850,72 +1857,27 @@ window.getUserRole = function (username) {
     return personel?.role || personel?.rol || 'user'; // Default rol
 };
 
-// Workflow getir - Firebase'den workflow nesnesi
+// [WHY]: Akış kök 'workflows' koleksiyonunda da tutuluyordu; kurallar orayı reddettiği için her geçiş hata
+//        verip purchaseOrders kaydı hiç yapılmıyordu (EBYS-16). Tek kaynak: ${COLLECTION_ROOT}/purchaseOrders içindeki item.workflow.
 window.getWorkflow = async function (workflowId) {
-    // Önce mevcut data içinde ara
-    const purchaseOrder = (window.data.purchaseOrders || []).find(item =>
-        item.workflow?.id === workflowId
-    );
-
-    if (purchaseOrder) {
-        return purchaseOrder.workflow;
-    }
-
-    // Firebase'den ara (gerekirse)
-    try {
-        const db = getFirestore();
-        const workflowDoc = await doc(db, 'workflows', workflowId);
-        const workflowSnap = await getDoc(workflowDoc);
-
-        if (workflowSnap.exists()) {
-            return workflowSnap.data();
-        }
-    } catch (error) {
-        console.error('Workflow getirme hatası:', error);
-    }
-
-    return null;
+    const purchaseOrder = (window.data.purchaseOrders || []).find(item => item.workflow?.id === workflowId);
+    return purchaseOrder ? purchaseOrder.workflow : null;
 };
 
-// Workflow kaydet - Firebase'e workflow nesnesi
 window.saveWorkflow = async function (workflow) {
-    try {
-        const db = getFirestore();
-
-        // Hem workflows koleksiyonuna hem de purchaseOrder'a kaydet
-        await setDoc(doc(db, 'workflows', workflow.id), workflow);
-
-        // İlgili purchaseOrder'ı güncelle
-        const purchaseOrder = (window.data.purchaseOrders || []).find(item =>
-            item.workflow?.id === workflow.id
-        );
-
-        if (purchaseOrder) {
-            purchaseOrder.workflow = workflow;
-            // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-            await window.saveData('purchaseOrders', window.data.purchaseOrders);
-        }
-
-        console.log('✅ Workflow kaydedildi:', workflow.id);
-        return true;
-    } catch (error) {
-        console.error('❌ Workflow kaydetme hatası:', error);
+    const purchaseOrder = (window.data.purchaseOrders || []).find(item => item.workflow?.id === workflow.id);
+    if (!purchaseOrder) {
+        console.error('❌ Workflow kaydı: bağlı satın alma talebi bulunamadı:', workflow.id);
         return false;
     }
+    purchaseOrder.workflow = workflow;
+    const saved = await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    if (saved === false) console.error('❌ Workflow kaydedilemedi:', workflow.id);
+    return saved !== false;
 };
 
-// Client IP adresini al - Audit trail için
-window.getClientIP = async function () {
-    try {
-        // Simple IP detection service
-        const response = await fetch('https://api.ipify.org?format=json');
-        const data = await response.json();
-        return data.ip;
-    } catch (error) {
-        console.log('IP alınamadı, localhost kullanılıyor');
-        return '127.0.0.1';
-    }
-};
+// [WHY]: Her geçişte kullanıcının IP'si api.ipify.org'a sorulup herkesin okuyabildiği geçmişe yazılıyordu;
+//        zaman aşımı yoktu ve ipify'ı engelleyen ağlarda onay takılıyordu (SEC-04). IP artık toplanmıyor.
 
 // Workflow geçmişini formatla - UI için
 window.formatWorkflowHistory = function (workflow) {
@@ -2502,7 +2464,6 @@ window.WorkflowRollbackManager = {
             // Metadata
             metadata: {
                 userAgent: navigator.userAgent,
-                ip: await window.getClientIP(),
                 stateLabel: window.getStateLabel(workflow.currentState),
                 stepCount: workflow.steps?.length || 0,
                 hasParallelSteps: (workflow.parallelStates?.length || 0) > 0
@@ -2568,8 +2529,7 @@ window.WorkflowRollbackManager = {
                 checkpointId: targetCheckpointId,
                 checkpointReason: checkpoint.reason,
                 checkpointTimestamp: checkpoint.timestamp,
-                userAgent: navigator.userAgent,
-                ip: await window.getClientIP()
+                userAgent: navigator.userAgent
             }
         };
 

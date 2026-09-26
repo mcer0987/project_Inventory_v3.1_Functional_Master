@@ -116,15 +116,14 @@ const SCENARIOS = {
     },
 
     // C5 · EBYS-01 (modal reset) + EBYS-02 (step owner guard, in-flight lock)
-    // transitionWorkflowState is stubbed: it belongs to EBYS-16 (root workflows + ipify), out of C5 scope.
+    // Runs the real transitionWorkflowState (EBYS-16 fixed: purchaseOrders only, no ipify).
     async ebysApprovalGuard(page) {
         return page.evaluate(async () => {
             const ft = window.__ft, out = {};
-            window.transitionWorkflowState = async () => ({});
             const id = Date.now();
             const rec = {
                 id, baslik: 'EBYS ' + ft.MARKER, durum: 'Onay Bekliyor', akis: [],
-                workflow: { id: 'wf_' + id, started: true, finished: false, currentStep: 0, currentState: 'manager_approval',
+                workflow: { id: 'wf_' + id, started: true, finished: false, currentStep: 0, currentState: 'initiation', history: [],
                     steps: [{ user: 'Flow Onay A', tip: 'Yönetici', status: 'pending' }, { user: 'Flow Onay B', tip: 'Finans', status: 'pending' }] },
             };
             await window.saveData('purchaseOrders', [...(window.data.purchaseOrders || []), rec]);
@@ -163,6 +162,11 @@ const SCENARIOS = {
             await Promise.all([window.approveStep(id), window.approveStep(id)]);
             await ft.waitFor(async () => (await dbStep()).finished === true);
             out.afterDoubleClick = await dbStep();
+            const final = (await ft.readMarked('purchaseOrders'))[0];
+            out.transitionsInHistory = (final.workflow.history || []).filter(h => h.action === 'transition').length;
+            out.ipStored = JSON.stringify(final.workflow.history || []).includes('"ip"');
+            out.finalState = final.workflow.currentState;
+            out.ipifyRequested = performance.getEntriesByType('resource').some(r => r.name.includes('ipify'));
             return out;
         });
     },
