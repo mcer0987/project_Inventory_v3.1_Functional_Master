@@ -162,3 +162,39 @@ The following actions are ALWAYS forbidden, regardless of context:
 | Skipping the plan step on non-trivial changes | Violates this file §1 |
 | Working outside your agent domain | Violates 02-agent-roles.md |
 | Omitting `// [WHY]` / `// [HOW]` on new functions | Violates Constitution §9 |
+| Claiming "verified"/"completed" without evidence | Violates this file §7.2 |
+| Writing files with PowerShell `Set-Content`/`Add-Content`/`Out-File` without `-Encoding utf8` | Violates this file §7.3 |
+| Fixing one half of a masking pair in isolation | Violates this file §7.4 |
+| Writing passwords, hashes, salts or tokens to terminal, logs, walkthroughs or commit messages | Violates this file §7.5 |
+
+---
+
+## 7. Process Safety Rules (v3.2 Phase 0)
+
+> Added after the v3.2 audit (root cause KN-7: behaviour lost during migrations went unnoticed).
+
+### 7.1 Atomic Commits
+- Every task = its own commit on the active phase branch (`<type>/phase-N-<topic>`). Never commit directly to `master`.
+- Commit message: Conventional Commits (`fix(scope): …`, `chore(scope): …`). No secrets.
+- Every walkthrough MUST list: commit hash(es), changed file list (`git diff --stat`), and the branch name.
+
+### 7.2 Definition of "Verified" / "Completed"
+A task may be reported as verified/completed ONLY when all three are attached:
+1. The code change (commit hash).
+2. Observed result of the related Regression List (Plan Ek A) items. State what was actually seen, not what is expected.
+3. Evidence: console output excerpt and/or screenshot, plus smoke-test metrics (error count, duplicate-load count) compared with the Phase 0 baseline.
+Without evidence, the status is "implemented, not verified".
+
+### 7.3 Character Encoding (OPS-03 / VIP-09)
+- Prefer editor tools (Edit/Write) for source files.
+- In Windows PowerShell 5.1, `Set-Content`, `Add-Content` and `Out-File` MUST be called with `-Encoding utf8`. Without it, the default ANSI code page (cp1254) corrupts Turkish characters.
+- Bulk regex replacements require a dry-run preview before writing.
+
+### 7.4 Masking Pairs
+If fixing bug A exposes bug B (see Master Plan §5.0 list, e.g. INV-01⇄INV-02, EBYS-01⇄EBYS-02, VIP-04⇄VIP-06⇄VIP-03), both MUST be fixed in the same commit. Do not ship half a pair.
+
+### 7.5 Secrets & Live-System Safety
+- Never request, print, or store passwords, hashes, salts, or tokens. Human operators confirm credential changes with a confirmation sentence only.
+- Test only via `http://localhost` or `http://127.0.0.1` (→ `inventory_demo`). Never via `file://` or a LAN IP (→ live `inventory_v2`).
+- Until Phase 2.5 is completed: do not trigger VIP "Tekerrürleri Temizle", kill switch, force logout, or system message, not even on localhost (`system_config` is not environment-scoped).
+- No `firebase deploy` of any target until the owner explicitly approves (planned: end of Phase 2).
