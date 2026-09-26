@@ -378,7 +378,7 @@ export const saveData = window.saveData = async function (arg1, arg2) {
     // [HOW]: Eğer window.userAuth yoksa, veritabanına yazma işlemini anında reddet (Frontend Guard).
     if (!window.userAuth) {
         console.error("❌ Yetkisiz Yazma Denemesi: Oturum bulunamadı.");
-        return;
+        return false;
     }
 
     // [ADIM 1] Akıllı Parametre Yönetimi: Gelen verinin tipine göre davranış belirle
@@ -466,8 +466,11 @@ export const saveData = window.saveData = async function (arg1, arg2) {
         }
 
         console.log(`☁️ Firebase Senkronize Edildi (Chunked): ${arg1 || 'Toplu Kayıt'}`);
+        return true;
     } catch (e) {
+        // [WHY]: Hata yutulduğu için çağıranlar başarısız kaydı "başarılı" gösteriyordu (DATA-02); sonuç artık döndürülüyor.
         console.error("❌ Kayıt Hatası:", e);
+        return false;
     }
 };
 

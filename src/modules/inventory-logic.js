@@ -285,16 +285,21 @@ export const bulkDelete = async function (depo) {
     }
 };
 
-export const saveProduct = function (e) {
+// [WHY]: Düzenleme kaydı id'siz yeni bir objeyle değiştiriyordu: doküman silinip yeniden oluşuyor, limit/takip/B2 status kayboluyordu (DATA-04).
+// [HOW]: Kayıt id ile bulunur ve {...mevcut, ...form, id} ile birleştirilir; B2'de durum 'status' alanına yazılır;
+//        yalnız ilgili depo kaydedilir ve sonuç beklenir.
+export const saveProduct = async function (e) {
     if (e) e.preventDefault();
 
     const form = document.getElementById('productForm');
     if (!form) return;
 
     const editIndex = form.dataset.editIndex;
+    const editId = form.dataset.editId;
     const editRepo = form.dataset.editRepo || (document.querySelector('.tab-content.active')?.id || 'b1');
+    const isEdit = editIndex !== undefined && editIndex !== null && editIndex !== '';
 
-    const updatedItem = {
+    const formFields = {
         sütun:      document.getElementById('prodColumn')?.value || '',
         raf:        document.getElementById('prodShelf')?.value || '',
         tür:        document.getElementById('prodType')?.value || '',
@@ -307,14 +312,34 @@ export const saveProduct = function (e) {
         lastUpdate: new Date().getTime()
     };
 
-    if (editIndex !== undefined && editIndex !== null && editIndex !== '') {
-        window.data[editRepo][parseInt(editIndex)] = updatedItem;
+    const items = [...(window.data[editRepo] || [])];
+
+    if (isEdit) {
+        const idx = editId !== undefined && editId !== ''
+            ? items.findIndex(x => String(x.id) === String(editId))
+            : parseInt(editIndex, 10);
+        const existing = items[idx];
+        if (!existing) {
+            if (typeof window.showAppAlert === 'function') window.showAppAlert('Düzenlenen ürün bulunamadı; liste güncellenmiş olabilir.', 'error');
+            return;
+        }
+        const merged = { ...existing, ...formFields, id: existing.id };
+        if (editRepo === 'b2') {
+            merged.status = formFields.durumu;
+            if (existing.durumu === undefined) delete merged.durumu;
+        }
+        items[idx] = merged;
     } else {
-        if (!window.data[editRepo]) window.data[editRepo] = [];
-        window.data[editRepo].push(updatedItem);
+        const created = { id: `${editRepo}_${Date.now()}`, ...formFields };
+        if (editRepo === 'b2') created.status = formFields.durumu;
+        items.push(created);
     }
 
-    if (typeof window.saveData === 'function') window.saveData(window.data);
+    const ok = await window.saveData(editRepo, items);
+    if (ok === false) {
+        if (typeof window.showAppAlert === 'function') window.showAppAlert('Kayıt başarısız oldu. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
+        return;
+    }
 
     if (typeof window.renderTable === 'function') {
         const limit = (window.currentPage || 1) * (window.pageSize || 25);
@@ -403,7 +428,10 @@ export const saveRequest = async function (event) {
         });
     }
 
-    await window.saveData('requests', requests);
+    if (await window.saveData('requests', requests) === false) {
+        alert('Talep kaydedilemedi. Bağlantınızı kontrol edip tekrar deneyin.', 'error');
+        return;
+    }
 
     window.editingReqId = null;
     window.editingReqIndex = null;
