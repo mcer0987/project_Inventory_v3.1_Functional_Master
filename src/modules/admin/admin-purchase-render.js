@@ -69,49 +69,49 @@ window.renderAdminDashboard = function () {
 
             return `
                 <tr class="align-middle" style="${isCancelled ? 'background:#f1f5f9; opacity:0.7;' : ''}">
-                    <td><span class="text-muted" style="font-size: 11px;">${item.evrakNo || "-"}</span></td>
-                    <td><div style="font-size: 12px; color: #64748b;">${item.tarih || "-"}</div></td>
+                    <td><span class="text-muted" style="font-size: 11px;">${escapeHtml(item.evrakNo || "-")}</span></td>
+                    <td><div style="font-size: 12px; color: #64748b;">${escapeHtml(item.tarih || "-")}</div></td>
                     <td>
-                        <div class="fw-bold" style="font-size: 13px; color: #1e293b;">${item.talepEden || item.createdByName || "-"}</div>
+                        <div class="fw-bold" style="font-size: 13px; color: #1e293b;">${escapeHtml(item.talepEden || item.createdByName || "-")}</div>
                         <small class="text-muted" style="font-size: 10px;">EBYS Birimi</small>
                     </td>
                     <td>
-                        <div class="fw-bold text-primary" style="font-size: 13px;">${item.urun || "-"}</div>
-                        <small class="text-muted" style="font-size: 11px;">${item.birim || ""}</small>
+                        <div class="fw-bold text-primary" style="font-size: 13px;">${escapeHtml(item.urun || "-")}</div>
+                        <small class="text-muted" style="font-size: 11px;">${escapeHtml(item.birim || "")}</small>
                     </td>
                     <td>
-                        <span class="badge-soft" style="background: ${status.bg}; color: ${status.color};">
-                            <i class="fas ${status.icon} me-1"></i>${status.text}
+                        <span class="badge-soft" style="background: ${escapeHtml(status.bg)}; color: ${escapeHtml(status.color)};">
+                            <i class="fas ${escapeHtml(status.icon)} me-1"></i>${escapeHtml(status.text)}
                         </span>
                     </td>
                     <td class="text-end">
                         <div class="d-flex justify-content-end gap-1">
                             <!-- Görüntüle -->
-                            <button onclick="window.openPurchaseDetail(${item.id},'view')" 
+                            <button onclick="window.openPurchaseDetail(${jsArg(item.id)},'view')" 
                                 class="btn-action btn-passive" title="Görüntüle">
                                 <i class="fas fa-eye fa-xs"></i>
                             </button>
                             
                             <!-- Düzenle -->
-                            <button onclick="window.openPurchaseDetail(${item.id},'edit')" 
+                            <button onclick="window.openPurchaseDetail(${jsArg(item.id)},'edit')" 
                                 class="btn-action btn-edit" title="Düzenle">
                                 <i class="fas fa-edit fa-xs"></i>
                             </button>
                             
                             ${!isStarted ? `
                                 <!-- Akışı Başlat -->
-                                <button onclick="window.startWorkflow(${item.id})" 
+                                <button onclick="window.startWorkflow(${jsArg(item.id)})" 
                                     class="btn-action btn-buy" title="Akışı Başlat">
                                     <i class="fas fa-play fa-xs"></i>
                                 </button>
                             ` : `
                                 <!-- İş Akışı (Mavi) -->
-                                <button onclick="window.viewWorkflow(${item.id})" 
+                                <button onclick="window.viewWorkflow(${jsArg(item.id)})" 
                                     class="btn-action btn-buy" title="İş Akışı">
                                     <i class="fas fa-stream fa-xs"></i>
                                 </button>
                                 <!-- Durdur (Kırmızı) -->
-                                <button onclick="window.stopWorkflow(${item.id})" 
+                                <button onclick="window.stopWorkflow(${jsArg(item.id)})" 
                                     class="btn-action btn-danger" title="Akışı Durdur">
                                     <i class="fas fa-stop fa-xs"></i>
                                 </button>
@@ -119,7 +119,7 @@ window.renderAdminDashboard = function () {
 
                             ${!isCancelled ? `
                                 <!-- [FEATURE] Bug 3: Geri Çek / İptal (cancelPurchaseRequest) butonu -->
-                                <button onclick="window.cancelPurchaseRequest('${item.id}')" 
+                                <button onclick="window.cancelPurchaseRequest(${jsArg(String(item.id))})" 
                                     class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
                                     <i class="fas fa-ban fa-xs"></i>
                                 </button>
@@ -127,7 +127,7 @@ window.renderAdminDashboard = function () {
 
                             ${!isStarted ? `
                                 <!-- Sil -->
-                                <button onclick="window.deletePurchaseRequest(${item.id})" 
+                                <button onclick="window.deletePurchaseRequest(${jsArg(item.id)})" 
                                     class="btn-action btn-danger" title="Sil">
                                     <i class="fas fa-trash-alt fa-xs"></i>
                                 </button>

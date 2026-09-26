@@ -55,10 +55,12 @@ function showAppAlert(message, type = 'info') {
         animation: slideIn 0.3s ease-out;
     `;
 
+    // [WHY]: Mesajlar kayıt verisi (ürün adı, yönetici mesajı) içeriyor; innerHTML ile XSS'e açıktı (SEC-01).
     alertDiv.innerHTML = `
-        <span>${finalMessage}</span>
+        <span style="white-space: pre-line;"></span>
         <button onclick="this.parentElement.remove()" style="background:none; border:none; color:white; cursor:pointer; font-weight:bold; margin-left:10px;">✕</button>
     `;
+    alertDiv.querySelector('span').textContent = finalMessage;
 
     container.appendChild(alertDiv);
 

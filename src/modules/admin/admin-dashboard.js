@@ -239,6 +239,7 @@ window.renderAdminRequestTable = function () {
     const countBadge = document.getElementById('pendingRequestCount');
     if (!tableBody) return;
 
+    const esc = window.escapeHtml;
     const allRequests = window.data.requests || [];
     tableBody.innerHTML = '';
     let pendingCount = 0;
@@ -280,15 +281,15 @@ window.renderAdminRequestTable = function () {
         tableBody.innerHTML += `
             <tr class="align-middle">
                 <td class="ps-3">
-                    <div style="font-size: 11px; color: #94a3b8; font-weight: 500;">${req.tarih || '-'}</div>
+                    <div style="font-size: 11px; color: #94a3b8; font-weight: 500;">${esc(req.tarih || '-')}</div>
                 </td>
                 <td>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b;">${req.personel || '-'}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #1e293b;">${esc(req.personel || '-')}</div>
                 </td>
                 <td>
-                    <div style="font-weight: 600; font-size: 14px; color: #0f172a;">${req.ürün || '-'}</div>
+                    <div style="font-weight: 600; font-size: 14px; color: #0f172a;">${esc(req.ürün || '-')}</div>
                     <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
-                        <i class="fas fa-layer-group me-1"></i> ${req.adet || 1} Adet
+                        <i class="fas fa-layer-group me-1"></i> ${esc(req.adet || 1)} Adet
                     </div>
                 </td>
                 <td class="text-center">
@@ -484,7 +485,7 @@ window.renderProductTypesTable = function () {
                     <td class="ps-3" style="width: 40%;">
                         <div class="d-flex align-items-center">
                             <i class="fas fa-tag me-2 text-primary opacity-75"></i>
-                            <span class="fw-bold text-dark">${type.name}</span>
+                            <span class="fw-bold text-dark">${escapeHtml(type.name)}</span>
                         </div>
                     </td>
                     <td class="text-center" style="width: 30%;">
@@ -495,10 +496,10 @@ window.renderProductTypesTable = function () {
                     </td>
                     <td class="text-end pe-3">
                         <div class="action-buttons justify-content-end">
-                            <button onclick="editProductType('${type.id}', '${typeNameForJS}', ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                            <button onclick="editProductType(${jsArg(String(type.id))}, '${typeNameForJS}', ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                                 <i class="fa-solid fa-arrows-rotate"></i>
                             </button>
-                            <button onclick="deleteProductType('${type.id}')" class="btn-action btn-passive shadow-sm" title="Sil">
+                            <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
                                 <i class="fas fa-trash fa-xs"></i>
                             </button>
                         </div>
@@ -514,7 +515,7 @@ window.renderProductTypesTable = function () {
                     <td class="ps-3">
                         <div class="d-flex align-items-center">
                             <i class="fas fa-tag me-2 text-info opacity-75"></i>
-                            <span class="fw-bold text-dark">${type.name}</span>
+                            <span class="fw-bold text-dark">${escapeHtml(type.name)}</span>
                         </div>
                     </td>
                     <td class="text-center">
@@ -528,10 +529,10 @@ window.renderProductTypesTable = function () {
                     </td>
                     <td class="text-end pe-3">
                         <div class="action-buttons justify-content-end">
-                            <button onclick="editProductType('${type.id}', '${typeNameForJS}', ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                            <button onclick="editProductType(${jsArg(String(type.id))}, '${typeNameForJS}', ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button onclick="deleteProductType('${type.id}')" class="btn-action btn-passive shadow-sm" title="Sil">
+                            <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -964,8 +965,8 @@ window.renderCriticalStockTable = function () {
             rows.push(`
                 <tr class="align-middle">
                     <td>
-                        <div class="fw-bold text-truncate" title="${item.ürün || item.name}">${item.ürün || item.name}</div>
-                        <small class="text-muted d-block">${item.depo} | ${item.rafNo || '-'}</small>
+                        <div class="fw-bold text-truncate" title="${escapeHtml(item.ürün || item.name)}">${escapeHtml(item.ürün || item.name)}</div>
+                        <small class="text-muted d-block">${escapeHtml(item.depo)} | ${escapeHtml(item.rafNo || '-')}</small>
                     </td>
                     <td class="text-center">
                         <span class="fw-bold ${mevcut <= 1 ? 'text-danger' : 'text-dark'}">${mevcut}</span>
@@ -976,7 +977,7 @@ window.renderCriticalStockTable = function () {
                         <div class="action-buttons">
                             <button class="btn-action btn-buy" title="Satın Al"><i class="fas fa-shopping-cart"></i></button>
                             <button class="btn-action btn-mail" title="Bildirim Gönder"><i class="fas fa-envelope"></i></button>
-                            <button class="btn-action btn-passive" onclick="deleteType('${item.name}')" title="Pasif Yap"><i class="fas fa-trash"></i></button>
+                            <button class="btn-action btn-passive" onclick="deleteType(${jsArg(String(item.name))})" title="Pasif Yap"><i class="fas fa-trash"></i></button>
                         </div>
                     </td>
                 </tr>`);
@@ -1575,7 +1576,7 @@ window.renderCustomWatchDashboard = function () {
         <div class="watch-card" onclick="openWatchDetail(${JSON.stringify(item).replace(/"/g, '&quot;')})">
 
             <div class="watch-header">
-                <div class="title">${item.ürün}</div>
+                <div class="title">${escapeHtml(item.ürün)}</div>
                 <div class="qty ${isLow ? 'danger' : 'success'}">${qty}</div>
             </div>
 
@@ -1799,8 +1800,8 @@ window.searchPersonnelForLocation = function (query) {
             // Personel verisinde birim hangi isimle tutuluyor olabilirse hepsini dene
             const pUnit = p.birim || p.unit || p.department || p.bolum || p.departman || p.birimAdi || '';
             return `
-                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" onclick="window.addPersonToLocation({name:'${p.name}', unit:'${pUnit}'})">
-                    <strong>${p.name}</strong> ${pUnit ? `<small class="text-muted">(${pUnit})</small>` : ''}
+                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" onclick="window.addPersonToLocation({name:${jsArg(String(p.name))}, unit:'${pUnit}'})">
+                    <strong>${escapeHtml(p.name)}</strong> ${pUnit ? `<small class="text-muted">(${pUnit})</small>` : ''}
                 </div>
             `;
         }).join('');
@@ -1818,7 +1819,7 @@ window.addPersonToLocation = function (person) {
 
     const badge = document.createElement('span');
     badge.className = 'badge bg-light text-dark border d-flex align-items-center gap-2 p-2';
-    badge.innerHTML = `${person.name} <i class="fas fa-times text-danger" style="cursor:pointer;" onclick="window.removePersonFromLocation('${person.name}')"></i>`;
+    badge.innerHTML = `${escapeHtml(person.name)} <i class="fas fa-times text-danger" style="cursor:pointer;" onclick="window.removePersonFromLocation(${jsArg(String(person.name))})"></i>`;
     container.appendChild(badge);
 
     document.getElementById('loc_personSearch').value = '';
@@ -1896,20 +1897,20 @@ window.renderLocationsTable = function () {
 
         return `
         <tr class="align-middle">
-            <td class="fw-bold text-dark">${loc.code || '-'}</td>
-            <td>${loc.unit || '-'}</td>
+            <td class="fw-bold text-dark">${escapeHtml(loc.code || '-')}</td>
+            <td>${escapeHtml(loc.unit || '-')}</td>
             <td>
-                <span class="badge bg-soft-primary text-primary">${loc.campus || '-'}</span>
-                <small class="text-muted ms-1">${loc.corridor || '-'} Koridoru</small>
+                <span class="badge bg-soft-primary text-primary">${escapeHtml(loc.campus || '-')}</span>
+                <small class="text-muted ms-1">${escapeHtml(loc.corridor || '-')} Koridoru</small>
             </td>
             <td>
                 <div class="person-tag-container" title="${persons.map(p => p.name).join(', ')}">
-                    ${visiblePersons.map(p => `<span class="badge bg-light text-dark border-0 person-tag">${p.name}</span>`).join('')}
+                    ${visiblePersons.map(p => `<span class="badge bg-light text-dark border-0 person-tag">${escapeHtml(p.name)}</span>`).join('')}
                     ${hasMore ? `
                         <div class="person-tag-more">
                             +${moreCount}
                             <div class="person-popover">
-                                ${persons.map(p => `<div class="popover-item">${p.name}</div>`).join('')}
+                                ${persons.map(p => `<div class="popover-item">${escapeHtml(p.name)}</div>`).join('')}
                             </div>
                         </div>
                     ` : ''}
@@ -1918,10 +1919,10 @@ window.renderLocationsTable = function () {
             </td>
             <td class="text-end">
                 <div class="d-flex justify-content-end gap-2">
-                    <button onclick="window.openLocationModal('${loc.id}')" class="p-btn-icon play" title="Düzenle">
+                    <button onclick="window.openLocationModal(${jsArg(String(loc.id))})" class="p-btn-icon play" title="Düzenle">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button onclick="window.deleteLocation('${loc.id}')" class="p-btn-icon delete" title="Sil">
+                    <button onclick="window.deleteLocation(${jsArg(String(loc.id))})" class="p-btn-icon delete" title="Sil">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>

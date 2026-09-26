@@ -514,11 +514,11 @@ window.renderRequestsTable = function () {
 
         row.innerHTML = `
             <td style="text-align:center;"><input type="checkbox" class="req-checkbox" value="${index}"></td>
-            <td>${req.tarih || "-"}</td>
-            <td>${req.personel || "-"}</td>
-            <td>${req.ürün || "-"} <strong>(${req.adet || 1} Adet)</strong></td>
-            <td style="color:#7f8c8d;">${req.not || "-"}</td>
-            <td style="font-weight:bold; color:#2c3e50;">${req.sn || "-"}</td>
+            <td>${escapeHtml(req.tarih || "-")}</td>
+            <td>${escapeHtml(req.personel || "-")}</td>
+            <td>${escapeHtml(req.ürün || "-")} <strong>(${escapeHtml(req.adet || 1)} Adet)</strong></td>
+            <td style="color:#7f8c8d;">${escapeHtml(req.not || "-")}</td>
+            <td style="font-weight:bold; color:#2c3e50;">${escapeHtml(req.sn || "-")}</td>
             <td style="text-align:center;"><span class="status-badge-pill ${statusClass}">${statusText}</span></td>
             <td style="text-align:center;">
                 ${isPending ? `
@@ -563,13 +563,13 @@ function renderMyRequestsTable() {
         else if (isRejected) statusHTML = `<div class="status-badge-pill status-rejected-pill">REDDEDİLDİ</div>`;
         else if (isCompleted) statusHTML = `<div class="status-badge-pill status-completed-pill">TESLİM ALINDI</div>`;
         else if (isDraft) statusHTML = `<div class="status-badge-pill" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;">TASLAK</div>`;
-        else statusHTML = `<div class="status-badge-pill status-pending-pill">${req.durum || '-'}</div>`;
+        else statusHTML = `<div class="status-badge-pill status-pending-pill">${escapeHtml(req.durum || '-')}</div>`;
 
         row.innerHTML = `
-            <td>${req.tarih}</td>
+            <td>${escapeHtml(req.tarih)}</td>
             <td>
-                <strong>${req.ürün}</strong><br>
-                <small style="color: #666; font-weight: bold;">Miktar: ${req.adet || 1} Adet</small>
+                <strong>${escapeHtml(req.ürün)}</strong><br>
+                <small style="color: #666; font-weight: bold;">Miktar: ${escapeHtml(req.adet || 1)} Adet</small>
             </td>
             <td style="text-align: center; vertical-align: middle;">${statusHTML}</td>
             <td style="text-align: center; vertical-align: middle;">
@@ -629,12 +629,12 @@ window.renderPersonnelInventoryTable = function () {
             : 'background: var(--color-info-light); color: var(--color-info); border: 1px solid rgba(96, 165, 250, 0.2);';
 
         row.innerHTML = `
-            <td>${req.tarih || "-"}</td>
-            <td><strong>${req.ürün || "-"}</strong></td>
-            <td style="font-weight:bold; color: var(--color-text);">${req.sn || "-"}</td>
-            <td>${req.adet || 1} Adet</td>
+            <td>${escapeHtml(req.tarih || "-")}</td>
+            <td><strong>${escapeHtml(req.ürün || "-")}</strong></td>
+            <td style="font-weight:bold; color: var(--color-text);">${escapeHtml(req.sn || "-")}</td>
+            <td>${escapeHtml(req.adet || 1)} Adet</td>
             <td><span class="status-badge-pill" style="min-width: 100px; padding: 6px 12px; font-size: 11px; ${typeBadgeStyle}">${typeText}</span></td>
-            <td style="color: var(--color-text-muted);">${req.not || "-"}</td>
+            <td style="color: var(--color-text-muted);">${escapeHtml(req.not || "-")}</td>
         `;
     });
 };
@@ -802,11 +802,11 @@ window.sendDraftInventoryRequest = async function (index) {
                 div.style.borderBottom = '1px solid var(--color-border-light)';
                 div.style.cursor = 'pointer';
                 if (res.isDemirbasStrict) {
-                    div.innerHTML = `🛡️ <b>${res.item.ürün || res.item.name || "-"}</b> - ${res.item.marka || ""} (Stok: ${res.qty}) <br><small>Raf: ${res.item.raf || "-"} / Sütun: ${res.item.sütun || "-"}</small>`;
+                    div.innerHTML = `🛡️ <b>${escapeHtml(res.item.ürün || res.item.name || "-")}</b> - ${escapeHtml(res.item.marka || "")} (Stok: ${escapeHtml(res.qty)}) <br><small>Raf: ${escapeHtml(res.item.raf || "-")} / Sütun: ${escapeHtml(res.item.sütun || "-")}</small>`;
                     div.style.backgroundColor = 'var(--color-surface)';
                     div.style.color = 'var(--color-text)';
                 } else {
-                    div.innerHTML = `📦 <b>${res.item.ürün || res.item.name || "-"}</b> - ${res.item.marka || ""} (Stok: ${res.qty}) <br><small>Raf: ${res.item.raf || "-"} / Sütun: ${res.item.sütun || "-"}</small>`;
+                    div.innerHTML = `📦 <b>${escapeHtml(res.item.ürün || res.item.name || "-")}</b> - ${escapeHtml(res.item.marka || "")} (Stok: ${escapeHtml(res.qty)}) <br><small>Raf: ${escapeHtml(res.item.raf || "-")} / Sütun: ${escapeHtml(res.item.sütun || "-")}</small>`;
                 }
                 div.onclick = function () {
                     const isAdmin = window.checkIsAdmin() || sessionStorage.getItem('adminVizesi') === 'true';
@@ -851,11 +851,11 @@ window.sendDraftInventoryRequest = async function (index) {
             html += `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid var(--color-border-light); background: var(--color-surface-alt); border-radius: 4px; margin-bottom: 4px;">
                 <div style="flex: 1;">
-                    <strong>${cartItem.item.ürün || cartItem.item.name || "-"}</strong><br>
-                    <small>${cartItem.item.raf || "-"} / ${cartItem.item.sütun || "-"}</small>
+                    <strong>${escapeHtml(cartItem.item.ürün || cartItem.item.name || "-")}</strong><br>
+                    <small>${escapeHtml(cartItem.item.raf || "-")} / ${escapeHtml(cartItem.item.sütun || "-")}</small>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <input type="number" min="1" max="${cartItem.qty}" value="${cartItem.exitQty}" onchange="updateCartQty(${idx}, this.value)" style="width: 60px; padding: 4px; text-align: center;">
+                    <input type="number" min="1" max="${escapeHtml(cartItem.qty)}" value="${escapeHtml(cartItem.exitQty)}" onchange="updateCartQty(${idx}, this.value)" style="width: 60px; padding: 4px; text-align: center;">
                     <button type="button" onclick="removeFromCart(${idx})" style="background: #e74c3c; color: white; border: none; border-radius: 4px; padding: 5px 8px; cursor: pointer;"><i class="fas fa-trash"></i></button>
                 </div>
             </div>`;
@@ -947,8 +947,8 @@ window.searchForRequest = function () {
             div.className = "search-item-hover";
             div.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div><strong style="color: #0984e3;">${item.ürün}</strong> <span style="font-size: 0.85em; color: #636e72;">${item.marka || ''}</span></div>
-                    <div style="text-align: right;"><span style="display: block; font-size: 0.75em; background: #dfe6e9; padding: 2px 6px; border-radius: 4px;">Raf: ${item.raf}</span><small style="color: ${item.adet > 0 ? '#27ae60' : '#d63031'}">Stok: ${item.adet}</small></div>
+                    <div><strong style="color: #0984e3;">${escapeHtml(item.ürün)}</strong> <span style="font-size: 0.85em; color: #636e72;">${escapeHtml(item.marka || '')}</span></div>
+                    <div style="text-align: right;"><span style="display: block; font-size: 0.75em; background: #dfe6e9; padding: 2px 6px; border-radius: 4px;">Raf: ${escapeHtml(item.raf)}</span><small style="color: ${escapeHtml(item.adet > 0 ? '#27ae60' : '#d63031')}">Stok: ${escapeHtml(item.adet)}</small></div>
                 </div>`;
             div.onmouseover = () => div.style.backgroundColor = "#f8f9fa";
             div.onmouseout = () => div.style.backgroundColor = "white";
@@ -985,7 +985,7 @@ window.searchForExit = function () {
         div.style.borderBottom = '1px solid #eee';
         div.style.cursor = 'pointer';
         const stock = item.adet !== undefined ? item.adet : (item.qty || 0);
-        div.innerHTML = `<strong>${item.ürün || item.name || '-'}</strong> <small>(${item.marka || item.tür || '-'})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${item.raf || item.shelf || '-'} | Stok: ${stock} | Depo: ${item._repo.toUpperCase()}</span>`;
+        div.innerHTML = `<strong>${escapeHtml(item.ürün || item.name || '-')}</strong> <small>(${escapeHtml(item.marka || item.tür || '-')})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${escapeHtml(item.raf || item.shelf || '-')} | Stok: ${stock} | Depo: ${escapeHtml(item._repo.toUpperCase())}</span>`;
         if (stock > 0) {
             div.onclick = () => window.selectProduct(item.ürün || item.name, item.tür || item.type || item.marka, item.raf || item.shelf, stock, item._repo, item._index);
         } else {
@@ -1023,14 +1023,14 @@ function renderExitTable() {
     const rowsHtml = window.data.b3.map((item, index) => {
         const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
         return `<tr class="${isPassive ? 'passive-row' : ''}">
-            <td>${item.rafNo || '-'}</td>
-            <td>${item.urunTuru || '-'}</td>
-            <td>${item.urunAciklama || '-'}</td>
-            <td>${item.sn || '-'}</td>
-            <td>${item.adet || 0}</td>
-            <td>${item.not || '-'}</td>
-            <td>${item.alanKisi || '-'}</td>
-            <td>${item.tarih || '-'}</td>
+            <td>${escapeHtml(item.rafNo || '-')}</td>
+            <td>${escapeHtml(item.urunTuru || '-')}</td>
+            <td>${escapeHtml(item.urunAciklama || '-')}</td>
+            <td>${escapeHtml(item.sn || '-')}</td>
+            <td>${escapeHtml(item.adet || 0)}</td>
+            <td>${escapeHtml(item.not || '-')}</td>
+            <td>${escapeHtml(item.alanKisi || '-')}</td>
+            <td>${escapeHtml(item.tarih || '-')}</td>
             <td>
                 <button class="pdf-btn" onclick="generateZimmetPDF(${index})">PDF</button>
                 <button class="delete-btn" onclick="if(validateAdminAction()) deleteB3Row(${index})">Sil</button>
@@ -1075,8 +1075,8 @@ window.exportPDF = function (depo) {
 
     items.forEach((item, index) => {
         const status = item.durumu ?? item.status ?? "-";
-        html += `<tr><td>${index + 1}</td><td>${item.sütun || '-'}</td><td>${item.raf || '-'}</td><td class="wrap">${item.ürün || '-'}</td><td class="wrap">${item.marka || '-'}</td>
-        <td style="text-align:center; font-weight:600;">${item.adet ?? item.qty ?? 0}</td><td class="${getStatusClass(status)}">${status}</td><td>${item.tür ?? item.type ?? '-'}</td></tr>`;
+        html += `<tr><td>${index + 1}</td><td>${escapeHtml(item.sütun || '-')}</td><td>${escapeHtml(item.raf || '-')}</td><td class="wrap">${escapeHtml(item.ürün || '-')}</td><td class="wrap">${escapeHtml(item.marka || '-')}</td>
+        <td style="text-align:center; font-weight:600;">${escapeHtml(item.adet ?? item.qty ?? 0)}</td><td class="${getStatusClass(status)}">${status}</td><td>${escapeHtml(item.tür ?? item.type ?? '-')}</td></tr>`;
     });
     html += `</tbody></table></div></body></html>`;
 
@@ -1194,7 +1194,10 @@ function showCustomConfirm(title, message, callback) {
         return Promise.resolve(res);
     }
     document.getElementById('alertTitle').innerText = title;
-    document.getElementById('alertMessage').innerHTML = message;
+    // [WHY]: Onay metinleri kayıt verisi (ürün/evrak adı) içeriyor; innerHTML ile XSS'e açıktı (SEC-01).
+    const alertMessageEl = document.getElementById('alertMessage');
+    alertMessageEl.textContent = message;
+    alertMessageEl.style.whiteSpace = 'pre-line';
     overlay.style.display = 'flex';
     return new Promise((resolve) => {
         confirmBtn.onclick = () => {
@@ -1307,11 +1310,11 @@ function renderRequestAction(request) {
     const checkIsAdmin = checkAdmin();
     if (request.status === 'pending') {
         return checkIsAdmin
-            ? `<button class="btn-deliver" onclick="updateRequestStatus(${request.id}, 'delivered')">Teslim Et</button>`
+            ? `<button class="btn-deliver" onclick="updateRequestStatus(${jsArg(request.id)}, 'delivered')">Teslim Et</button>`
             : `<span class="status-waiting">Bekleniyor...</span>`;
     } else if (request.status === 'delivered') {
         return !checkIsAdmin
-            ? `<button class="btn-confirm" onclick="confirmReceipt(${request.id})">Teslim Aldım</button>`
+            ? `<button class="btn-confirm" onclick="confirmReceipt(${jsArg(request.id)})">Teslim Aldım</button>`
             : `<span class="status-delivered">Onay Bekleniyor</span>`;
     } else {
         return `<span class="status-completed">Tamamlandı</span>`;

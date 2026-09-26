@@ -181,12 +181,12 @@ window.inventoryManagementModule = {
         { id: 'kpi-returned', label: 'İade Edildi', icon: 'fa-undo-alt', color: '#27ae60', bg: 'rgba(39,174,96,0.1)' },
         { id: 'kpi-pending', label: 'Bekleyen Talep', icon: 'fa-hourglass-half', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)' }
       ].map(k => `
-              <div style="background:${k.bg}; border:1px solid ${k.color}33; border-radius:14px; padding:16px; text-align:center; transition:0.2s;"
+              <div style="background:${escapeHtml(k.bg)}; border:1px solid ${escapeHtml(k.color)}33; border-radius:14px; padding:16px; text-align:center; transition:0.2s;"
                    onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px ${k.color}22'"
                    onmouseout="this.style.transform=''; this.style.boxShadow=''">
-                <div style="font-size:1.6rem; color:${k.color}; margin-bottom:6px;"><i class="fas ${k.icon}"></i></div>
-                <div id="${k.id}" style="font-size:1.8rem; font-weight:800; color:${k.color};">-</div>
-                <div style="font-size:0.7rem; font-weight:600; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:4px;">${k.label}</div>
+                <div style="font-size:1.6rem; color:${escapeHtml(k.color)}; margin-bottom:6px;"><i class="fas ${escapeHtml(k.icon)}"></i></div>
+                <div id="${escapeHtml(k.id)}" style="font-size:1.8rem; font-weight:800; color:${escapeHtml(k.color)};">-</div>
+                <div style="font-size:0.7rem; font-weight:600; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:4px;">${escapeHtml(k.label)}</div>
               </div>
             `).join('')}
           </div>
@@ -297,12 +297,12 @@ window.inventoryManagementModule = {
         : `<span style="background:#dbeafe; color:#1e40af; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">📌 Zimmetli</span>`;
 
       const returnDateInfo = a.talepTuru === 'Geçici Zimmet' && a.iadeTarihi
-        ? `<br><small style="color:var(--color-warning); font-weight:600;">📅 İade: ${a.iadeTarihi}</small>`
+        ? `<br><small style="color:var(--color-warning); font-weight:600;">📅 İade: ${escapeHtml(a.iadeTarihi)}</small>`
         : '';
 
       const actionBtn = a.iadeEdildi
         ? `<span style="color:var(--color-text-muted); font-size:12px;">✔ Tamamlandı</span>`
-        : `<button onclick="window.inventoryManagementModule.removeAssignment('${a._id}', '${a._source}')"
+        : `<button onclick="window.inventoryManagementModule.removeAssignment(${jsArg(String(a._id))}, ${jsArg(String(a._source))})"
                     style="padding:6px 12px; background:#e74c3c; color:white; border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:600; transition:0.2s;"
                     onmouseover="this.style.background='#c0392b'" onmouseout="this.style.background='#e74c3c'">
                     <i class="fas fa-undo"></i> Zimmetten Düş
@@ -310,7 +310,7 @@ window.inventoryManagementModule = {
 
       // [G] SN varsa Cihaz Geçmişi butonu
       const historyBtn = (a.sn && a.sn !== '-')
-        ? `<button onclick="window.inventoryManagementModule.showDeviceHistory('${a.sn.replace(/'/g, "\\'")}')"
+        ? `<button onclick="window.inventoryManagementModule.showDeviceHistory(${jsArg(String(a.sn))})"
                     title="Bu cihazın tüm zimmet geçmişini gör"
                     style="padding:5px 10px; background:#eff6ff; color:#1d4ed8; border:1px solid #93c5fd; border-radius:8px; cursor:pointer; font-size:11px; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:4px; transition:0.2s;"
                     onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
@@ -321,26 +321,26 @@ window.inventoryManagementModule = {
       return `
             <tr style="border-bottom:1px solid var(--color-border); transition:0.15s;" onmouseover="this.style.background='var(--color-surface-alt,#f8fafc)'" onmouseout="this.style.background=''">
               <td style="padding:12px 16px;">
-                <div style="font-weight:700; color:var(--color-text);">${a.personel}</div>
-                <div style="font-size:11px; color:var(--color-text-muted);">${a._source === 'request' ? '📋 Talep' : '📤 Doğrudan Çıkış'}</div>
+                <div style="font-weight:700; color:var(--color-text);">${escapeHtml(a.personel)}</div>
+                <div style="font-size:11px; color:var(--color-text-muted);">${escapeHtml(a._source === 'request' ? '📋 Talep' : '📤 Doğrudan Çıkış')}</div>
               </td>
               <td style="padding:12px 16px;">
-                <div style="font-weight:600; color:var(--color-text);">${a.ürün}</div>
-                ${a.sn && a.sn !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted); font-family:monospace;">SN: <b>${a.sn}</b></div>` : ''}
+                <div style="font-weight:600; color:var(--color-text);">${escapeHtml(a.ürün)}</div>
+                ${a.sn && a.sn !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted); font-family:monospace;">SN: <b>${escapeHtml(a.sn)}</b></div>` : ''}
               </td>
-              <td style="padding:12px 16px; text-align:center; font-weight:700; color:var(--color-text);">${a.adet}</td>
+              <td style="padding:12px 16px; text-align:center; font-weight:700; color:var(--color-text);">${escapeHtml(a.adet)}</td>
               <td style="padding:12px 16px;">
                 <span style="background:${tColor.bg}; color:${tColor.text}; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">
-                  ${tColor.icon} ${a.talepTuru}
+                  ${tColor.icon} ${escapeHtml(a.talepTuru)}
                 </span>
               </td>
               <td style="padding:12px 16px; text-align:center;">
                 <span style="background:${pColor.bg}; color:${pColor.text}; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">
-                  ${pColor.icon} ${a.oncelik}
+                  ${pColor.icon} ${escapeHtml(a.oncelik)}
                 </span>
               </td>
               <td style="padding:12px 16px;">
-                <div style="font-size:12px; color:var(--color-text-muted);">${a.tarih}</div>
+                <div style="font-size:12px; color:var(--color-text-muted);">${escapeHtml(a.tarih)}</div>
                 ${returnDateInfo}
               </td>
               <td style="padding:12px 16px; text-align:center;">${durumBadge}</td>
@@ -487,7 +487,7 @@ window.inventoryManagementModule = {
     if (select) {
       const personeller = window.data?.personel || [];
       select.innerHTML = '<option value="">-- Personel Seçiniz --</option>' +
-        personeller.map(p => `<option value="${p.name || p.adSoyad}">${p.name || p.adSoyad}</option>`).join('');
+        personeller.map(p => `<option value="${escapeHtml(p.name || p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
     }
 
     // Formu sıfırla
@@ -591,7 +591,7 @@ window.inventoryManagementModule = {
         .map((p, origIdx) => {
           // Orijinal index'i data-orig-idx ile sakla (depo splice yapmadan)
           const realIdx = products.indexOf(p);
-          return `<option value="${realIdx}" data-max="${p.adet}">${p.ürün || p.name} (Stok: ${p.adet})</option>`;
+          return `<option value="${realIdx}" data-max="${escapeHtml(p.adet)}">${escapeHtml(p.ürün || p.name)} (Stok: ${escapeHtml(p.adet)})</option>`;
         })
         .join('');
   },
@@ -935,11 +935,11 @@ window.inventoryManagementModule = {
       ? `<tr><td colspan="5" style="text-align:center; padding:32px; color:var(--color-text-muted);"><i class="fas fa-search fa-2x" style="display:block; margin-bottom:12px; opacity:0.3;"></i>Bu seri numarasiyla eslesen kayit bulunamadi.</td></tr>`
       : events.map((ev, i) => `
           <tr style="border-bottom:1px solid var(--color-border);">
-            <td style="padding:10px 14px; font-size:12px; color:var(--color-text-muted); white-space:nowrap;">${i + 1}. ${ev.tarih}</td>
-            <td style="padding:10px 14px;"><span style="font-size:12px; font-weight:700;">${ev.tip}</span></td>
-            <td style="padding:10px 14px; font-weight:600; color:var(--color-text);">${ev.personel}</td>
-            <td style="padding:10px 14px; color:var(--color-text-muted); font-size:12px;">${ev.ürün}</td>
-            <td style="padding:10px 14px; color:var(--color-text-muted); font-size:11px;">${ev.not}</td>
+            <td style="padding:10px 14px; font-size:12px; color:var(--color-text-muted); white-space:nowrap;">${i + 1}. ${escapeHtml(ev.tarih)}</td>
+            <td style="padding:10px 14px;"><span style="font-size:12px; font-weight:700;">${escapeHtml(ev.tip)}</span></td>
+            <td style="padding:10px 14px; font-weight:600; color:var(--color-text);">${escapeHtml(ev.personel)}</td>
+            <td style="padding:10px 14px; color:var(--color-text-muted); font-size:12px;">${escapeHtml(ev.ürün)}</td>
+            <td style="padding:10px 14px; color:var(--color-text-muted); font-size:11px;">${escapeHtml(ev.not)}</td>
           </tr>
         `).join('');
 
@@ -952,7 +952,7 @@ window.inventoryManagementModule = {
             </h4>
             <div style="margin-top:4px; display:flex; align-items:center; gap:8px;">
               <span style="font-size:13px; color:var(--color-text-muted);">Seri No:</span>
-              <code style="background:var(--color-surface-alt,#f3f4f6); padding:3px 10px; border-radius:6px; font-size:13px; font-weight:700; color:var(--color-primary); letter-spacing:0.5px;">${sn}</code>
+              <code style="background:var(--color-surface-alt,#f3f4f6); padding:3px 10px; border-radius:6px; font-size:13px; font-weight:700; color:var(--color-primary); letter-spacing:0.5px;">${escapeHtml(sn)}</code>
               <span style="background:#dbeafe; color:#1e40af; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700;">${events.length} Kayit</span>
             </div>
           </div>
@@ -1009,7 +1009,7 @@ window.inventoryManagementModule = {
           const personeller = window.data?.personel || [];
           const current = select.value;
           select.innerHTML = '<option value="">-- Personel Seciniz --</option>' +
-            personeller.map(p => `<option value="${p.name || p.adSoyad}">${p.name || p.adSoyad}</option>`).join('');
+            personeller.map(p => `<option value="${escapeHtml(p.name || p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
           if (personeller.length > 0) {
             const last = personeller[personeller.length - 1];
             select.value = last.name || last.adSoyad || current;

@@ -33,7 +33,7 @@ window.handlePurchaseFileChange = function (input) {
         Array.from(input.files).forEach(file => {
             const tag = document.createElement('div');
             tag.className = 'file-tag-slim';
-            tag.innerHTML = `<i class="fas fa-file"></i> ${file.name}`;
+            tag.innerHTML = `<i class="fas fa-file"></i> ${escapeHtml(file.name)}`;
             list.appendChild(tag);
         });
     }
@@ -391,32 +391,32 @@ window.renderPurchaseModule = function (options = {}) {
                     return `
                     <tr class="align-middle ${isCancelled ? 'passive-row' : ''}">
                         <td>
-                            <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${item.evrakNo || "-"}</div>
+                            <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${escapeHtml(item.evrakNo || "-")}</div>
                         </td>
                         <td>
-                            <div style="font-size:12px; color:#64748b; font-weight:500;">${item.tarih || "-"}</div>
+                            <div style="font-size:12px; color:#64748b; font-weight:500;">${escapeHtml(item.tarih || "-")}</div>
                         </td>
                         <td>
-                            <div style="font-size:13px; font-weight:600; color:#1e293b;">${item.talepEden || item.createdByName || "-"}</div>
+                            <div style="font-size:13px; font-weight:600; color:#1e293b;">${escapeHtml(item.talepEden || item.createdByName || "-")}</div>
                             <small class="text-muted" style="font-size:10px;">EBYS Birimi</small>
                         </td>
                         <td>
-                            <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${item.urun || "-"}</div>
+                            <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${escapeHtml(item.urun || "-")}</div>
                             <div style="font-size:11px; color:#94a3b8; font-weight:500; margin-top:2px;">
-                                <i class="fas fa-building me-1"></i> ${item.birim || "Genel"}
+                                <i class="fas fa-building me-1"></i> ${escapeHtml(item.birim || "Genel")}
                             </div>
                         </td>
                         <td>${durumHTML}</td>
                         <td class="text-end">
                             <div class="d-flex justify-content-end gap-1">
                                 <!-- Görüntüle -->
-                                <button onclick="window.openPurchaseDetail(${item.id}, 'view')" class="btn-action btn-passive" title="Görüntüle">
+                                <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'view')" class="btn-action btn-passive" title="Görüntüle">
                                     <i class="fas fa-eye fa-xs"></i>
                                 </button>
             
                                 ${window.isAdminPanel ? `
                                     <!-- Düzenle (Admin için her zaman açık) -->
-                                    <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                    <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'edit')" 
                                             class="btn-action btn-edit" 
                                             title="Düzenle">
                                         <i class="fas fa-edit fa-xs"></i>
@@ -424,31 +424,31 @@ window.renderPurchaseModule = function (options = {}) {
                                     
                                     ${!isStarted ? `
                                         <!-- Akışı Başlat -->
-                                        <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                        <button onclick="window.startWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Başlat">
                                             <i class="fas fa-play fa-xs"></i>
                                         </button>
                                     ` : `
                                         <!-- Akışı Görüntüle -->
-                                        <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                        <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Görüntüle">
                                             <i class="fas fa-stream fa-xs"></i>
                                         </button>
                                     `}
                                     
                                     ${!isCancelled ? `
                                         <!-- [BUGFIX] Admin Geri Çek / İptal (cancelPurchaseRequest) butonu -->
-                                        <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                        <button onclick="window.cancelPurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
                                             <i class="fas fa-ban fa-xs"></i>
                                         </button>
                                     ` : ''}
 
                                     <!-- Sil -->
-                                    <button onclick="window.deletePurchaseRequest('${item.id}')" class="btn-action btn-danger" title="Sil">
+                                    <button onclick="window.deletePurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="Sil">
                                         <i class="fas fa-trash-alt fa-xs"></i>
                                     </button>
                                 ` : `
                                     ${!isCancelled ? `
                                         <!-- Düzenle -->
-                                        <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                        <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'edit')" 
                                                 class="btn-action btn-edit" 
                                                 ${isStarted ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
                                                 title="${isStarted ? 'Süreç başladığı için düzenlenemez' : 'Düzenle'}">
@@ -457,18 +457,18 @@ window.renderPurchaseModule = function (options = {}) {
                     
                                         ${!isStarted ? `
                                             <!-- Akışı Başlat -->
-                                            <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                            <button onclick="window.startWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Başlat">
                                                 <i class="fas fa-play fa-xs"></i>
                                             </button>
                                         ` : `
                                             <!-- Akışı Görüntüle -->
-                                            <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                            <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Görüntüle">
                                                 <i class="fas fa-stream fa-xs"></i>
                                             </button>
                                         `}
                                         
                                         <!-- İptal Et / Geri Çek -->
-                                        <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                        <button onclick="window.cancelPurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
                                             <i class="fas fa-ban fa-xs"></i>
                                         </button>
                                     ` : ''}
@@ -479,7 +479,7 @@ window.renderPurchaseModule = function (options = {}) {
                     `;
                 } catch (err) {
                     console.error("❌ Satır render hatası:", err, item);
-                    return `<tr><td colspan="6" style="color:red; font-size:10px;">Veri hatası (ID: ${item.id})</td></tr>`;
+                    return `<tr><td colspan="6" style="color:red; font-size:10px;">Veri hatası (ID: ${escapeHtml(item.id)})</td></tr>`;
                 }
             }).join("")
             : `
@@ -526,32 +526,32 @@ window.renderServicesModule = function () {
             return `
                 <tr ${rowStyle} class="align-middle ${isCancelled ? 'passive-row' : ''}">
                     <td>
-                        <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${item.evrakNo || "-"}</div>
+                        <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${escapeHtml(item.evrakNo || "-")}</div>
                     </td>
                     <td>
-                        <div style="font-size:12px; color:#64748b; font-weight:500;">${item.tarih || "-"}</div>
+                        <div style="font-size:12px; color:#64748b; font-weight:500;">${escapeHtml(item.tarih || "-")}</div>
                     </td>
                     <td>
-                        <div style="font-size:13px; font-weight:600; color:#1e293b;">${item.talepEden || item.createdByName || "-"}</div>
+                        <div style="font-size:13px; font-weight:600; color:#1e293b;">${escapeHtml(item.talepEden || item.createdByName || "-")}</div>
                         <small class="text-muted" style="font-size:10px;">EBYS Birimi</small>
                     </td>
                     <td>
-                        <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${item.urun || "-"}</div>
+                        <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${escapeHtml(item.urun || "-")}</div>
                         <div style="font-size:11px; color:#94a3b8; font-weight:500; margin-top:2px;">
-                            <i class="fas fa-building me-1"></i> ${item.birim || "Genel"}
+                            <i class="fas fa-building me-1"></i> ${escapeHtml(item.birim || "Genel")}
                         </div>
                     </td>
                     <td>${durumHTML}</td>
                     <td class="text-end">
                         <div class="d-flex justify-content-end gap-1">
                             <!-- Görüntüle -->
-                            <button onclick="window.openPurchaseDetail(${item.id}, 'view')" class="btn-action btn-passive" title="Görüntüle">
+                            <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'view')" class="btn-action btn-passive" title="Görüntüle">
                                 <i class="fas fa-eye fa-xs"></i>
                             </button>
         
                             ${window.isAdminPanel ? `
                                 <!-- Düzenle (Admin için her zaman açık) -->
-                                <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'edit')" 
                                         class="btn-action btn-edit" 
                                         title="Düzenle">
                                     <i class="fas fa-edit fa-xs"></i>
@@ -559,31 +559,31 @@ window.renderServicesModule = function () {
                                 
                                 ${!isStarted ? `
                                     <!-- Akışı Başlat -->
-                                    <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                    <button onclick="window.startWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Başlat">
                                         <i class="fas fa-play fa-xs"></i>
                                     </button>
                                 ` : `
                                     <!-- Akışı Görüntüle -->
-                                    <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                    <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Görüntüle">
                                         <i class="fas fa-stream fa-xs"></i>
                                     </button>
                                 `}
                                 
                                 ${!isCancelled ? `
                                     <!-- [BUGFIX] Admin Geri Çek / İptal (cancelPurchaseRequest) butonu -->
-                                    <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                    <button onclick="window.cancelPurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
                                         <i class="fas fa-ban fa-xs"></i>
                                     </button>
                                 ` : ''}
 
                                 <!-- Sil -->
-                                <button onclick="window.deletePurchaseRequest('${item.id}')" class="btn-action btn-danger" title="Sil">
+                                <button onclick="window.deletePurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="Sil">
                                     <i class="fas fa-trash-alt fa-xs"></i>
                                 </button>
                             ` : `
                                 ${!isCancelled ? `
                                     <!-- Düzenle -->
-                                    <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                    <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'edit')" 
                                             class="btn-action btn-edit" 
                                             ${isStarted ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
                                             title="${isStarted ? 'Süreç başladığı için düzenlenemez' : 'Düzenle'}">
@@ -592,18 +592,18 @@ window.renderServicesModule = function () {
                 
                                     ${!isStarted ? `
                                         <!-- Akışı Başlat -->
-                                        <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                        <button onclick="window.startWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Başlat">
                                             <i class="fas fa-play fa-xs"></i>
                                         </button>
                                     ` : `
                                         <!-- Akışı Görüntüle -->
-                                        <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                        <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Görüntüle">
                                             <i class="fas fa-stream fa-xs"></i>
                                         </button>
                                     `}
                                     
                                     <!-- İptal Et / Geri Çek -->
-                                    <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                    <button onclick="window.cancelPurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
                                         <i class="fas fa-ban fa-xs"></i>
                                     </button>
                                 ` : ''}
@@ -637,28 +637,28 @@ window.renderServicesModule = function () {
             return `
             <tr>
                 <td>
-                    <div class="fw-bold text-dark">${item.urunAciklama || 'İsimsiz Ürün'}</div>
-                    <small class="text-muted">${item.marka || ''}${item.sn ? ' — SN: ' + item.sn : ''}</small>
-                    ${item.sevkTarihi ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">📅 ${item.sevkTarihi}</div>` : ''}
+                    <div class="fw-bold text-dark">${escapeHtml(item.urunAciklama || 'İsimsiz Ürün')}</div>
+                    <small class="text-muted">${escapeHtml(item.marka || '')}${escapeHtml(item.sn ? ' — SN: ' + item.sn : '')}</small>
+                    ${item.sevkTarihi ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">📅 ${escapeHtml(item.sevkTarihi)}</div>` : ''}
                 </td>
                 <td>
-                    <div style="font-size:10px;color:#888;margin-bottom:3px;">🏢 ${item.hedef || '-'}</div>
+                    <div style="font-size:10px;color:#888;margin-bottom:3px;">🏢 ${escapeHtml(item.hedef || '-')}</div>
                     <span style="background:${sc.bg};color:${sc.color};padding:2px 10px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">
-                        ${item.durum || 'Serviste'}
+                        ${escapeHtml(item.durum || 'Serviste')}
                     </span>
                 </td>
                 <td class="text-end" style="white-space:nowrap;">
-                    <button onclick="window.viewServiceItem(${item.id})"
+                    <button onclick="window.viewServiceItem(${jsArg(item.id)})"
                             class="btn btn-sm btn-outline-secondary"
                             title="Görüntüle" style="margin-right:3px;">
                         <i class="fas fa-eye"></i>
                     </button>
-                    <button onclick="window.updateServiceStatus(${item.id})"
+                    <button onclick="window.updateServiceStatus(${jsArg(item.id)})"
                             class="btn btn-sm btn-outline-warning"
                             title="Durum Güncelle" style="margin-right:3px;">
                         <i class="fas fa-sync-alt"></i>
                     </button>
-                    <button onclick="window.receiveFromService(${item.id})"
+                    <button onclick="window.receiveFromService(${jsArg(item.id)})"
                             class="btn btn-sm btn-outline-success"
                             title="Depoya Geri Al">
                         <i class="fas fa-warehouse"></i>
@@ -740,7 +740,7 @@ window.viewServiceItem = function (serviceId) {
     const _f = (label, value) => `
         <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;">
             <label style="display:block;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;margin-bottom:3px;">${label}</label>
-            <span style="font-size:13px;color:#2c3e50;font-weight:500;">${value}</span>
+            <span style="font-size:13px;color:#2c3e50;font-weight:500;">${escapeHtml(value)}</span>
         </div>`;
 
     const statusColors = {
@@ -759,8 +759,8 @@ window.viewServiceItem = function (serviceId) {
                 <i class="fas fa-tools" style="color:white;font-size:17px;"></i>
             </div>
             <div>
-                <h3 style="margin:0;font-size:16px;color:#1a1a2e;font-weight:700;">${record.urunAciklama || 'İsimsiz Ürün'}</h3>
-                <small style="color:#888;">${record.marka || ''}${record.sn ? ' — SN: ' + record.sn : ''}</small>
+                <h3 style="margin:0;font-size:16px;color:#1a1a2e;font-weight:700;">${escapeHtml(record.urunAciklama || 'İsimsiz Ürün')}</h3>
+                <small style="color:#888;">${escapeHtml(record.marka || '')}${escapeHtml(record.sn ? ' — SN: ' + record.sn : '')}</small>
             </div>
         </div>
 
@@ -777,7 +777,7 @@ window.viewServiceItem = function (serviceId) {
             <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Güncel Durum</label>
             <div style="margin-top:6px;">
                 <span style="background:${sc.bg};color:${sc.color};padding:4px 14px;border-radius:20px;font-size:13px;font-weight:600;">
-                    ${record.durum || 'Serviste'}
+                    ${escapeHtml(record.durum || 'Serviste')}
                 </span>
             </div>
         </div>
@@ -785,7 +785,7 @@ window.viewServiceItem = function (serviceId) {
         ${record.not ? `
         <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:12px;">
             <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Sevk Notu</label>
-            <p style="margin:6px 0 0;color:#333;font-size:13px;">${record.not}</p>
+            <p style="margin:6px 0 0;color:#333;font-size:13px;">${escapeHtml(record.not)}</p>
         </div>` : ''}
 
         ${orig.açıklama ? `
@@ -888,13 +888,13 @@ function renderPurchaseTable(data) {
     // Satın Alma Talepleri JS Render Örneği
     tbody.innerHTML = paginatedData.map(item => `
         <tr>
-            <td><strong>${item.evrakNo || '-'}</strong></td>
-            <td><span class="text-muted">${item.tarih || '-'}</span></td>
-            <td>${item.talepEden || '-'}</td>
-            <td>${item.urun || '-'}</td>
+            <td><strong>${escapeHtml(item.evrakNo || '-')}</strong></td>
+            <td><span class="text-muted">${escapeHtml(item.tarih || '-')}</span></td>
+            <td>${escapeHtml(item.talepEden || '-')}</td>
+            <td>${escapeHtml(item.urun || '-')}</td>
             <td>
                 <span class="badge-soft bg-soft-warning">
-                    ${item.durum || 'Bekliyor'}
+                    ${escapeHtml(item.durum || 'Bekliyor')}
                 </span>
             </td>
             <td class="text-end">
@@ -990,10 +990,10 @@ window.viewRequest = function (id) {
 
     // Selectbox'ları doldur (Eğer admin panelinde seçenekler yüklü değilse metin olarak ekle)
     const unitSelect = document.getElementById("purUnit");
-    unitSelect.innerHTML = `<option>${item.birim}</option>`;
+    unitSelect.innerHTML = `<option>${escapeHtml(item.birim)}</option>`;
 
     const typeSelect = document.getElementById("purType");
-    typeSelect.innerHTML = `<option>${item.kategori || "Genel"}</option>`;
+    typeSelect.innerHTML = `<option>${escapeHtml(item.kategori || "Genel")}</option>`;
 
     // Görüntüleme modunda inputları kilitle
     const inputs = document.querySelectorAll("#purchaseForm .modern-input");
@@ -1239,14 +1239,14 @@ function _purFilesHTML(item, canDelete) {
     const rows = files.map((f, i) => `
         <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f1f5f9;font-size:13px;">
             <i class="fas fa-file-alt" style="color:#94a3b8;flex-shrink:0;"></i>
-            <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${f.name}">${f.name}</span>
-            <small style="color:#cbd5e1;flex-shrink:0;">${f.uploadedAt || ''}</small>
-            <a href="${f.url}" target="_blank"
+            <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+            <small style="color:#cbd5e1;flex-shrink:0;">${escapeHtml(f.uploadedAt || '')}</small>
+            <a href="${escapeHtml(safeUrl(f.url))}" target="_blank" rel="noopener noreferrer"
                style="padding:3px 9px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;color:#475569;text-decoration:none;">
                 <i class="fas fa-download"></i>
             </a>
             ${canDelete ? `
-            <button onclick="window.deleteRequestFile(${item.id}, ${i})"
+            <button onclick="window.deleteRequestFile(${jsArg(item.id)}, ${i})"
                 style="padding:3px 9px;font-size:11px;border:1px solid #fca5a5;border-radius:5px;background:none;color:#ef4444;cursor:pointer;">
                 <i class="fas fa-trash"></i>
             </button>` : ''}
@@ -1349,13 +1349,13 @@ function _purWorkflowHTML(item) {
     const rows = allLogs.map((a, idx) => `
         <div class="${idx >= visibleCount ? 'pur-log-hidden' : ''}" style="display:${idx >= visibleCount ? 'none' : 'flex'};flex-direction:column;padding:8px 0;border-bottom:1px solid #f8fafc;font-size:12px;">
             <div style="display:flex;gap:10px;">
-                <span style="color:#94a3b8;min-width:130px;flex-shrink:0;">${a.tarih || ''}</span>
-                <span style="color:#64748b;min-width:90px;flex-shrink:0;font-weight:600;">${a.yapan || ''}</span>
-                <span style="color:#1e293b;">${a.islem || ''}</span>
+                <span style="color:#94a3b8;min-width:130px;flex-shrink:0;">${escapeHtml(a.tarih || '')}</span>
+                <span style="color:#64748b;min-width:90px;flex-shrink:0;font-weight:600;">${escapeHtml(a.yapan || '')}</span>
+                <span style="color:#1e293b;">${escapeHtml(a.islem || '')}</span>
                 ${a.type === 'ebys' ? '<span style="background:#e0e7ff;color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:8px;">EBYS</span>' : ''}
             </div>
             ${a.not ? `<div style="margin-top:4px;padding:6px 10px;background:#f8fafc;border-radius:6px;color:#475569;font-style:italic;font-size:11px;">
-                💬 ${a.not}
+                💬 ${escapeHtml(a.not)}
             </div>` : ''}
         </div>`).join('');
 

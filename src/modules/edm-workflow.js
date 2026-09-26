@@ -275,13 +275,13 @@ window.renderUnitManagement = function () {
     if (container) {
         container.innerHTML = units.map(u => `
             <tr>
-                <td><strong>${u.name}</strong></td>
-                <td><small>${(u.personnel || []).join(', ') || 'Personel yok'}</small></td>
+                <td><strong>${escapeHtml(u.name)}</strong></td>
+                <td><small>${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}</small></td>
                 <td style="text-align:right;">
-                    <button onclick="window.openUnitModal('${u.id}')" class="btn-edit" style="color:#2980b9; background:none; border:none; cursor:pointer; margin-right:10px;">
+                    <button onclick="window.openUnitModal(${jsArg(String(u.id))})" class="btn-edit" style="color:#2980b9; background:none; border:none; cursor:pointer; margin-right:10px;">
                         <i class="fas fa-edit"></i> Düzenle
                     </button>
-                    <button onclick="window.deleteUnit('${u.id}')" class="btn-delete" style="color:#c0392b; background:none; border:none; cursor:pointer;">
+                    <button onclick="window.deleteUnit(${jsArg(String(u.id))})" class="btn-delete" style="color:#c0392b; background:none; border:none; cursor:pointer;">
                         <i class="fas fa-trash"></i> Sil
                     </button>
                 </td>
@@ -292,15 +292,15 @@ window.renderUnitManagement = function () {
     if (defListContainer) {
         defListContainer.innerHTML = units.map(u => `
             <tr>
-                <td><strong>${u.name}</strong></td>
+                <td><strong>${escapeHtml(u.name)}</strong></td>
                 <td><span class="badge bg-light text-dark border">-</span></td>
-                <td><small class="text-muted">${(u.personnel || []).join(', ') || 'Personel yok'}</small></td>
+                <td><small class="text-muted">${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}</small></td>
                 <td class="text-end pe-3">
                     <div class="action-buttons justify-content-end">
-                        <button onclick="window.openUnitModal('${u.id}')" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                        <button onclick="window.openUnitModal(${jsArg(String(u.id))})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                             <i class="fa-solid fa-arrows-rotate"></i>
                         </button>
-                        <button onclick="window.deleteUnit('${u.id}')" class="btn-action btn-passive shadow-sm" title="Sil">
+                        <button onclick="window.deleteUnit(${jsArg(String(u.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
                             <i class="fas fa-trash fa-xs"></i>
                         </button>
                     </div>
@@ -345,7 +345,7 @@ window.startWorkflow = function (id) {
 
         tplDropdown.innerHTML =
             '<option value="manual">-- Yeni Özel İş Akışı (Manuel) --</option>' +
-            filtered.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+            filtered.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join('');
 
         tplDropdown.value = 'manual';
     }
@@ -436,18 +436,18 @@ window.renderManualSteps = function () {
             </td>
             <td>
                 <div class="position-relative w-100">
-                    <input type="text" class="form-control workflow-select-ghost w-100" placeholder="Personel arayın veya yazın..." value="${step.user}"
+                    <input type="text" class="form-control workflow-select-ghost w-100" placeholder="Personel arayın veya yazın..." value="${escapeHtml(step.user)}"
                            onkeyup="window.searchPersonnelForStart(this.value, ${index})" style="border:1px solid transparent;">
                     <div id="startManualResults_${index}" class="search-results-popover" style="display:none; position:absolute; width:100%; background:white; border:1px solid #e2e8f0; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:1000; max-height:200px; overflow-y:auto; top:100%;"></div>
                 </div>
             </td>
             <td>
                 <select class="form-select workflow-select-ghost w-100" onchange="WorkflowState.tempManualSteps[${index}].tip = this.value">
-                    <option value="Paraf" ${step.tip === 'Paraf' ? 'selected' : ''}>Paraf</option>
-                    <option value="E-İmza & Mobil İmza" ${step.tip === 'E-İmza & Mobil İmza' ? 'selected' : ''}>E-İmza & Mobil İmza</option>
-                    <option value="Olur (Islak)" ${step.tip === 'Olur (Islak)' ? 'selected' : ''}>Olur (Islak)</option>
-                    <option value="Olur (E-İmza)" ${step.tip === 'Olur (E-İmza)' ? 'selected' : ''}>Olur (E-İmza)</option>
-                    <option value="Islak İmza" ${step.tip === 'Islak İmza' ? 'selected' : ''}>Islak İmza</option>
+                    <option value="Paraf" ${escapeHtml(step.tip === 'Paraf' ? 'selected' : '')}>Paraf</option>
+                    <option value="E-İmza & Mobil İmza" ${escapeHtml(step.tip === 'E-İmza & Mobil İmza' ? 'selected' : '')}>E-İmza & Mobil İmza</option>
+                    <option value="Olur (Islak)" ${escapeHtml(step.tip === 'Olur (Islak)' ? 'selected' : '')}>Olur (Islak)</option>
+                    <option value="Olur (E-İmza)" ${escapeHtml(step.tip === 'Olur (E-İmza)' ? 'selected' : '')}>Olur (E-İmza)</option>
+                    <option value="Islak İmza" ${escapeHtml(step.tip === 'Islak İmza' ? 'selected' : '')}>Islak İmza</option>
                 </select>
             </td>
             <td class="text-center">
@@ -757,32 +757,32 @@ window.viewWorkflow = async function (id) {
         return `
         <div style="display:flex;gap:12px;margin-bottom:4px;">
             <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:38px;">
-                <div style="width:38px;height:38px;border-radius:50%;background:${m.bg};border:2px solid ${m.border};
-                            display:flex;align-items:center;justify-content:center;font-size:17px;">${m.icon}</div>
+                <div style="width:38px;height:38px;border-radius:50%;background:${escapeHtml(m.bg)};border:2px solid ${escapeHtml(m.border)};
+                            display:flex;align-items:center;justify-content:center;font-size:17px;">${escapeHtml(m.icon)}</div>
                 ${connector}
             </div>
-            <div style="flex:1;background:${m.bg};border:1px solid ${m.border};border-radius:10px;padding:11px 14px;
+            <div style="flex:1;background:${escapeHtml(m.bg)};border:1px solid ${escapeHtml(m.border)};border-radius:10px;padding:11px 14px;
                         margin-bottom:${i < steps.length - 1 ? '4px' : '0'};">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                     <div>
-                        <div style="font-size:10px;font-weight:700;color:${m.color};text-transform:uppercase;letter-spacing:.5px;">${tipLabel}</div>
-                        <div style="font-size:14px;font-weight:700;color:var(--color-text);margin:3px 0;">${step.user || '—'}</div>
-                        <span style="font-size:11px;font-weight:600;background:${m.border};color:${m.color};padding:2px 10px;border-radius:20px;">${m.label}</span>
+                        <div style="font-size:10px;font-weight:700;color:${escapeHtml(m.color)};text-transform:uppercase;letter-spacing:.5px;">${escapeHtml(tipLabel)}</div>
+                        <div style="font-size:14px;font-weight:700;color:var(--color-text);margin:3px 0;">${escapeHtml(step.user || '—')}</div>
+                        <span style="font-size:11px;font-weight:600;background:${escapeHtml(m.border)};color:${escapeHtml(m.color)};padding:2px 10px;border-radius:20px;">${escapeHtml(m.label)}</span>
                     </div>
                     ${canAct ? `
                     <div style="display:flex;gap:6px;flex-shrink:0;">
-                        <button onclick="window.approveStep(${id})"
+                        <button onclick="window.approveStep(${jsArg(id)})"
                             style="padding:6px 14px;background:var(--color-success);color:var(--color-text-white);border:none;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;">
                             <i class="fas fa-check"></i> Onayla
                         </button>
-                        <button onclick="window.rejectStep(${id})"
+                        <button onclick="window.rejectStep(${jsArg(id)})"
                             style="padding:6px 14px;background:var(--color-danger);color:var(--color-text-white);border:none;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;">
                             <i class="fas fa-times"></i> Reddet
                         </button>
                     </div>` : ''}
                 </div>
-                ${step.note ? `<div style="margin-top:8px;padding:7px 10px;background:var(--color-surface-alt);border:1px solid var(--color-border-light);border-radius:6px;font-size:12px;color:var(--color-text-muted);font-style:italic;">💬 "${step.note}"</div>` : ''}
-                ${step.date ? `<div style="margin-top:5px;font-size:10px;color:var(--color-text-hint);text-align:right;"><i class="fas fa-clock" style="margin-right:3px;"></i>${step.date}</div>` : ''}
+                ${step.note ? `<div style="margin-top:8px;padding:7px 10px;background:var(--color-surface-alt);border:1px solid var(--color-border-light);border-radius:6px;font-size:12px;color:var(--color-text-muted);font-style:italic;">💬 "${escapeHtml(step.note)}"</div>` : ''}
+                ${step.date ? `<div style="margin-top:5px;font-size:10px;color:var(--color-text-hint);text-align:right;"><i class="fas fa-clock" style="margin-right:3px;"></i>${escapeHtml(step.date)}</div>` : ''}
             </div>
         </div>`;
     }).join('');
@@ -796,23 +796,23 @@ window.viewWorkflow = async function (id) {
             ${[...item.akis].reverse().map(a => `
             <div style="display:flex;flex-direction:column;gap:2px;padding:5px 0;border-bottom:1px solid var(--color-border-light);font-size:11px;">
                 <div style="display:flex;gap:8px;">
-                    <span style="color:var(--color-text-hint);min-width:120px;flex-shrink:0;">${a.tarih || ''}</span>
-                    <span style="color:var(--color-text-muted);min-width:80px;flex-shrink:0;font-weight:600;">${a.yapan || ''}</span>
-                    <span style="color:var(--color-text);">${a.islem || ''}</span>
+                    <span style="color:var(--color-text-hint);min-width:120px;flex-shrink:0;">${escapeHtml(a.tarih || '')}</span>
+                    <span style="color:var(--color-text-muted);min-width:80px;flex-shrink:0;font-weight:600;">${escapeHtml(a.yapan || '')}</span>
+                    <span style="color:var(--color-text);">${escapeHtml(a.islem || '')}</span>
                 </div>
-                ${a.not ? `<div style="margin-left:128px; color:var(--color-text-muted); font-style:italic;">💬 "${a.not}"</div>` : ''}
-                ${a.note ? `<div style="margin-left:128px; color:var(--color-text-muted); font-style:italic;">💬 "${a.note}"</div>` : ''}
+                ${a.not ? `<div style="margin-left:128px; color:var(--color-text-muted); font-style:italic;">💬 "${escapeHtml(a.not)}"</div>` : ''}
+                ${a.note ? `<div style="margin-left:128px; color:var(--color-text-muted); font-style:italic;">💬 "${escapeHtml(a.note)}"</div>` : ''}
             </div>`).join('')}
         </div>` : '';
 
     body.innerHTML = `
-        <div style="background:${ds.bg};border-radius:10px;padding:13px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px;">
-            <i class="fas ${ds.icon}" style="font-size:22px;color:${ds.color};flex-shrink:0;"></i>
+        <div style="background:${escapeHtml(ds.bg)};border-radius:10px;padding:13px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px;">
+            <i class="fas ${escapeHtml(ds.icon)}" style="font-size:22px;color:${escapeHtml(ds.color)};flex-shrink:0;"></i>
             <div style="flex:1;min-width:0;">
-                <div style="font-size:15px;font-weight:700;color:var(--color-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.urun || '—'}</div>
-                <div style="font-size:11px;color:var(--color-text-hint);margin-top:2px;">${item.evrakNo || ''} · ${item.talepEden || item.createdByName || ''} · ${item.tarih || ''}</div>
+                <div style="font-size:15px;font-weight:700;color:var(--color-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.urun || '—')}</div>
+                <div style="font-size:11px;color:var(--color-text-hint);margin-top:2px;">${escapeHtml(item.evrakNo || '')} · ${escapeHtml(item.talepEden || item.createdByName || '')} · ${escapeHtml(item.tarih || '')}</div>
             </div>
-            <span style="background:${ds.color};color:var(--color-text-white);padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;flex-shrink:0;white-space:nowrap;">${ds.text}</span>
+            <span style="background:${escapeHtml(ds.color)};color:var(--color-text-white);padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;flex-shrink:0;white-space:nowrap;">${escapeHtml(ds.text)}</span>
         </div>
         ${steps.length > 0 ? `
         <div style="font-size:11px;font-weight:700;color:var(--color-text-hint);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;">
@@ -1327,7 +1327,7 @@ window.renderMyApprovals = function () {
             <div class="approval-card ${isCurrent ? 'active-step' : ''} d-flex flex-column">
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="approval-header-info">
-                        <h5 class="fw-bold">${item.urun || 'İsimsiz Talep'}</h5>
+                        <h5 class="fw-bold">${escapeHtml(item.urun || 'İsimsiz Talep')}</h5>
                         <span class="badge ${badgeClass}">${statusText}</span>
                     </div>
                     <div class="approval-id-badge">
@@ -1338,36 +1338,36 @@ window.renderMyApprovals = function () {
                 <div class="card-details">
                     <div class="detail-item">
                         <i class="fas fa-file-invoice" title="Evrak No"></i>
-                        <span class="font-monospace fw-bold detail-value">${item.evrakNo || '—'}</span>
+                        <span class="font-monospace fw-bold detail-value">${escapeHtml(item.evrakNo || '—')}</span>
                     </div>
                     <div class="detail-item">
                         <i class="fas fa-user" title="Talep Eden"></i>
-                        <span>${item.talepEden || item.createdByName || '—'}</span>
+                        <span>${escapeHtml(item.talepEden || item.createdByName || '—')}</span>
                     </div>
                     <div class="detail-item">
                         <i class="fas fa-building" title="Birim"></i>
-                        <span>${item.birim || '—'}</span>
+                        <span>${escapeHtml(item.birim || '—')}</span>
                     </div>
                     <div class="detail-item">
                         <i class="fas fa-calendar-alt" title="Tarih"></i>
-                        <span>${item.tarih || '—'}</span>
+                        <span>${escapeHtml(item.tarih || '—')}</span>
                     </div>
                 </div>
 
                 <div class="d-flex flex-row justify-content-between align-items-center mt-auto pt-3" style="border-top: 1px dashed #e2e8f0; display: flex !important; flex-direction: row !important; gap: 8px;">
-                    <button onclick="window.openPurchaseDetail('${item.id}', 'view')" class="btn-modern-card btn-detail" style="flex: 1; justify-content: center;">
+                    <button onclick="window.openPurchaseDetail(${jsArg(String(item.id))}, 'view')" class="btn-modern-card btn-detail" style="flex: 1; justify-content: center;">
                         <i class="fas fa-search-plus"></i> Detay
                     </button>
                     
                     ${isCurrent ? `
-                        <button onclick="window.rejectStep('${item.id}')" class="btn-modern-card btn-danger" style="flex: 1; justify-content: center;">
+                        <button onclick="window.rejectStep(${jsArg(String(item.id))})" class="btn-modern-card btn-danger" style="flex: 1; justify-content: center;">
                             <i class="fas fa-times"></i> Reddet
                         </button>
-                        <button onclick="window.approveStep('${item.id}')" class="btn-modern-card btn-success" style="flex: 1; justify-content: center;">
+                        <button onclick="window.approveStep(${jsArg(String(item.id))})" class="btn-modern-card btn-success" style="flex: 1; justify-content: center;">
                             <i class="fas fa-check"></i> Onayla
                         </button>
                     ` : `
-                        <button onclick="window.viewWorkflow('${item.id}')" class="btn-modern-card" style="flex: 2; justify-content: center; background: var(--color-primary-light); color: var(--color-primary);">
+                        <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-modern-card" style="flex: 2; justify-content: center; background: var(--color-primary-light); color: var(--color-primary);">
                             <i class="fas fa-history"></i> Akış Takibi
                         </button>
                     `}
@@ -1477,7 +1477,7 @@ window.renderTemplateSteps = function () {
                 <div class="position-relative w-100">
                     <input type="text"
                         class="form-control workflow-select-ghost w-100"
-                        value="${step.user || ''}"
+                        value="${escapeHtml(step.user || '')}"
                         placeholder="Personel..."
                         onkeyup="window.searchPersonnelForTemplate(this.value, 'step', ${index})">
                     
@@ -1496,7 +1496,7 @@ window.renderTemplateSteps = function () {
             "Olur (E-İmza)",
             "Islak İmza"
         ].map(t => `
-                        <option value="${t}" ${step.tip === t ? 'selected' : ''}>${t}</option>
+                        <option value="${t}" ${escapeHtml(step.tip === t ? 'selected' : '')}>${t}</option>
                     `).join('')}
                 </select>
             </td>
@@ -2268,7 +2268,7 @@ window.renderTemplateList = function () {
         ? '<tr><td colspan="4" class="text-center p-4 text-muted">Henüz şablon tanımlanmadı.</td></tr>'
         : templates.map(tpl => `
         <tr>
-            <td><strong>${tpl.name}</strong></td>
+            <td><strong>${escapeHtml(tpl.name)}</strong></td>
             <td>
                 <span class="badge bg-secondary" style="border-radius:12px; padding: 5px 12px;">
                     ${tpl.steps?.length || 0} Adım
@@ -2276,16 +2276,16 @@ window.renderTemplateList = function () {
             </td>
             <td>
                 <small class="text-muted">
-                    ${(tpl.auth && tpl.auth.length > 0) ? tpl.auth.join(', ') : 'Herkes'}
+                    ${escapeHtml((tpl.auth && tpl.auth.length > 0) ? tpl.auth.join(', ') : 'Herkes')}
                 </small>
             </td>
             <td class="text-end pe-3">
                 <div class="action-buttons justify-content-end">
-                    <button onclick="window.openTemplateModal('${tpl.id}')" 
+                    <button onclick="window.openTemplateModal(${jsArg(String(tpl.id))})" 
                             class="btn-action btn-buy shadow-sm" title="Düzenle">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button onclick="window.deleteTemplate('${tpl.id}')" 
+                    <button onclick="window.deleteTemplate(${jsArg(String(tpl.id))})" 
                             class="btn-action btn-passive shadow-sm" title="Sil">
                         <i class="fas fa-trash"></i>
                     </button>
@@ -2461,8 +2461,8 @@ window.renderWorkflowPreview = function (steps) {
 
     container.innerHTML = steps.map((s, i) => `
         <div style="padding:4px 0;">
-            <b>${i + 1}.</b> ${s.user || "-"} 
-            <span style="color:#64748b;">(${s.type || "onay"})</span>
+            <b>${i + 1}.</b> ${escapeHtml(s.user || "-")} 
+            <span style="color:#64748b;">(${escapeHtml(s.type || "onay")})</span>
         </div>
     `).join("");
 };

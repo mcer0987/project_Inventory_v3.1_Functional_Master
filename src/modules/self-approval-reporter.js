@@ -238,11 +238,11 @@ const showReportModal = function () {
             const badgeClass = log.securityLevel.includes('Bloke') ? 'sar-badge-blocked' : 'sar-badge-verified';
             return `
                 <tr>
-                    <td style="font-weight: 500;">${log.type}</td>
-                    <td>${log.item} <strong>(${log.qty} Adet)</strong></td>
-                    <td style="color: #94a3b8;">${log.user}</td>
-                    <td style="font-size: 0.8rem; color: #64748b;">${log.timestamp}</td>
-                    <td><span class="sar-badge ${badgeClass}">${log.securityLevel}</span></td>
+                    <td style="font-weight: 500;">${escapeHtml(log.type)}</td>
+                    <td>${escapeHtml(log.item)} <strong>(${escapeHtml(log.qty)} Adet)</strong></td>
+                    <td style="color: #94a3b8;">${escapeHtml(log.user)}</td>
+                    <td style="font-size: 0.8rem; color: #64748b;">${escapeHtml(log.timestamp)}</td>
+                    <td><span class="sar-badge ${badgeClass}">${escapeHtml(log.securityLevel)}</span></td>
                 </tr>
             `;
         }).join('');

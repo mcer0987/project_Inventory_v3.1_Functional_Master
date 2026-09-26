@@ -166,6 +166,47 @@ const SCENARIOS = {
             return out;
         });
     },
+
+    // C6 · SEC-01 — payloads written by an anonymous (staff) session must not execute in admin.html
+    async xssAdminPanel(page, browser) {
+        const ids = await page.evaluate(async () => {
+            const ft = window.__ft, P = '<img src=x onerror="window.__xss=(window.__xss||0)+1">';
+            const reqId = Date.now(), poId = '1);window.__xssId=1;//' + ft.MARKER;
+            await window.saveData('requests', [...(window.data.requests || []), { id: reqId, ürün: P, personel: 'X ' + ft.MARKER, not: P, durum: 'Beklemede', tarih: '01.01.2026', adet: 1 }]);
+            await window.saveData('tasks', [...(window.data.tasks || []), { id: 'task_' + reqId, title: P + ft.MARKER, description: P, priority: P, type: 'task', status: 'pending', assigneeId: 'pool', checklist: [{ text: P, done: false }], interactions: [{ user: P, message: P }] }]);
+            await window.saveData('purchaseOrders', [...(window.data.purchaseOrders || []), { id: poId, urun: P + ft.MARKER, evrakNo: P, talepEden: P, birim: P, tarih: P, durum: 'Taslak', akis: [] }]);
+            await ft.waitFor(async () => (await ft.readMarked('requests')).length && (await ft.readMarked('tasks')).length && (await ft.readMarked('purchaseOrders')).length);
+            return { reqId, poId };
+        });
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = [];
+        admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        const out = await admin.evaluate(async (poId) => {
+            const tryCall = n => { try { if (typeof window[n] === 'function') window[n](); return 'ok'; } catch (e) { return 'err: ' + e.message; } };
+            const renders = ['renderAdminRequestTable', 'renderTodoTab', 'renderPurchaseModule', 'renderAdminPurchaseTable', 'renderServicesModule'].map(n => [n, tryCall(n)]);
+            await new Promise(r => setTimeout(r, 1000));
+            const reqBody = document.getElementById('adminPendingRequestsBody');
+            const btn = [...document.querySelectorAll('button[onclick*="openPurchaseDetail"]')].find(b => b.getAttribute('onclick').includes('__xssId'));
+            let clicked = 'no button rendered';
+            if (btn) { try { btn.click(); clicked = 'clicked'; } catch (e) { clicked = 'click error: ' + e.message; } }
+            await new Promise(r => setTimeout(r, 500));
+            return {
+                renders: Object.fromEntries(renders),
+                xssExecuted: window.__xss || 0,
+                idInjectionExecuted: window.__xssId || 0,
+                payloadShownAsText: !!reqBody && reqBody.textContent.includes('<img src=x'),
+                injectedImgElements: document.querySelectorAll('img[src="x"]').length,
+                purchaseButton: clicked,
+            };
+        }, ids.poId);
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
+    },
 };
 
 (async () => {
@@ -187,7 +228,7 @@ const SCENARIOS = {
             try {
                 await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
                 await new Promise(r => setTimeout(r, 1500));
-                console.log(`\n=== ${name} ===\n` + JSON.stringify(await SCENARIOS[name](page), null, 1));
+                console.log(`\n=== ${name} ===\n` + JSON.stringify(await SCENARIOS[name](page, browser), null, 1));
             } catch (e) { failed = true; console.log(`\n=== ${name} FAILED: ${e.message}`); }
         }
     } finally {
