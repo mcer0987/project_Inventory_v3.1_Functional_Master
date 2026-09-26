@@ -88,7 +88,8 @@ window.openNewPurchaseModal = function () {
     if (filesDiv) { filesDiv.style.display = 'none'; filesDiv.innerHTML = ''; }
     if (wfDiv) { wfDiv.style.display = 'none'; wfDiv.innerHTML = ''; }
     if (fileArea) fileArea.style.display = 'block';
-    if (rejectBtn) rejectBtn.style.display = 'none';
+    if (rejectBtn) { rejectBtn.style.display = 'none'; rejectBtn.onclick = null; }
+    _resetPurchaseFileInputs();
 
     // 5. Populate fresh auto-generated values
     const now = new Date();
@@ -1003,13 +1004,6 @@ window.viewRequest = function (id) {
     document.getElementById("purchaseModal").style.display = "block";
 };
 
-window.closePurchaseModal = function () {
-    document.getElementById("purchaseModal").style.display = "none";
-    // Input kilitlerini kaldır (bir sonraki açılış için temizlik)
-    const inputs = document.querySelectorAll("#purchaseForm .modern-input");
-    inputs.forEach(input => input.disabled = false);
-};
-
 window.uploadFiles = async function (files) {
 
     const storage = getStorage();
@@ -1193,7 +1187,8 @@ window.openPurchaseDetail = function (id, mode) {
             }
         } else {
             const rejectBtn = document.getElementById('purRejectBtn');
-            if (rejectBtn) rejectBtn.style.display = 'none';
+            if (rejectBtn) { rejectBtn.style.display = 'none'; rejectBtn.onclick = null; }
+            if (saveBtn) saveBtn.onclick = null;
         }
 
     } else { // edit
@@ -1204,7 +1199,13 @@ window.openPurchaseDetail = function (id, mode) {
         if (saveBtn) {
             saveBtn.style.display = 'block';
             saveBtn.innerHTML = '<i class="fas fa-save me-2"></i> Değişiklikleri Kaydet';
+            // [WHY]: Görüntüleme modunda bağlanan "Onayla" onclick'i düzenlemede kalıyor, kayıt yerine onay veriyordu (EBYS-02).
+            saveBtn.onclick = null;
+            saveBtn.classList.remove('btn-success');
+            saveBtn.classList.add('btn-modern-save');
         }
+        const staleRejectBtn = document.getElementById('purRejectBtn');
+        if (staleRejectBtn) { staleRejectBtn.style.display = 'none'; staleRejectBtn.onclick = null; }
 
         // Mevcut dosyaları göster (silinebilir)
         if (filesDiv) {
@@ -1668,7 +1669,8 @@ window.closePurchaseModal = function () {
     if (title) title.innerHTML = '<i class="fas fa-file-invoice me-2"></i> Satın Alma Talebi';
 
     const rejectBtn = document.getElementById('purRejectBtn');
-    if (rejectBtn) rejectBtn.style.display = 'none';
+    if (rejectBtn) { rejectBtn.style.display = 'none'; rejectBtn.onclick = null; }
+    _resetPurchaseFileInputs();
 
     if (saveBtn) {
         saveBtn.classList.remove('btn-success');
@@ -1676,6 +1678,14 @@ window.closePurchaseModal = function () {
         saveBtn.onclick = null; // updatePurchaseRequest'e form submit bakıyor zaten
     }
 };
+
+// Seçilmiş dosya listesi ve input'u bir önceki talepten taşınmasın (EBYS-01).
+function _resetPurchaseFileInputs() {
+    const fileList = document.getElementById('purFileList');
+    const fileInput = document.getElementById('purchaseFile');
+    if (fileList) fileList.innerHTML = '';
+    if (fileInput) fileInput.value = '';
+}
 
 window.refreshPurchaseModule = function () {
     window.state = {

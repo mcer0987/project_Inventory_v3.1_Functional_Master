@@ -114,6 +114,58 @@ const SCENARIOS = {
             return out;
         });
     },
+
+    // C5 · EBYS-01 (modal reset) + EBYS-02 (step owner guard, in-flight lock)
+    // transitionWorkflowState is stubbed: it belongs to EBYS-16 (root workflows + ipify), out of C5 scope.
+    async ebysApprovalGuard(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            window.transitionWorkflowState = async () => ({});
+            const id = Date.now();
+            const rec = {
+                id, baslik: 'EBYS ' + ft.MARKER, durum: 'Onay Bekliyor', akis: [],
+                workflow: { id: 'wf_' + id, started: true, finished: false, currentStep: 0, currentState: 'manager_approval',
+                    steps: [{ user: 'Flow Onay A', tip: 'Yönetici', status: 'pending' }, { user: 'Flow Onay B', tip: 'Finans', status: 'pending' }] },
+            };
+            await window.saveData('purchaseOrders', [...(window.data.purchaseOrders || []), rec]);
+            await ft.waitFor(async () => (window.data.purchaseOrders || []).some(x => x.id === id));
+            const dbStep = async () => { const d = (await ft.readMarked('purchaseOrders'))[0]; return d && { step: d.workflow.currentStep, finished: d.workflow.finished, approvals: (d.akis || []).filter(a => String(a.islem).startsWith('✅')).length }; };
+
+            // EBYS-01: stale "Onayla" binding must not survive into a new request
+            window.setActiveUser({ name: 'Flow Onay A' });
+            window.openPurchaseDetail(id, 'view');
+            const saveBtn = document.getElementById('purSaveBtn');
+            out.viewModeHasApprove = /Onayla/.test(saveBtn.innerHTML) && typeof saveBtn.onclick === 'function';
+            document.getElementById('purFileList').innerHTML = '<div>old.pdf</div>';
+            window.openNewPurchaseModal();
+            out.newModalReset = {
+                onclickCleared: saveBtn.onclick === null,
+                noEditId: document.getElementById('purchaseForm').dataset.editId === undefined,
+                fileListCleared: document.getElementById('purFileList').innerHTML === '',
+                rejectHidden: !document.getElementById('purRejectBtn') || document.getElementById('purRejectBtn').style.display === 'none',
+            };
+            window.closePurchaseModal();
+
+            // EBYS-02: wrong person is denied
+            window.setActiveUser({ name: 'Flow Onay B' });
+            await window.approveStep(id);
+            await ft.sleep(1500);
+            out.wrongUserDenied = (await dbStep()).step === 0;
+
+            // right person (name normalised) advances one step
+            window.setActiveUser({ name: '  flow onay a ' });
+            await window.approveStep(id);
+            out.ownerApproved = await ft.waitFor(async () => (await dbStep()).step === 1);
+
+            // double click by next owner advances only once
+            window.setActiveUser({ name: 'Flow Onay B' });
+            await ft.waitFor(async () => (window.data.purchaseOrders.find(x => x.id === id)?.workflow.currentStep) === 1);
+            await Promise.all([window.approveStep(id), window.approveStep(id)]);
+            await ft.waitFor(async () => (await dbStep()).finished === true);
+            out.afterDoubleClick = await dbStep();
+            return out;
+        });
+    },
 };
 
 (async () => {

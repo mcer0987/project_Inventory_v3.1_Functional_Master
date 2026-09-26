@@ -51,22 +51,8 @@ const WorkflowState = window.WorkflowState = {
     currentEditingTemplateId: null
 };
 
-// --- MODAL KONTROLLERİ ---
-window.openNewPurchaseModal = function () {
-    const modal = document.getElementById('purchaseModal');
-    if (modal) {
-        modal.style.display = 'block';
-        // Modal açıldıktan sonra otomatik alanları doldurur
-        window.initEBYSModal();
-    } else {
-        console.error("Hata: 'purchaseModal' bu sayfada bulunamadı!");
-    }
-};
-
-window.closePurchaseModal = function () {
-    const modal = document.getElementById('purchaseModal');
-    if (modal) modal.style.display = 'none';
-};
+// [WHY]: Buradaki sıfırlamasız openNewPurchaseModal/closePurchaseModal, purchase-servises.js'teki düzeltilmiş
+//        sürümü eziyordu; "Yeni Talep" eski talebin üzerine yazabiliyordu (EBYS-01). Tek kaynak: purchase-servises.js.
 
 // --- EBYS FORM BAŞLATMA ---
 window.initEBYSModal = function () {
@@ -937,11 +923,35 @@ window.addEventListener('onInventoryDataUpdated', (e) => {
     }
 });
 
+// [WHY]: Adım sahibi kontrolü yoktu; bayat "Onayla" butonu veya liste butonu başkasının adımını onun adına onaylıyordu,
+//        çift tıklama iki adımı birden geçiriyordu (EBYS-02).
+// [HOW]: Yalnız mevcut adımın sahibi (normalize ad) veya Firebase admin oturumu işlem yapabilir; talep başına işlem kilidi.
+const _workflowActionsInFlight = new Set();
+const _normName = s => String(s || '').trim().toLocaleLowerCase('tr-TR');
+
+function _canActOnCurrentStep(item) {
+    const wf = item && item.workflow;
+    if (!wf || wf.finished) return false;
+    const step = (wf.steps || [])[wf.currentStep || 0];
+    if (!step) return false;
+    if (typeof window.isDbAdmin === 'function' && window.isDbAdmin()) return true;
+    const me = window.currentUser || (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null);
+    return !!(me && me.name && _normName(step.user) === _normName(me.name));
+}
+
+function _denyStepAction() {
+    if (typeof showAppAlert === 'function') showAppAlert('Bu adım için işlem yetkiniz yok (sıra sizde değil veya akış tamamlandı).', 'error');
+}
+
 // ✅ ENHANCED: State machine ile uyumlu onay sistemi
 window.approveStep = async function (id) {
+    const lockKey = String(id);
+    if (_workflowActionsInFlight.has(lockKey)) return;
+    _workflowActionsInFlight.add(lockKey);
     try {
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
         if (!item || !item.workflow) return;
+        if (!_canActOnCurrentStep(item)) { _denyStepAction(); return; }
 
         const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
 
@@ -1043,14 +1053,16 @@ window.approveStep = async function (id) {
         // [WHY]: window.saveData(window.data) attempts a batch write across ALL collections.
         //        Non-admin users have permission only on specific collections, so the batch fails.
         // [HOW]: We pass the collection name + its array directly so only purchaseOrders is written.
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        const saved = await window.saveData('purchaseOrders', window.data.purchaseOrders);
         window.closeWorkflowModal();
+        if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
 
         // 8. TÜM UI'LARI YENİLE
         refreshUI();
 
         if (typeof showAppAlert === 'function') {
-            showAppAlert(`Onay başarıyla verildi.`, "success");
+            if (saved === false) showAppAlert('Onay kaydedilemedi. Bağlantınızı kontrol edin.', 'error');
+            else showAppAlert(`Onay başarıyla verildi.`, "success");
         }
 
     } catch (error) {
@@ -1058,21 +1070,27 @@ window.approveStep = async function (id) {
         if (typeof showAppAlert === 'function') {
             showAppAlert(`Onay hatası: ${error.message}`, "error");
         }
+    } finally {
+        _workflowActionsInFlight.delete(lockKey);
     }
 };
 
 window.rejectStep = async function (id) {
+    const lockKey = String(id);
+    if (_workflowActionsInFlight.has(lockKey)) return;
+    _workflowActionsInFlight.add(lockKey);
     try {
-        const note = prompt("Lütfen RED nedenini belirtiniz (Zorunlu):");
-        if (note === null) return;
-
-        if (!note.trim()) {
-            alert("Red nedeni boş bırakılamaz!");
-            return window.rejectStep(id);
-        }
-
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
         if (!item || !item.workflow) return;
+        if (!_canActOnCurrentStep(item)) { _denyStepAction(); return; }
+
+        let note;
+        while (true) {
+            note = prompt("Lütfen RED nedenini belirtiniz (Zorunlu):");
+            if (note === null) return;
+            if (note.trim()) break;
+            alert("Red nedeni boş bırakılamaz!");
+        }
 
         const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
 
@@ -1101,6 +1119,7 @@ window.rejectStep = async function (id) {
         item.workflow.currentState = window.WorkflowEngine.states.CANCELLED;
 
         // Eski akış sistemini de güncelle
+        if (!item.akis) item.akis = [];
         const rejectionTime = new Date().toLocaleString('tr-TR');
         item.akis.push({
             islem: `❌ REDDEDİLDİ: ${step?.tip || 'Onay'}`,
@@ -1136,16 +1155,17 @@ window.rejectStep = async function (id) {
         // [BUGFIX] Bug 3: Targeted save to purchaseOrders only.
         // [WHY]: Same permission issue as approveStep — non-admins can't overwrite the full DB snapshot.
         // [HOW]: Only the purchaseOrders collection is written, matching the collection-level Firestore rules.
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        const saved = await window.saveData('purchaseOrders', window.data.purchaseOrders);
         window.closeWorkflowModal();
+        if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
 
         if (typeof refreshUI === "function") refreshUI();
         if (typeof renderPurchaseModule === "function") renderPurchaseModule();
         if (typeof renderMyApprovals === "function") renderMyApprovals();
 
-        // Success notification
         if (typeof showAppAlert === 'function') {
-            showAppAlert("Talep reddedildi.", "warning");
+            if (saved === false) showAppAlert('Red kaydedilemedi. Bağlantınızı kontrol edin.', 'error');
+            else showAppAlert("Talep reddedildi.", "warning");
         }
 
     } catch (error) {
@@ -1153,6 +1173,8 @@ window.rejectStep = async function (id) {
         if (typeof showAppAlert === 'function') {
             showAppAlert(`Red işlemi yapılamadı: ${error.message}`, "error");
         }
+    } finally {
+        _workflowActionsInFlight.delete(lockKey);
     }
 };
 
@@ -1389,8 +1411,6 @@ window.renderMyApprovals = function () {
 
 
 // edm-workflow.js'nin EN ALTINA ekle
-window.openNewPurchaseModal = openNewPurchaseModal;
-window.closePurchaseModal = closePurchaseModal;
 window.initEBYSModal = initEBYSModal;
 window.addNewUnit = addNewUnit;
 
