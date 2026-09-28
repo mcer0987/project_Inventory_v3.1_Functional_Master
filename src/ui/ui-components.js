@@ -760,7 +760,8 @@ export const UIComponents = {
             }
         });
 
-        await window.saveData(window.data);
+        // Kullanıcı onaylı toplu silme: saveData v2 toplu silme kilidi bilinçli olarak açılır (Faz 3.1).
+        await window.saveData(window.data, { allowBulkDelete: true });
         UIComponents.clearRowSelection();
         if (typeof window.renderTable === 'function') window.renderTable(depo);
         if (typeof showAppAlert === 'function') showAppAlert(`${indices.length} kayıt başarıyla silindi.`, 'success');

@@ -523,7 +523,8 @@ export const _bulkDeleteSelected = async function (depo, indices) {
         }
     });
 
-    await window.saveData(window.data);
+    // Kullanıcı onaylı toplu silme: saveData v2 toplu silme kilidi bilinçli olarak açılır (Faz 3.1).
+    await window.saveData(window.data, { allowBulkDelete: true });
 
     if (typeof window.clearRowSelection === 'function') window.clearRowSelection();
     if (typeof window.renderTable === 'function') window.renderTable(depo);

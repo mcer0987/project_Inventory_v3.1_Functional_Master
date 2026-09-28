@@ -1584,7 +1584,8 @@ async function deleteSelectedRequests() {
     const onay = await showCustomConfirm("Toplu Silme", `${idsToDelete.size} adet kaydı kalıcı olarak silmek istediğinize emin misiniz?`);
     if (onay) {
         const remaining = (window.data.requests || []).filter(r => !idsToDelete.has(String(r.id)));
-        if (await window.saveData('requests', remaining) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
+        // Kullanıcı onaylı toplu silme: saveData v2 toplu silme kilidi bilinçli olarak açılır (Faz 3.1).
+        if (await window.saveData('requests', remaining, { allowBulkDelete: true }) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
         renderRequestsTable();
         showAppAlert(`${idsToDelete.size} kayıt başarıyla silindi.`, "success");
         const headerCheck = document.querySelector('.select-all-header input');

@@ -1095,9 +1095,9 @@ window.deleteCriticalGroup = async function (groupKey) {
             if (window.data.b2) window.data.b2.splice(idx, 1);
         });
 
-        // Save to Firebase
+        // Save to Firebase — kullanıcı onaylı toplu silme: saveData v2 toplu silme kilidi bilinçli olarak açılır (Faz 3.1).
         if (typeof window.saveData === 'function') {
-            await window.saveData(window.data);
+            await window.saveData(window.data, { allowBulkDelete: true });
             showAppAlert("Ürün(ler) depodan başarıyla silindi.", "success");
         }
     }

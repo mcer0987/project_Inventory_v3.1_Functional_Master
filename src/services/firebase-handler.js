@@ -451,120 +451,156 @@ window.startRealtimeSync = function () {
 };
 
 /**
- * @function saveData
- * @description Verileri hem yerel hem de Firebase (Batch Write) üzerine kaydeder.
- * 
- * 🛠️ [AKILLI YAPI NOTU]: Bu fonksiyon 'Overloading' prensibiyle çalışır. 
- * Eskiden sadece tüm veri objesini kabul ederken, artık tekil depo güncellemelerini de
- * (örn: saveData('b1', data)) anlayarak diğer depoların (b2, b3 vb.) üzerine yazılmasını engeller.
- * 
- * 🛡️ [3 KATMANLI VERİ KORUMA KALKANI]:
- * 1. MERGE KALKANI: Sadece belirtilen odayı/depoyu günceller, diğerlerini 'undefined' ise atlar (Ezilme engellenir).
- * 2. ATOMİK KALKAN: 'writeBatch' kullanarak ya hep ya hiç kuralını uygular (Yarım kalmış kayıt oluşamaz).
- * 3. TEMİZLİK KALKANI: Firebase uyumsuz 'undefined' değerleri kayıttan önce JSON sterilizasyonu ile temizler.
+ * @function saveData (v2 · Faz 3.1)
+ * @description Bir koleksiyonun (veya tüm window.data'nın) istenen son halini Firestore'a yazar.
+ *
+ * Kullanım (geriye uyumlu):
+ *   saveData('requests', dizi)            → yalnız o koleksiyon
+ *   saveData(window.data)                 → tüm koleksiyonlar (her biri ayrı ayrı karşılaştırılır)
+ *   saveData('requests', dizi, opts) / saveData(window.data, opts)
+ *     opts.strict          true → hata fırlatır (SaveDataError). Varsayılan false: hata olursa false döner.
+ *     opts.allowBulkDelete true → toplu silme kilidini açar (yalnız kullanıcı onaylı toplu silmeler için).
+ *
+ * Dönüş: başarıda { written, deleted, unchanged, collections: { [col]: {written, deleted, unchanged} } } (truthy),
+ *        başarısızlıkta false (strict değilse). Mevcut `=== false` kontrolleri aynen çalışır.
  */
-// [WHY]: Hibrit ESM geçişi — saveData artık import ile kullanılabilir.
-// [HOW]: DUAL-EXPOSURE: export const hem ESM import'a hem window erişimine açar.
-//        window.saveData ataması LEGACY uyumluluk için korunur.
-export const saveData = window.saveData = async function (arg1, arg2) {
-    // [WHY]: Gelen verinin tipine göre davranış belirlemeden önce, giriş yetkisi (Auth) olup olmadığını kontrol et.
-    // [HOW]: Eğer window.userAuth yoksa, veritabanına yazma işlemini anında reddet (Frontend Guard).
-    if (!window.userAuth) {
-        console.error("❌ Yetkisiz Yazma Denemesi: Oturum bulunamadı.");
+// [WHY]: v1 her çağrıda hedef koleksiyonun TÜM dokümanlarını yeniden yazıyordu; 19 yerde bütün veritabanı yazılıyordu
+//        (DATA-01) — Spark kotası bu desenle hızla tükenir, kota bitince tüm yazmalar gün sonuna kadar başarısız olur.
+//        Hatalar yalnız false olarak dönüyordu ve bilinmeyen koleksiyon sessizce hiçbir şey yazmıyordu (DATA-02, DATA-13).
+// [HOW]: Her doküman, Firestore'dan gelen son kopyayla (_dbMirror) anahtar sırasından bağımsız JSON olarak karşılaştırılır;
+//        yalnız yeni veya değişen dokümanlar yazılır, mirror'da olup dizide olmayanlar silinir.
+//        Maskeleme çifti: yazma yalnız değişene inince tek tehlikeli davranış silme kalır — tüm dizi yerine bir alt küme
+//        gönderen çağıran geri kalan her şeyi siler. Bu yüzden TOPLU SİLME KİLİDİ: bir çağrıda bir koleksiyondan 1'den
+//        fazla VE (5'ten fazla VEYA koleksiyonun %20'sinden fazla) kayıt silinecekse, allowBulkDelete verilmedikçe
+//        HİÇBİR yazma yapılmaz. Tek kayıt silme her zaman serbest.
+//        Başarılı yazmadan sonra mirror güncellenir: snapshot gelene kadar yapılan ikinci kayıt aynı dokümanları
+//        tekrar yazmaz ve silme hesabı yeni eklenenleri "silinmiş" saymaz.
+const BULK_DELETE_MAX = 5;
+const BULK_DELETE_RATIO = 0.2;
+
+export class SaveDataError extends Error {
+    constructor(code, message, details) {
+        super(message);
+        this.name = 'SaveDataError';
+        this.code = code;
+        this.details = details || null;
+    }
+}
+window.SaveDataError = SaveDataError;
+
+// Anahtar sırasından bağımsız, kararlı JSON. '__' ile başlayan yardımcı (render) alanları karşılaştırmaya girmez.
+function _stableStringify(value) {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(_stableStringify).join(',') + ']';
+    return '{' + Object.keys(value)
+        .filter(k => !k.startsWith('__') && value[k] !== undefined)
+        .sort()
+        .map(k => JSON.stringify(k) + ':' + _stableStringify(value[k]))
+        .join(',') + '}';
+}
+const _clean = item => JSON.parse(JSON.stringify(item, (k, v) => v === undefined ? "" : v));
+const _docRef = (colName, id) => doc(fireDb, COLLECTION_ROOT, colName, "items", String(id).replace(/\//g, '_'));
+const _clone = v => (typeof structuredClone === 'function' ? structuredClone(v) : JSON.parse(JSON.stringify(v)));
+
+export const saveData = window.saveData = async function (arg1, arg2, arg3) {
+    const isTargeted = typeof arg1 === 'string';
+    const opts = (isTargeted ? arg3 : arg2) || {};
+    const strict = opts.strict === true;
+
+    const fail = (code, message, details) => {
+        const err = new SaveDataError(code, message, details);
+        console.error(`❌ saveData [${code}]: ${message}`, details || '');
+        if (strict) throw err;
         return false;
-    }
+    };
 
-    // [ADIM 1] Akıllı Parametre Yönetimi: Gelen verinin tipine göre davranış belirle
-    if (typeof arg1 === 'string' && arg2 !== undefined) {
-        // Hedefli Güncelleme: Diğer koleksiyonlara dokunmadan sadece ilgili alanı tazele
+    // [WHY]: Oturum yokken yazma denemesi sessizce "başarısız" dönüyordu; artık kodlu hata (strict'te fırlatılır).
+    if (!window.userAuth) return fail('no-auth', 'Oturum bulunamadı; yazma reddedildi.');
+
+    let targets;
+    if (isTargeted) {
+        if (!COLLECTIONS.includes(arg1)) return fail('unknown-collection', `Bilinmeyen koleksiyon: "${arg1}"`, { collection: arg1 });
+        if (!Array.isArray(arg2)) return fail('invalid-argument', `saveData('${arg1}', …) bir dizi bekliyor.`);
         window.data[arg1] = arg2;
-    } else if (typeof arg1 === 'object' && arg1 !== null) {
-        // Toplu Güncelleme: Tüm veritabanı objesini ana hafızaya al
+        targets = [arg1];
+    } else if (arg1 && typeof arg1 === 'object') {
         window.data = arg1;
+        targets = COLLECTIONS.filter(c => Array.isArray(window.data[c]));
+    } else {
+        return fail('invalid-argument', 'saveData koleksiyon adı + dizi veya window.data bekliyor.');
     }
 
+    // 1. Plan: her koleksiyon için yazılacak / silinecek dokümanlar
+    const plans = [];
+    for (const colName of targets) {
+        const items = window.data[colName] || [];
+        const mirror = window._dbMirror[colName] || [];
+        const mirrorById = new Map(mirror.filter(m => m && m.id != null && m.id !== '').map(m => [String(m.id), m]));
+
+        const writes = [];
+        const keep = new Set();
+        let unchanged = 0;
+        for (const item of items) {
+            if (!item || typeof item !== 'object') continue;
+            if (item.id == null || String(item.id).trim() === '') {
+                item.id = typeof window.makeId === 'function' ? window.makeId() : Date.now() * 1000 + Math.floor(Math.random() * 1000);
+            }
+            const key = String(item.id);
+            keep.add(key);
+            const clean = _clean(item);
+            const prev = mirrorById.get(key);
+            if (prev && _stableStringify(_clean(prev)) === _stableStringify(clean)) { unchanged++; continue; }
+            writes.push({ key, data: clean });
+        }
+        const deletes = [...mirrorById.keys()].filter(k => !keep.has(k));
+
+        const bulk = deletes.length > 1 && (deletes.length > BULK_DELETE_MAX || deletes.length > mirror.length * BULK_DELETE_RATIO);
+        if (bulk && opts.allowBulkDelete !== true) {
+            if (typeof window.showAppAlert === 'function') {
+                window.showAppAlert(`Güvenlik kilidi: tek işlemde "${colName}" koleksiyonundan ${deletes.length} kayıt silinmek istendi. İşlem durduruldu, hiçbir şey yazılmadı.`, 'error');
+            }
+            return fail('bulk-delete-blocked',
+                `"${colName}": tek çağrıda ${deletes.length}/${mirror.length} kayıt silinecekti (sınır: ${BULK_DELETE_MAX} kayıt veya %${BULK_DELETE_RATIO * 100}).`,
+                { collection: colName, deletes: deletes.length, total: mirror.length, ids: deletes.slice(0, 20) });
+        }
+        plans.push({ colName, writes, deletes, unchanged });
+    }
+
+    // 2. Yazma (500 işlem sınırı için parçalı batch)
+    const ops = [];
+    plans.forEach(p => {
+        p.deletes.forEach(key => ops.push({ type: 'delete', ref: _docRef(p.colName, key) }));
+        p.writes.forEach(w => ops.push({ type: 'set', ref: _docRef(p.colName, w.key), data: w.data }));
+    });
     try {
-        const collections = ['b1', 'b2', 'b3', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords', 'staff', 'units', 'locations', 'tasks', 'requests', 'assignments'];
-
-        const operations = []; // Tüm işlemleri bir havuzda topla
-
-        collections.forEach(colName => {
-            // [BUGFIX] Bug 3 (Overloading Fix): Eğer hedefli kaydetme (örn: saveData('purchaseOrders', data))
-            // yapılıyorsa, diğer koleksiyonları (b1, b2, personel vb.) kesinlikle atla ki yetki hatasına takılmasın.
-            if (typeof arg1 === 'string' && colName !== arg1) return;
-
-            // [KALKAN 1] MERGE - Veri hafızada yoksa (undefined) atla
-            if (window.data[colName] === undefined) return;
-
-            const itemsToSave = window.data[colName] || [];
-            const mirrorItems = window._dbMirror[colName] || [];
-
-            // Farkları (Diff) bul
-            const saveIds = new Set(itemsToSave.map(i => i.id));
-            const toDeleteIds = mirrorItems.filter(i => !saveIds.has(i.id)).map(i => i.id);
-
-            // Silinecekler
-            toDeleteIds.forEach(id => {
-                if (!id) return; // Güvenlik: Boş ID'leri atla
-                // [FIX]: TypeError ve Firestore kural hatalarını önlemek için String dönüşümü ve '/' karakter koruması eklendi.
-                const safeId = String(id).replace(/\//g, '_');
-                // [ENV_GUARD] Silme işlemi her zaman aktif ortamın root'una gider.
-                // COLLECTION_ROOT, modül yüklenirken bir kez belirlenir ve değişmez.
-                operations.push({
-                    type: 'delete',
-                    ref: doc(fireDb, COLLECTION_ROOT, colName, "items", safeId)
-                });
-            });
-
-            // Eklenecekler / Güncellenecekler (Upsert)
-            itemsToSave.forEach(item => {
-                if (!item || typeof item !== 'object') return; // Güvenlik: Yalnızca objeleri işle
-
-                // ID yoksa otomatik ata (hata olmaması için önlem)
-                if (!item.id || String(item.id).trim() === '') {
-                    item.id = 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-                }
-
-                // [KALKAN 3] TEMİZLİK - undefined olanları sil (Firebase sessiz reddetmesini önler)
-                const cleanItem = JSON.parse(JSON.stringify(item, (k, v) => v === undefined ? "" : v));
-
-                // Firestore id içinde '/' veya geçersiz karakter kullanımına izin vermez
-                const safeId = String(item.id).replace(/\//g, '_');
-
-                // [ENV_GUARD] Kayıt (set) işlemi yalnızca aktif ortam root'una yazılır.
-                // Bu blok, v3.1 ölçeğinde yanlışlıkla üretim üzerine yazma riskini sıfırlar.
-                operations.push({
-                    type: 'set',
-                    ref: doc(fireDb, COLLECTION_ROOT, colName, "items", safeId),
-                    data: cleanItem
-                });
-            });
-        });
-
-        // [KALKAN 2] BATCH CHUNKING (500 limitini aşmamak için)
         const CHUNK_SIZE = 490;
-        for (let i = 0; i < operations.length; i += CHUNK_SIZE) {
+        for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
             const batch = writeBatch(fireDb);
-            const chunk = operations.slice(i, i + CHUNK_SIZE);
-
-            chunk.forEach(op => {
-                if (op.type === 'delete') {
-                    batch.delete(op.ref);
-                } else {
-                    batch.set(op.ref, op.data, { merge: true });
-                }
-            });
-
+            ops.slice(i, i + CHUNK_SIZE).forEach(op => op.type === 'delete' ? batch.delete(op.ref) : batch.set(op.ref, op.data, { merge: true }));
             await batch.commit();
         }
-
-        console.log(`☁️ Firebase Senkronize Edildi (Chunked): ${arg1 || 'Toplu Kayıt'}`);
-        return true;
     } catch (e) {
-        // [WHY]: Hata yutulduğu için çağıranlar başarısız kaydı "başarılı" gösteriyordu (DATA-02); sonuç artık döndürülüyor.
-        console.error("❌ Kayıt Hatası:", e);
-        return false;
+        return fail('write-failed', `Firestore yazması başarısız: ${e.message}`, { code: e.code });
     }
+
+    // 3. Mirror'ı yazılanla güncelle (snapshot gelene kadar tutarlı karşılaştırma için)
+    const result = { written: 0, deleted: 0, unchanged: 0, collections: {} };
+    plans.forEach(p => {
+        const byId = new Map((window._dbMirror[p.colName] || []).map(m => [String(m.id), m]));
+        p.deletes.forEach(k => byId.delete(k));
+        p.writes.forEach(w => byId.set(w.key, { ...(byId.get(w.key) || {}), ..._clone(w.data) }));
+        window._dbMirror[p.colName] = [...byId.values()];
+
+        result.collections[p.colName] = { written: p.writes.length, deleted: p.deletes.length, unchanged: p.unchanged };
+        result.written += p.writes.length;
+        result.deleted += p.deletes.length;
+        result.unchanged += p.unchanged;
+        if (p.writes.length || p.deletes.length) {
+            console.log(`☁️ saveData(${p.colName}): ${p.writes.length} yazıldı · ${p.deletes.length} silindi · ${p.unchanged} değişmedi`);
+        }
+    });
+    if (!result.written && !result.deleted) console.log(`☁️ saveData(${isTargeted ? arg1 : 'window.data'}): değişiklik yok, yazma yapılmadı.`);
+    return result;
 };
 
 // [WHY]: Uygulama açılır açılmaz verileri çekmek 'Missing Permissions' hatasına sebep oluyordu.
