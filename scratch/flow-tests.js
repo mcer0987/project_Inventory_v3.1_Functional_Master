@@ -602,10 +602,16 @@ const SCENARIOS = {
                 { id: 'e', ürün: 'X', raf: 'R1', adet: 1, sn: 'N/A' }, { id: 'f2', ürün: 'W', raf: 'R9', adet: 1, sn: '--' }];
             window.data.b2 = [{ id: 'f', ürün: 'K', raf: 'R5', adet: 3 }, { id: 'g', ürün: 'K', raf: 'R5', adet: 3 }];
             window.data.b3 = [{ id: 1, sn: 'SN9', alanKisi: 'P' }, { id: 2, sn: 'SN9', alanKisi: 'P' }];
-            window.showCustomConfirm = async () => false;
-            await window.vipCleanDuplicates(); o.cleanerCancelWrites = alerts.length;
+            // real dialog (script.js showCustomConfirm, textContent): preview renders as text; Vazgeç = nothing happens
+            const realRun = window.vipCleanDuplicates(); await sleep(400);
+            const msgEl = document.getElementById('alertMessage');
+            o.cleanerRealDialog = { shown: getComputedStyle(document.getElementById('customAlertOverlay')).display === 'flex',
+                noMarkup: msgEl.children.length === 0 && !msgEl.textContent.includes('<') };
+            document.getElementById('alertCancelBtn').click(); await realRun;
+            o.cleanerCancelWrites = alerts.length;
             window.showCustomConfirm = async (t, msg) => {
-                o.cleanerPreview = { table: msg.includes('<table'), counts: (msg.match(/B1: <b>(\d+)<\/b> · B2: <b>(\d+)/) || []).slice(1), b3Excluded: msg.includes('B3 hareket defteri') };
+                o.cleanerPreview = { firstRow: msg.split('\n').find(l => l.startsWith('1. ')), counts: (msg.match(/B1: (\d+) · B2: (\d+)/) || []).slice(1),
+                    b3Excluded: msg.includes('B3 hareket defteri'), plainText: !/<[a-z]/i.test(msg) };
                 window.data.b1 = window.data.b1.filter(x => x.id !== 'e');
                 window.data.b2 = [...window.data.b2, { id: 'i', ürün: 'K', raf: 'R5', adet: 3 }];
                 return true;
