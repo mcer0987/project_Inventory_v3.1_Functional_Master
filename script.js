@@ -423,7 +423,10 @@ window.switchTab = function (tabName) {
 };
 
 // Personel işlemleri (monolith'te bırakıldı)
-window.openPersonelModal = function (mode, index = null) {
+// [WHY]: Düzenleme dizi indeksiyle yapılıyor ve kaydı {name, code} ile değiştiriyordu (id ve diğer alanlar kayboluyordu,
+//        doküman silinip yeniden oluşuyordu); ekleme/düzenleme tüm veritabanını yazıyordu (ITSM-07, DATA-04, DATA-06).
+// [HOW]: Kişi id ile bulunur; düzenleme yalnız adı günceller (updateItem), ekleme tek doküman (appendItem, makeId).
+window.openPersonelModal = function (mode, id = null) {
     const modal = document.getElementById('personelModal');
     const title = document.getElementById('personelModalTitle');
     const nameInput = document.getElementById('personelName');
@@ -432,14 +435,15 @@ window.openPersonelModal = function (mode, index = null) {
     if (!modal) return;
     title.innerText = mode === 'add' ? 'Yeni Personel Ekle' : 'Personel Düzenle';
 
-    if (mode === 'edit' && index !== null) {
-        const p = window.data.personel[index];
+    if (mode === 'edit' && id !== null) {
+        const p = (window.data.personel || []).find(x => String(x.id) === String(id));
+        if (!p) { showAppAlert('Personel bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
         nameInput.value = p.name;
         codeInput.value = p.code;
         codeInput.readOnly = true;
         form.onsubmit = function (e) {
             e.preventDefault();
-            editPersonel(index);
+            editPersonel(p.id);
         };
     } else {
         form.reset();
@@ -453,28 +457,27 @@ window.openPersonelModal = function (mode, index = null) {
     modal.style.display = 'block';
 };
 
-function addPersonel() {
-    const nameInput = document.getElementById('personelName');
-    const codeInput = document.getElementById('personelCode');
-    const personData = { name: nameInput.value, code: codeInput.value };
-    if (window.data.personel.some(p => p.code === personData.code)) {
+async function addPersonel() {
+    const name = document.getElementById('personelName').value.trim();
+    const code = document.getElementById('personelCode').value.trim();
+    if (!name) { showAppAlert('Ad Soyad boş olamaz.', 'warning'); return; }
+    if ((window.data.personel || []).some(p => String(p.code) === code)) {
         showAppAlert("Bu oturum kodu zaten kullanımda!", "warning");
         return;
     }
-    window.data.personel.push(personData);
-    window.saveData(data);
+    if (await window.appendItem('personel', { name, code }) === false) { showAppAlert('Personel eklenemedi.', 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
+    showAppAlert('Personel eklendi.', 'success');
 }
 
-function editPersonel(index) {
-    const nameInput = document.getElementById('personelName');
-    const codeInput = document.getElementById('personelCode');
-    const personData = { name: nameInput.value, code: codeInput.value };
-    window.data.personel[index] = personData;
-    window.saveData(data);
+async function editPersonel(id) {
+    const name = document.getElementById('personelName').value.trim();
+    if (!name) { showAppAlert('Ad Soyad boş olamaz.', 'warning'); return; }
+    if (await window.updateItem('personel', id, { name }) === false) { showAppAlert('Personel güncellenemedi.', 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
+    showAppAlert('Personel güncellendi.', 'success');
 }
 
 function closePersonelModal() {

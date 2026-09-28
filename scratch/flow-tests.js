@@ -957,6 +957,53 @@ const SCENARIOS = {
         });
     },
 
+    // Faz 3 · H2 — ITSM-07: personnel edit/delete by id, edit keeps the other fields, delete is confirmed, escaped table.
+    // 'personel' is admin-only: write API is a recorded stub.
+    async personnelById(page) {
+        return page.evaluate(async () => {
+            const out = {}, ops = [];
+            const orig = { p: window.data.personel, val: window.validateAdminAction, confirm: window.showCustomConfirm, alert: window.showAppAlert,
+                api: ['appendItem', 'updateItem', 'removeItem'].map(k => [k, window[k]]) };
+            ['appendItem', 'updateItem', 'removeItem'].forEach(k => { window[k] = async (...a) => { ops.push([k, ...JSON.parse(JSON.stringify(a))]); return { written: 1 }; }; });
+            window.validateAdminAction = () => true;
+            let confirmAnswer = false; window.showCustomConfirm = async () => confirmAnswer;
+            window.showAppAlert = () => {};
+            window.data.personel = [{ id: 'p1', name: 'Ayşe', code: '11111', role: 'x' }, { id: 'p2', name: '<img src=x onerror="window.__px=1">', code: '22222' }];
+            window.renderPersonelTable();
+            out.escaped = !document.querySelector('#tablePersonel img') && !window.__px;
+
+            window.openPersonelModal('edit', 'p1');
+            window.data.personel.unshift({ id: 'p0', name: 'Yeni', code: '00000' }); // array shift
+            document.getElementById('personelName').value = 'Ayşe Y.';
+            document.getElementById('personelForm').requestSubmit();
+            await new Promise(r => setTimeout(r, 50));
+            out.edit = ops.at(-1);
+
+            await window.deletePersonel('p2');
+            out.deleteCancelled = ops.length === 1;
+            confirmAnswer = true;
+            await window.deletePersonel('p2');
+            out.delete = ops.at(-1);
+
+            window.openPersonelModal('add');
+            document.getElementById('personelName').value = 'Mehmet';
+            document.getElementById('personelCode').value = '11111';
+            document.getElementById('personelForm').requestSubmit();
+            await new Promise(r => setTimeout(r, 50));
+            out.duplicateCodeRefused = ops.length === 2;
+            document.getElementById('personelCode').value = '33333';
+            document.getElementById('personelForm').requestSubmit();
+            await new Promise(r => setTimeout(r, 50));
+            out.add = ops.at(-1);
+
+            window.data.personel = orig.p;
+            orig.api.forEach(([k, f]) => { window[k] = f; });
+            Object.assign(window, { validateAdminAction: orig.val, showCustomConfirm: orig.confirm, showAppAlert: orig.alert });
+            document.getElementById('personelModal').style.display = 'none';
+            return out;
+        });
+    },
+
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
     async systemConfigScope(page) {
         return page.evaluate(async () => {
