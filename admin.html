@@ -1317,7 +1317,7 @@
                     <div class="vip-card-header">
                         <div class="header-left">
                             <i class="fas fa-eye" style="color: var(--vip-neon-blue);"></i>
-                            <span>God-Eye (Canli Radar)</span>
+                            <span>God-Eye (Canli Radar)</span> <span class="badge" title="Örnek veri: gerçek oturum/presence izlenmiyor (Karar K8-b)" style="background: var(--vip-warning, #f59e0b); color: #111; font-size: 0.6rem; margin-left: 6px;">DEMO</span>
                         </div>
                         <div class="header-right">
                             <button id="godEyeHeatmapToggle" onclick="window.vipToggleHeatmap(this)" title="Heatmap Moduna Gec">
@@ -1332,9 +1332,9 @@
                         <div id="godEyeRadarContainer">
                             <div class="god-eye-radar" id="godEyeRadarInner">
                                 <div class="radar-scanner"></div>
-                                <div class="radar-dot" data-user-id="user-1" data-user-name="Ahmet Yilmaz" data-user-module="B1 Depo" style="top: 30%; left: 40%;"></div>
-                                <div class="radar-dot" data-user-id="user-2" data-user-name="Ayse Kaya" data-user-module="Satin Alma" style="top: 70%; left: 60%; animation-delay: 1s;"></div>
-                                <div class="radar-dot" data-user-id="user-3" data-user-name="Mehmet Demir" data-user-module="Personel" style="top: 50%; left: 20%; animation-delay: 2.5s;"></div>
+                                <div class="radar-dot" data-demo="true" data-user-id="user-1" data-user-name="Ahmet Yilmaz" data-user-module="B1 Depo" style="top: 30%; left: 40%;"></div>
+                                <div class="radar-dot" data-demo="true" data-user-id="user-2" data-user-name="Ayse Kaya" data-user-module="Satin Alma" style="top: 70%; left: 60%; animation-delay: 1s;"></div>
+                                <div class="radar-dot" data-demo="true" data-user-id="user-3" data-user-name="Mehmet Demir" data-user-module="Personel" style="top: 50%; left: 20%; animation-delay: 2.5s;"></div>
                             </div>
                             <!-- Heatmap SVG (baslangicta gizli, JS ile doldurulur) -->
                             <svg id="godEyeHeatmapSVG" viewBox="-110 -110 220 220" xmlns="http://www.w3.org/2000/svg">
@@ -1342,7 +1342,7 @@
                         </div>
                         <!-- Durum Bilgisi -->
                         <div style="font-size: 0.7rem; color: var(--vip-text-muted); text-align: center; letter-spacing: 0.5px;">
-                            <span id="godEyeStatusText"><i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>3 aktif oturum izleniyor</span>
+                            <span id="godEyeStatusText"><i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>DEMO — örnek oturumlar (gerçek presence yok)</span>
                         </div>
                     </div>
                 </div>

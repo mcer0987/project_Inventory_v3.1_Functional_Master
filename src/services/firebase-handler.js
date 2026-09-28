@@ -130,6 +130,43 @@ window.fireDb = fireDb;
 // [HOW]: Tüm sistem ayarları ${COLLECTION_ROOT}/system_config/items/{admin_settings|admin_messages} altında. Kural: oturumlu okur, admin yazar.
 export const systemConfigRef = window.systemConfigRef = (name) => doc(fireDb, COLLECTION_ROOT, 'system_config', 'items', name);
 
+// [WHY]: VIP panelinden "Force Logout" (Oturumu Sonlandır) komutu verilen kullanıcının tarayıcısında çıkış yapılması.
+//        Eski alan (force_logout_user_id) hiç temizlenmiyor ve zaman/tekillik kontrolü yoktu: hedef kişi sonraki her
+//        admin_settings snapshot'ında (kill switch, sayfa yenileme, yeniden giriş) tekrar atılıyordu; admin kendini
+//        hedeflerse sürekli kilitleniyordu (VIP-06).
+// [HOW]: Komut { targetId, issuedAt, nonce } nesnesidir. Yalnız taze (FORCE_LOGOUT_TTL_MS) ve bu tarayıcıda daha önce
+//        işlenmemiş (nonce) komut uygulanır; Firebase admin oturumu hiçbir zaman atılmaz. Eski alan yok sayılır.
+//        Kimlik: id, giriş kodu veya ad (sistem üçünü de farklı bağlamlarda kullanıyor).
+export const handleForceLogoutCommand = window.handleForceLogoutCommand = function (cmd) {
+    if (!cmd || !cmd.targetId || !cmd.nonce) return false;
+    const FORCE_LOGOUT_TTL_MS = 10 * 60 * 1000;
+    const doneKey = `force_logout_done_${cmd.nonce}`;
+    const fresh = Number(cmd.issuedAt) > 0 && Math.abs(Date.now() - Number(cmd.issuedAt)) < FORCE_LOGOUT_TTL_MS;
+    const isAdminSession = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+    const localUser = window.currentUser || window.getActiveUser();
+    const targetId = String(cmd.targetId);
+    const isMatch = !!localUser && (
+        (localUser.id   && String(localUser.id)   === targetId) ||
+        (localUser.code && String(localUser.code) === targetId) ||
+        (localUser.name && String(localUser.name) === targetId)
+    );
+
+    if (fresh && isMatch && !isAdminSession && localStorage.getItem(doneKey) !== '1') {
+        localStorage.setItem(doneKey, '1');
+        console.warn('🚨 [Force Logout] Bu oturum yönetici tarafından sonlandırıldı. Hedef ID:', targetId);
+        if (typeof window.logout === 'function') {
+            window.logout('force_logout');
+        } else {
+            // Fallback: logout fonksiyonu henüz yüklenmemişse manuel temizle
+            window.clearSession();
+            window.location.replace('index.html');
+        }
+        return true;
+    }
+    return false;
+};
+
+
 if (!window.data) {
     window.data = { b1: [], b2: [], b3: [], personel: [], requests: [], productTypes: [], tasks: [], config: {}, assignments: [] };
 }
@@ -286,38 +323,8 @@ window.startRealtimeSync = function () {
                 }
             }
 
-            // [WHY]: VIP panelinden "Force Logout" (Oturumu Sonlandır) komutu verilen kullanıcının
-            //        tarayıcısında anında çıkış yapılması gerekiyor. Firebase'e yazılan force_logout_user_id
-            //        alanı tüm açık client'lara broadcast edilir; bu blok kendi ID'siyle eşleşen kullanıcıyı yakalar.
-            // [HOW]: window.currentUser null-guard'ı ile korunur (sayfa yüklenmeden önce null olabilir).
-            //        Kullanıcı kimliği için id, code ve name alanlarının üçü de karşılaştırılır;
-            //        bu, sistemin farklı bağlamlarda (personel id'si, giriş kodu, isim) kayıt tutmasından kaynaklanır.
-            if (data.force_logout_user_id) {
-                const targetId = data.force_logout_user_id;
-
-                // 🛡️ NULL-GUARD: window.currentUser henüz yüklenmemiş olabilir (async Firebase init race condition).
-                // localStorage'dan da okuyarak ikincil güvenlik ağı kuruyoruz.
-                const localUser = window.currentUser || window.getActiveUser();
-
-                if (localUser) {
-                    const isMatch = (
-                        (localUser.id   && String(localUser.id)   === String(targetId)) ||
-                        (localUser.code && String(localUser.code) === String(targetId)) ||
-                        (localUser.name && String(localUser.name) === String(targetId))
-                    );
-
-                    if (isMatch) {
-                        console.warn('🚨 [Force Logout] Bu oturum yönetici tarafından sonlandırıldı. Hedef ID:', targetId);
-                        if (typeof window.logout === 'function') {
-                            window.logout('force_logout');
-                        } else {
-                            // Fallback: logout fonksiyonu henüz yüklenmemişse manuel temizle
-                            window.clearSession();
-                            window.location.replace('index.html');
-                        }
-                    }
-                }
-            }
+            // Force logout: tek seferlik, taze komut (VIP-06) — bkz. handleForceLogoutCommand
+            handleForceLogoutCommand(data.force_logout);
         }
     }, (err) => {
         if (err.code === "permission-denied") console.warn("⏳ [Güvenlik] Firebase yetki onayı bekleniyor (admin_settings)...");

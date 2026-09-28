@@ -631,8 +631,8 @@
         // Viewport deÄŸiÅŸimlerini dinle
         window.addEventListener('resize', _updatePlatformInfo);
         
-        // God-Eye radarÄ±nÄ± baÅŸlat
-        _initGodEyeMock();
+        // [WHY]: Her 15 sn gerçek terminale sahte "X kullanıcısı talep onayladı" logu basılıyordu (VIP-03); kaldırıldı.
+        //        God-Eye radarı gerçek presence gelene kadar DEMO olarak etiketli (Karar K8-b).
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -824,20 +824,6 @@
         }
     };
 
-    // God-Eye Sahte (Mock) CanlÄ±lÄ±k LoglarÄ±
-    function _initGodEyeMock() {
-        const fakeUsers = ["Ahmet YÄ±lmaz", "AyÅŸe Kaya", "Mehmet Demir", "Fatma Ã‡elik"];
-        const fakeActions = ["zimmet ekledi", "talep onayladÄ±", "oturum aÃ§tÄ±", "sayfa yeniledi"];
-        
-        setInterval(() => {
-            if(document.getElementById('systemControlTab').style.display !== 'none') {
-                const u = fakeUsers[Math.floor(Math.random() * fakeUsers.length)];
-                const a = fakeActions[Math.floor(Math.random() * fakeActions.length)];
-                _appendLog('info', [`ğŸ‘ï¸ [God-Eye] ${u} az Ã¶nce ${a}.`]);
-            }
-        }, 15000); // 15 saniyede bir sahte radar logu
-    }
-
     // showAdminTab interceptor â€” VIP sekmesi aÃ§Ä±ldÄ±ÄŸÄ±nda baÅŸlat
     function _hookShowAdminTab() {
         // showAdminTab henÃ¼z tanÄ±mlÄ± deÄŸilse tekrar dene
@@ -861,8 +847,10 @@
                 if (mainContent) mainContent.classList.add('vip-bg');
                 document.body.classList.add('vip-portal-active');
 
+                // [WHY]: Yerel _initVipPanel çağrılıyordu; window._initVipPanel sarmalayıcı zinciri (buton durumları, radar
+                //        tıklamaları) hiç çalışmıyordu, aktivite paneli / mesaj / oturum sonlandırma ulaşılamazdı (VIP-04).
                 requestAnimationFrame(() => {
-                    setTimeout(_initVipPanel, 50);
+                    setTimeout(() => window._initVipPanel(), 50);
                 });
             } else {
                 // Normal dÃ¼nyaya dÃ¶nÃ¼ÅŸ
@@ -1009,7 +997,8 @@ function _onRadarDotClick(e) {
     const userData = {
         id:     this.dataset.userId     || 'user-unknown',
         name:   this.dataset.userName   || 'Bilinmeyen Kullanici',
-        module: this.dataset.userModule || 'Bilinmeyen Modul'
+        module: this.dataset.userModule || 'Bilinmeyen Modul',
+        demo:   this.dataset.demo === 'true'
     };
 
     _currentTargetUser = userData;
@@ -1029,14 +1018,13 @@ function _openUserActivityPanel(userData) {
 
     // Header bilgileri
     const nameEl = document.getElementById('uapUserName');
-    if (nameEl) nameEl.textContent = userData.name;
+    if (nameEl) nameEl.textContent = userData.name + (userData.demo ? ' · DEMO' : '');
 
     const moduleEl = document.getElementById('uapUserModule');
     if (moduleEl) moduleEl.innerHTML = '<i class="fas fa-cube me-1"></i>' + userData.module;
 
     // Ä°statistikler (mock + window.data analizi)
     const actionCount = _computeUserActionCount(userData.module);
-    const sessionMin  = Math.floor(Math.random() * 45) + 5;
 
     const statActions = document.getElementById('uapStatActions');
     const statSession = document.getElementById('uapStatSession');
@@ -1044,7 +1032,8 @@ function _openUserActivityPanel(userData) {
     const statRisk    = document.getElementById('uapStatRisk');
 
     if (statActions) statActions.textContent = actionCount;
-    if (statSession) statSession.textContent = sessionMin + 'dk';
+    // [WHY]: Oturum süresi Math.random() ile uyduruluyordu (VIP-03); presence verisi olmadığı için gösterilmez.
+    if (statSession) statSession.textContent = '—';
     if (statModule)  statModule.textContent  = userData.module;
     if (statRisk) {
         const risk = actionCount > 10 ? 'HIGH' : actionCount > 5 ? 'MED' : 'LOW';
@@ -1095,10 +1084,10 @@ window.vipCloseUserPanel = function() {
 
 // KullanÄ±cÄ±nÄ±n modÃ¼lÃ¼ne gÃ¶re window.data'dan eylem sayÄ±sÄ±nÄ± hesapla
 function _computeUserActionCount(moduleName) {
-    if (!window.data) return Math.floor(Math.random() * 8) + 1;
+    if (!window.data) return 0;
     const moduleKeyMap = { 'B1 Depo': 'b1', 'B2 Depo': 'b2', 'Satin Alma': 'requests', 'Personel': 'personel' };
     const key = moduleKeyMap[moduleName];
-    if (!key || !window.data[key]) return Math.floor(Math.random() * 8) + 1;
+    if (!key || !window.data[key]) return 0;
     const arr = Array.isArray(window.data[key]) ? window.data[key] : Object.values(window.data[key]);
     return Math.min(arr.length, 99);
 }
@@ -1119,7 +1108,10 @@ function _renderActivityList(moduleName) {
         { icon: 'fa-arrow-right-from-bracket', text: 'Oturum baÅŸlattÄ±',     min: 35 }
     ];
 
-    list.innerHTML = templates.map(function(t) {
+    // Örnek aktivite listesidir (gerçek oturum/presence izlenmiyor; Karar K8-b).
+    list.innerHTML = '<li class="uap-activity-item uap-demo-note" style="color: var(--vip-warning);">' +
+        '<i class="fas fa-flask uap-activity-icon"></i><div>DEMO — örnek aktivite; gerçek oturum izlenmiyor</div></li>' +
+        templates.map(function(t) {
         return '<li class="uap-activity-item">' +
             '<i class="fas ' + t.icon + ' uap-activity-icon"></i>' +
             '<div>' +
@@ -1223,22 +1215,42 @@ window.vipForceLogout = async function() {
     const userName = _currentTargetUser.name;
     const btn      = document.getElementById('uapForceLogoutBtn');
 
+    // [WHY]: Admin kendini hedeflerse her snapshot'ta tekrar atılıyordu (VIP-06). DEMO radar noktaları gerçek kişi değildir;
+    //        adları gerçek bir personelle aynıysa o kişi atılırdı (VIP-03).
+    const me = window.currentUser || (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null);
+    const isSelf = !!me && [me.id, me.code, me.name].some(v => v != null && v !== '' && (String(v) === String(userId) || String(v) === String(userName)));
+    if (isSelf || _currentTargetUser.demo) {
+        const why = isSelf ? 'Kendi oturumunuzu hedefleyemezsiniz.' : 'DEMO radar noktası gerçek bir oturum değildir.';
+        if (typeof _appendLog === 'function') _appendLog('warn', ['[God-Eye] Force Logout reddedildi: ' + why]);
+        if (typeof showAppAlert === 'function') showAppAlert('Force Logout uygulanmadı: ' + why, 'warning');
+        return;
+    }
+
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> UygulanÄ±yor...'; }
 
     try {
         if (!window.fireDb) throw new Error('Firestore baglantisi yok');
 
-        const { doc, setDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
+        const { setDoc, deleteField } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
 
         // [WHY]: force_logout_user_id alanÄ±nÄ± Firestore'a yaz.
         // [HOW]: firebase-handler.js bu alanÄ± onSnapshot ile dinleyerek
         //        hedef kullanÄ±cÄ±nÄ±n oturumunu client-side sonlandÄ±rÄ±r.
         const settingsRef = window.systemConfigRef("admin_settings");
+        // VIP-06: tek seferlik komut { targetId, issuedAt, nonce }; istemci yalnız taze ve daha önce işlemediği nonce'u uygular.
+        //         Eski düz alanlar (her snapshot'ta yeniden tetikleniyordu) silinir.
         await setDoc(settingsRef, {
-            force_logout_user_id: userId,
-            force_logout_user_name: userName,
-            force_logout_by: (window.currentUser && window.currentUser.name) || 'Admin',
-            force_logout_at: serverTimestamp()
+            force_logout: {
+                targetId: String(userId),
+                targetName: userName,
+                issuedAt: Date.now(),
+                nonce: Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10),
+                by: (window.currentUser && window.currentUser.name) || 'Admin'
+            },
+            force_logout_user_id: deleteField(),
+            force_logout_user_name: deleteField(),
+            force_logout_by: deleteField(),
+            force_logout_at: deleteField()
         }, { merge: true });
 
         if (typeof _appendLog === 'function') {
@@ -1299,7 +1311,7 @@ window.vipToggleHeatmap = function(btn) {
         if (heatmapSVG) heatmapSVG.classList.remove('visible');
         if (radarInner) radarInner.style.display = 'block';
         if (toggleBtn)  { toggleBtn.classList.remove('heatmap-active'); toggleBtn.innerHTML = '<i class="fas fa-fire-flame-curved"></i> HEATMAP'; }
-        if (statusText) statusText.innerHTML = '<i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>3 aktif oturum izleniyor';
+        if (statusText) statusText.innerHTML = '<i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>DEMO — örnek oturumlar (gerçek presence yok)';
     }
 };
 
