@@ -876,51 +876,11 @@
 
 
 
-// YENİ: Global Launchpad ve İpuçları Şartel Senkronizasyonu (Veritabanı üzerinden tetiklenecek)
-window.toggleLaunchpadGlobal = async function() {
-    try {
-        if(!window.fireDb) return;
-        const { doc, getDoc, setDoc } = window.fbFunctions;
-        const settingsRef = window.systemConfigRef("admin_settings");
-        const snap = await getDoc(settingsRef);
-        
-        let newState = true;
-        if(snap.exists()) {
-            newState = !snap.data().launchpadDisabledGlobal;
-        }
-        
-        await setDoc(settingsRef, { launchpadDisabledGlobal: newState }, { merge: true });
-        
-        localStorage.setItem('launchpadDisabledGlobal', newState);
-        if(typeof window.updateActionButtonsState === 'function') { window.updateActionButtonsState(); }
-        
-        // localStorage güncellemesi firebase-handler içindeki onSnapshot'a bırakıldı.
-        if(typeof showAppAlert === 'function') {
-            showAppAlert(newState ? 'Launchpad sistemden DEAKTİF edildi (Global).' : 'Launchpad tekrar Aktif edildi (Global).', newState ? 'warning' : 'success');
-        }
-    } catch(e) {
-        console.error("Şartel değiştirilemedi", e);
-    }
-};
-
+// [WHY]: Kaldırılmış Launchpad hâlâ system_config'e yazıyor (toggleLaunchpadGlobal), devre dışı VIP butonunu
+//        "Launchpad: Açık" diye canlandırıyordu; bayrak her istemcinin localStorage'ına kopyalanıyordu (VIP-10).
+// [HOW]: Karar K9-a: yazıcı, VIP butonu ve firebase-handler dinleyicisi kaldırıldı; burada yalnız İpuçları butonu kaldı.
 window.updateActionButtonsState = function() {
-    const lpBtn = document.getElementById('vipToggleLaunchpadBtn');
     const tipsBtn = document.getElementById('vipToggleTipsBtn');
-
-    if (lpBtn) {
-        const isLpDisabled = localStorage.getItem('launchpadDisabledGlobal') === 'true';
-        if (isLpDisabled) {
-            lpBtn.style.background = 'rgba(255,45,85,0.1)';
-            lpBtn.style.color = 'var(--vip-danger)';
-            lpBtn.style.border = '1px solid var(--vip-danger)';
-            lpBtn.innerHTML = '<i class="fas fa-rocket me-2"></i>Launchpad: Kapali';
-        } else {
-            lpBtn.style.background = 'rgba(0,255,136,0.1)';
-            lpBtn.style.color = 'var(--vip-matrix)';
-            lpBtn.style.border = '1px solid var(--vip-matrix)';
-            lpBtn.innerHTML = '<i class="fas fa-rocket me-2"></i>Launchpad: Acik';
-        }
-    }
 
     if (tipsBtn) {
         const isTipsDisabled = localStorage.getItem('systemTipsDisabled') === 'true';

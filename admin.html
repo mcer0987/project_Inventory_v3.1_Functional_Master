@@ -308,7 +308,7 @@
                         <span class="todo-nav-badge badge-hidden" id="admin-nav-todo-count">0</span>
                     </div>
 
-                    <button onclick="localStorage.setItem('launchpadBypassed', 'true'); window.location.href='index.html'" class="btn-status-action"
+                    <button onclick="window.location.href='index.html'" class="btn-status-action"
                         title="Ana Sayfaya Dön">
                         <i class="fas fa-home"></i>
                     </button>
@@ -1288,12 +1288,6 @@
                         <button class="btn w-100 fw-bold" onclick="window.vipBackupDatabase()"
                             style="background: rgba(0,255,136,0.1); color: var(--vip-matrix); border: 1px solid var(--vip-matrix); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-database me-2"></i>1-Tık DB Snapshot
-                        </button>
-                        <button class="btn w-100 fw-bold" disabled
-                            id="vipToggleLaunchpadBtn"
-                            style="background: rgba(128,128,128,0.05); color: #64748b; border: 1px solid #475569; padding: 12px; border-radius: 8px; cursor: not-allowed; display: flex; align-items: center; justify-content: center;"
-                            title="Launchpad modülü devre dışı bırakıldı.">
-                            <i class="fas fa-rocket me-2"></i>Launchpad: Askıda
                         </button>
                         <button class="btn w-100 fw-bold" onclick="window.toggleSystemTips()"
                             id="vipToggleTipsBtn"

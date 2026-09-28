@@ -1839,12 +1839,3 @@ window.renderLocationsTable = function () {
     }
 };
 
-// [DECOMMISSIONED] Launchpad modülü askıya alındı. Bu fonksiyon artık no-op.
-window.updateAdminLaunchpadButtonsVisibility = function () {
-    // No-op
-};
-
-// Trigger it immediately on script execution
-if (typeof window.updateAdminLaunchpadButtonsVisibility === 'function') {
-    window.updateAdminLaunchpadButtonsVisibility();
-}
