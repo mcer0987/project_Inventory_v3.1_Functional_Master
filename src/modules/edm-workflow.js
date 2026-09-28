@@ -22,7 +22,7 @@ function initWorkflowListener() {
     // [BUGFIX]: Env-guard and Zero-Trust path alignment
     // [WHY]: Firestore rules deny writing to root collections. Workflow templates must reside under COLLECTION_ROOT/workflowTemplates/items.
     // [HOW]: Query the collection under window.AppEnv.COLLECTION_ROOT subcollection structure.
-    const activeRoot = window.AppEnv?.COLLECTION_ROOT || window.COLLECTION_ROOT || "inventory_v2";
+    const activeRoot = window.AppEnv?.COLLECTION_ROOT || window.COLLECTION_ROOT || "lifeserver_master";
     onSnapshot(collection(db, activeRoot, "workflowTemplates", "items"), (snapshot) => {
         const fetchedTemplates = snapshot.docs.map(doc => ({
             id: doc.id,
@@ -2315,7 +2315,7 @@ window.saveTemplateData = async function () {
         // [BUGFIX]: Env-guard and Zero-Trust path alignment
         // [WHY]: Firestore rules deny writing to root collections. Workflow templates must reside under COLLECTION_ROOT/workflowTemplates/items.
         // [HOW]: Write to doc under window.AppEnv.COLLECTION_ROOT subcollection structure.
-        const activeRoot = window.AppEnv?.COLLECTION_ROOT || window.COLLECTION_ROOT || "inventory_v2";
+        const activeRoot = window.AppEnv?.COLLECTION_ROOT || window.COLLECTION_ROOT || "lifeserver_master";
         await setDoc(doc(db, activeRoot, "workflowTemplates", "items", id), templateData);
 
         console.log("✅ Şablon Firestore'a başarıyla gönderildi.");
@@ -2349,7 +2349,7 @@ window.deleteWorkflowTemplate = async function (id) {
 
     try {
         const db = getFirestore();
-        const activeRoot = window.AppEnv?.COLLECTION_ROOT || window.COLLECTION_ROOT || "inventory_v2";
+        const activeRoot = window.AppEnv?.COLLECTION_ROOT || window.COLLECTION_ROOT || "lifeserver_master";
         
         // [BUGFIX]: Delete template directly from COLLECTION_ROOT subcollection to prevent permission error
         await deleteDoc(doc(db, activeRoot, "workflowTemplates", "items", id));

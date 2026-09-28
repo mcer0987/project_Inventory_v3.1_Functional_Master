@@ -14,7 +14,16 @@ service cloud.firestore {
     }
 
     // ----------------------------------------------------
-    // YENİ CANLI MİMARİ: inventory_v2 (Subcollections)
+    // CANLI KÖK (28.09.2026'dan itibaren): lifeserver_master
+    // Canlı site bu kökü kullanır; kurallar inventory_v2 / inventory_demo ile aynıdır.
+    // ----------------------------------------------------
+    match /lifeserver_master/{col}/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || (isAuthenticated() && col in ['purchaseOrders', 'requests', 'tasks', 'assignments', 'serviceRecords']);
+    }
+
+    // ----------------------------------------------------
+    // ESKİ CANLI MİMARİ: inventory_v2 (Subcollections) — canlı site artık kullanmıyor, veri korunuyor
     // ----------------------------------------------------
     match /inventory_v2/{col}/{document=**} {
       // Bütün personeller veriyi görebilir

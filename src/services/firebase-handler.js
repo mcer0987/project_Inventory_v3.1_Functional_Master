@@ -35,11 +35,14 @@ import {
 //        export const kullanılıyor. Eski legacy dosyalar window.COLLECTION_ROOT'u okumaya devam eder.
 // [HOW]: Sabiti önce export const ile tanımlıyoruz, ardından window'a bağlıyoruz.
 //        Bu dual-exposure, COMPATIBILITY_BRIDGE kuralını uygular.
+// [WHY]: Canlı deneme dönemi (28.09.2026, sahibi): canlı site eski "inventory_v2" verisine dokunmadan, temiz ve
+//        yalnız canlıda kullanılan "lifeserver_master" kökünde çalışır. localhost/demo hâlâ "inventory_demo".
+export const LIVE_COLLECTION_ROOT = "lifeserver_master";
 export const COLLECTION_ROOT = (
     window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1' ||
     window.location.hostname.includes('demo')
-) ? "inventory_demo" : "inventory_v2";
+) ? "inventory_demo" : LIVE_COLLECTION_ROOT;
 
 // [ENV_GUARD] Aktif ortamı geliştirici konsoluna bildiren zorunlu init logu.
 // Bu satırı hiçbir zaman kaldırma; üretimde yanlış kök aktifse anında fark edilir.
