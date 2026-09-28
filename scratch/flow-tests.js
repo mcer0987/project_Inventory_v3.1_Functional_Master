@@ -727,6 +727,96 @@ const SCENARIOS = {
         });
     },
 
+    // Faz 3 · H1 — saveData v2 (diff writes, counts, bulk-delete lock, strict errors), makeId, listener management.
+    // Real writes to 'requests' (staff-writable), all marked; server counts are read back with getDocs.
+    async saveDataV2(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            const alerts = []; const realAlert = window.showAppAlert; window.showAppAlert = (m, t) => alerts.push([t, m]);
+            const marked = async () => (await ft.readMarked('requests')).length;
+            const col = r => r && r.collections && r.collections.requests;
+            const base = window.makeId();
+            const mk = n => ({ id: base + n, ürün: 'V2 ' + n + ' ' + ft.MARKER, personel: 'V2 ' + ft.MARKER, durum: 'Beklemede', adet: 1, tarih: '01.01.2026' });
+
+            // 1) five new docs -> 5 written; saving the same array again before the snapshot -> 0 (mirror updated)
+            const arr = [...(window.data.requests || []), mk(1), mk(2), mk(3), mk(4), mk(5)];
+            const r1 = await window.saveData('requests', arr);
+            const r1b = await window.saveData('requests', arr);
+            out.create = { written: col(r1)?.written, deleted: col(r1)?.deleted, resaveBeforeSnapshot: col(r1b)?.written };
+            await ft.waitFor(async () => (await marked()) === 5 && window.data.requests.filter(r => String(r.ürün).includes(ft.MARKER)).length === 5);
+
+            // 2) editing one doc -> exactly 1 write, everything else unchanged
+            const total = window.data.requests.length;
+            const r2 = await window.saveData('requests', window.data.requests.map(r => r.id === base + 3 ? { ...r, adet: 7 } : r));
+            out.editOne = { written: col(r2)?.written, deleted: col(r2)?.deleted, unchanged: col(r2)?.unchanged, total };
+            await ft.waitFor(async () => (await ft.readMarked('requests')).some(r => r.id === base + 3 && r.adet === 7));
+
+            // 3) no change -> no write at all
+            await ft.waitFor(async () => window.data.requests.some(r => r.id === base + 3 && r.adet === 7));
+            const r3 = await window.saveData('requests', window.data.requests);
+            out.noChange = { written: r3.written, deleted: r3.deleted };
+
+            // 4) single delete is always allowed
+            const r4 = await window.saveData('requests', window.data.requests.filter(r => r.id !== base + 5));
+            out.singleDelete = { deleted: col(r4)?.deleted };
+            await ft.waitFor(async () => (await marked()) === 4 && !window.data.requests.some(r => r.id === base + 5));
+
+            // 5) bulk delete (3 of the collection) is blocked without the flag; nothing is written
+            const toDrop = new Set([base + 1, base + 2, base + 4]);
+            const before = await marked();
+            const r5 = await window.saveData('requests', window.data.requests.filter(r => !toDrop.has(r.id)));
+            await ft.sleep(1200);
+            out.bulkBlocked = { result: r5, markedBefore: before, markedAfter: await marked(), alert: alerts.at(-1)?.[1] };
+            let strictBulk = null;
+            try { await window.saveData('requests', window.data.requests.filter(r => !toDrop.has(r.id)), { strict: true }); }
+            catch (e) { strictBulk = { name: e.name, code: e.code, deletes: e.details?.deletes }; }
+            out.bulkBlockedStrict = strictBulk;
+
+            // 6) the same bulk delete with the explicit flag goes through
+            const r6 = await window.saveData('requests', window.data.requests.filter(r => !toDrop.has(r.id)), { allowBulkDelete: true });
+            out.bulkAllowed = { deleted: col(r6)?.deleted };
+            await ft.waitFor(async () => (await marked()) === 1);
+            out.markedLeft = await marked();
+
+            // 7) unknown collection / no session: false by default, SaveDataError in strict mode
+            out.unknownDefault = await window.saveData('archive', []);
+            try { await window.saveData('archive', [], { strict: true }); out.unknownStrict = 'no throw'; }
+            catch (e) { out.unknownStrict = e.code; }
+            const realAuth = window.userAuth; window.userAuth = null;
+            out.noAuthDefault = await window.saveData('requests', window.data.requests);
+            try { await window.saveData('requests', window.data.requests, { strict: true }); out.noAuthStrict = 'no throw'; }
+            catch (e) { out.noAuthStrict = e.code; }
+            window.userAuth = realAuth;
+
+            // 8) makeId: unique, strictly increasing, numeric, safe
+            const ids = Array.from({ length: 5000 }, () => window.makeId());
+            out.makeId = { unique: new Set(ids).size === ids.length, increasing: ids.every((v, i) => i === 0 || v > ids[i - 1]), safe: ids.every(Number.isSafeInteger) };
+
+            // 9) listener management: template listener is managed, stop/start works, permission banner shows and clears
+            const h0 = window.getSyncHealth();
+            out.listeners = { running: h0.running, extra: h0.extra, templatesLoaded: (window.templates || []).length > 0 };
+            out.authReady = !!(await Promise.race([window.whenAuthReady(), ft.sleep(3000).then(() => null)]));
+            window.stopRealtimeSync();
+            out.afterStop = window.getSyncHealth().running;
+            window.templates = [];
+            window.startRealtimeSync();
+            await ft.waitFor(async () => (window.templates || []).length > 0, 8000);
+            out.afterRestart = { running: window.getSyncHealth().running, templatesReloaded: (window.templates || []).length > 0 };
+            window.reportListenerError('b1', { code: 'permission-denied' });
+            out.bannerShown = !!document.getElementById('syncPermissionBanner') && window.getSyncHealth().denied.includes('b1');
+            window.stopRealtimeSync(); window.startRealtimeSync();
+            await ft.sleep(1500);
+            out.bannerCleared = !document.getElementById('syncPermissionBanner') && window.getSyncHealth().denied.length === 0;
+            window.userAuth = null;
+            window.reportListenerError('b2', { code: 'permission-denied' });
+            out.ignoredWithoutSession = window.getSyncHealth().denied.length === 0;
+            window.userAuth = realAuth;
+
+            window.showAppAlert = realAlert;
+            return out;
+        });
+    },
+
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
     async systemConfigScope(page) {
         return page.evaluate(async () => {
