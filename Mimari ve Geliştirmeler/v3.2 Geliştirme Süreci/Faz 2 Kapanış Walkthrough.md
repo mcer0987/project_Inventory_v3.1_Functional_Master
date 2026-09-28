@@ -126,7 +126,9 @@ Her turdan sonra tüm koleksiyonlar okunup karşılaştırıldı: test kaydı ka
 4. **Satın alma:** yeni talepte "Talep Eden" oturumdaki kişi; akışı boş onaylayıcıyla başlatmayı dene (reddedilir); listeden seçerek başlat; admin tablosunda Durdur → "Durduruldu"; sıradaki kişi onaylayamaz; "Akışı Başlat" ile yeniden başlar.
 
 ## 7. Açık kalanlar (Faz 2 planında olup bu dalda ele alınmayanlar)
-Bu maddeler Tur 3 kapsamı dışında bırakıldı ve master'a açık olarak geçiyor. Faz 3 başlamadan önce ayrı bir tura alınması önerilir:
+> **Karar (28.09.2026, sahibi):** Bu maddeler Faz 3 — Veri Katmanı Sağlamlaştırma'nın (saveData v2, tek-doküman API, atomik işlemler) doğal parçası olduğu için Faz 2 burada **kesin olarak kapatıldı**. Aşağıdakiler Faz 3'ün ilk önceliğidir.
+
+Bu maddeler Tur 3 kapsamı dışında bırakıldı ve master'a açık olarak geçti:
 
 | Bulgu | Plan | Durum |
 |---|---|---|
@@ -147,4 +149,18 @@ Bu maddeler Tur 3 kapsamı dışında bırakıldı ve master'a açık olarak ge�
 ## 8. Süreç notları
 - **Karakter kodlaması (OPS-03 / VIP-09):** tüm düzenlemeler UTF-8 ve satır sonu (CRLF/LF) korunarak Node/Edit ile yapıldı; PowerShell `Set-Content` kullanılmadı. Git Bash'in `//` ile başlayan argümanları `/`'a çevirmesi iki kez yorum satırı bozdu; ikisi de sözdizimi kontrolünde yakalanıp düzeltildi, commit'lere girmedi.
 - **Test boşluğu dersi:** F1'in ilk testi onay kutusunu stub'ladığı için önizlemenin ekranda ham HTML olarak görüneceğini yakalamadı; senaryo artık gerçek onay kutusunu da sürüyor.
-- `master`'a merge: `git merge --no-ff fix/phase-2-critical-flows -m "feat(phase-2): complete critical flow repairs (ITSM, Inventory, EBYS, Admin, VIP)"`.
+- `master`'a merge: `git merge --no-ff fix/phase-2-critical-flows -m "feat(phase-2): complete critical flow repairs (ITSM, Inventory, EBYS, Admin, VIP)"` → `8269197`.
+
+## 9. Kapanış sonrası saha hotfix'leri (G1–G4)
+Merge'ten (`8269197`) sonra sahibinin saha testinde bulunan dört madde `fix/ebys-dark-mode-and-status` dalında düzeltildi; dal `master`'a ayrıca `--no-ff` ile merge edildi.
+
+| Hash | Madde | Özet |
+|---|---|---|
+| `53ee3ec` | G1 · mevcut şablon görünmüyordu | `workflowTemplates` dinleyicisi oturum açılmadan kaydoluyor, `permission-denied` alıp kalıcı olarak kapanıyordu. Mevcut şablonlar ne "Akışı Başlat" listesinde ne "Tanımlar > İş Akışları"nda görünüyordu. Dinleyici artık `window.userAuth`'u bekliyor. |
+| `12d20a2` | G2 · adım durumu | Reddedilen akışta önceki **onaylı** adımlar da kırmızı gösteriliyordu. Artık yalnız `status === 'rejected'` kırmızı; sırası gelmeyen adımlar "Değerlendirilmedi". Adım rozetinin arka planı ile yazısı aynı renkti (okunmuyordu); `--badge-*` çiftlerine geçti. |
+| `ea55f6a` | G3 · dark mode | "İş Akışı Seçimi" modalında tema sınıflarını ezen satır içi açık renkler kaldırıldı (admin + index). |
+| `a8fd395` | G4 · dark mode | Satın alma "Süreç Geçmişi" sabit hex renklerden tema değişkenlerine geçti. |
+| `7d51ad1` | test | `ebysWorkflowDisplay` senaryosu; tam suite **13/13**, smoke temiz. |
+| `13c4946` | yerel | Sahibinin bekleyen metin düzeltmesi (`inventory-management.js`). |
+
+Not: G1'den sonra bir şablon, "Yetkili Kullanıcılar" listesinde olmayan kullanıcıya (ör. Admin) `checkTemplateAuth` gereği gösterilmez; bu tasarım gereğidir.
