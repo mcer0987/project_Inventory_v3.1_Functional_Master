@@ -1540,14 +1540,17 @@
     <div id="startWorkflowModal" class="modern-modal"
         style="display:none; position:fixed; z-index:10001; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6);">
         <div class="modern-modal-content modal-modern-teal"
-            style="background:#f8f9fa; margin:5% auto; padding:0; width:800px; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            style="margin:5% auto; padding:0; width:800px; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
             <div class="p-4 bg-gradient-primary border-bottom d-flex justify-content-between align-items-center"
                 style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
                 <h3 class="mb-0 fw-bold text-white">🚀 İş Akışını Başlat</h3>
                 <button type="button" onclick="closeStartWorkflowModal()" class="btn-close btn-close-white"
                     style="border:none; background:none; font-size:28px; cursor:pointer; opacity:0.8;">&times;</button>
             </div>
-            <div class="modal-body-teal p-4" style="background:#f8f9fa;">
+            <!-- [WHY]: Sabit background:#f8f9fa/#e2e8f0/table-light dark temada koyu zemine geçmiyordu (madde 1). -->
+            <!-- [HOW]: .modal-body-teal/.form-select/.bg-white zaten dark-theme.css'te tanımlı; yalnız onları ezen -->
+            <!--        satır içi renkler kaldırıldı, thead için değişken tabanlı stil eklendi. -->
+            <div class="modal-body-teal p-4">
                 <input type="hidden" id="startWorkflowReqId">
 
                 <div class="mb-4">
@@ -1557,7 +1560,7 @@
                         <div class="flex-grow-1">
                             <select id="tplSelectDropdown" class="form-select form-select-lg w-100"
                                 onchange="window.toggleWorkflowMethod(this.value)"
-                                style="border-radius:8px; border:2px solid #e2e8f0; padding:12px;">
+                                style="border-radius:8px; border:2px solid var(--color-border); padding:12px;">
                                 <option value="manual">-- Yeni Özel İş Akışı (Manuel) --</option>
                                 <option value="tpl_1">Satın Alma Standart</option>
                                 <option value="tpl_2">Üst Yönetim Onayı</option>
@@ -1578,7 +1581,7 @@
                     </div>
                     <div class="table-responsive">
                         <table class="table table-hover">
-                            <thead class="table-light">
+                            <thead style="background:var(--color-surface-alt); color:var(--color-text);">
                                 <tr>
                                     <th style="width: 5%;">#</th>
                                     <th style="width: 45%;">👤 Personel</th>

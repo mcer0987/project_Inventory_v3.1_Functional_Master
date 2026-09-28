@@ -2434,9 +2434,9 @@ window.renderWorkflowPreview = function (steps) {
     }
 
     container.innerHTML = steps.map((s, i) => `
-        <div style="padding:4px 0;">
-            <b>${i + 1}.</b> ${escapeHtml(s.user || "-")} 
-            <span style="color:#64748b;">(${escapeHtml(s.type || "onay")})</span>
+        <div style="padding:4px 0; color:var(--color-text);">
+            <b>${i + 1}.</b> ${escapeHtml(s.user || "-")}
+            <span style="color:var(--color-text-muted);">(${escapeHtml(s.type || "onay")})</span>
         </div>
     `).join("");
 };

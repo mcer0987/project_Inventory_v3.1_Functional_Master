@@ -812,8 +812,9 @@
         <!-- Akış Başlatma Seçenekleri Modalı -->
         <div id="startWorkflowModal" class="modern-modal"
             style="display:none; position:fixed; z-index:10001; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6);">
+            <!-- [WHY]: background:#ffffff satır içi, .modern-modal-content'in koyu tema kuralını eziyordu (madde 1). -->
             <div class="modern-modal-content modal-modern-teal"
-                style="background:#ffffff; margin:3% auto; padding:0; width:820px; max-width:92vw; border-radius: var(--radius-xl); box-shadow: var(--shadow-xl); overflow:hidden; border: 1px solid var(--color-border-light);">
+                style="margin:3% auto; padding:0; width:820px; max-width:92vw; border-radius: var(--radius-xl); box-shadow: var(--shadow-xl); overflow:hidden; border: 1px solid var(--color-border-light);">
                 <div class="modal-header-modern"
                     style="background:var(--color-primary-light); border-bottom: 1px solid var(--color-border-light); padding: 20px 24px; position: relative;">
                     <div class="d-flex align-items-center gap-3">
@@ -833,7 +834,7 @@
                         onmouseover="this.style.background='var(--color-border-light)'; this.style.color='var(--color-text)';"
                         onmouseout="this.style.background='none'; this.style.color='var(--color-text-muted)';">&times;</button>
                 </div>
-                <div class="modal-body-modern" style="background:#ffffff; padding: 32px 24px; min-height:400px;">
+                <div class="modal-body-modern" style="padding: 32px 24px; min-height:400px;">
                     <input type="hidden" id="startWorkflowReqId">
 
                     <div class="mb-4">
