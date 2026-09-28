@@ -177,18 +177,102 @@ if (!window.data) {
 window.isFirebaseLoaded = false;
 window._dbMirror = {}; // YENİ: Firebase'den gelen saf verilerin kopyası (Değişiklik tespiti için)
 
+// [WHY]: Koleksiyon listesi 3 yerde ayrı ayrı sabitti (dinleyici, saveData, göç); listede olmayan bir koleksiyona
+//        hedefli kayıt sessizce hiçbir şey yazmıyordu (DATA-13, bkz. DATA-10 'archive').
+// [HOW]: Tek, dondurulmuş liste. saveData listede olmayan koleksiyonu hata olarak reddeder.
+export const COLLECTIONS = window.COLLECTIONS = Object.freeze([
+    'b1', 'b2', 'b3', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords',
+    'staff', 'units', 'locations', 'tasks', 'requests', 'assignments'
+]);
+
+// ─── Dinleyici yönetimi (Faz 3.8 · DATA-11, EBYS-18) ─────────────────────────────────────────────
+// [WHY]: Dinleyicilerin bir kısmı (şablonlar) senkron motorunun dışında, oturum açılmadan kaydoluyor ve izin hatasında
+//        Firestore tarafından kalıcı olarak kapatılıyordu; çıkış yapıp girince yeniden başlamıyordu. İzin hatası yalnız
+//        konsola düştüğü için kullanıcı boş listeyi "veri yok" sanıyordu.
+// [HOW]: - registerSyncListener(key, subscribe): modüller ek dinleyicilerini buraya kaydeder; startRealtimeSync hepsini
+//          oturum açıkken başlatır, stopRealtimeSync hepsini kapatır (çift dinleyici ve ölü dinleyici yok).
+//        - whenAuthReady() / 'onAuthReady' olayı: oturum (anonim veya admin) her hazır olduğunda.
+//        - reportListenerError: oturum açıkken gelen permission-denied ekranda "bağlantı yetkisi yok" bandı gösterir;
+//          aynı dinleyiciden başarılı veri gelince band kalkar. Bilinçli çıkış sırasında (stopRealtimeSync) uyarı verilmez.
+const _extraListeners = new Map();   // key -> subscribe():unsubscribe
+let _syncUnsubscribers = [];
+let _syncRunning = false;
+let _syncStopping = false;
+const _deniedListeners = new Set();
+
+export const registerSyncListener = window.registerSyncListener = function (key, subscribe) {
+    _extraListeners.set(key, subscribe);
+    if (_syncRunning) {
+        try { _syncUnsubscribers.push(subscribe()); } catch (e) { console.error(`❌ Dinleyici başlatılamadı (${key}):`, e); }
+    }
+};
+
+function _renderSyncHealth() {
+    const denied = [..._deniedListeners];
+    let banner = document.getElementById('syncPermissionBanner');
+    if (denied.length && !banner && document.body) {
+        banner = document.createElement('div');
+        banner.id = 'syncPermissionBanner';
+        banner.setAttribute('role', 'alert');
+        banner.style.cssText = 'position:fixed; left:16px; bottom:16px; z-index:12000; max-width:420px; padding:10px 14px; border-radius:8px; font-size:13px; background:var(--badge-rejected-bg,#fff5f5); color:var(--badge-rejected-text,#c92a2a); border:1px solid var(--color-danger,#e74c3c); box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+        document.body.appendChild(banner);
+    }
+    if (banner) {
+        if (denied.length) banner.textContent = `⚠️ Veri bağlantısı yetkisi yok (${denied.join(', ')}). Sayfayı yenileyin veya yeniden giriş yapın.`;
+        else banner.remove();
+    }
+    const syncText = document.getElementById('syncText');
+    const dot = document.getElementById('syncIndicator');
+    if (syncText) syncText.textContent = denied.length ? 'YETKİ YOK' : 'LIVE SYNC';
+    if (dot) dot.classList.toggle('online', !denied.length);
+}
+
+export const reportListenerError = window.reportListenerError = function (name, err) {
+    if (err && err.code === 'permission-denied') {
+        if (_syncStopping || !window.userAuth) {
+            console.warn(`⏳ [Güvenlik] ${name}: oturum kapalıyken yetki reddi (beklenen).`);
+            return;
+        }
+        console.error(`⛔ [Güvenlik] ${name}: Firestore okuma yetkisi reddedildi.`, err);
+        _deniedListeners.add(name);
+        _renderSyncHealth();
+        return;
+    }
+    console.error(`❌ Dinleme hatası (${name}):`, err);
+};
+
+function _markListenerHealthy(name) {
+    if (_deniedListeners.delete(name)) _renderSyncHealth();
+}
+
+window.getSyncHealth = () => ({ running: _syncRunning, denied: [..._deniedListeners], extra: [..._extraListeners.keys()] });
+
+let _authReadyResolvers = [];
+export const whenAuthReady = window.whenAuthReady = function () {
+    if (window.userAuth) return Promise.resolve(window.userAuth);
+    return new Promise(resolve => _authReadyResolvers.push(resolve));
+};
+
 /**
  * @function startRealtimeSync
  * @description Uygulamanın 'Canlı Veri' motorudur. 'onSnapshot' kullanarak 
  * Firebase'deki her değişikliği anında (sayfa yenilemeden) arayüze yansıtır.
  */
 // [WHY]: Oturum kapat/aç sonrası senkron yeniden başlatılınca eski dinleyiciler ölmemişse çift dinleyici oluşur.
-// [HOW]: Her onSnapshot'ın unsubscribe'ı saklanır; yeniden başlatmada önce eskiler kapatılır.
-let _syncUnsubscribers = [];
-
-window.startRealtimeSync = function () {
+// [HOW]: Her onSnapshot'ın unsubscribe'ı saklanır; yeniden başlatmada önce eskiler kapatılır (stopRealtimeSync).
+export const stopRealtimeSync = window.stopRealtimeSync = function () {
+    _syncStopping = true;
     _syncUnsubscribers.forEach(unsub => { try { unsub(); } catch (e) { } });
     _syncUnsubscribers = [];
+    _syncRunning = false;
+    _deniedListeners.clear();
+    _renderSyncHealth();
+    _syncStopping = false;
+};
+
+window.startRealtimeSync = function () {
+    stopRealtimeSync();
+    _syncRunning = true;
 
     const statusDiv = document.getElementById('loginStatus');
     // [WHY]: Support 'access-val-node' ID which is used in index.html for security obfuscation.
@@ -203,11 +287,10 @@ window.startRealtimeSync = function () {
     // A. ENVANTER VERİLERİNİ DİNLE (COLLECTION_ROOT alt koleksiyonları)
     // [ENV_GUARD] Sabit "inventory_v2" yerine COLLECTION_ROOT kullanılıyor.
     // Bu, demo/localhost ortamında yanlışlıkla üretim verisi dinlenmesini engeller.
-    const collectionsToListen = ['b1', 'b2', 'b3', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords', 'staff', 'units', 'locations', 'tasks', 'requests', 'assignments'];
-
-    collectionsToListen.forEach(colName => {
+    COLLECTIONS.forEach(colName => {
         _syncUnsubscribers.push(onSnapshot(collection(fireDb, COLLECTION_ROOT, colName, "items"), (snapshot) => {
             console.log(`[DB-PATH-CHECK] Şu an aktif olarak dinlenen koleksiyon: ${COLLECTION_ROOT}/${colName}/items`);
+            _markListenerHealthy(colName);
 
             let hasModifications = false;
             let changesPayload = [];
@@ -275,13 +358,12 @@ window.startRealtimeSync = function () {
                     loginInput.placeholder = "Erişim Kodu Giriniz";
                 }
             }
-        }, (err) => {
-            if(err.code !== "permission-denied") console.error(err);
-        }));
+        }, (err) => reportListenerError(colName, err)));
     });
 
     // B. SİSTEM AYARLARINI DİNLE
     _syncUnsubscribers.push(onSnapshot(systemConfigRef("admin_settings"), (docSnap) => {
+        _markListenerHealthy('admin_settings');
         if (docSnap.exists()) {
             const data = docSnap.data();
             window.data.config = data;
@@ -324,15 +406,13 @@ window.startRealtimeSync = function () {
             // Force logout: tek seferlik, taze komut (VIP-06) — bkz. handleForceLogoutCommand
             handleForceLogoutCommand(data.force_logout);
         }
-    }, (err) => {
-        if (err.code === "permission-denied") console.warn("⏳ [Güvenlik] Firebase yetki onayı bekleniyor (admin_settings)...");
-        else console.error("Dinleme hatası:", err);
-    }));
+    }, (err) => reportListenerError('admin_settings', err)));
 
     // C. SİSTEM MESAJLARINI DİNLE
     // [WHY]: God-Eye panelinden gönderilen yönetici mesajlarını gerçek zamanlı yakalamak için.
     // [HOW]: system_config/admin_messages belgesindeki target_user_id ile mevcut kullanıcının id/code/name alanlarını karşılaştırır ve eşleşirse alert gösterir.
     _syncUnsubscribers.push(onSnapshot(systemConfigRef("admin_messages"), (docSnap) => {
+        _markListenerHealthy('admin_messages');
         if (docSnap.exists()) {
             const data = docSnap.data();
             
@@ -362,9 +442,12 @@ window.startRealtimeSync = function () {
                 }
             }
         }
-    }, (err) => {
-        if(err.code !== "permission-denied") console.error("Sistem mesajı dinleme hatası:", err);
-    }));
+    }, (err) => reportListenerError('admin_messages', err)));
+
+    // D. MODÜLLERİN KAYDETTİĞİ EK DİNLEYİCİLER (ör. iş akışı şablonları)
+    _extraListeners.forEach((subscribe, key) => {
+        try { _syncUnsubscribers.push(subscribe()); } catch (e) { console.error(`❌ Dinleyici başlatılamadı (${key}):`, e); }
+    });
 };
 
 /**
@@ -496,7 +579,8 @@ let isSyncStarted = false;
 // [HOW]: Listen for the 'onAppLogout' custom event (fired by auth-engine.js handleLogout)
 //        and reset isSyncStarted=false so the next successful Firebase auth triggers a fresh startRealtimeSync().
 window.addEventListener('onAppLogout', () => {
-    console.warn('🔄 [firebase-handler] onAppLogout alındı — isSyncStarted sıfırlanıyor. Yeniden giriş, listener motoru yeniden başlatacak.');
+    console.warn('🔄 [firebase-handler] onAppLogout alındı — dinleyiciler kapatılıyor. Yeniden giriş, listener motoru yeniden başlatacak.');
+    stopRealtimeSync();
     isSyncStarted = false;
 });
 
@@ -505,9 +589,16 @@ onAuthStateChanged(auth, async (user) => {
         window.userAuth = user;
         console.log("✅ [Auth] Firebase Oturumu Doğrulandı UID:", user.uid);
 
+        // Faz 3.8: oturum hazır — bekleyenleri çöz ve olayı yayınla (anonim veya admin oturumu, her açılışta)
+        const resolvers = _authReadyResolvers; _authReadyResolvers = [];
+        resolvers.forEach(r => { try { r(user); } catch (e) { } });
+        window.dispatchEvent(new CustomEvent('onAuthReady', { detail: { uid: user.uid, isAnonymous: !!user.isAnonymous } }));
+
         // [BUGFIX] Bug 1: isSyncStarted=false (reset by onAppLogout) allows this block
         // to re-fire startRealtimeSync() after a logout+re-login without a page refresh.
-        if (!isSyncStarted) {
+        // Faz 3.8: SecurityConfig.logout dinleyicileri kapatır (_syncRunning=false). Çıkış sonrası anonim oturum
+        // 'onAppLogout' olayından önce gelse bile senkron yeniden başlar; aksi halde dinleyiciler ölü kalırdı.
+        if (!isSyncStarted || !_syncRunning) {
             isSyncStarted = true;
             window.startRealtimeSync();
         }
@@ -544,7 +635,7 @@ window.fbFunctions = {
 
 window.migrateDataFromOldToNew = async function () {
     console.log("🚀 MIGRATION BAŞLADI: Eski veriler Sub-collection'lara aktarılıyor...");
-    const collections = ['b1', 'b2', 'b3', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords', 'staff', 'units', 'locations', 'tasks', 'requests', 'assignments'];
+    const collections = COLLECTIONS;
 
     for (const colName of collections) {
         try {

@@ -26,6 +26,9 @@ const SecurityConfig = {
     
     async logout() {
         try {
+            // Faz 3.8: dinleyiciler oturum kapanmadan önce kapatılır; aksi halde her biri permission-denied ile ölür
+            // ve "bağlantı yetkisi yok" göstergesi normal bir çıkışta yanlışlıkla belirir.
+            if (typeof window.stopRealtimeSync === 'function') window.stopRealtimeSync();
             const { getAuth, signOut } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js");
             const auth = getAuth(window.app || window.firebaseApp);
             await signOut(auth);

@@ -4,26 +4,14 @@ import { doc, setDoc, getDocs, collection, getDoc, onSnapshot, deleteDoc } from 
 // [HOW]: Bunun yerine firebase-handler.js icinde olusturulmus olan 'window.fireDb' nesnesini donduren bir yardimci tanimliyoruz.
 const getFirestore = () => window.fireDb;
 
-// [WHY]: Sayfa yuklendiginde window.fireDb henuz hazir olmayabilir. Ayrica onSnapshot, anonim/admin oturum acilmadan
-//        (window.userAuth) hemen kayit oluyordu: rules "isAuthenticated()" istedigi icin permission-denied aliniyor,
-//        Firestore bu dinleyiciyi kalici olarak kapatiyor ve oturum acildiktan sonra bile bir daha hic tetiklenmiyordu.
-//        Sonuc: Firestore'da var olan sablonlar hem "Akisi Baslat" listesinde hem "Tanimlar > Is Akislari" sekmesinde
-//        hic gorunmuyordu; yalnizca dogrudan setDoc/deleteDoc yazma islemleri (sablon olusturma/silme) calisiyordu.
-// [HOW]: fireDb'nin yaninda window.userAuth da beklenir (startRealtimeSync'in ayni deseni); boylece dinleyici oturum
-//        gercekten acildiktan sonra kaydolur ve permission-denied'a hic dusmez.
-function initWorkflowListener() {
-    if (!window.fireDb || !window.userAuth) {
-        setTimeout(initWorkflowListener, 50);
-        return;
-    }
-    const db = window.fireDb;
-    
-    // Sablonlar koleksiyonunu canli dinle
-    // [BUGFIX]: Env-guard and Zero-Trust path alignment
-    // [WHY]: Firestore rules deny writing to root collections. Workflow templates must reside under COLLECTION_ROOT/workflowTemplates/items.
-    // [HOW]: Query the collection under window.AppEnv.COLLECTION_ROOT subcollection structure.
+// [WHY]: Şablon dinleyicisi senkron motorunun dışındaydı: oturum açılmadan kaydolup permission-denied ile kalıcı olarak
+//        kapanıyordu (EBYS-18; G1 bunu window.userAuth'u bekleyerek yamamıştı). Çıkış yapıp tekrar girince (signOut
+//        dinleyiciyi öldürür) yeniden başlamıyordu ve yetki hatası yalnız konsola düşüyordu.
+// [HOW]: Dinleyici firebase-handler'ın registerSyncListener kaydına verilir: startRealtimeSync onu oturum açıkken diğer
+//        koleksiyonlarla birlikte başlatır, stopRealtimeSync kapatır, izin hatası ortak "bağlantı yetkisi yok" bandına düşer.
+function subscribeWorkflowTemplates() {
     const activeRoot = window.AppEnv?.COLLECTION_ROOT || window.COLLECTION_ROOT || "lifeserver_master";
-    onSnapshot(collection(db, activeRoot, "workflowTemplates", "items"), (snapshot) => {
+    return onSnapshot(collection(window.fireDb, activeRoot, "workflowTemplates", "items"), (snapshot) => {
         const fetchedTemplates = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
@@ -36,12 +24,9 @@ function initWorkflowListener() {
 
         console.log("📂 Sablonlar guncellendi:", window.templates);
         if (typeof window.renderTemplateList === "function") window.renderTemplateList();
-    }, (err) => { 
-        if(err.code === "permission-denied") console.warn("⏳ [Guvenlik] Firebase yetki onayi bekleniyor (workflowTemplates)..."); 
-        else console.error(err); 
-    });
+    }, (err) => window.reportListenerError('workflowTemplates', err));
 }
-initWorkflowListener();
+window.registerSyncListener('workflowTemplates', subscribeWorkflowTemplates);
 
 // ✅ Değişkenleri window üzerinde sabitleyelim (Çakışmaları önlemek için)
 window.currentEditingUnitId = window.currentEditingUnitId || null;
