@@ -181,7 +181,7 @@ const SCENARIOS = {
                 mk(1, 'Beklemede', 'Personel A ' + ft.MARKER), mk(2, 'Beklemede', 'Personel B ' + ft.MARKER), mk(3, 'draft', 'Personel C ' + ft.MARKER)]);
             await ft.waitFor(async () => (await ft.readMarked('requests')).length === 3 && (window.data.requests || []).filter(r => String(r.ürün).includes(ft.MARKER)).length === 3);
             const db = async n => (await ft.readMarked('requests')).find(r => r.id === base + n);
-            const realSave = window.saveData; let b3Attempts = 0;
+            const realSave = window.saveData, realModal = window.showRequestApprovalModal; let b3Attempts = 0;
             // b3 is admin-only: count the attempt and report success so the approval is not rolled back.
             window.saveData = async (col, items) => { if (col === 'b3') { b3Attempts++; return true; } return realSave(col, items); };
             window.showCustomConfirm = async () => true;
@@ -219,7 +219,7 @@ const SCENARIOS = {
             await ft.waitFor(async () => window.data.requests.find(r => r.id === base + 2)?.durum === 'rejected');
             await window.deleteRequest(base + 2);
             out.deletedById = await ft.waitFor(async () => !(await db(2)) && !!(await db(1)) && !!(await db(3)));
-            window.saveData = realSave;
+            window.saveData = realSave; window.showRequestApprovalModal = realModal;
             return out;
         });
     },
@@ -241,6 +241,7 @@ const SCENARIOS = {
             const db = async n => (await ft.readMarked('requests')).find(r => r.id === base + n);
 
             const tx = [], b3 = []; let failB3 = false;
+            const realTx = window.runStockTransaction, realAlert = window.showAppAlert;
             window.runStockTransaction = async (c, id, d) => { tx.push([c, id, d]); const p = window.data[c].find(x => x.id === id); const before = p.adet; p.adet += d; return { before, after: p.adet }; };
             const realSave = window.saveData;
             window.saveData = async (col, items) => { if (col === 'b3') { if (failB3) return false; b3.push(items[items.length - 1]); return true; } return realSave(col, items); };
@@ -303,7 +304,7 @@ const SCENARIOS = {
             await pending.p; await ft.sleep(800);
             out.txFailure = { stillPending: (await db(2)).durum === 'Beklemede', message: alerts.at(-1)?.[1] };
 
-            window.saveData = realSave;
+            window.saveData = realSave; window.runStockTransaction = realTx; window.showAppAlert = realAlert;
             window.data.b1 = window.data.b1.filter(p => p !== prod && p !== low);
             return out;
         });
@@ -380,6 +381,53 @@ const SCENARIOS = {
         result.adminPageErrors = errs;
         await admin.browserContext().close();
         return result;
+    },
+
+    // Tur 2.5 · purchase "Belge / Ürün Türü": fed from productTypes (live while the modal is open), selection kept,
+    // real purchaseOrders save carries 'tur'. productTypes/units are replaced in memory only and restored.
+    async purchaseTypeSelect(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            const orig = { types: window.data.productTypes, units: window.data.units };
+            const fire = col => window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: col, isPatch: false, changes: [] } }));
+            const opts = () => [...document.getElementById('purType').options].map(o => o.value);
+            const form = document.getElementById('purchaseForm');
+            window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+
+            window.data.productTypes = []; window.data.units = [{ id: 'u1', name: 'FT Birim' }];
+            window.openNewPurchaseModal();
+            out.emptyState = { options: opts(), text: document.getElementById('purType').options[0].text };
+            ft.set('purName', 'Ürün ' + ft.MARKER);
+            ft.set('purUnit', 'FT Birim');
+            out.formBlockedWhileEmpty = form.checkValidity() === false;
+
+            window.data.productTypes = [{ id: 'a', name: 'Zeta' }, { id: 'b', name: '<b>Alfa</b>' }, { id: 'c', name: 'Zeta' }];
+            fire('productTypes');
+            out.liveFilled = { options: opts(), noInjectedB: !document.querySelector('#purType b') };
+            ft.set('purType', 'Zeta');
+            window.data.productTypes = [...window.data.productTypes, { id: 'd', name: 'Beta' }];
+            fire('productTypes');
+            out.selectionKept = document.getElementById('purType').value === 'Zeta' && opts().includes('Beta');
+            out.formValidNow = form.checkValidity();
+
+            form.requestSubmit();
+            out.saved = await ft.waitFor(async () => (await ft.readMarked('purchaseOrders')).length === 1);
+            await ft.waitFor(async () => document.getElementById('purchaseModal').style.display === 'none'); // save flow finished (form reset done)
+            const [po] = await ft.readMarked('purchaseOrders');
+            out.savedFields = po && { tur: po.tur, birim: po.birim };
+
+            // a type deleted after the request was made stays visible in edit mode
+            await ft.waitFor(async () => (window.data.purchaseOrders || []).some(x => x.id === po.id));
+            window.data.productTypes = [{ id: 'd', name: 'Beta' }];
+            window.openPurchaseDetail(po.id, 'edit');
+            await ft.sleep(150);
+            fire('productTypes');
+            out.editKeepsDeletedType = document.getElementById('purType').value === 'Zeta' && opts().includes('Beta');
+            window.closePurchaseModal();
+
+            window.data.productTypes = orig.types; window.data.units = orig.units;
+            return out;
+        });
     },
 
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).

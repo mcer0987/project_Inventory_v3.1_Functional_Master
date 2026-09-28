@@ -111,30 +111,27 @@ window.openNewPurchaseModal = function () {
 // -----------------------------
 // SELECT DOLDUR
 // -----------------------------
+// [WHY]: "Belge / Ürün Türü" yalnız modal açılırken bir kez dolduruluyordu; türler (veya birimler) modal açıkken ya da
+//        henüz tanımlanmamışken gelirse liste boş kalıyor, zorunlu alan yüzünden form ilerlemiyordu. Adlar kaçışsız basılıyordu.
+// [HOW]: Liste ${COLLECTION_ROOT}/productTypes/items (window.data.productTypes) ve units'ten; tekil, sıralı, kaçışlı.
+//        Mevcut seçim korunur; boşsa nereden tanımlanacağı yazılır. Modal açıkken snapshot gelince yeniden doldurulur (dosya sonu).
+function _fillNamedSelect(select, items, placeholder, emptyText) {
+    if (!select) return;
+    const current = select.value;
+    const names = [...new Set(items.map(x => String((x && typeof x === 'object' ? (x.name || x.birimAdi) : x) || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'tr'));
+    select.innerHTML = (names.length ? `<option value="">${placeholder}</option>` : `<option value="">${emptyText}</option>`) +
+        names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    if (!current) return;
+    if (!names.includes(current)) select.add(new Option(current, current));
+    select.value = current;
+}
+
 function fillPurchaseSelects() {
-
-    const unitSelect = document.getElementById('purUnit');
-    const typeSelect = document.getElementById('purType');
-
-    if (unitSelect) {
-        const units = window.data.units || [];
-        unitSelect.innerHTML =
-            '<option value="">Birim Seçiniz</option>' +
-            units.map(u => {
-                const name = typeof u === "object" ? u.name : u;
-                return `<option value="${name}">${name}</option>`;
-            }).join('');
-    }
-
-    if (typeSelect) {
-        const types = window.data.productTypes || [];
-        typeSelect.innerHTML =
-            '<option value="">Tür Seçiniz</option>' +
-            types.map(t => {
-                const name = typeof t === "object" ? t.name : t;
-                return `<option value="${name}">${name}</option>`;
-            }).join('');
-    }
+    _fillNamedSelect(document.getElementById('purUnit'), window.data.units || [],
+        'Birim Seçiniz', 'Tanımlı birim yok — Tanımlar › Birimler');
+    _fillNamedSelect(document.getElementById('purType'), window.data.productTypes || [],
+        'Tür Seçiniz', 'Tanımlı ürün türü yok — Tanımlar › Ürün Türleri');
 }
 
 // -----------------------------
@@ -1063,7 +1060,10 @@ window.openPurchaseDetail = function (id, mode) {
     setTimeout(() => {
         const sel = (selId, val) => {
             const el = document.getElementById(selId);
-            if (el) [...el.options].forEach(o => { o.selected = o.value === val; });
+            if (!el) return;
+            // Kayıttaki değer artık tanımlı değilse (silinmiş tür/birim) kaybolmasın diye seçenek olarak eklenir.
+            if (val && ![...el.options].some(o => o.value === val)) el.add(new Option(val, val));
+            [...el.options].forEach(o => { o.selected = o.value === val; });
         };
         sel('purUnit', item.birim);
         sel('purType', item.tur);
@@ -1660,5 +1660,11 @@ window.addEventListener('onInventoryDataUpdated', function (e) {
         if (typeof window.renderPurchaseStats === 'function') {
             window.renderPurchaseStats();
         }
+    }
+    // Modal açıkken tanımlanan tür/birim anında listeye gelsin (görüntüleme modunda kilitli alanlara dokunulmaz).
+    if (collection === 'productTypes' || collection === 'units') {
+        const modal = document.getElementById('purchaseModal');
+        const typeSel = document.getElementById('purType');
+        if (modal && modal.style.display !== 'none' && typeSel && !typeSel.disabled) fillPurchaseSelects();
     }
 });
