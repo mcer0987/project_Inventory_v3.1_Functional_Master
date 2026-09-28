@@ -654,9 +654,11 @@ window.inventoryManagementModule = {
       }
     };
     try {
+      const stockChanges = [];
       for (const it of items) {
-        await window.runStockTransaction(it.warehouse, it.product.id, -it.qty);
+        const r = await window.runStockTransaction(it.warehouse, it.product.id, -it.qty);
         deducted.push(it);
+        if (r) stockChanges.push(`${it.warehouse.toUpperCase()} ${it.product.ürün || it.product.name}: ${r.before} → ${r.after}`);
       }
 
       const now = typeof getTurkiyeTarihi === 'function' ? getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
@@ -694,7 +696,7 @@ window.inventoryManagementModule = {
       if (await window.saveData('assignments', [...assignmentEntries, ...(window.data.assignments || [])]) === false) {
         alert('Zimmet oluşturuldu ancak zimmet geçmişi (assignments) yazılamadı.', 'warning');
       } else {
-        alert(`${personnelName} adına ${items.length} kalem zimmet başarıyla oluşturuldu.`, 'success');
+        alert(`${personnelName} adına ${items.length} kalem zimmet başarıyla oluşturuldu. Stok: ${stockChanges.join(' · ')}`, 'success');
       }
       this.closeAssignModal();
       this.renderTable();
@@ -754,7 +756,7 @@ window.inventoryManagementModule = {
       if (!ok) return;
     }
 
-    let product = null;
+    let product = null, stockChange = null;
     if (target) {
       const list = window.data[target] || [];
       product = item.productId != null ? list.find(p => String(p.id) === String(item.productId)) : null;
@@ -765,7 +767,7 @@ window.inventoryManagementModule = {
       }
       if (!product) { alert(`${target.toUpperCase()} deposunda bu ürün tek ve kesin olarak bulunamadı; iade yapılmadı.`, 'error'); return; }
       try {
-        await window.runStockTransaction(target, product.id, qty);
+        stockChange = await window.runStockTransaction(target, product.id, qty);
       } catch (e) {
         alert(`Stok iadesi başarısız: ${e.message}`, 'error');
         return;
@@ -791,7 +793,9 @@ window.inventoryManagementModule = {
     }
 
     this.renderTable();
-    alert(target ? `Zimmet düşüldü ve ${target.toUpperCase()} deposuna iade edildi.` : 'Zimmet kaydı kapatıldı (depo iadesi yapılmadı).', 'success');
+    alert(target
+      ? `Zimmet düşüldü ve ${target.toUpperCase()} deposuna iade edildi.${stockChange ? ` Stok: ${stockChange.before} → ${stockChange.after}` : ''}`
+      : 'Zimmet kaydı kapatıldı (depo iadesi yapılmadı).', 'success');
   },
 
   // ──────────────────────────────────────────

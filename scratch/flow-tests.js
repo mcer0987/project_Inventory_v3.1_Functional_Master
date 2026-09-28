@@ -182,16 +182,17 @@ const SCENARIOS = {
             await ft.waitFor(async () => (await ft.readMarked('requests')).length === 3 && (window.data.requests || []).filter(r => String(r.ürün).includes(ft.MARKER)).length === 3);
             const db = async n => (await ft.readMarked('requests')).find(r => r.id === base + n);
             const realSave = window.saveData; let b3Attempts = 0;
-            window.saveData = async (col, items) => { if (col === 'b3') b3Attempts++; return realSave(col, items); };
+            // b3 is admin-only: count the attempt and report success so the approval is not rolled back.
+            window.saveData = async (col, items) => { if (col === 'b3') { b3Attempts++; return true; } return realSave(col, items); };
             window.showCustomConfirm = async () => true;
             window.setActiveUser({ name: 'Yönetici Test' });
 
-            window.prompt = () => null;
+            window.showRequestApprovalModal = async () => null;
             await window.confirmRequest(base + 1);
             await ft.sleep(1200);
             out.cancelKeepsPending = (await db(1)).durum === 'Beklemede' && b3Attempts === 0;
 
-            window.prompt = () => 'SN-123';
+            window.showRequestApprovalModal = async () => ({ sn: 'SN-123', source: null });
             await Promise.all([window.confirmRequest(base + 1), window.confirmRequest(base + 1)]);
             await ft.waitFor(async () => (await db(1)).durum === 'approved');
             const a = await db(1);
@@ -219,6 +220,91 @@ const SCENARIOS = {
             await window.deleteRequest(base + 2);
             out.deletedById = await ft.waitFor(async () => !(await db(2)) && !!(await db(1)) && !!(await db(3)));
             window.saveData = realSave;
+            return out;
+        });
+    },
+
+    // Tur 2.5 · ITSM-08 — approval deducts the chosen stock item, links b3 to it and rolls back on failure.
+    // b1/b2/b3 writes need an admin session: runStockTransaction and b3 saves are recorded stubs, requests are real.
+    // A fake B1 product lives only in window.data (never saved). The real approval modal is driven through the DOM.
+    async requestApprovalStock(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            const base = Date.now();
+            const prod = { id: 'b1_ft_' + base, ürün: 'FT Laptop ' + ft.MARKER, marka: 'Acme', raf: 'R-9', adet: 5, isDemirbas: true };
+            const low = { id: 'b1_ftlow_' + base, ürün: 'FT Low ' + ft.MARKER, marka: '', raf: 'R-1', adet: 1 };
+            window.data.b1 = [...(window.data.b1 || []), prod, low];
+            const mk = (n, ürün, adet) => ({ id: base + n, ürün, personel: 'Personel ' + n + ' ' + ft.MARKER, durum: 'Beklemede', adet, tarih: '01.01.2026' });
+            await window.saveData('requests', [...(window.data.requests || []),
+                mk(1, 'Acme FT Laptop ' + ft.MARKER, 2), mk(2, 'Acme FT Laptop ' + ft.MARKER, 1), mk(3, 'Serbest ürün ' + ft.MARKER, 3), mk(4, 'FT Low ' + ft.MARKER, 2)]);
+            await ft.waitFor(async () => (window.data.requests || []).filter(r => String(r.ürün).includes(ft.MARKER)).length === 4);
+            const db = async n => (await ft.readMarked('requests')).find(r => r.id === base + n);
+
+            const tx = [], b3 = []; let failB3 = false;
+            window.runStockTransaction = async (c, id, d) => { tx.push([c, id, d]); const p = window.data[c].find(x => x.id === id); const before = p.adet; p.adet += d; return { before, after: p.adet }; };
+            const realSave = window.saveData;
+            window.saveData = async (col, items) => { if (col === 'b3') { if (failB3) return false; b3.push(items[items.length - 1]); return true; } return realSave(col, items); };
+            const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
+            window.setActiveUser({ name: 'Yönetici Test' });
+            const modal = () => document.getElementById('requestApprovalModal');
+            const openFor = async n => { const run = { p: window.confirmRequest(base + n) }; await ft.waitFor(async () => !!modal(), 2000); return run; };
+
+            // 1) exact name match is preselected; OK deducts 2 from B1 and links b3 to the product
+            let pending = await openFor(1);
+            const sel = modal().querySelector('#raSource');
+            out.preselected = sel.value === `b1|${prod.id}`;
+            out.lowStockDisabled = [...sel.options].find(o => o.value === `b1|${low.id}`)?.disabled === true;
+            modal().querySelector('#raSn').value = 'SN-FT1';
+            modal().querySelector('#raOk').click();
+            await pending.p;
+            await ft.waitFor(async () => (await db(1))?.durum === 'approved');
+            const r1 = await db(1);
+            out.approveWithStock = {
+                tx: JSON.stringify(tx) === JSON.stringify([['b1', prod.id, -2]]), stockNow: prod.adet,
+                request: { durum: r1.durum, sn: r1.sn, stockRepo: r1.stockRepo, stockProductId: r1.stockProductId === prod.id },
+                b3: b3[0] && { sourceRepo: b3[0].sourceRepo, productId: b3[0].productId === prod.id, requestId: b3[0].requestId === base + 1, sarfAdet: b3[0].sarfAdet, shelfNo: b3[0].shelfNo, isDemirbas: b3[0].isDemirbas },
+                message: alerts.at(-1)?.[1],
+            };
+
+            // 2) cancel: nothing changes
+            tx.length = 0; b3.length = 0;
+            pending = await openFor(2);
+            modal().querySelector('#raCancel').click();
+            await pending.p; await ft.sleep(800);
+            out.cancel = { noTx: tx.length === 0, noB3: b3.length === 0, stillPending: (await db(2)).durum === 'Beklemede' };
+
+            // 3) free-text item: OK without choice is refused; explicit "no stock" approves without deduction
+            pending = await openFor(3);
+            out.freeTextPreselect = modal().querySelector('#raSource').value;
+            modal().querySelector('#raOk').click();
+            out.okWithoutChoiceRefused = !!modal() && modal().querySelector('#raError').style.display === 'block';
+            const s3 = modal().querySelector('#raSource'); s3.value = '__none__'; s3.dispatchEvent(new Event('change'));
+            modal().querySelector('#raOk').click();
+            await pending.p;
+            await ft.waitFor(async () => (await db(3))?.durum === 'approved');
+            out.noStock = { noTx: tx.length === 0, sourceRepo: b3[0]?.sourceRepo, hasProductId: 'productId' in (b3[0] || {}), message: alerts.at(-1)?.[1] };
+
+            // 4) b3 write fails: stock is restored and the request goes back to pending
+            tx.length = 0; failB3 = true;
+            await ft.waitFor(async () => window.data.requests.some(r => r.id === base + 2 && r.durum === 'Beklemede'));
+            pending = await openFor(2);
+            const s4 = modal().querySelector('#raSource'); s4.value = `b1|${prod.id}`; s4.dispatchEvent(new Event('change'));
+            modal().querySelector('#raOk').click();
+            await pending.p;
+            await ft.sleep(1500);
+            out.b3Failure = { tx: JSON.stringify(tx) === JSON.stringify([['b1', prod.id, -1], ['b1', prod.id, 1]]), stockNow: prod.adet, reverted: (await db(2)).durum === 'Beklemede', message: alerts.at(-1)?.[1] };
+
+            // 5) stock transaction refuses (e.g. insufficient on server): nothing is approved
+            failB3 = false; tx.length = 0;
+            window.runStockTransaction = async () => { throw new Error('Yetersiz Stok!'); };
+            pending = await openFor(2);
+            const s5 = modal().querySelector('#raSource'); s5.value = `b1|${prod.id}`; s5.dispatchEvent(new Event('change'));
+            modal().querySelector('#raOk').click();
+            await pending.p; await ft.sleep(800);
+            out.txFailure = { stillPending: (await db(2)).durum === 'Beklemede', message: alerts.at(-1)?.[1] };
+
+            window.saveData = realSave;
+            window.data.b1 = window.data.b1.filter(p => p !== prod && p !== low);
             return out;
         });
     },

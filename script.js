@@ -656,6 +656,86 @@ const _refreshRequestTables = () => {
 const _saveRequestItem = updated => window.saveData('requests',
     (window.data.requests || []).map(r => String(r.id) === String(updated.id) ? updated : r));
 
+// [WHY]: Talep serbest metin olduğu için onay stoktan hiç düşmüyordu; onaylanan ürün depoda görünmeye devam ediyor,
+//        iadesi de "stok bağlantısı yok" diye depoya dönmüyordu (ITSM-08, Karar K7-a).
+// [HOW]: Onayda SN ile birlikte B1/B2 stok kalemi seçtirilir; adı talep metniyle birebir eşleşen tek kalem ön seçilir.
+//        "Stoktan düşmeden onayla" ancak açıkça seçilirse geçerlidir. İptal → null; aksi halde { sn, source: {repo, productId} | null }.
+const _normText = s => String(s || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
+const _stockLabel = p => `${p.marka || ''} ${p.ürün || p.name || ''}`.replace(/\s+/g, ' ').trim();
+const _stockQty = p => Number(p.adet ?? p.qty ?? 0) || 0;
+const NO_STOCK = '__none__';
+
+window.showRequestApprovalModal = function (request) {
+    return new Promise(resolve => {
+        const want = Number(request.adet) || 1;
+        const target = _normText(request.ürün);
+        const rank = p => {
+            const label = _normText(_stockLabel(p)), name = _normText(p.ürün || p.name);
+            if (label === target || name === target) return 0;
+            if (target && ((label && label.includes(target)) || (name && target.includes(name)))) return 1;
+            return 2;
+        };
+        const candidates = ['b1', 'b2'].flatMap(repo => (window.data[repo] || [])
+            .filter(p => _stockQty(p) > 0 && p.durumu !== 'Pasif' && p.status !== 'Pasif')
+            .map(p => ({ repo, p, rank: rank(p), key: `${repo}|${p.id}` })))
+            .sort((a, b) => a.rank - b.rank || _stockLabel(a.p).localeCompare(_stockLabel(b.p), 'tr'));
+        const exact = candidates.filter(c => c.rank === 0 && _stockQty(c.p) >= want);
+        let selected = exact.length === 1 ? exact[0].key : '';
+
+        const overlay = document.createElement('div');
+        overlay.id = 'requestApprovalModal';
+        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.75); display:flex; align-items:center; justify-content:center; z-index:11000;';
+        const field = 'width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-size:14px; margin-bottom:12px;';
+        overlay.innerHTML = `
+          <div style="background:#fff; color:#1e293b; padding:24px; border-radius:12px; width:520px; max-width:94vw; font-family:sans-serif;">
+            <h3 style="margin:0 0 6px; font-size:1.2rem;">Talebi Onayla</h3>
+            <p style="margin:0 0 16px; color:#64748b; font-size:0.9rem;">${escapeHtml(request.personel || '-')} · <strong>${escapeHtml(request.ürün || '-')}</strong> · ${escapeHtml(want)} adet</p>
+            <label style="font-weight:600; font-size:13px;">Stoktan düşülecek kalem</label>
+            <input id="raFilter" type="text" placeholder="Ürün, marka veya raf ara..." autocomplete="off" style="${field} margin-bottom:6px;">
+            <select id="raSource" size="6" style="${field}"></select>
+            <label style="font-weight:600; font-size:13px;">Seri numarası / zimmet bilgisi</label>
+            <input id="raSn" type="text" placeholder="Yoksa boş bırakın" autocomplete="off" style="${field}">
+            <div id="raError" style="display:none; color:#dc2626; font-size:13px; margin-bottom:10px;"></div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+              <button id="raCancel" type="button" style="padding:10px 18px; border:1px solid #cbd5e1; background:#fff; border-radius:8px; cursor:pointer;">Vazgeç</button>
+              <button id="raOk" type="button" style="padding:10px 18px; border:none; background:#16a34a; color:#fff; font-weight:700; border-radius:8px; cursor:pointer;">Onayla</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+
+        const sel = overlay.querySelector('#raSource');
+        const renderOptions = () => {
+            const q = _normText(overlay.querySelector('#raFilter').value);
+            const visible = candidates.filter(c => !q || _normText(`${_stockLabel(c.p)} ${c.p.raf || ''} ${c.repo}`).includes(q));
+            sel.innerHTML = `<option value="${NO_STOCK}">— Stoktan düşmeden onayla (stok dışı / tedarik edilecek)</option>` +
+                visible.map(c => {
+                    const qty = _stockQty(c.p);
+                    return `<option value="${escapeHtml(c.key)}" ${qty < want ? 'disabled' : ''}>${c.repo.toUpperCase()} · ${escapeHtml(_stockLabel(c.p))} · Raf ${escapeHtml(c.p.raf || '-')} · Stok: ${escapeHtml(qty)}${qty < want ? ' (yetersiz)' : ''}</option>`;
+                }).join('');
+            sel.value = selected;
+        };
+        renderOptions();
+        overlay.querySelector('#raFilter').addEventListener('input', renderOptions);
+        sel.addEventListener('change', () => { selected = sel.value; });
+
+        const close = val => { overlay.remove(); resolve(val); };
+        overlay.querySelector('#raCancel').onclick = () => close(null);
+        overlay.querySelector('#raOk').onclick = () => {
+            if (!selected) {
+                const err = overlay.querySelector('#raError');
+                err.textContent = 'Stoktan düşülecek kalemi seçin veya "Stoktan düşmeden onayla" seçeneğini işaretleyin.';
+                err.style.display = 'block';
+                return;
+            }
+            const sn = overlay.querySelector('#raSn').value.trim() || '-';
+            if (selected === NO_STOCK) return close({ sn, source: null });
+            const [repo, ...rest] = selected.split('|');
+            close({ sn, source: { repo, productId: rest.join('|') } });
+        };
+        setTimeout(() => overlay.querySelector(selected ? '#raSn' : '#raFilter')?.focus(), 0);
+    });
+};
+
 window.confirmRequest = async function (requestId) {
     const lockKey = String(requestId);
     if (_requestActionsInFlight.has(lockKey)) return;
@@ -665,24 +745,43 @@ window.confirmRequest = async function (requestId) {
         if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
         if (!_isPendingRequest(request)) { showAppAlert('Bu talep zaten işlenmiş veya taslak durumda.', 'warning'); _refreshRequestTables(); return; }
 
-        const answer = window.prompt(`"${request.ürün}" için seri numarası / zimmet bilgisi girin (yoksa boş bırakın):`, '');
-        if (answer === null) return;
-        const snValue = answer.trim() || '-';
+        const choice = await window.showRequestApprovalModal(request);
+        if (!choice) return;
+        const snValue = choice.sn || '-';
 
-        // prompt açıkken snapshot gelmiş olabilir: güncel nesne ve durum yeniden kontrol edilir
+        // modal açıkken snapshot gelmiş olabilir: güncel nesne ve durum yeniden kontrol edilir
         const live = _findRequest(requestId);
         if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
 
+        // Stok önce atomik düşülür; sonraki yazmalardan biri başarısız olursa geri eklenir.
+        const qty = Number(live.adet) || 1;
+        const repo = choice.source?.repo;
+        const product = repo ? (window.data[repo] || []).find(p => String(p.id) === String(choice.source.productId)) : null;
+        if (repo && !product) { showAppAlert('Seçilen stok kalemi bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        let stockChange = null;
+        if (product) {
+            try { stockChange = await window.runStockTransaction(repo, product.id, -qty); }
+            catch (e) { showAppAlert(`Stok düşülemedi: ${e.message}`, 'error'); return; }
+        }
+        const restoreStock = async () => {
+            if (!product) return;
+            try { await window.runStockTransaction(repo, product.id, qty); } catch (e) { console.error('❌ Stok geri alma hatası:', e); }
+        };
+
         const approver = window.currentUser?.name || 'Yönetici';
         const now = getTurkiyeSaati();
-        const updated = { ...live, durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now };
-        if (await _saveRequestItem(updated) === false) { showAppAlert('Onay kaydedilemedi.', 'error'); return; }
+        const updated = {
+            ...live, durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now,
+            ...(product ? { stockRepo: repo, stockProductId: product.id } : {})
+        };
+        if (await _saveRequestItem(updated) === false) { await restoreStock(); showAppAlert('Onay kaydedilemedi; stok geri alındı.', 'error'); return; }
 
         const exitEntry = {
             id: Date.now(),
             requestId: live.id,
-            shelfNo: "TALEP",
-            productType: live.ürün,
+            shelfNo: product ? (product.raf || '-') : "TALEP",
+            productType: product ? (product.ürün || product.name || live.ürün) : live.ürün,
+            ...(product ? { productId: product.id } : {}),
             description: "Personel Talebi Onaylandı",
             sn: snValue,
             sarfAdet: live.adet || 1,
@@ -691,19 +790,25 @@ window.confirmRequest = async function (requestId) {
             alanKisi: live.personel,
             date: getTurkiyeTarihi(),
             tarih: getTurkiyeTarihi(),
-            isDemirbas: live.isDemirbas === true || live.isDemirbas === "true",
+            isDemirbas: [product?.isDemirbas, live.isDemirbas].some(v => v === true || v === "true"),
             talepTuru: live.talepTuru || 'Kalıcı Zimmet',
             oncelik: live.oncelik || 'Orta',
             ...(live.iadeTarihi ? { iadeTarihi: live.iadeTarihi } : {}),
             iadeEdildi: false,
-            sourceRepo: 'TALEP',
+            sourceRepo: product ? repo : 'TALEP',
             approvedBy: approver
         };
         const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
         if (!alreadyLogged && await window.saveData('b3', [...(window.data.b3 || []), exitEntry]) === false) {
-            showAppAlert('Talep onaylandı ancak zimmet kaydı yazılamadı.', 'error');
+            // Zimmet kaydı yoksa iade stoğa dönemez: onay ve stok birlikte geri alınır.
+            const reverted = await _saveRequestItem(live);
+            await restoreStock();
+            showAppAlert(reverted === false
+                ? 'Zimmet kaydı yazılamadı; stok geri alındı ancak talep "onaylandı" kaldı. Lütfen talebi kontrol edin.'
+                : 'Zimmet kaydı yazılamadı; onay ve stok geri alındı.', 'error');
         } else {
-            showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.`, "success");
+            const stockText = stockChange ? ` ${repo.toUpperCase()} stok: ${stockChange.before} → ${stockChange.after}.` : ' Stoktan düşülmedi.';
+            showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.${stockText}`, "success");
         }
         _refreshRequestTables();
     } finally {

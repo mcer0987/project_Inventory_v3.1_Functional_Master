@@ -600,7 +600,9 @@ export const runStockTransaction = window.runStockTransaction = async function (
     // aktif ortam root'una yönlendirilir. Prod/demo karışımını önler.
     const docRef = doc(fireDb, COLLECTION_ROOT, colName, "items", String(docId));
 
-    await runTransaction(fireDb, async (transaction) => {
+    // [WHY]: Çağıranlar sonucu göremediği için "başarılı" mesajı stoğun gerçekten değişip değişmediğini söylemiyordu.
+    // [HOW]: Transaction önceki ve yeni adedi döndürür; stok alanı hiç yoksa 'adet' yazılır (sessiz no-op olmaz).
+    return runTransaction(fireDb, async (transaction) => {
         const sfDoc = await transaction.get(docRef);
         if (!sfDoc.exists()) {
             throw new Error("İlgili stok kaydı veritabanında bulunamadı!");
@@ -623,11 +625,14 @@ export const runStockTransaction = window.runStockTransaction = async function (
         const updateData = {};
         if (data.adet !== undefined) updateData.adet = newQty;
         if (data.qty !== undefined) updateData.qty = newQty;
+        if (data.adet === undefined && data.qty === undefined) updateData.adet = newQty;
         updateData.durumu = newStatus;
         updateData.status = newStatus;
 
         transaction.update(docRef, updateData);
+        return { before: currentQty, after: newQty };
+    }).then(result => {
+        console.log(`✅ [TRANSACTION BAŞARILI] ${colName}/${docId} stoğu güncellendi: ${result.before} → ${result.after}`);
+        return result;
     });
-
-    console.log(`✅ [TRANSACTION BAŞARILI] ${colName}/${docId} stoğu güncellendi. Delta: ${delta}`);
 };
