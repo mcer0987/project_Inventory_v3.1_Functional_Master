@@ -1659,22 +1659,26 @@ window.openLocationModal = function (id = null) {
     const units = window.data.units || [];
     units.forEach(u => {
         const unitName = typeof u === 'object' ? (u.name || u.birimAdi) : u;
-        if (unitName) {
-            unitSelect.innerHTML += `<option value="${unitName}">${unitName}</option>`;
-        }
+        if (unitName) unitSelect.add(new Option(unitName, unitName));
     });
 
-    if (id && window.data.locations && window.data.locations[id]) {
-        const loc = window.data.locations[id];
+    // [WHY]: Düzenleme window.data.locations[id] ile (dizi + id) aranıyordu: form boş açılıyor, kaydedince kayıt eziliyor ve
+    //        atanmış kişiler kayboluyordu (ADM-04).
+    // [HOW]: Kayıt id ile bulunur; kayıtlı birim listede yoksa seçenek olarak eklenir; kişiler rozet listesinden çizilir.
+    const loc = id ? (window.data.locations || []).find(l => String(l.id) === String(id)) : null;
+    if (id && !loc) {
+        showAppAlert('Mahal bulunamadı; liste güncellenmiş olabilir.', 'error');
+        return;
+    }
+    if (loc) {
         title.innerHTML = '<i class="fas fa-edit text-info me-2"></i> Mahali Düzenle';
         document.getElementById('loc_code').value = loc.code || '';
+        if (loc.unit && ![...unitSelect.options].some(o => o.value === loc.unit)) unitSelect.add(new Option(loc.unit, loc.unit));
         document.getElementById('loc_unit').value = loc.unit || '';
         document.getElementById('loc_campus').value = loc.campus || '';
         document.getElementById('loc_corridor').value = loc.corridor || '';
-
-        if (loc.persons && Array.isArray(loc.persons)) {
-            loc.persons.forEach(p => window.addPersonToLocation(p));
-        }
+        window.locationSelectedPersons = Array.isArray(loc.persons) ? loc.persons.map(p => ({ ...p })) : [];
+        _renderLocationPersons();
     } else {
         title.innerHTML = '<i class="fas fa-map-marker-alt text-info me-2"></i> Yeni Mahal Tanımla';
     }
@@ -1701,8 +1705,8 @@ window.searchPersonnelForLocation = function (query) {
             // Personel verisinde birim hangi isimle tutuluyor olabilirse hepsini dene
             const pUnit = p.birim || p.unit || p.department || p.bolum || p.departman || p.birimAdi || '';
             return `
-                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" onclick="window.addPersonToLocation({name:${jsArg(String(p.name))}, unit:'${pUnit}'})">
-                    <strong>${escapeHtml(p.name)}</strong> ${pUnit ? `<small class="text-muted">(${pUnit})</small>` : ''}
+                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" onclick="window.addPersonToLocation({name:${jsArg(String(p.name))}, unit:${jsArg(String(pUnit))}})">
+                    <strong>${escapeHtml(p.name)}</strong> ${pUnit ? `<small class="text-muted">(${escapeHtml(pUnit)})</small>` : ''}
                 </div>
             `;
         }).join('');
@@ -1712,72 +1716,71 @@ window.searchPersonnelForLocation = function (query) {
     }
 };
 
-window.addPersonToLocation = function (person) {
-    if (window.locationSelectedPersons.find(p => p.name === person.name)) return;
-
-    window.locationSelectedPersons.push(person);
+// [WHY]: Kişi çıkarınca rozetler addPersonToLocation ile yeniden çizilmeye çalışılıyordu; kişi zaten listede olduğu için
+//        fonksiyon hemen dönüyor ve TÜM rozetler siliniyordu (ADM-04).
+// [HOW]: Rozetler her zaman locationSelectedPersons dizisinden çizilir; ekle/çıkar yalnız diziyi değiştirir.
+function _renderLocationPersons() {
     const container = document.getElementById('loc_selectedPersons');
+    if (!container) return;
+    container.innerHTML = window.locationSelectedPersons.map(p => `
+        <span class="badge bg-light text-dark border d-flex align-items-center gap-2 p-2">${escapeHtml(p.name)}
+            <i class="fas fa-times text-danger" style="cursor:pointer;" onclick="window.removePersonFromLocation(${jsArg(String(p.name))})"></i></span>`).join('');
+}
 
-    const badge = document.createElement('span');
-    badge.className = 'badge bg-light text-dark border d-flex align-items-center gap-2 p-2';
-    badge.innerHTML = `${escapeHtml(person.name)} <i class="fas fa-times text-danger" style="cursor:pointer;" onclick="window.removePersonFromLocation(${jsArg(String(person.name))})"></i>`;
-    container.appendChild(badge);
-
+window.addPersonToLocation = function (person) {
+    if (!person || !person.name) return;
+    if (!window.locationSelectedPersons.some(p => p.name === person.name)) {
+        window.locationSelectedPersons.push(person);
+        _renderLocationPersons();
+    }
     document.getElementById('loc_personSearch').value = '';
     document.getElementById('loc_personResults').style.display = 'none';
 };
 
 window.removePersonFromLocation = function (name) {
     window.locationSelectedPersons = window.locationSelectedPersons.filter(p => p.name !== name);
-    const container = document.getElementById('loc_selectedPersons');
-    container.innerHTML = '';
-    window.locationSelectedPersons.forEach(p => window.addPersonToLocation(p));
+    _renderLocationPersons();
 };
 
+// [WHY]: Kayıt tam nesneyle değiştiriliyor (form dışı alanlar kayboluyor), düzenlenen kayıt bulunamazsa sessizce hiçbir şey
+//        yazılmıyor, saveData sonucu kontrol edilmeden "güncellendi" deniyordu (ADM-04).
+// [HOW]: Mevcut kayıt id ile bulunup {...mevcut, ...form} ile birleştirilir; yalnız 'locations' yazılır ve sonuç kontrol edilir.
 window.saveLocation = async function (e) {
     if (e) e.preventDefault();
 
     const id = document.getElementById('loc_id').value;
-    const newLoc = {
-        id: id || 'loc_' + Date.now(),
-        code: document.getElementById('loc_code').value,
+    const locations = [...(window.data.locations || [])];
+    const existing = id ? locations.find(l => String(l.id) === String(id)) : null;
+    if (id && !existing) { showAppAlert('Düzenlenen mahal bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+
+    const now = Date.now();
+    const formFields = {
+        code: document.getElementById('loc_code').value.trim(),
         unit: document.getElementById('loc_unit').value,
         campus: document.getElementById('loc_campus').value,
         corridor: document.getElementById('loc_corridor').value,
-        persons: window.locationSelectedPersons,
-        updatedAt: Date.now(),
-        createdAt: id ? (window.data.locations?.find(l => l.id === id)?.createdAt || Date.now()) : Date.now()
+        persons: window.locationSelectedPersons.map(p => ({ ...p })),
+        updatedAt: now
     };
+    const next = existing
+        ? locations.map(l => String(l.id) === String(id) ? { ...l, ...formFields, id: l.id } : l)
+        : [...locations, { id: 'loc_' + now, ...formFields, createdAt: now }];
 
-    if (!window.data.locations) window.data.locations = [];
-
-    if (id) {
-        const idx = window.data.locations.findIndex(l => l.id === id);
-        if (idx !== -1) window.data.locations[idx] = newLoc;
-    } else {
-        window.data.locations.push(newLoc);
+    if (await window.saveData('locations', next) === false) {
+        showAppAlert('Mahal kaydedilemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
+        return;
     }
-
-    try {
-        await window.saveData('locations', window.data.locations);
-        showAppAlert(id ? "Mahal güncellendi." : "Yeni mahal eklendi.", "success");
-        window.closeLocationModal();
-    } catch (err) {
-        console.error("Mahal kaydetme hatası:", err);
-        showAppAlert("Hata oluştu!", "danger");
-    }
+    showAppAlert(existing ? "Mahal güncellendi." : "Yeni mahal eklendi.", "success");
+    window.closeLocationModal();
+    window.renderLocationsTable();
 };
 
 window.deleteLocation = async function (id) {
     if (!confirm("Bu mahali silmek istediğinize emin misiniz?")) return;
-
-    try {
-        window.data.locations = window.data.locations.filter(l => l.id !== id);
-        await window.saveData('locations', window.data.locations);
-        showAppAlert("Mahal silindi.", "info");
-    } catch (err) {
-        console.error("Mahal silme hatası:", err);
-    }
+    const next = (window.data.locations || []).filter(l => String(l.id) !== String(id));
+    if (await window.saveData('locations', next) === false) { showAppAlert('Mahal silinemedi.', 'error'); return; }
+    window.renderLocationsTable();
+    showAppAlert("Mahal silindi.", "info");
 };
 
 window.renderLocationsTable = function () {
