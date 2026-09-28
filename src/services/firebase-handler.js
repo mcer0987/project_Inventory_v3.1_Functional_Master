@@ -603,6 +603,108 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
     return result;
 };
 
+// ─── Tek-doküman API (Faz 3.2 · DATA-01, DATA-06) ────────────────────────────────────────────────
+// [WHY]: Tek bir kaydı değiştirmek için bile çağıranlar koleksiyonun (çoğu zaman tüm veritabanının) son halini diziyle
+//        gönderiyordu; silme/düzenleme dizi indeksiyle hedefleniyordu ve her snapshot diziyi yeniden kurduğu için yanlış
+//        kaydı vurabiliyordu (KN-5).
+// [HOW]: İşlemler koleksiyon + id ile tarif edilir ve tek bir writeBatch'te (Firestore'da atomik: ya hepsi ya hiçbiri)
+//        yazılır. Böylece "hedefe ekle + kaynaktan sil" (sevk) gibi çok dokümanlı işlemler de yarım kalmaz.
+//          applyItemOps([{op:'set', col, item} | {op:'update', col, id, fields} | {op:'delete', col, id}], opts)
+//          upsertItem(col, item)       → dokümanın tamamı yazılır (merge YOK: kayıttan çıkarılan alan Firestore'da da gider)
+//          appendItem(col, item)       → yeni kayıt; id yoksa makeId(); aynı id zaten varsa 'duplicate-id'
+//          updateItems(col, [{id, fields}]) / updateItem(col, id, fields) → yalnız verilen alanlar (başka alanlara dokunmaz;
+//                                        eşzamanlı başka düzenlemeleri ezmez); kayıt yoksa 'not-found'
+//          removeItem(col, id)         → tek silme
+//          bulkRemove(col, ids)        → bilinçli toplu silme (çağıranın kullanıcı onayı alması beklenir)
+//        '__' ile başlayan render alanları yazılmaz. Başarıdan sonra window.data ve mirror hemen güncellenir (arayüz
+//        snapshot'ı beklemeden doğru çizilir). Hata sözleşmesi saveData ile aynı: false veya strict'te SaveDataError.
+const _stripRenderFields = item => Object.fromEntries(Object.entries(item).filter(([k]) => !k.startsWith('__')));
+const _sameId = id => x => x && String(x.id) === String(id);
+
+function _applyLocal(colName, op) {
+    for (const store of [window.data, window._dbMirror]) {
+        const list = Array.isArray(store[colName]) ? store[colName] : (store[colName] = []);
+        const idx = list.findIndex(_sameId(op.id));
+        if (op.op === 'delete') { if (idx !== -1) list.splice(idx, 1); continue; }
+        const next = op.op === 'update' ? { ...(idx !== -1 ? list[idx] : {}), ...op.data } : { ...op.data };
+        const value = store === window._dbMirror ? _clone(next) : next;
+        if (idx !== -1) list[idx] = value; else list.unshift(value);
+    }
+}
+
+export const applyItemOps = window.applyItemOps = async function (ops, opts = {}) {
+    const strict = opts.strict === true;
+    const fail = (code, message, details) => {
+        const err = new SaveDataError(code, message, details);
+        console.error(`❌ applyItemOps [${code}]: ${message}`, details || '');
+        if (strict) throw err;
+        return false;
+    };
+    if (!window.userAuth) return fail('no-auth', 'Oturum bulunamadı; yazma reddedildi.');
+    if (!Array.isArray(ops) || ops.length === 0) return fail('invalid-argument', 'En az bir işlem gerekli.');
+
+    const prepared = [];
+    for (const o of ops) {
+        if (!o || !COLLECTIONS.includes(o.col)) return fail('unknown-collection', `Bilinmeyen koleksiyon: "${o && o.col}"`, { collection: o && o.col });
+        if (o.op === 'set') {
+            if (!o.item || typeof o.item !== 'object') return fail('invalid-argument', 'set işlemi item bekliyor.');
+            const item = _stripRenderFields(o.item);
+            if (item.id == null || String(item.id).trim() === '') item.id = window.makeId();
+            if (o.mustBeNew && (window._dbMirror[o.col] || []).some(_sameId(item.id))) {
+                return fail('duplicate-id', `"${o.col}" içinde ${item.id} id'li kayıt zaten var.`, { collection: o.col, id: item.id });
+            }
+            prepared.push({ op: 'set', col: o.col, id: String(item.id), data: _clean(item) });
+        } else if (o.op === 'update') {
+            if (o.id == null || !o.fields || typeof o.fields !== 'object') return fail('invalid-argument', 'update işlemi id ve fields bekliyor.');
+            const known = (window._dbMirror[o.col] || []).some(_sameId(o.id)) || (window.data[o.col] || []).some(_sameId(o.id));
+            if (!known) return fail('not-found', `"${o.col}" içinde ${o.id} id'li kayıt bulunamadı; liste güncellenmiş olabilir.`, { collection: o.col, id: o.id });
+            const fields = _clean(_stripRenderFields(o.fields));
+            delete fields.id;
+            prepared.push({ op: 'update', col: o.col, id: String(o.id), data: fields });
+        } else if (o.op === 'delete') {
+            if (o.id == null || String(o.id) === '') return fail('invalid-argument', 'delete işlemi id bekliyor.');
+            prepared.push({ op: 'delete', col: o.col, id: String(o.id) });
+        } else {
+            return fail('invalid-argument', `Bilinmeyen işlem: "${o.op}"`);
+        }
+    }
+    if (prepared.length > 490) return fail('invalid-argument', `Tek atomik işlemde en fazla 490 doküman yazılabilir (${prepared.length}).`);
+
+    try {
+        const batch = writeBatch(fireDb);
+        prepared.forEach(p => {
+            const ref = _docRef(p.col, p.id);
+            if (p.op === 'set') batch.set(ref, p.data);
+            else if (p.op === 'update') batch.update(ref, p.data);
+            else batch.delete(ref);
+        });
+        await batch.commit();
+    } catch (e) {
+        if (e && e.code === 'not-found') return fail('not-found', 'Kayıt Firestore\'da bulunamadı; başka biri silmiş olabilir.', { code: e.code });
+        return fail('write-failed', `Firestore yazması başarısız: ${e.message}`, { code: e && e.code });
+    }
+
+    const result = { written: 0, deleted: 0, collections: {} };
+    prepared.forEach(p => {
+        _applyLocal(p.col, p);
+        const c = result.collections[p.col] || (result.collections[p.col] = { written: 0, deleted: 0 });
+        if (p.op === 'delete') { c.deleted++; result.deleted++; } else { c.written++; result.written++; }
+    });
+    console.log('☁️ applyItemOps:', Object.entries(result.collections).map(([k, v]) => `${k} ${v.written}↑ ${v.deleted}✕`).join(' · '));
+    result.ids = prepared.map(p => p.id);
+    return result;
+};
+
+export const upsertItem = window.upsertItem = (col, item, opts) => applyItemOps([{ op: 'set', col, item }], opts);
+export const appendItem = window.appendItem = (col, item, opts) => applyItemOps([{ op: 'set', col, item, mustBeNew: true }], opts);
+export const updateItems = window.updateItems = (col, list, opts) => applyItemOps((list || []).map(x => ({ op: 'update', col, id: x.id, fields: x.fields })), opts);
+export const updateItem = window.updateItem = (col, id, fields, opts) => applyItemOps([{ op: 'update', col, id, fields }], opts);
+export const removeItem = window.removeItem = (col, id, opts) => applyItemOps([{ op: 'delete', col, id }], opts);
+export const bulkRemove = window.bulkRemove = (col, ids, opts) => applyItemOps((ids || []).map(id => ({ op: 'delete', col, id })), opts);
+
+// Id ile arama (render'lar data-id taşır; indeks yerine bu kullanılır).
+export const findItem = window.findItem = (col, id) => (window.data[col] || []).find(_sameId(id)) || null;
+
 // [WHY]: Uygulama açılır açılmaz verileri çekmek 'Missing Permissions' hatasına sebep oluyordu.
 // [HOW]: Auth durumunu (onAuthStateChanged) dinleyerek sadece oturum açan kullanıcılara veriyi açıyoruz.
 const auth = getAuth(app);

@@ -817,6 +817,62 @@ const SCENARIOS = {
         });
     },
 
+    // Faz 3 · H2 — single-document API. Real, marked writes to 'requests' and 'tasks' (staff-writable).
+    // Atomicity: a batch that also touches b1 (admin-only) must be rejected as a whole.
+    async itemApi(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            const srv = async (col, id) => (await ft.readAll(col)).find(d => String(d.id) === String(id));
+            const r = { ürün: 'API ' + ft.MARKER, personel: 'API ' + ft.MARKER, durum: 'Beklemede', adet: 1, extra: 'x' };
+
+            const a = await window.appendItem('requests', { ...r });
+            const id = a.ids[0];
+            out.append = { written: a.written, idIsSafeInt: Number.isSafeInteger(Number(id)), local: !!window.findItem('requests', id), server: !!(await srv('requests', id)) };
+            out.duplicate = await window.appendItem('requests', { ...r, id }).catch(e => e.code);
+            let dupStrict = null; try { await window.appendItem('requests', { ...r, id }, { strict: true }); } catch (e) { dupStrict = e.code; }
+            out.duplicateStrict = dupStrict;
+
+            // update: only the given field changes, others stay
+            await window.updateItem('requests', id, { adet: 4, __index: 9 });
+            const u = await srv('requests', id);
+            out.update = { adet: u.adet, extraKept: u.extra === 'x', noRenderField: !('__index' in u) };
+            let nf = null; try { await window.updateItem('requests', 'nope_' + id, { adet: 1 }, { strict: true }); } catch (e) { nf = e.code; }
+            out.updateMissing = nf;
+
+            // upsert = full document: a field removed from the item disappears in Firestore (no stale merge)
+            const cur = { ...window.findItem('requests', id) }; delete cur.extra;
+            await window.upsertItem('requests', cur);
+            out.upsertDropsField = !('extra' in (await srv('requests', id)));
+
+            // atomic multi-collection batch: requests + tasks together
+            const tid = 'task_api_' + Date.now();
+            const m = await window.applyItemOps([
+                { op: 'update', col: 'requests', id, fields: { durum: 'draft' } },
+                { op: 'set', col: 'tasks', item: { id: tid, title: 'API ' + ft.MARKER, status: 'pending', type: 'task', assigneeId: 'pool' } },
+            ]);
+            out.multi = { written: m.written, req: (await srv('requests', id)).durum, task: !!(await srv('tasks', tid)) };
+
+            // atomicity: same batch plus an admin-only b1 write -> nothing is applied
+            const b1 = (window.data.b1 || [])[0];
+            const bad = await window.applyItemOps([
+                { op: 'update', col: 'requests', id, fields: { durum: 'SHOULD_NOT_APPLY' } },
+                { op: 'update', col: 'b1', id: b1.id, fields: { açıklama: b1.açıklama || '' } },
+            ]);
+            await ft.sleep(800);
+            out.atomicReject = { result: bad, requestUnchanged: (await srv('requests', id)).durum === 'draft', localUnchanged: window.findItem('requests', id).durum === 'draft' };
+
+            // remove / bulkRemove
+            const extra = [];
+            for (let i = 0; i < 3; i++) extra.push((await window.appendItem('requests', { ...r, n: i })).ids[0]);
+            const br = await window.bulkRemove('requests', extra);
+            const rm = await window.removeItem('tasks', tid);
+            await ft.sleep(500);
+            out.remove = { bulkDeleted: br.deleted, taskGone: !(await srv('tasks', tid)), bulkGone: (await Promise.all(extra.map(x => srv('requests', x)))).every(x => !x) };
+            out.unknownCol = await window.upsertItem('archive', { id: 1 });
+            return out;
+        });
+    },
+
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
     async systemConfigScope(page) {
         return page.evaluate(async () => {
