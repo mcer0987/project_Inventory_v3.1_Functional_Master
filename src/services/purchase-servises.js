@@ -45,6 +45,37 @@ console.log("🚀 purchase-services.js yüklendi");
 if (!window.data) window.data = {};
 if (!window.data.purchaseOrders) window.data.purchaseOrders = [];
 
+// [WHY]: Geri çek / iptal / düzenle / sil / ek sil işlemlerinde kim olduğuna bakılmıyordu; herhangi bir oturum başkasının
+//        talebini geri çekebiliyor, iptal edebiliyor veya ekini silebiliyordu; görüntüleme modunda da ek silme açıktı (EBYS-12).
+//        İşlemler canlı nesneyi değiştirip kayıt sonucuna bakmadan "başarılı" diyordu; başarısız kayıt yarım hal bırakıyordu.
+// [HOW]: Yalnız talebi açan kişi (kod veya ad) ya da Firebase admin oturumu. Değişiklikten önce kopya alınır, başarısız
+//        kayıtta geri döndürülür; yazma tek doküman ve birleştirmesiz (upsertItem: eski workflow alt alanları kalmaz, DATA-14).
+const _normP = s => String(s || '').trim().toLocaleLowerCase('tr-TR');
+function _isPurchaseOwner(item) {
+    const me = typeof window.getActiveUser === 'function' ? window.getActiveUser() : window.currentUser;
+    if (!me || !item) return false;
+    if (me.code && item.createdBy && item.createdBy !== 'unknown' && String(item.createdBy) === String(me.code)) return true;
+    const owner = _normP(item.createdByName || item.talepEden);
+    return !!owner && owner === _normP(me.name);
+}
+function _canManagePurchase(item) {
+    return (typeof window.isDbAdmin === 'function' && window.isDbAdmin()) || _isPurchaseOwner(item);
+}
+window.canManagePurchase = _canManagePurchase;
+function _denyManage() {
+    if (typeof showAppAlert === 'function') showAppAlert('Bu talep üzerinde işlem yetkiniz yok (yalnız talebi açan kişi veya yönetici).', 'error');
+}
+function _snapshotPurchase(item) {
+    const copy = JSON.parse(JSON.stringify(item));
+    return () => { Object.keys(item).forEach(k => delete item[k]); Object.assign(item, copy); };
+}
+async function _savePurchase(item, undo) {
+    const res = await window.upsertItem('purchaseOrders', item);
+    if (res === false && undo) undo();
+    return res !== false;
+}
+const _findPurchase = id => (window.data.purchaseOrders || []).find(x => String(x.id) === String(id));
+
 // [BUGFIX] Bug 4: Full modal state reset before opening for a new request.
 // [WHY]: openPurchaseDetail() mutates form fields, disables inputs, changes purSaveBtn.onclick,
 //        and stores dataset.editId. Without a reset, clicking "New Request" re-opens a filled form
@@ -201,12 +232,12 @@ window.savePurchaseRequest = async function (e) {
 
         console.log("📦 Yeni talep nesnesi oluşturuldu:", newRequest);
 
-        if (!window.data.purchaseOrders) window.data.purchaseOrders = [];
-        window.data.purchaseOrders.unshift(newRequest);
-
         console.log("💾 Veritabanına kaydediliyor...");
-        // [BUGFIX] Bug 5: Targeted save to prevent quota exceeded & permission denied
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        // Tek doküman eklenir (H2); başarısızsa "oluşturuldu" denmez.
+        if (await window.appendItem('purchaseOrders', newRequest) === false) {
+            if (typeof showAppAlert === 'function') showAppAlert("Talep kaydedilemedi. Bağlantınızı kontrol edip tekrar deneyin.", "error");
+            return false;
+        }
         console.log("✅ Kayıt başarılı.");
 
         document.getElementById('purchaseModal').style.display = "none";
@@ -929,7 +960,7 @@ function renderPaginationControls(totalItems, containerId) {
 // [WHY]: Hiç açılmayan #editRequestModal için closeEditModal/editRequest ve form dinleyicisi kaldırıldı; aynı ad ürün türü modalının kapanmasını engelliyordu (ADM-03).
 
 window.viewRequest = function (id) {
-    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    const item = _findPurchase(id);
     if (!item) return;
 
     // Modalı Görüntüleme Modunda Doldur
@@ -1015,7 +1046,7 @@ window.uploadFiles = async function (files) {
 // TALEP DETAY MODAL — GÖRÜNTÜLE / DÜZENLE
 // ─────────────────────────────────────────────────────────────
 window.openPurchaseDetail = function (id, mode) {
-    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    const item = _findPurchase(id);
     if (!item) return;
 
     const modal = document.getElementById('purchaseModal');
@@ -1074,7 +1105,7 @@ window.openPurchaseDetail = function (id, mode) {
         // Mevcut dosyalar
         if (filesDiv) {
             filesDiv.style.display = 'block';
-            filesDiv.innerHTML = _purFilesHTML(item, true);
+            filesDiv.innerHTML = _purFilesHTML(item, false); // EBYS-12: görüntüleme modunda ek silinmez
         }
         // Akış geçmişi
         if (workflowDiv) {
@@ -1139,7 +1170,7 @@ window.openPurchaseDetail = function (id, mode) {
         // Mevcut dosyaları göster (silinebilir)
         if (filesDiv) {
             filesDiv.style.display = 'block';
-            filesDiv.innerHTML = _purFilesHTML(item, window.isAdminPanel);
+            filesDiv.innerHTML = _purFilesHTML(item, _canManagePurchase(item) && !item.workflow?.started);
         }
         if (workflowDiv) {
             workflowDiv.style.display = 'block';
@@ -1175,7 +1206,7 @@ function _purFilesHTML(item, canDelete) {
                 <i class="fas fa-download"></i>
             </a>
             ${canDelete ? `
-            <button onclick="window.deleteRequestFile(${jsArg(item.id)}, ${i})"
+            <button onclick="window.deleteRequestFile(${jsArg(item.id)}, ${i}, ${jsArg(f.url || f.name || '')})"
                 style="padding:3px 9px;font-size:11px;border:1px solid #fca5a5;border-radius:5px;background:none;color:#ef4444;cursor:pointer;">
                 <i class="fas fa-trash"></i>
             </button>` : ''}
@@ -1315,10 +1346,10 @@ function _purWorkflowHTML(item) {
 window.updatePurchaseRequest = async function (e, id) {
     if (e) { e.preventDefault(); e.stopPropagation(); }
 
-    const idx = window.data.purchaseOrders.findIndex(x => Number(x.id) === Number(id));
-    if (idx === -1) return;
-
-    const item = window.data.purchaseOrders[idx];
+    const item = _findPurchase(id);
+    if (!item) { if (typeof showAppAlert === 'function') showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+    if (!_canManagePurchase(item)) { _denyManage(); return; }
+    const undo = _snapshotPurchase(item);
 
     // Yeni dosya yükleme
     const fileInput = document.getElementById('purchaseFile');
@@ -1355,12 +1386,15 @@ window.updatePurchaseRequest = async function (e, id) {
     });
 
     try {
-        // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        if (!(await _savePurchase(item, undo))) {
+            if (typeof showAppAlert === 'function') showAppAlert('Talep güncellenemedi; değişiklikler geri alındı.', 'error');
+            return;
+        }
         window.closePurchaseModal();
         if (typeof renderPurchaseModule === 'function') renderPurchaseModule();
         if (typeof showAppAlert === 'function') showAppAlert('Talep başarıyla güncellendi.', 'success');
     } catch (err) {
+        undo();
         console.error('Güncelleme hatası:', err);
         if (typeof showAppAlert === 'function') showAppAlert('Kayıt hatası oluştu!', 'error');
     }
@@ -1370,71 +1404,29 @@ window.updatePurchaseRequest = async function (e, id) {
 // GERİ ÇEK / DURDUR — Personel akışı durdurur, taslak moduna alır
 // ─────────────────────────────────────────────────────────────
 // [BUGFIX] Bug 1: Complete workflow state reset & targeted save on withdraw
-window.withdrawWorkflow = async function (id) {
-    const onay = await showCustomConfirm(
-        'Akışı Durdur',
-        'Talebi geri çekip taslak moduna almak istediğinize emin misiniz? Akış durdurulacak.'
-    );
-    if (!onay) return;
-
-    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
-    if (!item) return;
-
-    // Tam sıfırlama (Finished, currentState, ve adımlar temizleniyor)
-    item.durum = 'Taslak';
-    const prevHistory = item.workflow?.history || [];
-    const prevAkis = item.akis || [];
-
-    item.workflow = {
-        id: item.workflow?.id || ('workflow_' + Date.now()),
-        started: false,
-        finished: false,
-        currentStep: 0,
-        currentState: window.WorkflowEngine?.states?.INITIATION || 'initiation',
-        status: 'draft',
-        steps: [],
-        history: [
-            ...prevHistory,
-            {
-                action: 'withdraw',
-                actor: window.currentUser?.name || 'Kullanıcı',
-                timestamp: new Date().toISOString(),
-                from: item.workflow?.currentState || 'active',
-                to: window.WorkflowEngine?.states?.INITIATION || 'initiation',
-                note: 'Talep geri çekildi (Taslak moduna alındı)'
-            }
-        ]
-    };
-
-    item.akis = [
-        ...prevAkis,
-        {
-            islem: 'İş akışı durduruldu (Taslak moduna alındı)',
-            yapan: window.currentUser?.name || 'Kullanıcı',
-            tarih: new Date().toLocaleString('tr-TR')
-        }
-    ];
-
-    // [BUGFIX] Bug 5: Yalnızca purchaseOrders kaydediliyor (Yetki reddini önler)
-    await window.saveData('purchaseOrders', window.data.purchaseOrders);
-    if (typeof refreshUI === 'function') refreshUI();
-    if (typeof showAppAlert === 'function') showAppAlert('Talep başarıyla geri çekildi. Düzenleyip tekrar başlatabilirsiniz.', 'info');
-};
+// withdrawWorkflow, cancelPurchaseRequest'in başlamış akış dalının çağıranı olmayan bir kopyasıydı; ayrışmasın diye oraya yönlendirir.
+window.withdrawWorkflow = id => window.cancelPurchaseRequest(id);
 
 // ─────────────────────────────────────────────────────────────
 // DOSYA SİL — Admin, showCustomConfirm ile sorar
 // ─────────────────────────────────────────────────────────────
-window.deleteRequestFile = async function (requestId, fileIndex) {
+window.deleteRequestFile = async function (requestId, fileIndex, fileRef) {
     const onay = await showCustomConfirm(
         'Dosyayı Sil',
         'Bu dosya kalıcı olarak silinecektir. Emin misiniz?'
     );
     if (!onay) return;
 
-    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(requestId));
+    const item = _findPurchase(requestId);
     if (!item || !item.files) return;
+    if (!_canManagePurchase(item)) { _denyManage(); return; }
+    if (item.workflow?.started) { if (typeof showAppAlert === 'function') showAppAlert('Akış devam ederken ek silinemez.', 'warning'); return; }
+    // Dosya, gösterildiği andaki indeks yerine url/ad ile bulunur (liste bu arada değişmiş olabilir).
+    const pos = fileRef ? item.files.findIndex(f => (f.url || f.name) === fileRef) : fileIndex;
+    if (pos < 0 || !item.files[pos]) { if (typeof showAppAlert === 'function') showAppAlert('Dosya bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+    const undo = _snapshotPurchase(item);
 
-    item.files.splice(fileIndex, 1);
+    item.files.splice(pos, 1);
 
     if (!item.akis) item.akis = [];
     item.akis.push({
@@ -1443,23 +1435,25 @@ window.deleteRequestFile = async function (requestId, fileIndex) {
         tarih: new Date().toLocaleString('tr-TR')
     });
 
-    // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-    await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    if (!(await _savePurchase(item, undo))) { if (typeof showAppAlert === 'function') showAppAlert('Dosya silinemedi.', 'error'); return; }
 
     // Modal açıksa dosya listesini yerinde güncelle
     const filesDiv = document.getElementById('purUploadedFilesList');
     if (filesDiv && filesDiv.style.display !== 'none') {
         filesDiv.innerHTML = _purFilesHTML(item, true);
     }
-    if (typeof showAppAlert === 'function') showAppAlert('Dosya silindi.', 'success');
+    if (typeof showAppAlert === 'function') showAppAlert('Dosya silindi. (Depolamadaki dosyanın kendisi silinmez.)', 'success');
 };
 
 // ─────────────────────────────────────────────────────────────
 // TALEBİ SİL — Sadece Admin, showCustomConfirm ile sorar
 // ─────────────────────────────────────────────────────────────
 window.deletePurchaseRequest = async function (id) {
-    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    const item = _findPurchase(id);
     if (!item) return;
+    // Admin her talebi; sahibi yalnız akışı başlamamış talebini silebilir (EBYS-12).
+    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+    if (!isAdmin && !(_isPurchaseOwner(item) && !item.workflow?.started)) { _denyManage(); return; }
 
     const onay = await showCustomConfirm(
         'Talebi Kalıcı Sil',
@@ -1467,11 +1461,7 @@ window.deletePurchaseRequest = async function (id) {
     );
     if (!onay) return;
 
-    const idx = window.data.purchaseOrders.findIndex(x => Number(x.id) === Number(id));
-    window.data.purchaseOrders.splice(idx, 1);
-
-    // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-    await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    if (await window.removeItem('purchaseOrders', item.id) === false) { if (typeof showAppAlert === 'function') showAppAlert('Talep silinemedi.', 'error'); return; }
     if (typeof renderPurchaseModule === 'function') renderPurchaseModule();
     if (typeof showAppAlert === 'function') showAppAlert('Talep silindi.', 'success');
 };
@@ -1481,8 +1471,9 @@ window.deletePurchaseRequest = async function (id) {
 // ─────────────────────────────────────────────────────────────
 // [BUGFIX] Bug 1: Complete reset & correct 'Taslak' status when withdrawing started workflow
 window.cancelPurchaseRequest = async function (id) {
-    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    const item = _findPurchase(id);
     if (!item) return;
+    if (!_canManagePurchase(item)) { _denyManage(); return; }
 
     const isStarted = item.workflow?.started === true;
 
@@ -1492,6 +1483,7 @@ window.cancelPurchaseRequest = async function (id) {
             `"${item.urun || item.evrakNo}" talebini geri çekip taslak moduna almak istediğinize emin misiniz?`
         );
         if (!onay) return;
+        const undo = _snapshotPurchase(item);
 
         item.durum = 'Taslak';
         const prevHistory = item.workflow?.history || [];
@@ -1527,8 +1519,8 @@ window.cancelPurchaseRequest = async function (id) {
             }
         ];
 
-        // [BUGFIX]: root /workflows koleksiyonu ya da global saveData yerine targeted save
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        // Tek doküman, birleştirmesiz: eski workflow alt alanları (finished, suspendedAt…) Firestore'da kalmaz (DATA-14).
+        if (!(await _savePurchase(item, undo))) { if (typeof showAppAlert === 'function') showAppAlert('Talep geri çekilemedi; değişiklik geri alındı.', 'error'); return; }
 
         if (typeof refreshUI === 'function') {
             refreshUI();
@@ -1543,6 +1535,7 @@ window.cancelPurchaseRequest = async function (id) {
             `"${item.urun || item.evrakNo}" talebini tamamen iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.`
         );
         if (!onay) return;
+        const undo = _snapshotPurchase(item);
 
         item.durum = 'İptal Edildi';
         if (item.workflow) {
@@ -1561,7 +1554,7 @@ window.cancelPurchaseRequest = async function (id) {
             tarih: new Date().toLocaleString('tr-TR')
         });
 
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        if (!(await _savePurchase(item, undo))) { if (typeof showAppAlert === 'function') showAppAlert('Talep iptal edilemedi; değişiklik geri alındı.', 'error'); return; }
 
         if (typeof refreshUI === 'function') refreshUI();
         if (typeof showAppAlert === 'function') showAppAlert('Talep iptal edildi.', 'success');

@@ -555,6 +555,8 @@ window.confirmStartWorkflow = async function () {
         if (typeof showAppAlert === 'function') showAppAlert(checked.error, 'warning'); else alert(checked.error);
         return;
     }
+    const startKey = 'start_' + String(req.id);
+    _beginMutation(startKey, req);
 
     // 🔥 MANUEL MOD
     if (WorkflowState.isManualMode) {
@@ -623,10 +625,12 @@ window.confirmStartWorkflow = async function () {
     });
 
     // [BUGFIX] Bug 1: Targeted save only to purchaseOrders (Prevents global batch permission error)
-    if (await window.saveData('purchaseOrders', window.data.purchaseOrders) === false) {
+    if (await window.upsertItem('purchaseOrders', req) === false) {
+        _rollback(startKey);
         if (typeof showAppAlert === 'function') showAppAlert('İş akışı kaydedilemedi. Bağlantınızı kontrol edin.', 'error');
         return;
     }
+    _endMutation(startKey);
 
     window.closeStartWorkflowModal();
 
@@ -655,7 +659,7 @@ function refreshUI() {
 window.refreshUI = refreshUI;
 
 window.viewWorkflow = async function (id) {
-    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
+    const item = (window.data.purchaseOrders || []).find(x => String(x.id) === String(id));
     if (!item || !item.workflow) return;
 
     // Veri düzeltme - currentStep değerini status'dan yeniden hesapla ve kaydet
@@ -829,9 +833,12 @@ window.closeWorkflowModal = function () {
 
 // Veri düzeltme fonksiyonu - currentStep değerini status'dan yeniden hesapla
 // [BUGFIX] Bug 5: Made async to support await for targeted save
+// [WHY]: viewWorkflow her açılışta bu fonksiyonu saveToDB=true ile çağırıyor ve tüm purchaseOrders'ı yazıyordu (DATA-14).
+// [HOW]: Değişiklik olup olmadığı döndürülür; saveToDB yalnız değişiklik varsa ve yalnız bu talebi yazar (upsertItem).
 window.fixWorkflowCurrentStep = async function (item, saveToDB = false) {
-    if (!item.workflow || !item.workflow.steps) return;
+    if (!item.workflow || !item.workflow.steps) return false;
 
+    const before = JSON.stringify([item.workflow.currentStep, item.workflow.currentState, item.workflow.finished, item.durum]);
     const steps = item.workflow.steps;
 
     // Tamamlanan adımları status'dan say
@@ -869,16 +876,19 @@ window.fixWorkflowCurrentStep = async function (item, saveToDB = false) {
         }
     }
 
-    // İsteğe bağlı veritabanına kaydet
-    if (saveToDB && window.saveData) {
-        // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    const changed = before !== JSON.stringify([item.workflow.currentStep, item.workflow.currentState, item.workflow.finished, item.durum]);
+    if (changed && saveToDB && typeof window.upsertItem === 'function') {
+        await window.upsertItem('purchaseOrders', item);
     }
+    return changed;
 };
 
 // Tüm workflow verilerini düzeltme fonksiyonu
+// [WHY]: Bu göç ilk purchaseOrders snapshot'ında her ziyaretçide (anonim dahil) çalışıp yazıyordu (DATA-14).
+// [HOW]: Yalnız Firebase admin oturumunda çalışır; yalnız değişen talepler yazılır (saveData v2 fark yazması).
 window.fixAllWorkflowData = async function () {
-    if (!window.data.purchaseOrders) return;
+    if (!window.data.purchaseOrders) return 0;
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) return 0;
 
     let fixedCount = 0;
     window.data.purchaseOrders.forEach(item => {
@@ -924,6 +934,28 @@ window.addEventListener('onInventoryDataUpdated', (e) => {
 const _workflowActionsInFlight = new Set();
 const _normName = s => String(s || '').trim().toLocaleLowerCase('tr-TR');
 
+// [WHY]: Onay/red/durdurma talebi canlı window.data nesnesi üzerinde değiştiriyor (adım "approved", durum, akis), sonra
+//        geçiş veya kayıt başarısız olursa nesne yarı değişmiş kalıyordu (EBYS-17). saveData v2 fark yazdığı için bu yarım
+//        hal, sonraki herhangi bir purchaseOrders kaydında sessizce kalıcı hale gelirdi (maskeleme çifti). Id'siz eski
+//        akışlarda geçiş getWorkflow(undefined) ile başka bir talebin akışını değiştirebiliyordu.
+// [HOW]: Değişiklikten önce talebin tam kopyası alınır; hata veya başarısız kayıtta talep kopyaya geri döndürülür.
+//        Akışın id'si yoksa talebe bağlı kalıcı bir id verilir ('workflow_' + talep id).
+const _rollbacks = new Map();
+function _ensureWorkflowId(item) {
+    if (item && item.workflow && !item.workflow.id) item.workflow.id = 'workflow_' + item.id;
+}
+function _beginMutation(key, item) {
+    _ensureWorkflowId(item);
+    const copy = JSON.parse(JSON.stringify(item));
+    _rollbacks.set(key, () => { Object.keys(item).forEach(k => delete item[k]); Object.assign(item, copy); });
+}
+function _rollback(key) {
+    const fn = _rollbacks.get(key);
+    _rollbacks.delete(key);
+    if (fn) { fn(); console.warn('↩️ [EBYS] Talep değişiklikleri geri alındı:', key); }
+}
+function _endMutation(key) { _rollbacks.delete(key); }
+
 function _canActOnCurrentStep(item) {
     const wf = item && item.workflow;
     // Durdurulmuş (askıya alınmış) akışta sıradaki kişi onay/red veremez (EBYS-13 çifti).
@@ -948,6 +980,7 @@ window.approveStep = async function (id) {
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
         if (!item || !item.workflow) return;
         if (!_canActOnCurrentStep(item)) { _denyStepAction(); return; }
+        _beginMutation(lockKey, item);
 
         const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
 
@@ -1051,7 +1084,8 @@ window.approveStep = async function (id) {
         //        Non-admin users have permission only on specific collections, so the batch fails.
         // [HOW]: We pass the collection name + its array directly so only purchaseOrders is written.
         // Snapshot dizisi değişmiş olabilir; değiştirilmiş talep güncel dizideki yerine konularak tek seferde yazılır.
-        const saved = await window.saveData('purchaseOrders', (window.data.purchaseOrders || []).map(x => String(x.id) === String(id) ? item : x));
+        const saved = await window.upsertItem('purchaseOrders', item);
+        if (saved === false) _rollback(lockKey); else _endMutation(lockKey);
         window.closeWorkflowModal();
         if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
 
@@ -1068,8 +1102,10 @@ window.approveStep = async function (id) {
         if (typeof showAppAlert === 'function') {
             showAppAlert(`Onay hatası: ${error.message}`, "error");
         }
+        _rollback(lockKey);
     } finally {
         _workflowActionsInFlight.delete(lockKey);
+        _endMutation(lockKey);
     }
 };
 
@@ -1091,6 +1127,7 @@ window.rejectStep = async function (id) {
         }
 
         const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+        _beginMutation(lockKey, item);
 
         // Mevcut adımı sabitle
         const currentStepIndex = item.workflow.currentStep || 0;
@@ -1155,7 +1192,8 @@ window.rejectStep = async function (id) {
         // [WHY]: Same permission issue as approveStep — non-admins can't overwrite the full DB snapshot.
         // [HOW]: Only the purchaseOrders collection is written, matching the collection-level Firestore rules.
         // Snapshot dizisi değişmiş olabilir; değiştirilmiş talep güncel dizideki yerine konularak tek seferde yazılır.
-        const saved = await window.saveData('purchaseOrders', (window.data.purchaseOrders || []).map(x => String(x.id) === String(id) ? item : x));
+        const saved = await window.upsertItem('purchaseOrders', item);
+        if (saved === false) _rollback(lockKey); else _endMutation(lockKey);
         window.closeWorkflowModal();
         if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
 
@@ -1173,8 +1211,10 @@ window.rejectStep = async function (id) {
         if (typeof showAppAlert === 'function') {
             showAppAlert(`Red işlemi yapılamadı: ${error.message}`, "error");
         }
+        _rollback(lockKey);
     } finally {
         _workflowActionsInFlight.delete(lockKey);
+        _endMutation(lockKey);
     }
 };
 
@@ -1206,6 +1246,7 @@ window.stopWorkflow = async function (id) {
         if (!item || !item.workflow || !item.workflow.started || item.workflow.finished) { notify('Akış bu arada değişti; işlem iptal edildi.', 'warning'); return; }
 
         const actor = window.currentUser?.name || "Yönetici";
+        _beginMutation(lockKey, item);
         await window.transitionWorkflowState(item.workflow.id, window.WorkflowEngine.states.SUSPENDED, actor, "Akış askıya alındı", { persist: false });
 
         item.workflow.started = false;
@@ -1215,7 +1256,8 @@ window.stopWorkflow = async function (id) {
         if (!Array.isArray(item.akis)) item.akis = [];
         item.akis.push({ islem: "⏸️ Akış durduruldu", yapan: actor, tarih: new Date().toLocaleString('tr-TR') });
 
-        const saved = await window.saveData('purchaseOrders', (window.data.purchaseOrders || []).map(x => String(x.id) === String(id) ? item : x));
+        const saved = await window.upsertItem('purchaseOrders', item);
+        if (saved === false) _rollback(lockKey); else _endMutation(lockKey);
         if (typeof refreshUI === "function") refreshUI();
         if (typeof renderPurchaseModule === "function") renderPurchaseModule();
         if (saved === false) notify('Akış durdurulamadı: kayıt yazılamadı.', 'error');
@@ -1223,8 +1265,10 @@ window.stopWorkflow = async function (id) {
     } catch (error) {
         console.error('Akış durdurulamadı:', error);
         notify(`Akış durdurulamadı: ${error.message}`, "error");
+        _rollback(lockKey);
     } finally {
         _workflowActionsInFlight.delete(lockKey);
+        _endMutation(lockKey);
     }
 };
 
@@ -1857,6 +1901,8 @@ window.getUserRole = function (username) {
 // [WHY]: Akış kök 'workflows' koleksiyonunda da tutuluyordu; kurallar orayı reddettiği için her geçiş hata
 //        verip purchaseOrders kaydı hiç yapılmıyordu (EBYS-16). Tek kaynak: ${COLLECTION_ROOT}/purchaseOrders içindeki item.workflow.
 window.getWorkflow = async function (workflowId) {
+    // EBYS-17: id'siz eski akışlarda getWorkflow(undefined) id'si olmayan İLK akışı (başka bir talebi) buluyordu.
+    if (workflowId === undefined || workflowId === null || workflowId === '') return null;
     const purchaseOrder = (window.data.purchaseOrders || []).find(item => item.workflow?.id === workflowId);
     return purchaseOrder ? purchaseOrder.workflow : null;
 };
@@ -1868,7 +1914,7 @@ window.saveWorkflow = async function (workflow) {
         return false;
     }
     purchaseOrder.workflow = workflow;
-    const saved = await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    const saved = await window.upsertItem('purchaseOrders', purchaseOrder);
     if (saved === false) console.error('❌ Workflow kaydedilemedi:', workflow.id);
     return saved !== false;
 };

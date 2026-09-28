@@ -686,8 +686,8 @@ const SCENARIOS = {
             //    badge's background must differ from its text color (contrast bug).
             // viewWorkflow always calls fixWorkflowCurrentStep(item, true), which always writes 'purchaseOrders'
             // regardless of whether anything changed — saveData is stubbed so this in-memory scenario writes nothing.
-            const origSave = window.saveData;
-            window.saveData = async () => true;
+            const origSave = window.saveData, origUpsert = window.upsertItem;
+            window.saveData = async () => true; window.upsertItem = async () => ({ written: 1 });
             const orig = { po: window.data.purchaseOrders };
             const id = Date.now(); // viewWorkflow/openPurchaseDetail compare with Number(x.id) === Number(id)
             window.data.purchaseOrders = [...(orig.po || []), {
@@ -721,7 +721,7 @@ const SCENARIOS = {
             out.purchaseHistoryNoHardcodedHex = !/#1e293b|#94a3b8|#64748b|#f8fafc|#e2e8f0|#e0e7ff/i.test(document.getElementById('purWorkflowSection').innerHTML);
             window.closePurchaseModal();
             window.data.purchaseOrders = orig.po;
-            window.saveData = origSave;
+            window.saveData = origSave; window.upsertItem = origUpsert;
 
             return out;
         });
@@ -1035,6 +1035,83 @@ const SCENARIOS = {
         out.adminPageErrors = errs;
         await admin.browserContext().close();
         return out;
+    },
+
+    // Faz 3 · H2 — EBYS-17 (rollback, legacy id), EBYS-12 (owner or admin), DATA-14 (no write on view, no stale sub-fields,
+    // migration admin-only). Real, marked purchaseOrders writes (staff-writable).
+    async ebysH2(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            const srv = async id => (await ft.readMarked('purchaseOrders')).find(d => String(d.id) === String(id));
+            const alerts = []; const realAlert = window.showAppAlert; window.showAppAlert = (m, t) => alerts.push([t, m]);
+            const realConfirm = window.showCustomConfirm; window.showCustomConfirm = async () => true;
+            const owner = { name: 'Sahip ' + ft.MARKER, code: '70001' };
+            const mk = (extra) => ({ id: window.makeId(), urun: 'H2 ' + ft.MARKER, talepEden: owner.name, createdBy: owner.code, createdByName: owner.name,
+                durum: 'Onay Bekliyor', akis: [], files: [{ name: 'a.pdf', url: 'https://x/a.pdf' }], ...extra });
+            const wf = (id, extra) => ({ id, started: true, finished: false, currentStep: 0, currentState: 'initiation', history: [],
+                steps: [{ user: 'Onay Kişi', tip: 'Paraf', status: 'pending' }, { user: 'İkinci', tip: 'Paraf', status: 'pending' }], ...extra });
+
+            // setup: A (workflow with id), L1/L2 (legacy workflows WITHOUT id)
+            const A = mk({ workflow: wf('wf_a_' + Date.now(), { suspendedAt: 'OLD' }) });
+            const L1 = mk({ workflow: wf(undefined) }), L2 = mk({ workflow: wf(undefined) });
+            delete L1.workflow.id; delete L2.workflow.id;
+            for (const x of [A, L1, L2]) await window.appendItem('purchaseOrders', x);
+            await ft.waitFor(async () => (await ft.readMarked('purchaseOrders')).length === 3);
+            await ft.waitFor(async () => [A, L1, L2].every(x => window.data.purchaseOrders.some(p => String(p.id) === String(x.id))));
+            const live = x => window.findItem('purchaseOrders', x.id);
+
+            // EBYS-17a: transition throws -> in-memory item fully restored
+            window.setActiveUser({ name: 'Onay Kişi' });
+            const realTransition = window.transitionWorkflowState;
+            window.transitionWorkflowState = async () => { throw new Error('simulated'); };
+            await window.approveStep(A.id);
+            window.transitionWorkflowState = realTransition;
+            out.rollbackOnThrow = { stepStatus: live(A).workflow.steps[0].status, akis: live(A).akis.length, durum: live(A).durum };
+
+            // EBYS-17b: save fails -> restored
+            const realUpsert = window.upsertItem; window.upsertItem = async () => false;
+            await window.approveStep(A.id);
+            window.upsertItem = realUpsert;
+            out.rollbackOnSaveFail = { stepStatus: live(A).workflow.steps[0].status, currentStep: live(A).workflow.currentStep, alert: alerts.at(-1)?.[1] };
+
+            // EBYS-17c: legacy workflows without id — approving L2 must not touch L1; L2 gets a stable id
+            await window.approveStep(L2.id);
+            await ft.waitFor(async () => (await srv(L2.id))?.workflow?.currentStep === 1);
+            const sL1 = await srv(L1.id), sL2 = await srv(L2.id);
+            out.legacyId = { l2Id: sL2.workflow.id, l2Step: sL2.workflow.currentStep, l1Untouched: sL1.workflow.currentStep === 0 && sL1.workflow.steps[0].status === 'pending' && !sL1.workflow.id };
+
+            // DATA-14: viewing a consistent workflow writes nothing
+            let upserts = 0; window.upsertItem = async (...a) => { upserts++; return realUpsert(...a); };
+            await window.viewWorkflow(L2.id); window.closeWorkflowModal();
+            window.upsertItem = realUpsert;
+            out.viewNoWrite = upserts === 0;
+            out.migrationSkippedForStaff = await window.fixAllWorkflowData() === 0;
+
+            // EBYS-12: stranger denied; view-mode file list has no delete button; owner withdraw works
+            window.setActiveUser({ name: 'Yabancı Kişi', code: '99999' });
+            await window.cancelPurchaseRequest(A.id);
+            out.strangerDenied = { alert: alerts.at(-1)?.[1], stillStarted: live(A).workflow.started === true };
+            await window.deleteRequestFile(A.id, 0, 'https://x/a.pdf');
+            out.strangerFileDenied = live(A).files.length === 1;
+            window.openPurchaseDetail(A.id, 'view');
+            out.viewModeNoFileDelete = !document.querySelector('#purUploadedFilesList button[onclick*="deleteRequestFile"]');
+            window.closePurchaseModal();
+
+            window.setActiveUser(owner);
+            await window.cancelPurchaseRequest(A.id);
+            await ft.waitFor(async () => (await srv(A.id))?.durum === 'Taslak');
+            const sA = await srv(A.id);
+            out.ownerWithdraw = { durum: sA.durum, started: sA.workflow.started, staleFieldGone: !('suspendedAt' in sA.workflow), historyKept: (sA.workflow.history || []).some(h => h.action === 'withdraw') };
+
+            // owner can delete a file once not started; the file is found by url
+            await ft.waitFor(async () => live(A).workflow.started === false);
+            await window.deleteRequestFile(A.id, 5, 'https://x/a.pdf');
+            await ft.waitFor(async () => ((await srv(A.id))?.files || []).length === 0);
+            out.ownerFileDelete = ((await srv(A.id)).files || []).length === 0;
+
+            window.showAppAlert = realAlert; window.showCustomConfirm = realConfirm;
+            return out;
+        });
     },
 
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
