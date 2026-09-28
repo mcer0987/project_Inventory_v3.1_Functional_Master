@@ -70,7 +70,7 @@ function _snapshotPurchase(item) {
     return () => { Object.keys(item).forEach(k => delete item[k]); Object.assign(item, copy); };
 }
 async function _savePurchase(item, undo) {
-    const res = await window.upsertItem('purchaseOrders', item);
+    const res = await window.writeOk(window.upsertItem('purchaseOrders', item));
     if (res === false && undo) undo();
     return res !== false;
 }
@@ -249,7 +249,7 @@ window.savePurchaseRequest = async function (e) {
 
         console.log("💾 Veritabanına kaydediliyor...");
         // Tek doküman eklenir (H2); başarısızsa "oluşturuldu" denmez.
-        if (await window.appendItem('purchaseOrders', newRequest) === false) {
+        if (!(await window.writeOk(window.appendItem('purchaseOrders', newRequest)))) {
             if (typeof showAppAlert === 'function') showAppAlert("Talep kaydedilemedi. Bağlantınızı kontrol edip tekrar deneyin.", "error");
             return false;
         }
@@ -1454,7 +1454,7 @@ window.deletePurchaseRequest = async function (id) {
     );
     if (!onay) return;
 
-    if (await window.removeItem('purchaseOrders', item.id) === false) { if (typeof showAppAlert === 'function') showAppAlert('Talep silinemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.removeItem('purchaseOrders', item.id)))) { if (typeof showAppAlert === 'function') showAppAlert('Talep silinemedi.', 'error'); return; }
     if (typeof renderPurchaseModule === 'function') renderPurchaseModule();
     if (typeof showAppAlert === 'function') showAppAlert('Talep silindi.', 'success');
 };

@@ -58,7 +58,7 @@ async function _performExit(requestedQty) {
         productId:    product.id
     };
 
-    if (await window.appendItem('b3', b3Entry) === false) {
+    if (!(await window.writeOk(window.appendItem('b3', b3Entry)))) {
         try { await window.runStockTransaction(repo, product.id, requestedQty); } catch (e) { console.error('❌ Stok geri alınamadı:', e); }
         _alert('Çıkış kaydı yazılamadı; stok geri alındı.', 'error');
         return;
@@ -125,7 +125,7 @@ export const deleteItem = async function (depo, id) {
 
     const scrollPosition = window.scrollY;
 
-    if (await window.removeItem(depo, item.id) === false) { _alert('Kayıt silinemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error'); return; }
+    if (!(await window.writeOk(window.removeItem(depo, item.id)))) { _alert('Kayıt silinemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error'); return; }
 
     const currentLimit = ((window.currentPage || 1) * (window.pageSize || 25));
     if (typeof window.renderTable === 'function') window.renderTable(depo, false, currentLimit);
@@ -162,7 +162,7 @@ export const bulkDelete = async function (depo) {
     const changed = targets.length > 0;
 
     if (changed) {
-        if (await window.updateItems(depo, targets.map(t => ({ id: t.id, fields: { durumu: 'Pasif', status: 'Pasif' } }))) === false) {
+        if (!(await window.writeOk(window.updateItems(depo, targets.map(t => ({ id: t.id, fields: { durumu: 'Pasif', status: 'Pasif' } })))))) {
             _alert('Pasife alma kaydedilemedi.', 'error');
             return;
         }
@@ -214,11 +214,11 @@ export const saveProduct = async function (e) {
             fields.status = formFields.durumu;
             if (existing.durumu === undefined) delete fields.durumu;
         }
-        ok = await window.updateItem(editRepo, existing.id, fields);
+        ok = await window.writeOk(window.updateItem(editRepo, existing.id, fields));
     } else {
         const created = { id: `${editRepo}_${window.makeId()}`, ...formFields };
         if (editRepo === 'b2') created.status = formFields.durumu;
-        ok = await window.appendItem(editRepo, created);
+        ok = await window.writeOk(window.appendItem(editRepo, created));
     }
 
     if (ok === false) {
@@ -240,7 +240,7 @@ export const toggleWatch = async function (depo, id) {
     if (!item) { _missing(); return; }
 
     // Yalnız isWatched alanı yazılır (tek doküman).
-    if (await window.updateItem(depo, item.id, { isWatched: !item.isWatched }) === false) {
+    if (!(await window.writeOk(window.updateItem(depo, item.id, { isWatched: !item.isWatched })))) {
         _alert('Takip durumu kaydedilemedi.', 'error');
         return;
     }
@@ -284,15 +284,15 @@ export const saveRequest = async function (event) {
     let saved;
     if (editId !== null && editId !== undefined) {
         if (!_find('requests', editId)) { alert('Düzenlenen talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-        saved = await window.updateItem('requests', editId, formFields);
+        saved = await window.writeOk(window.updateItem('requests', editId, formFields));
     } else {
-        saved = await window.appendItem('requests', {
+        saved = await window.writeOk(window.appendItem('requests', {
             ...formFields,
             personel: user.name,
             personelKodu: user.code || '',
             durum: 'Beklemede',
             tarih: typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR'),
-        });
+        }));
     }
 
     if (saved === false) {
@@ -320,7 +320,7 @@ export const receiveProduct = async function (id) {
     };
 
     try {
-        if (await window.updateItem('requests', req.id, fields) === false) { _alert('Teslim alındı bilgisi kaydedilemedi.', 'error'); return; }
+        if (!(await window.writeOk(window.updateItem('requests', req.id, fields)))) { _alert('Teslim alındı bilgisi kaydedilemedi.', 'error'); return; }
         if (typeof window.sendArchiveEmail === 'function') window.sendArchiveEmail({ ...req, ...fields });
         if (typeof window.renderMyRequestsTable === 'function') window.renderMyRequestsTable();
         if (typeof window.showAppAlert === 'function') {
@@ -344,7 +344,7 @@ export const deleteB3Row = async function (id) {
             ? await window.showCustomConfirm('Çıkış Kaydını Sil', `"${row.urunAciklama || row.productType || 'Bu kayıt'}" çıkış kaydı silinecek. Stok değişmez. Onaylıyor musunuz?`)
             : confirm('Çıkış kaydı silinsin mi?');
         if (ok !== true) return;
-        if (await window.removeItem('b3', row.id) === false) { _alert('Kayıt silinemedi.', 'error'); return; }
+        if (!(await window.writeOk(window.removeItem('b3', row.id)))) { _alert('Kayıt silinemedi.', 'error'); return; }
 
         if (typeof window.renderExitTable === 'function') window.renderExitTable();
         else if (typeof window.renderTable === 'function') window.renderTable('b3');
@@ -363,7 +363,7 @@ export const toggleStatus = async function (depo, id) {
     if (!item) { _missing(); return; }
 
     const field = depo === 'b1' ? 'durumu' : 'status';
-    if (await window.updateItem(depo, item.id, { [field]: item[field] === 'Pasif' ? 'Aktif' : 'Pasif' }) === false) {
+    if (!(await window.writeOk(window.updateItem(depo, item.id, { [field]: item[field] === 'Pasif' ? 'Aktif' : 'Pasif' })))) {
         _alert('Durum kaydedilemedi.', 'error');
         return;
     }
@@ -386,7 +386,7 @@ export const _bulkDeleteSelected = async function (depo, ids) {
 
     if (onay !== true) return;
 
-    if (await window.bulkRemove(depo, targets.map(t => t.id)) === false) { _alert('Toplu silme kaydedilemedi; hiçbir kayıt silinmedi.', 'error'); return; }
+    if (!(await window.writeOk(window.bulkRemove(depo, targets.map(t => t.id))))) { _alert('Toplu silme kaydedilemedi; hiçbir kayıt silinmedi.', 'error'); return; }
 
     if (typeof window.clearRowSelection === 'function') window.clearRowSelection();
     if (typeof window.renderTable === 'function') window.renderTable(depo);

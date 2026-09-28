@@ -688,12 +688,12 @@ window.inventoryManagementModule = {
         });
       });
 
-      if (await window.saveData('b3', [...b3Entries, ...(window.data.b3 || [])]) === false) {
+      if (!(await window.writeOk(window.saveData('b3', [...b3Entries, ...(window.data.b3 || [])])))) {
         await rollback();
         alert('Zimmet kaydedilemedi; stok geri alındı.', 'error');
         return;
       }
-      if (await window.saveData('assignments', [...assignmentEntries, ...(window.data.assignments || [])]) === false) {
+      if (!(await window.writeOk(window.saveData('assignments', [...assignmentEntries, ...(window.data.assignments || [])])))) {
         alert('Zimmet oluşturuldu ancak zimmet geçmişi (assignments) yazılamadı.', 'warning');
       } else {
         alert(`${personnelName} adına ${items.length} kalem zimmet başarıyla oluşturuldu. Stok: ${stockChanges.join(' · ')}`, 'success');
@@ -731,7 +731,7 @@ window.inventoryManagementModule = {
         : Promise.resolve(window.confirm('Talep kaynaklı zimmet kapatılsın mı?')));
       if (!ok) return;
       const updated = { ...req, iadeEdildi: true, iadeEdildiTarihi: today };
-      const saved = await window.saveData('requests', window.data.requests.map(r => sameId(r) ? updated : r));
+      const saved = await window.writeOk(window.saveData('requests', window.data.requests.map(r => sameId(r) ? updated : r)));
       if (saved === false) { alert('İade kaydedilemedi.', 'error'); return; }
       this.renderTable();
       alert('Zimmet kaydı kapatıldı.', 'success');
@@ -775,7 +775,7 @@ window.inventoryManagementModule = {
     }
 
     const updatedItem = { ...item, iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today };
-    if (await window.saveData('b3', window.data.b3.map(b => sameId(b) ? updatedItem : b)) === false) {
+    if (!(await window.writeOk(window.saveData('b3', window.data.b3.map(b => sameId(b) ? updatedItem : b))))) {
       if (target && product) { try { await window.runStockTransaction(target, product.id, -qty); } catch (e) { console.error(e); } }
       alert('İade kaydedilemedi; stok değişikliği geri alındı.', 'error');
       return;

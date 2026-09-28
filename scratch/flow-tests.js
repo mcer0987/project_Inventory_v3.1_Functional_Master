@@ -764,11 +764,11 @@ const SCENARIOS = {
             // 5) bulk delete (3 of the collection) is blocked without the flag; nothing is written
             const toDrop = new Set([base + 1, base + 2, base + 4]);
             const before = await marked();
-            const r5 = await window.saveData('requests', window.data.requests.filter(r => !toDrop.has(r.id)));
+            const r5 = await window.saveData('requests', window.data.requests.filter(r => !toDrop.has(r.id)), { strict: false });
             await ft.sleep(1200);
             out.bulkBlocked = { result: r5, markedBefore: before, markedAfter: await marked(), alert: alerts.at(-1)?.[1] };
             let strictBulk = null;
-            try { await window.saveData('requests', window.data.requests.filter(r => !toDrop.has(r.id)), { strict: true }); }
+            try { await window.saveData('requests', window.data.requests.filter(r => !toDrop.has(r.id))); } // default = strict
             catch (e) { strictBulk = { name: e.name, code: e.code, deletes: e.details?.deletes }; }
             out.bulkBlockedStrict = strictBulk;
 
@@ -779,14 +779,21 @@ const SCENARIOS = {
             out.markedLeft = await marked();
 
             // 7) unknown collection / no session: false by default, SaveDataError in strict mode
-            out.unknownDefault = await window.saveData('archive', []);
-            try { await window.saveData('archive', [], { strict: true }); out.unknownStrict = 'no throw'; }
+            out.unknownNonStrict = await window.saveData('archive', [], { strict: false });
+            try { await window.saveData('archive', []); out.unknownStrict = 'no throw'; }
             catch (e) { out.unknownStrict = e.code; }
             const realAuth = window.userAuth; window.userAuth = null;
-            out.noAuthDefault = await window.saveData('requests', window.data.requests);
-            try { await window.saveData('requests', window.data.requests, { strict: true }); out.noAuthStrict = 'no throw'; }
+            out.noAuthNonStrict = await window.saveData('requests', window.data.requests, { strict: false });
+            try { await window.saveData('requests', window.data.requests); out.noAuthStrict = 'no throw'; }
             catch (e) { out.noAuthStrict = e.code; }
             window.userAuth = realAuth;
+
+            // 7b) strict is the default: writeOk turns it into false; an uncaught error is shown by the global handler
+            out.writeOk = { failed: await window.writeOk(window.saveData('archive', [])), ok: await window.writeOk(window.saveData('requests', window.data.requests)) };
+            const before7b = alerts.length;
+            window.saveData('archive', []); // not awaited, not caught
+            await ft.sleep(300);
+            out.globalHandler = alerts.slice(before7b).map(a => a[0] + ':' + a[1].slice(0, 40));
 
             // 8) makeId: unique, strictly increasing, numeric, safe
             const ids = Array.from({ length: 5000 }, () => window.makeId());
@@ -828,7 +835,7 @@ const SCENARIOS = {
             const a = await window.appendItem('requests', { ...r });
             const id = a.ids[0];
             out.append = { written: a.written, idIsSafeInt: Number.isSafeInteger(Number(id)), local: !!window.findItem('requests', id), server: !!(await srv('requests', id)) };
-            out.duplicate = await window.appendItem('requests', { ...r, id }).catch(e => e.code);
+            out.duplicate = await window.appendItem('requests', { ...r, id }, { strict: false });
             let dupStrict = null; try { await window.appendItem('requests', { ...r, id }, { strict: true }); } catch (e) { dupStrict = e.code; }
             out.duplicateStrict = dupStrict;
 
@@ -854,10 +861,10 @@ const SCENARIOS = {
 
             // atomicity: same batch plus an admin-only b1 write -> nothing is applied
             const b1 = (window.data.b1 || [])[0];
-            const bad = await window.applyItemOps([
+            const bad = await window.applyItemOps([ // strict:false → false instead of throwing
                 { op: 'update', col: 'requests', id, fields: { durum: 'SHOULD_NOT_APPLY' } },
                 { op: 'update', col: 'b1', id: b1.id, fields: { açıklama: b1.açıklama || '' } },
-            ]);
+            ], { strict: false });
             await ft.sleep(800);
             out.atomicReject = { result: bad, requestUnchanged: (await srv('requests', id)).durum === 'draft', localUnchanged: window.findItem('requests', id).durum === 'draft' };
 
@@ -868,7 +875,7 @@ const SCENARIOS = {
             const rm = await window.removeItem('tasks', tid);
             await ft.sleep(500);
             out.remove = { bulkDeleted: br.deleted, taskGone: !(await srv('tasks', tid)), bulkGone: (await Promise.all(extra.map(x => srv('requests', x)))).every(x => !x) };
-            out.unknownCol = await window.upsertItem('archive', { id: 1 });
+            out.unknownCol = await window.upsertItem('archive', { id: 1 }, { strict: false });
             return out;
         });
     },

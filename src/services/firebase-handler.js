@@ -460,7 +460,7 @@ window.startRealtimeSync = function () {
  *   saveData('requests', dizi)            → yalnız o koleksiyon
  *   saveData(window.data)                 → tüm koleksiyonlar (her biri ayrı ayrı karşılaştırılır)
  *   saveData('requests', dizi, opts) / saveData(window.data, opts)
- *     opts.strict          true → hata fırlatır (SaveDataError). Varsayılan false: hata olursa false döner.
+ *     opts.strict          varsayılan true (H2 sonu): hata SaveDataError olarak fırlatılır. false → hata olursa false döner.
  *     opts.allowBulkDelete true → toplu silme kilidini açar (yalnız kullanıcı onaylı toplu silmeler için).
  *
  * Dönüş: başarıda { written, deleted, unchanged, collections: { [col]: {written, deleted, unchanged} } } (truthy),
@@ -490,6 +490,26 @@ export class SaveDataError extends Error {
 }
 window.SaveDataError = SaveDataError;
 
+// [WHY]: H2 sonunda strict varsayılan oldu (karar 1). Sonucu `=== false` ile kontrol edip telafi yapan çağıranlar (stok geri
+//        alma, talebi geri döndürme) hata fırlatılınca o dalı hiç çalıştırmazdı; sonucu hiç kontrol etmeyen çağıranlar ise
+//        başarısız yazmada kullanıcıya hiçbir şey göstermeden dururdu.
+// [HOW]: writeOk(p) — yazma sözünü true/false'a çevirir (yalnız SaveDataError'ı yakalar); telafi yapan çağıranlar bunu
+//        kullanır. Yakalanmamış SaveDataError'lar genel yakalayıcıda kullanıcıya gösterilir (işlem de orada durur).
+export const writeOk = window.writeOk = p => Promise.resolve(p).then(r => r !== false, e => {
+    if (e && e.name === 'SaveDataError') return false;
+    throw e;
+});
+window.addEventListener('unhandledrejection', ev => {
+    const e = ev.reason;
+    if (!e || e.name !== 'SaveDataError') return;
+    ev.preventDefault();
+    if (e.code === 'bulk-delete-blocked') return; // saveData kendi uyarısını zaten gösterdi
+    const text = e.code === 'no-auth' ? 'Oturum yok; kayıt yapılamadı. Sayfayı yenileyip tekrar giriş yapın.'
+        : e.code === 'not-found' ? 'Kayıt bulunamadı; başka biri değiştirmiş veya silmiş olabilir.'
+        : `Kayıt yapılamadı: ${e.message}`;
+    if (typeof window.showAppAlert === 'function') window.showAppAlert(text, 'error');
+});
+
 // Anahtar sırasından bağımsız, kararlı JSON. '__' ile başlayan yardımcı (render) alanları karşılaştırmaya girmez.
 function _stableStringify(value) {
     if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -507,7 +527,7 @@ const _clone = v => (typeof structuredClone === 'function' ? structuredClone(v) 
 export const saveData = window.saveData = async function (arg1, arg2, arg3) {
     const isTargeted = typeof arg1 === 'string';
     const opts = (isTargeted ? arg3 : arg2) || {};
-    const strict = opts.strict === true;
+    const strict = opts.strict !== false; // H2 sonu (karar 1): varsayılan strict — hata SaveDataError olarak fırlatılır
 
     const fail = (code, message, details) => {
         const err = new SaveDataError(code, message, details);
@@ -635,7 +655,7 @@ function _applyLocal(colName, op) {
 }
 
 export const applyItemOps = window.applyItemOps = async function (ops, opts = {}) {
-    const strict = opts.strict === true;
+    const strict = opts.strict !== false; // H2 sonu (karar 1): varsayılan strict — hata SaveDataError olarak fırlatılır
     const fail = (code, message, details) => {
         const err = new SaveDataError(code, message, details);
         console.error(`❌ applyItemOps [${code}]: ${message}`, details || '');

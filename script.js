@@ -465,7 +465,7 @@ async function addPersonel() {
         showAppAlert("Bu oturum kodu zaten kullanımda!", "warning");
         return;
     }
-    if (await window.appendItem('personel', { name, code }) === false) { showAppAlert('Personel eklenemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.appendItem('personel', { name, code })))) { showAppAlert('Personel eklenemedi.', 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
     showAppAlert('Personel eklendi.', 'success');
@@ -474,7 +474,7 @@ async function addPersonel() {
 async function editPersonel(id) {
     const name = document.getElementById('personelName').value.trim();
     if (!name) { showAppAlert('Ad Soyad boş olamaz.', 'warning'); return; }
-    if (await window.updateItem('personel', id, { name }) === false) { showAppAlert('Personel güncellenemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.updateItem('personel', id, { name })))) { showAppAlert('Personel güncellenemedi.', 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
     showAppAlert('Personel güncellendi.', 'success');
@@ -780,7 +780,7 @@ window.confirmRequest = async function (requestId) {
             ...live, durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now,
             ...(product ? { stockRepo: repo, stockProductId: product.id } : {})
         };
-        if (await _saveRequestItem(updated) === false) { await restoreStock(); showAppAlert('Onay kaydedilemedi; stok geri alındı.', 'error'); return; }
+        if (!(await window.writeOk(_saveRequestItem(updated)))) { await restoreStock(); showAppAlert('Onay kaydedilemedi; stok geri alındı.', 'error'); return; }
 
         const exitEntry = {
             id: Date.now(),
@@ -805,9 +805,9 @@ window.confirmRequest = async function (requestId) {
             approvedBy: approver
         };
         const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
-        if (!alreadyLogged && await window.saveData('b3', [...(window.data.b3 || []), exitEntry]) === false) {
+        if (!alreadyLogged && !(await window.writeOk(window.saveData('b3', [...(window.data.b3 || []), exitEntry])))) {
             // Zimmet kaydı yoksa iade stoğa dönemez: onay ve stok birlikte geri alınır.
-            const reverted = await _saveRequestItem(live);
+            const reverted = await window.writeOk(_saveRequestItem(live));
             await restoreStock();
             showAppAlert(reverted === false
                 ? 'Zimmet kaydı yazılamadı; stok geri alındı ancak talep "onaylandı" kaldı. Lütfen talebi kontrol edin.'
@@ -835,7 +835,7 @@ window.rejectRequest = async function (requestId) {
         const live = _findRequest(requestId);
         if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
         const updated = { ...live, durum: 'rejected', rejectedBy: window.currentUser?.name || 'Yönetici', rejectedAt: getTurkiyeSaati() };
-        if (await _saveRequestItem(updated) === false) { showAppAlert('Red kaydedilemedi.', 'error'); return; }
+        if (!(await window.writeOk(_saveRequestItem(updated)))) { showAppAlert('Red kaydedilemedi.', 'error'); return; }
         _refreshRequestTables();
         showAppAlert(`${live.personel} talebi reddedildi.`, "error");
     } finally {
@@ -849,7 +849,7 @@ window.deleteRequest = async function (requestId) {
     const onay = await showCustomConfirm("Kaydı Sil", "Bu talep kaydını tamamen silmek istediğinize emin misiniz? Bu işlem geri alınamaz.");
     if (onay !== true) return;
     const remaining = (window.data.requests || []).filter(r => String(r.id) !== String(requestId));
-    if (await window.saveData('requests', remaining) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.saveData('requests', remaining)))) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
     _refreshRequestTables();
     showAppAlert("Talep kaydı kalıcı olarak silindi.", "info");
 };
@@ -873,7 +873,7 @@ window.withdrawInventoryRequest = async function (id) {
     if (!_isPendingRequest(req)) { showAppAlert('Yalnız onay bekleyen bir talep geri çekilebilir.', 'warning'); renderMyRequestsTable(); return; }
     const onay = await showCustomConfirm("Talebi Geri Çek", `${req.ürün} talebinizi geri çekmek (taslağa almak) istediğinize emin misiniz?`);
     if (onay === true) {
-        if (await window.updateItem('requests', req.id, { durum: 'draft' }) === false) { showAppAlert('Talep geri çekilemedi.', 'error'); return; }
+        if (!(await window.writeOk(window.updateItem('requests', req.id, { durum: 'draft' })))) { showAppAlert('Talep geri çekilemedi.', 'error'); return; }
         if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
         showAppAlert("Talebiniz geri çekildi ve TASLAK moduna alındı.", "info");
     }
@@ -907,7 +907,7 @@ window.sendDraftInventoryRequest = async function (id) {
     if (!req) return;
     const d = String(req.durum || '').trim().toUpperCase();
     if (d !== 'DRAFT' && d !== 'TASLAK') { showAppAlert('Bu talep taslak değil.', 'warning'); renderMyRequestsTable(); return; }
-    if (await window.updateItem('requests', req.id, { durum: 'Beklemede', tarih: getTurkiyeTarihi() }) === false) { showAppAlert('Talep gönderilemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.updateItem('requests', req.id, { durum: 'Beklemede', tarih: getTurkiyeTarihi() })))) { showAppAlert('Talep gönderilemedi.', 'error'); return; }
     if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
     showAppAlert("Talebiniz başarıyla onaya gönderildi.", "success");
 };
@@ -1315,7 +1315,7 @@ async function importExcel(event) {
             if (typeof renderTable === 'function') renderTable(depo);
             showAppAlert(`${importedData.length} ürün başarıyla depoya eklendi ve kaydedildi!`, "success");
         } catch (err) {
-            showAppAlert("Excel okunurken bir hata oluştu!", "error");
+            showAppAlert(err && err.name === 'SaveDataError' ? `Ürünler kaydedilemedi: ${err.message}` : "Excel okunurken bir hata oluştu!", "error");
         }
     };
     reader.readAsArrayBuffer(file);
@@ -1529,7 +1529,7 @@ async function deleteSelectedRequests() {
     if (onay) {
         const remaining = (window.data.requests || []).filter(r => !idsToDelete.has(String(r.id)));
         // Kullanıcı onaylı toplu silme: saveData v2 toplu silme kilidi bilinçli olarak açılır (Faz 3.1).
-        if (await window.saveData('requests', remaining, { allowBulkDelete: true }) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
+        if (!(await window.writeOk(window.saveData('requests', remaining, { allowBulkDelete: true })))) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
         renderRequestsTable();
         showAppAlert(`${idsToDelete.size} kayıt başarıyla silindi.`, "success");
         const headerCheck = document.querySelector('.select-all-header input');

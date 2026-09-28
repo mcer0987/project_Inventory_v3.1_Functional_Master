@@ -198,7 +198,7 @@ window.saveUnitData = async function () {
 
     unitEditor.saving = true;
     try {
-        if (await window.saveData('units', next) === false) { _unitAlert('Birim kaydedilemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error'); return; }
+        if (!(await window.writeOk(window.saveData('units', next)))) { _unitAlert('Birim kaydedilemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error'); return; }
         const wasEdit = !!unitEditor.id;
         window.closeUnitModal();
         window.renderUnitManagement();
@@ -216,7 +216,7 @@ window.deleteUnit = async function (unitId) {
         : window.confirm('Bu birimi silmek istediğinize emin misiniz?');
     if (ok !== true) return;
     const next = (window.data.units || []).filter(u => !(u && typeof u === 'object' && String(u.id) === String(unitId)));
-    if (await window.saveData('units', next) === false) { _unitAlert('Birim silinemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.saveData('units', next)))) { _unitAlert('Birim silinemedi.', 'error'); return; }
     window.renderUnitManagement();
     _unitAlert('Birim silindi.', 'info');
 };
@@ -625,7 +625,7 @@ window.confirmStartWorkflow = async function () {
     });
 
     // [BUGFIX] Bug 1: Targeted save only to purchaseOrders (Prevents global batch permission error)
-    if (await window.upsertItem('purchaseOrders', req) === false) {
+    if (!(await window.writeOk(window.upsertItem('purchaseOrders', req)))) {
         _rollback(startKey);
         if (typeof showAppAlert === 'function') showAppAlert('İş akışı kaydedilemedi. Bağlantınızı kontrol edin.', 'error');
         return;
@@ -878,7 +878,8 @@ window.fixWorkflowCurrentStep = async function (item, saveToDB = false) {
 
     const changed = before !== JSON.stringify([item.workflow.currentStep, item.workflow.currentState, item.workflow.finished, item.durum]);
     if (changed && saveToDB && typeof window.upsertItem === 'function') {
-        await window.upsertItem('purchaseOrders', item);
+        // Görüntüleme sırasında onarım yazılamazsa (çevrimdışı, yetki) pencere yine açılır; sonuç yalnız loglanır.
+        if (!(await window.writeOk(window.upsertItem('purchaseOrders', item)))) console.warn('⚠️ Akış onarımı kaydedilemedi:', item.id);
     }
     return changed;
 };
@@ -906,7 +907,7 @@ window.fixAllWorkflowData = async function () {
     if (fixedCount > 0) {
         console.log(`🎯 Toplam ${fixedCount} workflow kaydı düzeltildi, kaydediliyor...`);
         // [FIX]: Tüm veritabanını yollamak yerine sadece ilgili tabloyu akıllı saveData overload'u ile gönderiyoruz
-        if (window.saveData) await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        if (!(await window.writeOk(window.saveData('purchaseOrders', window.data.purchaseOrders)))) { console.error('❌ Akış göçü kaydedilemedi'); return 0; }
         console.log(`✅ Veritabanına kaydedildi`);
     } else {
         console.log(`✅ Düzeltilecek kayıt bulunamadı`);
@@ -1084,7 +1085,7 @@ window.approveStep = async function (id) {
         //        Non-admin users have permission only on specific collections, so the batch fails.
         // [HOW]: We pass the collection name + its array directly so only purchaseOrders is written.
         // Snapshot dizisi değişmiş olabilir; değiştirilmiş talep güncel dizideki yerine konularak tek seferde yazılır.
-        const saved = await window.upsertItem('purchaseOrders', item);
+        const saved = await window.writeOk(window.upsertItem('purchaseOrders', item));
         if (saved === false) _rollback(lockKey); else _endMutation(lockKey);
         window.closeWorkflowModal();
         if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
@@ -1192,7 +1193,7 @@ window.rejectStep = async function (id) {
         // [WHY]: Same permission issue as approveStep — non-admins can't overwrite the full DB snapshot.
         // [HOW]: Only the purchaseOrders collection is written, matching the collection-level Firestore rules.
         // Snapshot dizisi değişmiş olabilir; değiştirilmiş talep güncel dizideki yerine konularak tek seferde yazılır.
-        const saved = await window.upsertItem('purchaseOrders', item);
+        const saved = await window.writeOk(window.upsertItem('purchaseOrders', item));
         if (saved === false) _rollback(lockKey); else _endMutation(lockKey);
         window.closeWorkflowModal();
         if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
@@ -1256,7 +1257,7 @@ window.stopWorkflow = async function (id) {
         if (!Array.isArray(item.akis)) item.akis = [];
         item.akis.push({ islem: "⏸️ Akış durduruldu", yapan: actor, tarih: new Date().toLocaleString('tr-TR') });
 
-        const saved = await window.upsertItem('purchaseOrders', item);
+        const saved = await window.writeOk(window.upsertItem('purchaseOrders', item));
         if (saved === false) _rollback(lockKey); else _endMutation(lockKey);
         if (typeof refreshUI === "function") refreshUI();
         if (typeof renderPurchaseModule === "function") renderPurchaseModule();
@@ -1914,7 +1915,7 @@ window.saveWorkflow = async function (workflow) {
         return false;
     }
     purchaseOrder.workflow = workflow;
-    const saved = await window.upsertItem('purchaseOrders', purchaseOrder);
+    const saved = await window.writeOk(window.upsertItem('purchaseOrders', purchaseOrder));
     if (saved === false) console.error('❌ Workflow kaydedilemedi:', workflow.id);
     return saved !== false;
 };

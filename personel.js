@@ -21,7 +21,7 @@ window.deletePersonel = async function (id) {
     if (!person) { showAppAlert('Personel bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     const ok = await showCustomConfirm('Personeli Sil', `"${person.name || '-'}" silinecek; bu kişi artık oturum kodu ile giriş yapamaz. Onaylıyor musunuz?`);
     if (ok !== true) return;
-    if (await window.removeItem('personel', person.id) === false) { showAppAlert('Personel silinemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.removeItem('personel', person.id)))) { showAppAlert('Personel silinemedi.', 'error'); return; }
     renderPersonelTable();
     showAppAlert('Personel silindi.', 'info');
 };

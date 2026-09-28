@@ -214,7 +214,7 @@ window.bulkAddB2Items = async function (itemsArray) {
     }));
 
     try {
-        const res = await window.applyItemOps(formattedItems.map(item => ({ op: 'set', col: 'b2', item, mustBeNew: true })));
+        const res = await window.writeOk(window.applyItemOps(formattedItems.map(item => ({ op: 'set', col: 'b2', item, mustBeNew: true }))));
         if (res === false) {
             if (typeof showAppAlert === 'function') showAppAlert("Ürünler eklenemedi; hiçbir kayıt yazılmadı.", "error");
             return false;
@@ -1087,7 +1087,7 @@ window.deleteCriticalGroup = async function (groupKey) {
     //        yazıyordu (ADM-07, DATA-06). [HOW]: Grup ürünleri id ile silinir, B1+B2 tek atomik batch'te; sonuç kontrol edilir.
     if (onay) {
         const ops = group.items.filter(i => i.id != null && i.id !== '').map(i => ({ op: 'delete', col: i.key, id: i.id }));
-        if (await window.applyItemOps(ops) === false) {
+        if (!(await window.writeOk(window.applyItemOps(ops)))) {
             showAppAlert("Silme kaydedilemedi; hiçbir ürün silinmedi.", "error");
             return;
         }
@@ -1423,7 +1423,7 @@ window.syncProductTypesToProducts = async function (oldName, newName) {
             if (next.prodType === oldName) next.prodType = newName;
             return next;
         });
-        if (changed && await window.saveData(depo, items) === false) ok = false;
+        if (changed && !(await window.writeOk(window.saveData(depo, items)))) ok = false;
     }
     console.log(`✔ Tür güncellendi: ${oldName} → ${newName}`);
     return ok;
@@ -1758,7 +1758,7 @@ window.saveLocation = async function (e) {
         ? locations.map(l => String(l.id) === String(id) ? { ...l, ...formFields, id: l.id } : l)
         : [...locations, { id: 'loc_' + now, ...formFields, createdAt: now }];
 
-    if (await window.saveData('locations', next) === false) {
+    if (!(await window.writeOk(window.saveData('locations', next)))) {
         showAppAlert('Mahal kaydedilemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
         return;
     }
@@ -1770,7 +1770,7 @@ window.saveLocation = async function (e) {
 window.deleteLocation = async function (id) {
     if (!confirm("Bu mahali silmek istediğinize emin misiniz?")) return;
     const next = (window.data.locations || []).filter(l => String(l.id) !== String(id));
-    if (await window.saveData('locations', next) === false) { showAppAlert('Mahal silinemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.saveData('locations', next)))) { showAppAlert('Mahal silinemedi.', 'error'); return; }
     window.renderLocationsTable();
     showAppAlert("Mahal silindi.", "info");
 };

@@ -75,7 +75,7 @@ window.importFirebaseBackup = async function(event) {
             // Kullanıcı onaylı tam geri yükleme: yedekte olmayan kayıtlar silinir, bu yüzden toplu silme kilidi bilinçli
             // olarak açılır (Faz 3.1). Kayıt başarısızsa "geri yüklendi" denmez.
             if (typeof window.saveData === 'function') {
-                const res = await window.saveData(window.data, { allowBulkDelete: true });
+                const res = await window.writeOk(window.saveData(window.data, { allowBulkDelete: true }));
                 if (res === false) { showAppAlert("Yedek geri yüklenemedi; hiçbir değişiklik yazılmadı.", "error"); return; }
             }
 

@@ -393,7 +393,7 @@ export const UIComponents = {
             return;
         }
 
-        if (await window.applyItemOps(ops) === false) {
+        if (!(await window.writeOk(window.applyItemOps(ops)))) {
             if (typeof showAppAlert === 'function') showAppAlert('Sevk kaydedilemedi; ürün yerinde bırakıldı.', 'error');
             return;
         }
