@@ -1004,6 +1004,39 @@ const SCENARIOS = {
         });
     },
 
+    // Faz 3 · H2 — ADM-07 on admin.html: critical-group delete by ids across B1+B2 in one batch; bulk B2 add atomic.
+    async adminBulkOps(page, browser) {
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        const out = await admin.evaluate(async () => {
+            const o = {}, ops = [];
+            const orig = { b1: window.data.b1, b2: window.data.b2, apply: window.applyItemOps, confirm: window.customConfirmAlert, alert: window.showAppAlert };
+            window.applyItemOps = async x => { ops.push(JSON.parse(JSON.stringify(x))); return { written: x.length }; };
+            window.customConfirmAlert = async () => { window.data.b1.unshift({ id: 'shift', ürün: 'Başka', tür: 'Başka', adet: 9 }); return true; };
+            const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
+            window.data.b1 = [{ id: 'k1', ürün: 'Kablo', tür: 'Kablo', adet: 0 }, { id: 'm1', ürün: 'Mouse', tür: 'Mouse', adet: 0 }];
+            window.data.b2 = [{ id: 'k2', ürün: 'Kablo', tür: 'Kablo', adet: 0 }];
+            const key = window.checkIsDemirbas(window.data.b1[0]) ? null : `sarf_${window.getCleanProductName('Kablo')}`;
+            o.groupKey = key;
+            await window.deleteCriticalGroup(key);
+            o.criticalDelete = ops.at(-1);
+            const r = await window.bulkAddB2Items([{ ürün: 'Yeni1', adet: 2 }, { ürün: 'Yeni2' }]);
+            const last = ops.at(-1);
+            o.bulkAdd = { ops: last.length, allSet: last.every(x => x.op === 'set' && x.col === 'b2' && x.mustBeNew), idsUnique: new Set(last.map(x => x.item.id)).size === 2, returned: !!r };
+            window.applyItemOps = async () => false;
+            o.bulkAddFailure = { result: await window.bulkAddB2Items([{ ürün: 'X' }]), alert: alerts.at(-1) };
+            Object.assign(window.data, { b1: orig.b1, b2: orig.b2 });
+            Object.assign(window, { applyItemOps: orig.apply, customConfirmAlert: orig.confirm, showAppAlert: orig.alert });
+            return o;
+        });
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
+    },
+
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
     async systemConfigScope(page) {
         return page.evaluate(async () => {

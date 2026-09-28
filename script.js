@@ -1456,21 +1456,9 @@ window.addEventListener("load", () => {
     window.addEventListener('offline', () => { if (typeof showAppAlert === 'function') showAppAlert("İnternet bağlantısı koptu.", "warning"); });
 });
 
-// Request Actions helpers (legacy check)
-function renderRequestAction(request) {
-    const checkIsAdmin = checkAdmin();
-    if (request.status === 'pending') {
-        return checkIsAdmin
-            ? `<button class="btn-deliver" onclick="updateRequestStatus(${jsArg(request.id)}, 'delivered')">Teslim Et</button>`
-            : `<span class="status-waiting">Bekleniyor...</span>`;
-    } else if (request.status === 'delivered') {
-        return !checkIsAdmin
-            ? `<button class="btn-confirm" onclick="confirmReceipt(${jsArg(request.id)})">Teslim Aldım</button>`
-            : `<span class="status-delivered">Onay Bekleniyor</span>`;
-    } else {
-        return `<span class="status-completed">Tamamlandı</span>`;
-    }
-}
+// [WHY]: Eski talep şemasını (status/person/product) kullanan ve tüm veritabanını yazan ölü kod kaldırıldı: addRequest,
+//        submitRequest, updateRequestStatus (sabit "Muhammed Cer"), renderRequestAction (tanımsız confirmReceipt).
+//        Hiçbiri çağrılmıyordu; talep akışı saveRequest / confirmRequest / receiveProduct üzerinden (H2, DATA-10 benzeri gizli risk).
 
 async function createLog(action, detail) {
     const parsed = window.getActiveUser();
@@ -1488,65 +1476,6 @@ function checkCategory(selectElement) {
     const selectedOption = selectElement.options[selectElement.selectedIndex];
     const isDemirbas = selectedOption.getAttribute('data-is-demirbas') === 'true';
     document.getElementById('isDemirbas').value = isDemirbas;
-}
-
-async function updateRequestStatus(requestId, newStatus) {
-    const isAdmin = checkIsAdmin();
-    const request = window.data.requests.find(r => r.id === requestId);
-    if (!request) return;
-    if (newStatus === 'delivered' && isAdmin) {
-        request.status = 'delivered';
-        request.deliveredBy = "Muhammed Cer";
-        showAppAlert("Teslimat yapıldı. Personel onayı bekleniyor.", "success");
-    } else if (newStatus === 'confirmed' && !isAdmin) {
-        request.status = 'confirmed';
-        request.confirmedDate = getTurkiyeSaati();
-        await createLog("ZİMMET ONAYI", `${request.person} ürünü teslim aldı.`);
-    }
-    await window.saveData(window.data);
-    renderTable('requests');
-}
-
-async function addRequest(event) {
-    if (event) event.preventDefault();
-    const activeUser = window.getActiveUser();
-    const productName = document.getElementById('requestProductName').value;
-    const productSn = document.getElementById('requestProductSn')?.value || "-";
-    const newRequest = {
-        id: Date.now(),
-        tarih: getTurkiyeTarihi(),
-        personel: activeUser ? activeUser.name : "Bilinmeyen Personel",
-        ürün: productName,
-        sn: productSn,
-        durum: 'Beklemede'
-    };
-    if (!window.data.requests) window.data.requests = [];
-    window.data.requests.push(newRequest);
-    await window.saveData(window.data);
-    showAppAlert("Talebiniz başarıyla iletildi.", "success");
-    closeModal('request');
-}
-
-async function submitRequest(event) {
-    if (event) event.preventDefault();
-    const product = document.getElementById('reqProduct').value;
-    const note = document.getElementById('reqNote').value;
-    const user = window.getActiveUser();
-    if (!product) { showAppAlert("Lütfen talep edilecek ürünü yazın.", "warning"); return; }
-    const newRequest = {
-        id: Date.now(),
-        date: new Date().toLocaleDateString('tr-TR'),
-        person: user ? user.name : 'Bilinmeyen Personel',
-        product: product,
-        note: note,
-        status: 'pending'
-    };
-    if (!window.data.requests) window.data.requests = [];
-    window.data.requests.push(newRequest);
-    await window.saveData(window.data);
-    if (typeof showSuccessBanner === 'function') showSuccessBanner("Talebiniz başarıyla iletildi!");
-    closeModal('request');
-    document.getElementById('requestForm').reset();
 }
 
 function openTab(tabId) {

@@ -191,19 +191,17 @@ if (!window.fireDb) {
 
 let watchChartInstance = null; // Eski grafiği silmek için hafızada tutuyoruz
 
+// [WHY]: Toplu ekleme bellekteki diziye ekleyip tüm veritabanını yazıyordu ve hata olsa da başarı gösterebiliyordu (ADM-07).
+// [HOW]: Yeni kayıtlar tek atomik batch'te eklenir (applyItemOps: ya hepsi ya hiçbiri); id makeId ile.
 window.bulkAddB2Items = async function (itemsArray) {
-    if (!Array.isArray(itemsArray)) {
-        console.error("Hata: Veri bir dizi (array) olmalıdır.");
-        return;
-    }
-
-    if (!window.data.b2) {
-        window.data.b2 = [];
+    if (!Array.isArray(itemsArray) || itemsArray.length === 0) {
+        console.error("Hata: Veri boş olmayan bir dizi (array) olmalıdır.");
+        return false;
     }
 
     // Yeni verileri hazırla
     const formattedItems = itemsArray.map(item => ({
-        id: item.id || 'b2-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+        id: item.id || `b2_${window.makeId()}`,
         sütun: item.sütun || '-',
         raf: item.raf || '-',
         ürün: item.ürün || '-',
@@ -215,17 +213,19 @@ window.bulkAddB2Items = async function (itemsArray) {
         lastUpdate: Date.now()
     }));
 
-    // Mevcut listeye ekle
-    window.data.b2 = [...window.data.b2, ...formattedItems];
-
     try {
-        await window.saveData(window.data);
+        const res = await window.applyItemOps(formattedItems.map(item => ({ op: 'set', col: 'b2', item, mustBeNew: true })));
+        if (res === false) {
+            if (typeof showAppAlert === 'function') showAppAlert("Ürünler eklenemedi; hiçbir kayıt yazılmadı.", "error");
+            return false;
+        }
         if (typeof showAppAlert === 'function') {
             showAppAlert(`${formattedItems.length} ürün başarıyla B2 deposuna eklendi.`);
         } else {
             alert(`${formattedItems.length} ürün eklendi.`);
         }
         if (typeof window.renderTable === 'function') window.renderTable('b2');
+        return res;
     } catch (e) {
         console.error("Bulk ekleme hatası:", e);
         if (typeof showAppAlert === 'function') {
@@ -1083,23 +1083,15 @@ window.deleteCriticalGroup = async function (groupKey) {
         `"${group.displayName}" grubundaki tüm ürünleri (${group.items.length} adet kayıt) depodan TAMAMEN silmek istediğinize emin misiniz?`
     );
 
+    // [WHY]: Onay kutusu açıkken gelen bir snapshot indeksleri kaydırıyordu; silme yanlış ürünleri vurup tüm veritabanını
+    //        yazıyordu (ADM-07, DATA-06). [HOW]: Grup ürünleri id ile silinir, B1+B2 tek atomik batch'te; sonuç kontrol edilir.
     if (onay) {
-        // Sort indices descending to avoid shifting issues during splicing
-        const b1Indices = group.items.filter(i => i.key === 'b1').map(i => i.originalIndex).sort((a, b) => b - a);
-        const b2Indices = group.items.filter(i => i.key === 'b2').map(i => i.originalIndex).sort((a, b) => b - a);
-
-        b1Indices.forEach(idx => {
-            if (window.data.b1) window.data.b1.splice(idx, 1);
-        });
-        b2Indices.forEach(idx => {
-            if (window.data.b2) window.data.b2.splice(idx, 1);
-        });
-
-        // Save to Firebase — kullanıcı onaylı toplu silme: saveData v2 toplu silme kilidi bilinçli olarak açılır (Faz 3.1).
-        if (typeof window.saveData === 'function') {
-            await window.saveData(window.data, { allowBulkDelete: true });
-            showAppAlert("Ürün(ler) depodan başarıyla silindi.", "success");
+        const ops = group.items.filter(i => i.id != null && i.id !== '').map(i => ({ op: 'delete', col: i.key, id: i.id }));
+        if (await window.applyItemOps(ops) === false) {
+            showAppAlert("Silme kaydedilemedi; hiçbir ürün silinmedi.", "error");
+            return;
         }
+        showAppAlert(`${ops.length} ürün depodan silindi.`, "success");
     }
 };
 
