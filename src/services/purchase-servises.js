@@ -101,12 +101,20 @@ window.openNewPurchaseModal = function () {
     const elUser = document.getElementById('purUser');
     if (elDoc) elDoc.value = docCode;
     if (elDate) elDate.value = now.toLocaleDateString('tr-TR');
-    if (elUser) elUser.value = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+    if (elUser) elUser.value = _purchaseRequester().name || "Bilinmeyen Kullanıcı";
 
     fillPurchaseSelects();
 
     modal.style.display = "block";
 };
+
+// [WHY]: Talep eden, yeni talepte ölü initEBYSModal'daki sabit "Muhammed CER" yedeğine düşebiliyor; kayıtta ise elle
+//        değiştirilebilen form alanından okunuyordu (EBYS-06).
+// [HOW]: Talep eden her zaman oturumdaki aktif kullanıcıdır (getActiveUser → currentUser); form alanı yalnız gösterimdir.
+function _purchaseRequester() {
+    const u = (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null) || window.currentUser || {};
+    return { name: String(u.name || '').trim(), code: String(u.code || u.id || '').trim() };
+}
 
 // -----------------------------
 // SELECT DOLDUR
@@ -154,11 +162,16 @@ window.savePurchaseRequest = async function (e) {
             console.log("✅ Dosya yükleme tamamlandı.");
         }
 
+        const requester = _purchaseRequester();
+        if (!requester.name) {
+            if (typeof showAppAlert === 'function') showAppAlert('Talep oluşturmak için giriş yapmalısınız.', 'error');
+            return false;
+        }
         const newRequest = {
             id: Date.now(),
             evrakNo: document.getElementById('purDocName')?.value || "",
             tarih: document.getElementById('purDate')?.value || "",
-            talepEden: document.getElementById('purUser')?.value || window.currentUser?.name || "",
+            talepEden: requester.name,
             urun: document.getElementById('purName')?.value || "",
             adet: parseFloat(document.getElementById('purQty')?.value) || 1,
             butce: parseFloat(document.getElementById('purBudget')?.value) || 0,
@@ -166,8 +179,8 @@ window.savePurchaseRequest = async function (e) {
             tur: document.getElementById('purType')?.value || "",
             oncelik: document.getElementById('purPriority')?.value || "Normal",
             aciklama: document.getElementById('purDesc')?.value || "",
-            createdBy: String(window.currentUser?.code || window.currentUser?.id || "unknown"),
-            createdByName: window.currentUser?.name || "Bilinmeyen",
+            createdBy: requester.code || "unknown",
+            createdByName: requester.name,
             durum: "Onay Bekliyor",
             createdAt: Date.now(),
             files: uploadedFiles.map(f => ({
@@ -179,7 +192,7 @@ window.savePurchaseRequest = async function (e) {
             akis: [
                 {
                     islem: "Talep Oluşturuldu",
-                    yapan: window.currentUser?.name,
+                    yapan: requester.name,
                     tarih: new Date().toLocaleString('tr-TR')
                 }
             ],

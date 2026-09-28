@@ -53,56 +53,8 @@ const WorkflowState = window.WorkflowState = {
 
 // [WHY]: Buradaki sıfırlamasız openNewPurchaseModal/closePurchaseModal, purchase-servises.js'teki düzeltilmiş
 //        sürümü eziyordu; "Yeni Talep" eski talebin üzerine yazabiliyordu (EBYS-01). Tek kaynak: purchase-servises.js.
-
-// --- EBYS FORM BAŞLATMA ---
-window.initEBYSModal = function () {
-    const now = new Date();
-
-    // 1. OTOMATİK EVRAK KODU (SAT-20260428-1234 formatı)
-    const year = now.getFullYear();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    const day = now.getDate().toString().padStart(2, '0');
-    const random = Math.floor(1000 + Math.random() * 9000);
-    const docCode = `SAT-${year}${month}${day}-${random}`;
-
-    // 2. NAVBARDAN DİNAMİK KULLANICI ADI ÇEKME
-    // Navbardaki kullanıcı adını tutan span/div ID'ni kontrol et (genelde user-name veya benzeridir)
-    // Eğer bulamazsa "Sistem Kullanıcısı" yazar.
-    const navbarUserName = document.querySelector('.navbar .user-name')?.innerText ||
-        document.getElementById('navUser')?.innerText ||
-        "Muhammed CER"; // Yedek isim
-
-    // 3. ALANLARI DOLDURMA (ID Kontrolü ile)
-    const elDoc = document.getElementById('purDocName');
-    const elDate = document.getElementById('purDate');
-    const elUser = document.getElementById('purUser');
-    const elUnit = document.getElementById('purUnit');
-
-    if (elDoc) elDoc.value = docCode;
-    if (elDate) elDate.value = now.toLocaleDateString('tr-TR');
-    if (elUser) elUser.value = navbarUserName.trim();
-
-    window.fillEBYSSelects();
-    // Verilerin Firebase'den gelmiş olduğundan emin olmak için 300ms sonra tekrar tetikle
-    setTimeout(() => {
-        window.fillEBYSSelects();
-        console.log("🔄 Ürün türleri dropdown listesi tazelendi.");
-    }, 300);
-
-    // 4. BİRİM SEÇİM LİSTESİNİ GÜNCELLE
-    if (elUnit) {
-        const units = window.data.units || [];
-        if (units.length > 0) {
-            // Eğer units objeleri {id, name} şeklindeyse u.name, direkt string ise u kullanır
-            elUnit.innerHTML = units.map(u => {
-                const val = typeof u === 'object' ? u.name : u;
-                return `<option value="${val}">${val}</option>`;
-            }).join('');
-        } else {
-            elUnit.innerHTML = '<option disabled>Önce Birim Tanımlayın</option>';
-        }
-    }
-};
+// Ölü initEBYSModal / fillEBYSSelects de kaldırıldı: talep edeni sabit "Muhammed CER" yedeğiyle dolduruyordu (EBYS-06);
+// form doldurma tek kaynaktan: purchase-servises.js openNewPurchaseModal + fillPurchaseSelects.
 
 // [WHY]: Birim yönetimi bozuktu (EBYS-15): modal modül-yerel durumu, saveUnitData ise hiç atanmayan window.* durumunu okuyordu
 //        (düzenleme ikinci birim oluşturuyor, personel kaydolmuyordu); personel araması sonuç çizmiyordu; deleteUnit(index)
@@ -277,39 +229,6 @@ window.deleteUnit = async function (unitId) {
     if (await window.saveData('units', next) === false) { _unitAlert('Birim silinemedi.', 'error'); return; }
     window.renderUnitManagement();
     _unitAlert('Birim silindi.', 'info');
-};
-
-// "İlgili Birim" ve "Ürün Türü" kısımları da boş geliyorsa, onları da şu fonksiyonla besle
-window.fillEBYSSelects = function () {
-    const unitSelect = document.getElementById('purUnit');
-    const typeSelect = document.getElementById('purType');
-
-    // 1. BİRİMLERİ DOLDUR
-    if (unitSelect) {
-        const units = window.data?.units || [];
-        unitSelect.innerHTML = '<option value="">Birim Seçiniz...</option>' +
-            units.map(u => {
-                const name = typeof u === 'object' ? (u.name || u.birimAdi) : u;
-                return `<option value="${name}">${name}</option>`;
-            }).join('');
-    }
-
-    // 2. ÜRÜN TÜRLERİNİ DOLDUR (19 Veriyi Buraya Basıyoruz)
-    if (typeSelect) {
-        // window.data.productTypes admin panelinde kaydettiğin listedir
-        const types = window.data?.productTypes || [];
-
-        if (types.length > 0) {
-            typeSelect.innerHTML = '<option value="">Tür Seçiniz...</option>' +
-                types.map(t => {
-                    // Admin panelinde 'name' olarak kaydettiğin için t.name kullanıyoruz
-                    const typeName = typeof t === 'object' ? t.name : t;
-                    return `<option value="${typeName}">${typeName}</option>`;
-                }).join('');
-        } else {
-            typeSelect.innerHTML = '<option disabled>Türler yüklenemedi (Veri Boş)...</option>';
-        }
-    }
 };
 
 // --- TABLO RENDER ---
@@ -1463,7 +1382,6 @@ window.renderMyApprovals = function () {
 
 
 // edm-workflow.js'nin EN ALTINA ekle
-window.initEBYSModal = initEBYSModal;
 
 // --- İŞ AKIŞI ŞABLONLARI (WORKFLOW TEMPLATES) ---
 window.openTemplateModal = function (id = null) {
