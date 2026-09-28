@@ -1148,6 +1148,27 @@ window.onReqTypeChange = function () {
     }
 };
 
+// [WHY]: b3'te iki şema var: çıkış formu rafNo/urunTuru/urunAciklama/adet/not/tarih yazıyor; talep onayı ve admin zimmeti
+//        shelfNo/productType/description/sarfAdet/note/date yazıyor. Tablo yalnız ilkini okuduğu için yeni kayıtlarda
+//        yalnız Alan Kişi / Tarih / SN doluyordu. (Tek kanonik şema Faz 3 işi; burada okuyucu iki şemayı birleştirir.)
+// [HOW]: Alan başına eski → yeni sırayla okunur; ürün türü yeni kayıtta yoksa productId + sourceRepo ile stok kaleminden bulunur.
+window.normalizeB3Row = function (item) {
+    const repo = item.sourceRepo || item.kaynakDepo;
+    const product = item.productId != null && (repo === 'b1' || repo === 'b2')
+        ? (window.data[repo] || []).find(p => String(p.id) === String(item.productId)) : null;
+    const pick = (...vals) => vals.find(v => v !== undefined && v !== null && String(v).trim() !== '');
+    return {
+        raf: pick(item.rafNo, item.shelfNo, product?.raf) ?? '-',
+        tur: pick(item.urunTuru, product?.tür, product?.type) ?? '-',
+        urun: pick(item.urunAciklama, item.productType, product?.ürün) ?? '-',
+        sn: pick(item.sn) ?? '-',
+        adet: pick(item.adet, item.sarfAdet) ?? 0,
+        not: pick(item.not, item.note) ?? '-',
+        alanKisi: pick(item.alanKisi, item.person, item.personel) ?? '-',
+        tarih: pick(item.tarih, item.date) ?? '-',
+    };
+};
+
 // Sekme B3 PDF/Excel & Diğer araçlar
 function renderExitTable() {
     const tbody = document.querySelector('#tableB3 tbody');
@@ -1159,15 +1180,16 @@ function renderExitTable() {
     }
     const rowsHtml = window.data.b3.map((item, index) => {
         const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+        const row = window.normalizeB3Row(item);
         return `<tr class="${isPassive ? 'passive-row' : ''}">
-            <td>${escapeHtml(item.rafNo || '-')}</td>
-            <td>${escapeHtml(item.urunTuru || '-')}</td>
-            <td>${escapeHtml(item.urunAciklama || '-')}</td>
-            <td>${escapeHtml(item.sn || '-')}</td>
-            <td>${escapeHtml(item.adet || 0)}</td>
-            <td>${escapeHtml(item.not || '-')}</td>
-            <td>${escapeHtml(item.alanKisi || '-')}</td>
-            <td>${escapeHtml(item.tarih || '-')}</td>
+            <td>${escapeHtml(row.raf)}</td>
+            <td>${escapeHtml(row.tur)}</td>
+            <td>${escapeHtml(row.urun)}</td>
+            <td>${escapeHtml(row.sn)}</td>
+            <td>${escapeHtml(row.adet)}</td>
+            <td>${escapeHtml(row.not)}</td>
+            <td>${escapeHtml(row.alanKisi)}</td>
+            <td>${escapeHtml(row.tarih)}</td>
             <td>
                 <button class="pdf-btn" onclick="generateZimmetPDF(${index})">PDF</button>
                 <button class="delete-btn" onclick="if(validateAdminAction()) deleteB3Row(${index})">Sil</button>
