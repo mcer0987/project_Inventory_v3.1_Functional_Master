@@ -665,6 +665,68 @@ const SCENARIOS = {
         return result;
     },
 
+    // Saha bulgusu (screenshot) · workflowTemplates listener race + step-status display.
+    // Real read of the existing workflowTemplates doc (proves the onSnapshot no longer dies on permission-denied);
+    // step-badge scenario runs on in-memory purchaseOrders data only (nothing written).
+    async ebysWorkflowDisplay(page) {
+        return page.evaluate(async () => {
+            const out = {};
+
+            // 1) Listener race (EBYS-09 saha takibi): must populate window.templates without a permission warning,
+            //    for ANY authenticated session (not just admin) — the collection allows read to any authenticated user.
+            const warnings = [];
+            const origWarn = console.warn;
+            console.warn = (...a) => { warnings.push(a.join(' ')); origWarn.apply(console, a); };
+            await new Promise(r => setTimeout(r, 300));
+            console.warn = origWarn;
+            out.templatesLoaded = Array.isArray(window.templates) && window.templates.length > 0;
+            out.noPermissionWarning = !warnings.some(w => /workflowTemplates/.test(w));
+
+            // 2) Step display: 2 approved + 1 rejected must NOT all render as rejected (screenshot bug), and each
+            //    badge's background must differ from its text color (contrast bug).
+            // viewWorkflow always calls fixWorkflowCurrentStep(item, true), which always writes 'purchaseOrders'
+            // regardless of whether anything changed — saveData is stubbed so this in-memory scenario writes nothing.
+            const origSave = window.saveData;
+            window.saveData = async () => true;
+            const orig = { po: window.data.purchaseOrders };
+            const id = Date.now(); // viewWorkflow/openPurchaseDetail compare with Number(x.id) === Number(id)
+            window.data.purchaseOrders = [...(orig.po || []), {
+                id, urun: 'FT Ürün', evrakNo: 'SAT-FT', talepEden: 'FT', tarih: '01.01.2026', durum: 'Reddedildi', akis: [],
+                workflow: {
+                    id: 'wf_' + id, started: true, finished: true, currentStep: 2, currentState: 'cancelled',
+                    steps: [
+                        { user: 'A', tip: 'Paraf', status: 'approved', date: '01.01.2026' },
+                        { user: 'B', tip: 'Paraf', status: 'approved', date: '01.01.2026' },
+                        { user: 'C', tip: 'Olur (E-İmza)', status: 'rejected', note: 'x', date: '01.01.2026' },
+                    ], history: []
+                }
+            }];
+            await window.viewWorkflow(id);
+            const body = document.getElementById('workflowBody');
+            const badges = [...body.querySelectorAll('span')]
+                .filter(s => ['Onaylandı', 'Reddedildi', 'Bekliyor', 'Sırada', 'Değerlendirilmedi'].includes(s.textContent.trim()))
+                .map(s => { const cs = getComputedStyle(s); return { text: s.textContent.trim(), bg: cs.backgroundColor, color: cs.color }; });
+            out.stepBadges = badges.map(b => b.text);
+            out.badgesContrastOk = badges.length > 0 && badges.every(b => b.bg !== b.color);
+            window.closeWorkflowModal();
+            window.data.purchaseOrders = orig.po;
+
+            // 3) Purchase modal history (_purWorkflowHTML): no leftover hardcoded hex colors.
+            window.data.purchaseOrders = [...(orig.po || []), {
+                id, urun: 'FT Ürün', evrakNo: 'SAT-FT', talepEden: 'FT', tarih: '01.01.2026',
+                akis: [{ islem: 'Talep Oluşturuldu', yapan: 'FT', tarih: '01.01.2026 10:00:00' }], workflow: { started: false, steps: [] }
+            }];
+            window.openPurchaseDetail(id, 'view');
+            await new Promise(r => setTimeout(r, 100));
+            out.purchaseHistoryNoHardcodedHex = !/#1e293b|#94a3b8|#64748b|#f8fafc|#e2e8f0|#e0e7ff/i.test(document.getElementById('purWorkflowSection').innerHTML);
+            window.closePurchaseModal();
+            window.data.purchaseOrders = orig.po;
+            window.saveData = origSave;
+
+            return out;
+        });
+    },
+
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
     async systemConfigScope(page) {
         return page.evaluate(async () => {

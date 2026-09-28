@@ -955,7 +955,7 @@ window.inventoryManagementModule = {
           ${ events.length > 0 ? `
           <div style="margin-bottom:16px; padding:12px 16px; background:#f0fdf4; border:1px solid #86efac; border-radius:10px; display:flex; align-items:center; gap:8px;">
             <i class="fas fa-info-circle" style="color:#16a34a;"></i>
-            <span style="font-size:13px; color:#166534;">Bu cihaz <b>${events.length}</b> kez islem gormust. Kronolojik sirayla listelenmektedir.</span>
+            <span style="font-size:13px; color:#166534;">Bu cihaz <b>${events.length}</b> kez islem gormustür. Kronolojik sirayla listelenmektedir.</span>
           </div>` : '' }
           <div style="overflow-x:auto;">
             <table style="width:100%; border-collapse:collapse; font-size:13px;">
