@@ -663,120 +663,116 @@
     };
 
     // Tekerrür (Birebir Kopya) Kayıtları Temizleyici
-    // [WHY]: Veritabanında yanlışlıkla ya da çift import/kayıt sebebiyle oluşan birebir kopya ürünlerin temizlenmesi.
-    // [HOW]: Heuristic eşleşme ile id ve önbellek index alanları hariç tüm alanları veya seri numarası birebir aynı olan kopyaları tespit eder.
-    //        V2 Batch mimarisine sadık kalarak (window.saveData) silme işlemini güvenli şekilde yapar.
-    window.vipCleanDuplicates = async function() {
-        if (!window.userAuth) {
-            alert("Oturum yetkiniz yok!");
+    // [WHY]: VIP-01: seri no kuralı b3 hareket defterine de uygulanıyordu; aynı cihazın zimmet → iade → yeniden zimmet
+    //        kayıtlarından en yenisi (çoğunlukla aktif zimmet) siliniyordu; "N/A", "--", "bilinmiyor" gibi yer tutucular
+    //        farklı ürünleri birleştiriyordu; onay kutusu yalnız toplam sayıyı gösteriyordu.
+    //        VIP-02: silme, onaydan ÖNCE alınmış kopyayla üç koleksiyonun tamamını yeniden yazıyordu (dialog açıkken gelen
+    //        kayıtlar silinir, düzenlemeler ezilirdi); başarısızlıkta da "başarıyla silindi" deniyordu.
+    // [HOW]: Yalnız B1/B2 taranır (b3 kapsam dışı). Yer tutucu seri numaraları boş sayılır. Onay kutusunda depo bazında
+    //        sayı + ilk satırların önizlemesi gösterilir. Onaydan SONRA güncel diziden yeniden hesaplanır ve yalnız
+    //        önizlemede sayılan VE hâlâ kopya olan kayıtlar id ile silinir (başka hiçbir doküman yazılmaz).
+    //        Çift tıklama kilidi, yalnız Firebase admin oturumu, sonuç doğru bildirilir.
+    const _DUP_COLLECTIONS = ['b1', 'b2'];
+    const _DUP_PREVIEW_ROWS = 10;
+    const _PLACEHOLDER_SERIALS = new Set(['yok', 'none', 'null', 'undefined', 'n/a', 'na', 'n.a.', 'bilinmiyor', 'belirsiz',
+        'tanımsız', 'tanimsiz', 'unknown', 'sn yok', 'seri no yok', '?', 'x']);
+
+    const _normSerial = function (raw) {
+        const s = String(raw ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
+        if (!s || _PLACEHOLDER_SERIALS.has(s) || /^[-_.\/*\s]+$/.test(s) || /^0+$/.test(s)) return '';
+        return s;
+    };
+
+    const _dupSignature = function (item) {
+        return JSON.stringify(Object.keys(item)
+            .filter(k => k !== 'id' && !k.startsWith('_'))
+            .sort()
+            .map(k => [k, typeof item[k] === 'string' ? item[k].trim() : (item[k] ?? '')]));
+    };
+
+    // Liste sırasındaki ilk kayıt tutulur; sonrakiler { colName, item, reason } olarak döner.
+    const _findDuplicates = function (colName) {
+        const seenSerial = new Set(), seenSig = new Set(), dups = [];
+        (window.data?.[colName] || []).forEach(item => {
+            if (!item || typeof item !== 'object' || item.id == null || item.id === '') return;
+            const serial = _normSerial(item.seriNo ?? item.serialNo ?? item.seri ?? item.sn);
+            const sig = _dupSignature(item);
+            if (serial && seenSerial.has(serial)) { dups.push({ colName, item, reason: 'Aynı seri no' }); return; }
+            if (seenSig.has(sig)) { dups.push({ colName, item, reason: 'Birebir kopya' }); return; }
+            if (serial) seenSerial.add(serial);
+            seenSig.add(sig);
+        });
+        return dups;
+    };
+
+    const _dupKey = d => `${d.colName}|${d.item.id}`;
+    const _dupAlert = (msg, type) => { if (typeof showAppAlert === 'function') showAppAlert(msg, type); else alert(msg); };
+    let _dupCleaning = false;
+
+    window.vipCleanDuplicates = async function (btn) {
+        if (_dupCleaning) return;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error');
             return;
         }
-
-        let totalDuplicates = 0;
-        const collections = ['b1', 'b2', 'b3'];
-        const uniqueDataMap = {};
-
-        // 1. Tarama ve Tekerrür Sayısını Hesaplama
-        for (const colName of collections) {
-            const items = window.data && window.data[colName] ? window.data[colName] : [];
-            const seenSignatures = new Set();
-            const seenSerials = new Set();
-            const uniqueItems = [];
-
-            items.forEach(item => {
-                if (!item || typeof item !== 'object') return;
-
-                const serialRaw = item.seriNo || item.serialNo || item.seri || item.sn || "";
-                const serial = String(serialRaw).trim().toLocaleLowerCase('tr-TR');
-                let isDuplicate = false;
-
-                // Seri Numarası Kontrolü
-                if (serial !== "" && serial !== "yok" && serial !== "-" && serial !== "0") {
-                    if (seenSerials.has(serial)) {
-                        isDuplicate = true;
-                    } else {
-                        seenSerials.add(serial);
-                    }
-                }
-
-                // Milimetrik Eşleşme Kontrolü (sadece id ve önbellek index alanları hariç)
-                if (!isDuplicate) {
-                    const cleanObj = {};
-                    const keys = Object.keys(item)
-                        .filter(k => k !== 'id' && !k.startsWith('__') && !k.startsWith('_'))
-                        .sort();
-
-                    for (const key of keys) {
-                        let val = item[key];
-                        if (typeof val === 'string') {
-                            val = val.trim();
-                        }
-                        cleanObj[key] = val ?? "";
-                    }
-
-                    const signature = JSON.stringify(cleanObj);
-
-                    if (seenSignatures.has(signature)) {
-                        isDuplicate = true;
-                    } else {
-                        seenSignatures.add(signature);
-                    }
-                }
-
-                if (isDuplicate) {
-                    totalDuplicates++;
-                } else {
-                    uniqueItems.push(item);
-                }
-            });
-
-            uniqueDataMap[colName] = uniqueItems;
-        }
-
-        // 2. Kullanıcı Bildirimi ve Onay
-        if (totalDuplicates === 0) {
-            if (typeof showAppAlert === 'function') {
-                showAppAlert("🔍 Tekerrür eden (birebir kopya) kayıt bulunamadı.", "info");
-            } else {
-                alert("🔍 Tekerrür eden (birebir kopya) kayıt bulunamadı.");
-            }
-            return;
-        }
-
-        const confirmTitle = "Tekerrür Temizliği Onayı";
-        const confirmMsg = `Bulunan Birebir Kopya (Tekerrür) Sayısı: ${totalDuplicates} adet.\nBu kopya kayıtları kalıcı olarak veritabanından silmek istiyor musunuz?`;
-        
-        let onay = false;
-        if (typeof showCustomConfirm === 'function') {
-            onay = await showCustomConfirm(confirmTitle, confirmMsg);
-        } else {
-            onay = confirm(confirmMsg);
-        }
-
-        if (!onay) return;
-
-        // 3. V2 Batch Mimarisi İle Kayıt ve Silme
+        _dupCleaning = true;
+        if (btn) btn.disabled = true;
         try {
-            for (const colName of collections) {
-                if (uniqueDataMap[colName]) {
-                    await window.saveData(colName, uniqueDataMap[colName]);
-                }
+            // 1. Önizleme
+            const preview = _DUP_COLLECTIONS.flatMap(_findDuplicates);
+            if (preview.length === 0) {
+                _dupAlert('🔍 B1/B2 depolarında tekerrür eden kayıt bulunamadı. (B3 hareket defteri taranmaz.)', 'info');
+                return;
+            }
+            const esc = window.escapeHtml;
+            const perCol = _DUP_COLLECTIONS.map(c => `${c.toUpperCase()}: <b>${preview.filter(d => d.colName === c).length}</b>`).join(' · ');
+            const rows = preview.slice(0, _DUP_PREVIEW_ROWS).map(d => `<tr>
+                <td>${esc(d.colName.toUpperCase())}</td><td>${esc(d.item.ürün || d.item.name || '-')}</td>
+                <td>${esc(d.item.raf || '-')}</td><td>${esc(d.item.seriNo || d.item.sn || '-')}</td>
+                <td>${esc(d.item.adet ?? '-')}</td><td>${esc(d.reason)}</td></tr>`).join('');
+            const more = preview.length > _DUP_PREVIEW_ROWS ? `<div style="margin-top:6px;">… ve ${preview.length - _DUP_PREVIEW_ROWS} kayıt daha.</div>` : '';
+            const message = `<div style="text-align:left;">
+                <div>Silinecek kayıt: <b>${preview.length}</b> (${perCol}). Her grubun ilk kaydı tutulur. B3 hareket defteri kapsam dışıdır.</div>
+                <div style="max-height:260px; overflow:auto; margin-top:8px;">
+                  <table style="width:100%; font-size:12px; border-collapse:collapse;">
+                    <thead><tr><th>Depo</th><th>Ürün</th><th>Raf</th><th>SN</th><th>Adet</th><th>Neden</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                  </table>${more}
+                </div>
+                <div style="margin-top:8px;">Bu kayıtlar kalıcı olarak silinecek. Devam edilsin mi?</div></div>`;
+            const ok = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('Tekerrür Temizliği Onayı', message)
+                : confirm(`${preview.length} tekerrür kaydı silinsin mi?`);
+            if (ok !== true) return;
+
+            // 2. Onaydan SONRA güncel diziden yeniden hesapla; yalnız önizlemede sayılan ve hâlâ kopya olanlar silinir
+            const shown = new Set(preview.map(_dupKey));
+            const toDelete = _DUP_COLLECTIONS.flatMap(_findDuplicates).filter(d => shown.has(_dupKey(d)));
+            const skipped = preview.length - toDelete.length;
+            if (toDelete.length === 0) {
+                _dupAlert('Veriler bu arada değişti; silinecek kayıt kalmadı. Hiçbir şey silinmedi.', 'warning');
+                return;
             }
 
-            if (typeof showAppAlert === 'function') {
-                showAppAlert(`🧹 ${totalDuplicates} adet tekerrür eden kopya kayıt başarıyla silindi!`, "success");
-            } else {
-                alert(`🧹 ${totalDuplicates} adet tekerrür eden kopya kayıt başarıyla silindi!`);
+            // 3. Yalnız bu dokümanlar silinir
+            console.info('[vipCleanDuplicates] silinecek:', toDelete.map(_dupKey).join(', '), '| atlanan:', skipped);
+            const { doc, writeBatch } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+            for (let i = 0; i < toDelete.length; i += 450) {
+                const batch = writeBatch(window.fireDb);
+                toDelete.slice(i, i + 450).forEach(d => batch.delete(
+                    doc(window.fireDb, window.COLLECTION_ROOT, d.colName, 'items', String(d.item.id).replace(/\//g, '_'))));
+                await batch.commit();
             }
 
-            if (typeof _appendLog === 'function') {
-                _appendLog('success', [`🧹 TEKERRÜR TEMİZLİĞİ: Toplam ${totalDuplicates} kopya kayıt silindi.`]);
-            }
+            const note = skipped > 0 ? ` (${skipped} kayıt bu arada değiştiği için silinmedi.)` : '';
+            _dupAlert(`🧹 ${toDelete.length} tekerrür kaydı silindi.${note}`, 'success');
+            _appendLog('success', [`🧹 TEKERRÜR TEMİZLİĞİ: ${toDelete.length} kayıt silindi (${toDelete.map(_dupKey).join(', ')}).${note}`]);
         } catch (error) {
-            console.error("Tekerrür temizlik hatası:", error);
-            if (typeof showAppAlert === 'function') {
-                showAppAlert("Temizlik sırasında bir hata oluştu: " + error.message, "error");
-            }
+            console.error('Tekerrür temizlik hatası:', error);
+            _dupAlert('Temizlik başarısız; kayıt silinmedi ya da yalnız bir kısmı silindi: ' + error.message, 'error');
+        } finally {
+            _dupCleaning = false;
+            if (btn) btn.disabled = false;
         }
     };
 
