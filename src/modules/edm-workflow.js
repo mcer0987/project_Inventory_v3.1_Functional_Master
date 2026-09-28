@@ -929,7 +929,8 @@ const _normName = s => String(s || '').trim().toLocaleLowerCase('tr-TR');
 
 function _canActOnCurrentStep(item) {
     const wf = item && item.workflow;
-    if (!wf || wf.finished) return false;
+    // Durdurulmuş (askıya alınmış) akışta sıradaki kişi onay/red veremez (EBYS-13 çifti).
+    if (!wf || wf.finished || wf.started === false || wf.currentState === 'suspended') return false;
     const step = (wf.steps || [])[wf.currentStep || 0];
     if (!step) return false;
     if (typeof window.isDbAdmin === 'function' && window.isDbAdmin()) return true;
@@ -1180,51 +1181,53 @@ window.rejectStep = async function (id) {
     }
 };
 
+// [WHY]: stopWorkflow hiçbir zaman başarılı olamıyordu: geçiş tablosunda aktif durumlardan 'suspended'a geçiş yoktu; akis dizisi
+//        olmayan talepte çöküyor, geçiş ayrıca tüm diziyi yazıyor ve sonuç kontrol edilmiyordu (EBYS-13).
+// [HOW]: Yalnız Firebase admin oturumu durdurur; yalnız başlamış ve bitmemiş akış. Geçiş persist:false ile yapılır, talep
+//        güncel dizideki yerine konularak tek seferde yazılır; hata "başarılı" gösterilmez. Durdurulan akışta adım sahibi
+//        işlem yapamaz; talep "Durduruldu" olur ve admin tablosunda yeniden "Akışı Başlat" ile başlatılabilir (geçmiş korunur).
 window.stopWorkflow = async function (id) {
+    const lockKey = 'stop_' + String(id);
+    if (_workflowActionsInFlight.has(lockKey)) return;
+    _workflowActionsInFlight.add(lockKey);
+    const notify = (msg, type) => { if (typeof showAppAlert === 'function') showAppAlert(msg, type); else alert(msg); };
     try {
-        if (!confirm("Akış durdurulsun mu?")) return;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { notify('Akışı yalnız yönetici durdurabilir.', 'error'); return; }
 
-        const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
-        if (!item || !item.workflow) return;
+        const find = () => (window.data.purchaseOrders || []).find(x => String(x.id) === String(id));
+        const initial = find();
+        if (!initial || !initial.workflow) { notify('Talep veya akış bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        if (!initial.workflow.started || initial.workflow.finished) { notify('Yalnız devam eden bir akış durdurulabilir.', 'warning'); return; }
 
-        const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+        const ok = typeof showCustomConfirm === 'function'
+            ? await showCustomConfirm('Akışı Durdur', 'Akış askıya alınacak; sıradaki onaylayıcı işlem yapamayacak. Daha sonra "Akışı Başlat" ile yeniden başlatılabilir. Devam edilsin mi?')
+            : window.confirm('Akış durdurulsun mu?');
+        if (ok !== true) return;
 
-        // State machine ile suspended state'ine geç
-        await window.transitionWorkflowState(
-            item.workflow.id,
-            window.WorkflowEngine.states.SUSPENDED,
-            actor,
-            "Akış askıya alındı"
-        );
+        // Onay kutusu açıkken snapshot gelmiş olabilir: güncel kayıt ve durum yeniden kontrol edilir
+        const item = find();
+        if (!item || !item.workflow || !item.workflow.started || item.workflow.finished) { notify('Akış bu arada değişti; işlem iptal edildi.', 'warning'); return; }
 
-        // Backward compatibility için eski mantığı da güncelle
+        const actor = window.currentUser?.name || "Yönetici";
+        await window.transitionWorkflowState(item.workflow.id, window.WorkflowEngine.states.SUSPENDED, actor, "Akış askıya alındı", { persist: false });
+
         item.workflow.started = false;
+        item.workflow.suspendedAt = new Date().toISOString();
+        item.workflow.suspendedBy = actor;
         item.durum = "Durduruldu";
+        if (!Array.isArray(item.akis)) item.akis = [];
+        item.akis.push({ islem: "⏸️ Akış durduruldu", yapan: actor, tarih: new Date().toLocaleString('tr-TR') });
 
-        // Eski akış sistemini de güncelle
-        item.akis.push({
-            islem: "Akış durduruldu",
-            yapan: actor,
-            tarih: new Date().toLocaleString('tr-TR')
-        });
-
-        // Kaydet ve UI güncelle
-        // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
-
+        const saved = await window.saveData('purchaseOrders', (window.data.purchaseOrders || []).map(x => String(x.id) === String(id) ? item : x));
         if (typeof refreshUI === "function") refreshUI();
         if (typeof renderPurchaseModule === "function") renderPurchaseModule();
-
-        // Success notification
-        if (typeof showAppAlert === 'function') {
-            showAppAlert("Akış durduruldu.", "info");
-        }
-
+        if (saved === false) notify('Akış durdurulamadı: kayıt yazılamadı.', 'error');
+        else notify("Akış durduruldu (askıya alındı).", "info");
     } catch (error) {
         console.error('Akış durdurulamadı:', error);
-        if (typeof showAppAlert === 'function') {
-            showAppAlert(`Akış durdurulamadı: ${error.message}`, "error");
-        }
+        notify(`Akış durdurulamadı: ${error.message}`, "error");
+    } finally {
+        _workflowActionsInFlight.delete(lockKey);
     }
 };
 
@@ -1599,12 +1602,13 @@ window.WorkflowEngine = {
     },
 
     // State geçiş kuralları
+    // [WHY]: Hiçbir aktif durumdan 'suspended'a geçiş yoktu; stopWorkflow her zaman 'Geçersiz state geçişi' ile düşüyordu (EBYS-13).
     transitions: {
-        'initiation': ['manager_approval', 'completed', 'cancelled'],
-        'manager_approval': ['hr_approval', 'finance_approval', 'completed', 'cancelled', 'initiation'],
-        'hr_approval': ['finance_approval', 'director_approval', 'completed', 'cancelled', 'manager_approval'],
-        'finance_approval': ['director_approval', 'completed', 'cancelled', 'manager_approval'],
-        'director_approval': ['completed', 'cancelled', 'finance_approval'],
+        'initiation': ['manager_approval', 'completed', 'cancelled', 'suspended'],
+        'manager_approval': ['hr_approval', 'finance_approval', 'completed', 'cancelled', 'initiation', 'suspended'],
+        'hr_approval': ['finance_approval', 'director_approval', 'completed', 'cancelled', 'manager_approval', 'suspended'],
+        'finance_approval': ['director_approval', 'completed', 'cancelled', 'manager_approval', 'suspended'],
+        'director_approval': ['completed', 'cancelled', 'finance_approval', 'suspended'],
         'completed': ['initiation'],
         'cancelled': ['initiation'],
         'suspended': ['initiation', 'cancelled', 'manager_approval']
