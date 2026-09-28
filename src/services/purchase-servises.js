@@ -1007,36 +1007,9 @@ window.uploadFiles = async function (files) {
     }
 }
 
-window.archiveOldRequests = async function () {
-
-    const active = [];
-    const archive = [];
-
-    (window.data.purchaseOrders || []).forEach(item => {
-
-        if (
-            item.durum === "Onaylandı" ||
-            item.durum === "Reddedildi"
-        ) {
-            archive.push(item);
-        } else {
-            active.push(item);
-        }
-    });
-
-    window.data.purchaseOrders = active;
-
-    if (!window.data.archive)
-        window.data.archive = [];
-
-    window.data.archive.push(...archive);
-
-    // [BUGFIX] Bug 5: Targeted save for purchaseOrders and archive individually
-    await window.saveData('purchaseOrders', window.data.purchaseOrders);
-    await window.saveData('archive', window.data.archive);
-
-    renderPurchaseModule();
-}
+// [WHY]: archiveOldRequests onaylanan/reddedilen talepleri purchaseOrders'dan siliyor, dinlenmeyen ve kaydedilmeyen 'archive'
+//        koleksiyonuna "taşıyordu" (saveData listesinde yok → sessiz no-op): çağrılırsa talepler kalıcı olarak kaybolurdu (DATA-10).
+//        Hiçbir yerden çağrılmıyordu; Karar K12 verilene kadar kaldırıldı.
 
 // ─────────────────────────────────────────────────────────────
 // TALEP DETAY MODAL — GÖRÜNTÜLE / DÜZENLE
