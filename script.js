@@ -543,7 +543,7 @@ function renderMyRequestsTable() {
     );
 
     if (myReqs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Henüz bir talebiniz bulunmuyor.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Henüz bir talebiniz bulunmuyor.</td></tr>';
         return;
     }
 
@@ -572,6 +572,7 @@ function renderMyRequestsTable() {
                 <small style="color: #666; font-weight: bold;">Miktar: ${escapeHtml(req.adet || 1)} Adet</small>
             </td>
             <td style="text-align: center; vertical-align: middle;">${statusHTML}</td>
+            <td style="text-align: center; vertical-align: middle;">${escapeHtml(req.teslimTarihi || '-')}</td>
             <td style="text-align: center; vertical-align: middle;">
                 ${isCompleted ?
                 `<div class="status-badge-pill status-completed-pill" style="min-width: 120px; justify-content: center; margin: 0 auto;">Teslim Alındı</div>` :
