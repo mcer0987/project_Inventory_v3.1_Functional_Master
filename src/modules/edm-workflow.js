@@ -4,10 +4,15 @@ import { doc, setDoc, getDocs, collection, getDoc, onSnapshot, deleteDoc } from 
 // [HOW]: Bunun yerine firebase-handler.js icinde olusturulmus olan 'window.fireDb' nesnesini donduren bir yardimci tanimliyoruz.
 const getFirestore = () => window.fireDb;
 
-// [WHY]: Sayfa yuklendiginde window.fireDb henuz hazir olmayabilir.
-// [HOW]: Kisa bir timeout ile fireDb'nin hazir olmasini bekleyip sonra listener'i baslatiyoruz.
+// [WHY]: Sayfa yuklendiginde window.fireDb henuz hazir olmayabilir. Ayrica onSnapshot, anonim/admin oturum acilmadan
+//        (window.userAuth) hemen kayit oluyordu: rules "isAuthenticated()" istedigi icin permission-denied aliniyor,
+//        Firestore bu dinleyiciyi kalici olarak kapatiyor ve oturum acildiktan sonra bile bir daha hic tetiklenmiyordu.
+//        Sonuc: Firestore'da var olan sablonlar hem "Akisi Baslat" listesinde hem "Tanimlar > Is Akislari" sekmesinde
+//        hic gorunmuyordu; yalnizca dogrudan setDoc/deleteDoc yazma islemleri (sablon olusturma/silme) calisiyordu.
+// [HOW]: fireDb'nin yaninda window.userAuth da beklenir (startRealtimeSync'in ayni deseni); boylece dinleyici oturum
+//        gercekten acildiktan sonra kaydolur ve permission-denied'a hic dusmez.
 function initWorkflowListener() {
-    if (!window.fireDb) {
+    if (!window.fireDb || !window.userAuth) {
         setTimeout(initWorkflowListener, 50);
         return;
     }
