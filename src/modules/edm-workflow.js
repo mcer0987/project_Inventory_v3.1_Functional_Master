@@ -404,6 +404,7 @@ window.renderManualSteps = function () {
             <td>
                 <div class="position-relative w-100">
                     <input type="text" class="form-control workflow-select-ghost w-100" placeholder="Personel arayın veya yazın..." value="${escapeHtml(step.user)}"
+                           oninput="WorkflowState.tempManualSteps[${index}].user = this.value"
                            onkeyup="window.searchPersonnelForStart(this.value, ${index})" style="border:1px solid transparent;">
                     <div id="startManualResults_${index}" class="search-results-popover" style="display:none; position:absolute; width:100%; background:white; border:1px solid #e2e8f0; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:1000; max-height:200px; overflow-y:auto; top:100%;"></div>
                 </div>
@@ -532,19 +533,41 @@ window.selectPersonForWorkflow = function (index, name) {
 };
 
 // [BUGFIX] Bug 1 & Bug 2: Enforce authorization check & use targeted save to avoid permission-denied
+// [WHY]: Boş (veya listeden seçilmeden yazılmış, state'e hiç düşmeyen) onaylayıcıyla akış başlatılabiliyordu; kimsenin
+//        sırası gelmeyen adım akışı sonsuza dek takılı bırakıyordu. Şablon modunda ekranda düzenlenen adımlar yok sayılıp
+//        şablonun kendi adımları kullanılıyordu (EBYS-09).
+// [HOW]: Yazılan ad state'e anında yazılır. Başlatmadan önce ekrandaki her adımın onaylayıcısı dolu ve personel listesinde
+//        kayıtlı olmalı (ad kayıtlı biçimine çevrilir); şablon modunda da ekrandaki adımlar (sırayla şablon meta verisiyle) kullanılır.
+function _resolveWorkflowSteps(steps) {
+    if (!Array.isArray(steps) || steps.length === 0) return { error: 'En az bir onay adımı ekleyin.' };
+    const norm = v => String(v || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
+    const known = new Map([...(window.data.personel || []), ...(window.data.staff || [])]
+        .map(p => String(p?.name || p?.adSoyad || '').trim()).filter(Boolean).map(n => [norm(n), n]));
+    const resolved = [];
+    for (let i = 0; i < steps.length; i++) {
+        const typed = String(steps[i].user || '').trim();
+        if (!typed) return { error: `${i + 1}. adımın onaylayıcısı boş.` };
+        const name = known.get(norm(typed));
+        if (!name) return { error: `${i + 1}. adım: "${typed}" personel listesinde yok. Listeden seçin.` };
+        resolved.push({ ...steps[i], user: name, tip: steps[i].tip || 'Paraf' });
+    }
+    return { steps: resolved };
+}
+
 window.confirmStartWorkflow = async function () {
 
     const id = document.getElementById('startWorkflowReqId').value;
     const req = window.data.purchaseOrders.find(x => String(x.id) === String(id));
     if (!req) return;
 
+    const checked = _resolveWorkflowSteps(WorkflowState.tempManualSteps);
+    if (checked.error) {
+        if (typeof showAppAlert === 'function') showAppAlert(checked.error, 'warning'); else alert(checked.error);
+        return;
+    }
+
     // 🔥 MANUEL MOD
     if (WorkflowState.isManualMode) {
-
-        if (!WorkflowState.tempManualSteps.length) {
-            alert("En az bir adım ekleyin");
-            return;
-        }
 
         const prevHist = req.workflow?.history && Array.isArray(req.workflow.history) ? req.workflow.history : [];
         req.workflow = {
@@ -553,7 +576,7 @@ window.confirmStartWorkflow = async function () {
             currentStep: 0,
             finished: false,
             currentState: window.WorkflowEngine.states.INITIATION,
-            steps: WorkflowState.tempManualSteps.map(s => ({
+            steps: checked.steps.map(s => ({
                 user: s.user,
                 tip: s.tip,
                 status: "pending",
@@ -587,7 +610,12 @@ window.confirmStartWorkflow = async function () {
             return;
         }
 
-        const newWf = window.createWorkflowFromTemplate(tpl);
+        // Ekranda düzenlenen adımlar kullanılır; aynı sıradaki şablon adımının meta verisi (paralel grup vb.) korunur.
+        const tplSteps = tpl.steps || [];
+        const newWf = window.createWorkflowFromTemplate({
+            ...tpl,
+            steps: checked.steps.map((s, i) => ({ ...(tplSteps[i] || {}), order: i, user: s.user, tip: s.tip }))
+        });
         // [BUGFIX] Bug 1: Preserve prior history cleanly on restart after withdraw
         if (req.workflow?.history && Array.isArray(req.workflow.history)) {
             newWf.history = [...req.workflow.history, ...newWf.history];
@@ -605,7 +633,10 @@ window.confirmStartWorkflow = async function () {
     });
 
     // [BUGFIX] Bug 1: Targeted save only to purchaseOrders (Prevents global batch permission error)
-    await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    if (await window.saveData('purchaseOrders', window.data.purchaseOrders) === false) {
+        if (typeof showAppAlert === 'function') showAppAlert('İş akışı kaydedilemedi. Bağlantınızı kontrol edin.', 'error');
+        return;
+    }
 
     window.closeStartWorkflowModal();
 
