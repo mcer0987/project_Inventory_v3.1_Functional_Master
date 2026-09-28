@@ -1033,7 +1033,7 @@ window.sendDraftInventoryRequest = async function (index) {
                     product.qty = newQty;
                     if (newQty <= 0) { product.durumu = "Tükendi"; product.status = "Tükendi"; }
                     const b3Entry = {
-                        id: Date.now() + Math.random(),
+                        id: window.makeId(), // DATA-12: ondalıklı Date.now()+Math.random() yerine
                         rafNo: product.raf || "-",
                         sutun: product.sütun || "-",
                         urunTuru: product.tür || product.type || "-",
