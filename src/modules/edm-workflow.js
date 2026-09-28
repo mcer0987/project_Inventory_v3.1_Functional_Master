@@ -720,29 +720,36 @@ window.viewWorkflow = async function (id) {
     const ds = getWorkflowStatus(item);
 
     // Adım meta - Status-based kontrol
+    // [WHY]: Bir adım reddedilince onu izleyen TÜM adımlar (o adımın kendisi dahil, currentStep'e kadar olanlar) kırmızı
+    //        "Reddedildi" gösteriliyordu — Süreç Geçmişi'nde 1. ve 2. adımın gerçekten onaylandığı görülse bile (statüsü
+    //        'approved'), akış iptal olduğu an ekranda hepsi reddedilmiş gibi boyanıyordu. Fonksiyonel olarak doğruydu
+    //        (akış durdu), ama kimin onayladığını görsel olarak yanlış anlatıyordu.
+    //        Ayrıca rozet (pill) arka planı ve yazı rengi AYNI değişkene ayarlanmıştı (background:m.border, color:m.color
+    //        ile ikisi de örn. var(--color-success)) — metin arka planla aynı renk olduğu için hiçbir temada okunmuyordu.
+    // [HOW]: Kırmızı yalnız fiilen reddedilen adımda (step.status === 'rejected'). Onaylanan adım her zaman yeşil kalır.
+    //        İptal edilen bir akışta reddedilen adımdan sonra sırası hiç gelmemiş adımlar (durumu hâlâ 'pending') nötr
+    //        "Değerlendirilmedi" rozetiyle gösterilir. Rozet artık --badge-*-bg/--badge-*-text çiftlerini kullanır (arka
+    //        plan ile metin farklı tonlar); bu çiftler hem açık hem koyu temada tanımlı.
     function stepMeta(step, stepIndex, item) {
-        // Step durumunu doğrudan step.status üzerinden kontrol et
         const stepStatus = step.status || 'pending';
         const currentStepIndex = item.workflow?.currentStep || 0;
         const isCurrentStep = currentStepIndex === stepIndex;
         const isPastStep = currentStepIndex > stepIndex;
+        const isCancelled = item.workflow?.currentState === window.WorkflowEngine?.states?.CANCELLED;
+        const isFinished = !!item.workflow?.finished;
 
-        // Red durumunu kontrol et
-        const isRejected = stepStatus === 'rejected' ||
-            (item.workflow?.currentState === window.WorkflowEngine?.states?.CANCELLED && stepIndex <= currentStepIndex);
-
-        // Onay durumunu kontrol et
-        const isApproved = stepStatus === 'approved' || isPastStep;
-
-        // Bekleyen durum
+        const isRejected = stepStatus === 'rejected';
+        const isApproved = stepStatus === 'approved' || (isPastStep && !isCancelled && !isFinished);
+        // Akış bitmiş/iptal olmuş ama bu adım ne onaylanmış ne reddedilmiş: sırası hiç gelmedi.
+        const isMoot = !isRejected && !isApproved && (isCancelled || isFinished);
         const isPending = stepStatus === 'pending' || stepStatus === 'waiting';
 
-        if (isRejected) return { icon: '❌', bg: 'var(--color-danger-light)', border: 'var(--color-danger)', color: 'var(--color-danger)', label: 'Reddedildi' };
-        if (isApproved) return { icon: '✅', bg: 'var(--color-success-light)', border: 'var(--color-success)', color: 'var(--color-success)', label: 'Onaylandı' };
-        if (isCurrentStep && isPending) return { icon: '⏳', bg: 'var(--color-primary-light)', border: 'var(--color-primary)', color: 'var(--color-primary)', label: 'Bekliyor' };
-        if (isPending) return { icon: '⭕', bg: 'var(--color-surface-alt)', border: 'var(--color-border-light)', color: 'var(--color-text-muted)', label: 'Sırada' };
+        if (isRejected) return { icon: '❌', bg: 'var(--color-danger-light)', border: 'var(--color-danger)', color: 'var(--color-danger)', badgeBg: 'var(--badge-rejected-bg)', badgeText: 'var(--badge-rejected-text)', label: 'Reddedildi' };
+        if (isApproved) return { icon: '✅', bg: 'var(--color-success-light)', border: 'var(--color-success)', color: 'var(--color-success)', badgeBg: 'var(--badge-approved-bg)', badgeText: 'var(--badge-approved-text)', label: 'Onaylandı' };
+        if (isMoot) return { icon: '⛔', bg: 'var(--color-surface-alt)', border: 'var(--color-border-light)', color: 'var(--color-text-muted)', badgeBg: 'var(--color-surface-alt)', badgeText: 'var(--color-text-muted)', label: 'Değerlendirilmedi' };
+        if (isCurrentStep && isPending) return { icon: '⏳', bg: 'var(--color-primary-light)', border: 'var(--color-primary)', color: 'var(--color-primary)', badgeBg: 'var(--badge-pending-bg)', badgeText: 'var(--badge-pending-text)', label: 'Bekliyor' };
 
-        return { icon: '⭕', bg: 'var(--color-surface-alt)', border: 'var(--color-border-light)', color: 'var(--color-text-muted)', label: 'Sırada' };
+        return { icon: '⭕', bg: 'var(--color-surface-alt)', border: 'var(--color-border-light)', color: 'var(--color-text-muted)', badgeBg: 'var(--color-surface-alt)', badgeText: 'var(--color-text-muted)', label: 'Sırada' };
     }
 
     const steps = item.workflow.steps || [];
@@ -770,7 +777,7 @@ window.viewWorkflow = async function (id) {
                     <div>
                         <div style="font-size:10px;font-weight:700;color:${escapeHtml(m.color)};text-transform:uppercase;letter-spacing:.5px;">${escapeHtml(tipLabel)}</div>
                         <div style="font-size:14px;font-weight:700;color:var(--color-text);margin:3px 0;">${escapeHtml(step.user || '—')}</div>
-                        <span style="font-size:11px;font-weight:600;background:${escapeHtml(m.border)};color:${escapeHtml(m.color)};padding:2px 10px;border-radius:20px;">${escapeHtml(m.label)}</span>
+                        <span style="font-size:11px;font-weight:600;background:${escapeHtml(m.badgeBg)};color:${escapeHtml(m.badgeText)};padding:2px 10px;border-radius:20px;">${escapeHtml(m.label)}</span>
                     </div>
                     ${canAct ? `
                     <div style="display:flex;gap:6px;flex-shrink:0;">
