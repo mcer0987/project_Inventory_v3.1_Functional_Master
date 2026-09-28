@@ -285,16 +285,21 @@ export const bulkDelete = async function (depo) {
     }
 };
 
-export const saveProduct = function (e) {
+// [WHY]: Düzenleme kaydı id'siz yeni bir objeyle değiştiriyordu: doküman silinip yeniden oluşuyor, limit/takip/B2 status kayboluyordu (DATA-04).
+// [HOW]: Kayıt id ile bulunur ve {...mevcut, ...form, id} ile birleştirilir; B2'de durum 'status' alanına yazılır;
+//        yalnız ilgili depo kaydedilir ve sonuç beklenir.
+export const saveProduct = async function (e) {
     if (e) e.preventDefault();
 
     const form = document.getElementById('productForm');
     if (!form) return;
 
     const editIndex = form.dataset.editIndex;
+    const editId = form.dataset.editId;
     const editRepo = form.dataset.editRepo || (document.querySelector('.tab-content.active')?.id || 'b1');
+    const isEdit = editIndex !== undefined && editIndex !== null && editIndex !== '';
 
-    const updatedItem = {
+    const formFields = {
         sütun:      document.getElementById('prodColumn')?.value || '',
         raf:        document.getElementById('prodShelf')?.value || '',
         tür:        document.getElementById('prodType')?.value || '',
@@ -307,14 +312,34 @@ export const saveProduct = function (e) {
         lastUpdate: new Date().getTime()
     };
 
-    if (editIndex !== undefined && editIndex !== null && editIndex !== '') {
-        window.data[editRepo][parseInt(editIndex)] = updatedItem;
+    const items = [...(window.data[editRepo] || [])];
+
+    if (isEdit) {
+        const idx = editId !== undefined && editId !== ''
+            ? items.findIndex(x => String(x.id) === String(editId))
+            : parseInt(editIndex, 10);
+        const existing = items[idx];
+        if (!existing) {
+            if (typeof window.showAppAlert === 'function') window.showAppAlert('Düzenlenen ürün bulunamadı; liste güncellenmiş olabilir.', 'error');
+            return;
+        }
+        const merged = { ...existing, ...formFields, id: existing.id };
+        if (editRepo === 'b2') {
+            merged.status = formFields.durumu;
+            if (existing.durumu === undefined) delete merged.durumu;
+        }
+        items[idx] = merged;
     } else {
-        if (!window.data[editRepo]) window.data[editRepo] = [];
-        window.data[editRepo].push(updatedItem);
+        const created = { id: `${editRepo}_${Date.now()}`, ...formFields };
+        if (editRepo === 'b2') created.status = formFields.durumu;
+        items.push(created);
     }
 
-    if (typeof window.saveData === 'function') window.saveData(window.data);
+    const ok = await window.saveData(editRepo, items);
+    if (ok === false) {
+        if (typeof window.showAppAlert === 'function') window.showAppAlert('Kayıt başarısız oldu. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
+        return;
+    }
 
     if (typeof window.renderTable === 'function') {
         const limit = (window.currentPage || 1) * (window.pageSize || 25);
@@ -354,54 +379,85 @@ export const toggleWatch = async function (depo, index) {
     console.groupEnd();
 };
 
+// [WHY]: ESM geçişinde saveRequest kayboldu; "Envanter Talep Et" formu var olmayan bir fonksiyonu çağırıp sayfayı yeniliyordu (ITSM-01).
+// [HOW]: Form alanları doğrulanır; yeni talep eklenir veya düzenlenen talep id ile bulunup birleştirilir; yalnız 'requests' yazılır.
+export const saveRequest = async function (event) {
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+
+    const alert = (msg, type) => { if (typeof window.showAppAlert === 'function') window.showAppAlert(msg, type); };
+    const user = window.getActiveUser();
+    if (!user) { alert('Talep oluşturmak için giriş yapmalısınız.', 'error'); return; }
+
+    const val = id => (document.getElementById(id)?.value || '').trim();
+    const urun = val('reqProdName');
+    const adet = parseInt(val('reqQty'), 10);
+    const talepTuru = val('reqType') || 'Kalıcı Zimmet';
+    const oncelik = val('reqPriority') || 'Orta';
+    const iadeTarihi = val('reqReturnDate');
+    const not = val('reqNote');
+
+    if (!urun) { alert('Lütfen talep edilen ürünü yazın.', 'warning'); return; }
+    if (!Number.isInteger(adet) || adet < 1) { alert('Adet en az 1 olmalıdır.', 'warning'); return; }
+    if (talepTuru === 'Geçici Zimmet') {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        if (!iadeTarihi || new Date(iadeTarihi + 'T00:00:00') <= today) {
+            alert('Geçici zimmet için bugünden sonraki bir iade tarihi seçin.', 'warning');
+            return;
+        }
+    }
+
+    const formFields = {
+        ürün: urun, adet, talepTuru, oncelik, not,
+        iadeTarihi: talepTuru === 'Geçici Zimmet' ? iadeTarihi : '',
+    };
+
+    const requests = [...(window.data.requests || [])];
+    const editId = window.editingReqId;
+    if (editId !== null && editId !== undefined) {
+        const idx = requests.findIndex(r => String(r.id) === String(editId));
+        if (idx === -1) { alert('Düzenlenen talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        requests[idx] = { ...requests[idx], ...formFields };
+    } else {
+        requests.unshift({
+            id: Date.now(),
+            ...formFields,
+            personel: user.name,
+            personelKodu: user.code || '',
+            durum: 'Beklemede',
+            tarih: typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR'),
+        });
+    }
+
+    if (await window.saveData('requests', requests) === false) {
+        alert('Talep kaydedilemedi. Bağlantınızı kontrol edip tekrar deneyin.', 'error');
+        return;
+    }
+
+    window.editingReqId = null;
+    window.editingReqIndex = null;
+    document.getElementById('requestForm')?.reset();
+    if (typeof window.closeRequestModal === 'function') window.closeRequestModal();
+    if (typeof window.renderMyRequestsTable === 'function') window.renderMyRequestsTable();
+    alert(editId != null ? 'Talebiniz güncellendi.' : 'Talebiniz iletildi.', 'success');
+};
+
 export const receiveProduct = async function (index) {
     if (!window.data || !window.data.requests) return;
     const req = window.data.requests[index];
     if (!req) return;
 
-    if (typeof window.sendArchiveEmail === 'function') {
-        window.sendArchiveEmail(req);
-    }
-
-    if (typeof window.showAppAlert === 'function') {
-        window.showAppAlert("Ürünü teslim aldığınızı onayladınız. Talep Sonlandırıldı.", "info");
-    }
-
+    // [WHY]: Tam kayıt personel oturumunda reddediliyor, "Teslim Aldım" hiç kaydolmuyordu (ITSM-03, DATA-03).
+    // [HOW]: Yalnız talep durumu yazılır. Zimmet (b3) kaydını admin onay adımı (confirmRequest) yazar; personel b3'e yazamaz.
     req.durum = 'completed';
-
-    const now = typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
-    const alreadyInB3 = (window.data.b3 || []).some(b =>
-        (b.person === req.personel || b.alanKisi === req.personel) &&
-        (b.productType === req.ürün) &&
-        !b.iadeEdildi
-    );
-
-    if (!alreadyInB3) {
-        if (!window.data.b3) window.data.b3 = [];
-        window.data.b3.unshift({
-            id: Date.now(),
-            shelfNo: 'TALEP',
-            productType: req.ürün || '-',
-            description: 'Teslim Alındı (Otomatik Zimmet)',
-            sn: req.sn || '-',
-            sarfAdet: req.adet || 1,
-            note: req.not || 'Personel tarafından teslim alındı',
-            person: req.personel,
-            alanKisi: req.personel,
-            date: now,
-            tarih: now,
-            isDemirbas: req.isDemirbas || false,
-            talepTuru: req.talepTuru || 'Kalıcı Zimmet',
-            oncelik: req.oncelik || 'Orta',
-            ...(req.iadeTarihi ? { iadeTarihi: req.iadeTarihi } : {}),
-            iadeEdildi: false,
-            sourceRepo: 'TALEP'
-        });
-    }
+    req.teslimTarihi = typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
 
     try {
-        await window.saveData(window.data);
+        await window.saveData('requests', window.data.requests);
+        if (typeof window.sendArchiveEmail === 'function') window.sendArchiveEmail(req);
         if (typeof window.renderMyRequestsTable === 'function') window.renderMyRequestsTable();
+        if (typeof window.showAppAlert === 'function') {
+            window.showAppAlert("Ürünü teslim aldığınızı onayladınız. Talep Sonlandırıldı.", "info");
+        }
     } catch (e) {
         console.error("Hata:", e);
     }
@@ -493,6 +549,7 @@ export const InventoryLogic = {
     bulkDelete,
     saveProduct,
     toggleWatch,
+    saveRequest,
     receiveProduct,
     deleteB3Row,
     toggleStatus,
@@ -511,6 +568,7 @@ window.deleteItem = window.AppModules.Inventory.deleteItem;
 window.bulkDelete = window.AppModules.Inventory.bulkDelete;
 window.saveProduct = window.AppModules.Inventory.saveProduct;
 window.toggleWatch = window.AppModules.Inventory.toggleWatch;
+window.saveRequest = window.AppModules.Inventory.saveRequest;
 window.receiveProduct = window.AppModules.Inventory.receiveProduct;
 window.deleteB3Row = window.AppModules.Inventory.deleteB3Row;
 window.toggleStatus = window.AppModules.Inventory.toggleStatus;

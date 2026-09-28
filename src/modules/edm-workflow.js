@@ -51,231 +51,184 @@ const WorkflowState = window.WorkflowState = {
     currentEditingTemplateId: null
 };
 
-// --- MODAL KONTROLLERİ ---
-window.openNewPurchaseModal = function () {
-    const modal = document.getElementById('purchaseModal');
-    if (modal) {
-        modal.style.display = 'block';
-        // Modal açıldıktan sonra otomatik alanları doldurur
-        window.initEBYSModal();
-    } else {
-        console.error("Hata: 'purchaseModal' bu sayfada bulunamadı!");
-    }
-};
+// [WHY]: Buradaki sıfırlamasız openNewPurchaseModal/closePurchaseModal, purchase-servises.js'teki düzeltilmiş
+//        sürümü eziyordu; "Yeni Talep" eski talebin üzerine yazabiliyordu (EBYS-01). Tek kaynak: purchase-servises.js.
+// Ölü initEBYSModal / fillEBYSSelects de kaldırıldı: talep edeni sabit "Muhammed CER" yedeğiyle dolduruyordu (EBYS-06);
+// form doldurma tek kaynaktan: purchase-servises.js openNewPurchaseModal + fillPurchaseSelects.
 
-window.closePurchaseModal = function () {
-    const modal = document.getElementById('purchaseModal');
-    if (modal) modal.style.display = 'none';
-};
+// [WHY]: Birim yönetimi bozuktu (EBYS-15): modal modül-yerel durumu, saveUnitData ise hiç atanmayan window.* durumunu okuyordu
+//        (düzenleme ikinci birim oluşturuyor, personel kaydolmuyordu); personel araması sonuç çizmiyordu; deleteUnit(index)
+//        id ile çağrılıyordu (yanlış birim ya da hiçbiri silinir); admin.html'de #unitModal yoktu (buton TypeError). addNewUnit
+//        birimleri düz metin olarak yazıyordu (ölü kod, kaldırıldı).
+// [HOW]: Tek durum nesnesi (unitEditor); modal işaretlemesi yalnız burada, yoksa enjekte edilir (iki sayfada aynı);
+//        arama sonuçları çizilir ve tıklanarak seçilir; kaydet/sil id ile, yalnız 'units' yazılır ve sonuç kontrol edilir.
+const unitEditor = { id: null, personnel: [], saving: false };
+const _unitName = u => (u && typeof u === 'object') ? (u.name || u.birimAdi || '') : String(u || '');
+const _personName = p => (p && (p.name || p.adSoyad || p.ad)) || '';
+const _unitAlert = (msg, type) => { if (typeof showAppAlert === 'function') showAppAlert(msg, type); else alert(msg); };
 
-// --- EBYS FORM BAŞLATMA ---
-window.initEBYSModal = function () {
-    const now = new Date();
-
-    // 1. OTOMATİK EVRAK KODU (SAT-20260428-1234 formatı)
-    const year = now.getFullYear();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    const day = now.getDate().toString().padStart(2, '0');
-    const random = Math.floor(1000 + Math.random() * 9000);
-    const docCode = `SAT-${year}${month}${day}-${random}`;
-
-    // 2. NAVBARDAN DİNAMİK KULLANICI ADI ÇEKME
-    // Navbardaki kullanıcı adını tutan span/div ID'ni kontrol et (genelde user-name veya benzeridir)
-    // Eğer bulamazsa "Sistem Kullanıcısı" yazar.
-    const navbarUserName = document.querySelector('.navbar .user-name')?.innerText ||
-        document.getElementById('navUser')?.innerText ||
-        "Muhammed CER"; // Yedek isim
-
-    // 3. ALANLARI DOLDURMA (ID Kontrolü ile)
-    const elDoc = document.getElementById('purDocName');
-    const elDate = document.getElementById('purDate');
-    const elUser = document.getElementById('purUser');
-    const elUnit = document.getElementById('purUnit');
-
-    if (elDoc) elDoc.value = docCode;
-    if (elDate) elDate.value = now.toLocaleDateString('tr-TR');
-    if (elUser) elUser.value = navbarUserName.trim();
-
-    window.fillEBYSSelects();
-    // Verilerin Firebase'den gelmiş olduğundan emin olmak için 300ms sonra tekrar tetikle
-    setTimeout(() => {
-        window.fillEBYSSelects();
-        console.log("🔄 Ürün türleri dropdown listesi tazelendi.");
-    }, 300);
-
-    // 4. BİRİM SEÇİM LİSTESİNİ GÜNCELLE
-    if (elUnit) {
-        const units = window.data.units || [];
-        if (units.length > 0) {
-            // Eğer units objeleri {id, name} şeklindeyse u.name, direkt string ise u kullanır
-            elUnit.innerHTML = units.map(u => {
-                const val = typeof u === 'object' ? u.name : u;
-                return `<option value="${val}">${val}</option>`;
-            }).join('');
-        } else {
-            elUnit.innerHTML = '<option disabled>Önce Birim Tanımlayın</option>';
-        }
-    }
-};
-
-window.addNewUnit = async function () {
-    const input = document.getElementById('newUnitName');
-    const name = input.value.trim();
-    if (!name) return;
-
-    if (!window.data.units) window.data.units = [];
-    window.data.units.push(name);
-
-    // [BUGFIX] Bug 5: Targeted save for units
-    await window.saveData('units', window.data.units);
-    input.value = "";
-    window.renderUnitManagement();
-    if (typeof showAppAlert === 'function') showAppAlert("Birim başarıyla eklendi.", "success");
-};
-
-window.deleteUnit = async function (index) {
-    if (confirm("Bu birimi silmek istediğinize emin misiniz?")) {
-        window.data.units.splice(index, 1);
-        // [BUGFIX] Bug 5: Targeted save for units
-        await window.saveData('units', window.data.units);
-        window.renderUnitManagement();
-    }
-};
-
-// ebys-workflow.js
-let currentEditingUnitId = null;
-let tempSelectedPersonnel = [];
+function _ensureUnitModal() {
+    if (document.getElementById('unitModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'unitModal';
+    modal.style.cssText = 'display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10500; align-items:flex-start; justify-content:center; overflow-y:auto;';
+    // Renkler tema değişkenlerinden (style.css / dark-theme.css [data-theme="dark"]); sabit renk yok.
+    modal.innerHTML = `
+        <style>
+            #unitModal .um-box { background:var(--color-surface,#fff); color:var(--color-text,#2c3e50); border:1px solid var(--color-border-light,transparent);
+                width:500px; max-width:94vw; margin:50px auto; padding:20px; border-radius:8px; box-sizing:border-box; }
+            #unitModal hr { border:none; border-top:1px solid var(--color-border,#bdc3c7); }
+            #unitModal .um-input { width:100%; box-sizing:border-box; padding:8px; border-radius:6px; border:1px solid var(--color-border,#bdc3c7);
+                background:var(--color-surface-alt,#f8f9fa); color:var(--color-text,#2c3e50); }
+            #unitModal .um-input::placeholder, #unitModal .um-muted { color:var(--color-text-muted,#7f8c8d); }
+            #unitModal .um-results { display:none; border:1px solid var(--color-border,#bdc3c7); border-top:none; max-height:180px; overflow-y:auto; background:var(--color-surface,#fff); }
+            #unitModal .unit-personnel-option { padding:8px 10px; border-bottom:1px solid var(--color-border-light,#eef0f2); cursor:pointer; }
+            #unitModal .unit-personnel-option:hover { background:var(--color-surface-alt,#f8f9fa); }
+            #unitModal .unit-personnel-option.is-added { cursor:default; color:var(--color-text-muted,#7f8c8d); }
+            #unitModal .unit-personnel-option.is-added:hover { background:none; }
+            #unitModal .um-list { list-style:none; padding:0; margin:10px 0 0; max-height:150px; overflow-y:auto; }
+            #unitModal .um-list li.um-chip { padding:5px 10px; background:var(--color-surface-alt,#f8f9fa); border-bottom:1px solid var(--color-border-light,#eef0f2);
+                display:flex; justify-content:space-between; align-items:center; }
+            #unitModal .um-remove { background:none; border:none; color:var(--color-danger,#e74c3c); cursor:pointer; font-size:16px; }
+            #unitModal .um-cancel { padding:8px 15px; border:1px solid var(--color-border,#bdc3c7); background:transparent; color:var(--color-text,#2c3e50); border-radius:4px; cursor:pointer; }
+            #unitModal .um-save { background:var(--color-success-dark,#27ae60); color:#fff; padding:8px 15px; border:none; border-radius:4px; cursor:pointer; }
+        </style>
+        <div class="um-box">
+            <h3 id="unitModalTitle" style="margin-top:0;">Yeni Birim Tanımla</h3>
+            <hr>
+            <label for="unitNameInput">Birim Adı:</label>
+            <input type="text" id="unitNameInput" class="um-input" placeholder="Örn: Bilgi İşlem" autocomplete="off" style="margin:4px 0 15px;">
+            <label for="unitPersonnelSearch">Personel Ekle (Ara/Seç):</label>
+            <input type="text" id="unitPersonnelSearch" class="um-input" placeholder="Personel adı yazın (en az 2 harf)..." autocomplete="off"
+                oninput="window.searchPersonnelForUnit(this.value)" style="margin-top:4px;">
+            <div id="unitPersonnelResults" class="um-results"></div>
+            <div style="margin-top:20px;">
+                <label><b>Atanan Personeller:</b></label>
+                <ul id="unitSelectedPersonnel" class="um-list"></ul>
+            </div>
+            <div style="margin-top:20px; text-align:right;">
+                <button type="button" class="um-cancel" onclick="window.closeUnitModal()">Vazgeç</button>
+                <button type="button" id="unitSaveBtn" class="um-save" onclick="window.saveUnitData()">Kaydet</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
 
 // --- MODAL KONTROLLERİ ---
 window.openUnitModal = function (unitId = null) {
-    const modal = document.getElementById('unitModal');
-    currentEditingUnitId = unitId;
-    tempSelectedPersonnel = [];
-    document.getElementById('unitModal').style.display = 'block';
+    _ensureUnitModal();
+    const unit = unitId != null ? (window.data.units || []).find(u => u && typeof u === 'object' && String(u.id) === String(unitId)) : null;
+    if (unitId != null && !unit) { _unitAlert('Birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
 
-    if (unitId) {
-        // Düzenleme Modu
-        const unit = window.data.units.find(u => u.id === unitId);
-        document.getElementById('unitModalTitle').innerText = "Birimi Düzenle";
-        document.getElementById('modalUnitName').value = unit.name;
-        tempSelectedPersonnel = [...(unit.personnel || [])];
-    } else {
-        // Yeni Kayıt
-        document.getElementById('unitModalTitle').innerText = "Yeni Birim Tanımla";
-        document.getElementById('modalUnitName').value = "";
-    }
+    unitEditor.id = unit ? String(unit.id) : null;
+    unitEditor.personnel = unit ? [...(unit.personnel || [])] : [];
+    document.getElementById('unitModalTitle').innerText = unit ? 'Birimi Düzenle' : 'Yeni Birim Tanımla';
+    document.getElementById('unitNameInput').value = unit ? _unitName(unit) : '';
+    document.getElementById('unitPersonnelSearch').value = '';
+    document.getElementById('unitPersonnelResults').style.display = 'none';
     window.renderSelectedPersonnel();
+    document.getElementById('unitModal').style.display = 'flex';
+    document.getElementById('unitNameInput').focus();
 };
 
 window.closeUnitModal = function () {
-    document.getElementById('unitModal').style.display = 'none';
+    const modal = document.getElementById('unitModal');
+    if (modal) modal.style.display = 'none';
 };
 
 // --- PERSONEL ARAMA VE SEÇME ---
 window.searchPersonnelForUnit = function (query) {
-    const resultArea = document.getElementById('searchResultList');
-    if (!query || query.length < 2) {
-        resultArea.style.display = 'none';
-        return;
-    }
+    const resultArea = document.getElementById('unitPersonnelResults');
+    if (!resultArea) return;
+    const term = String(query || '').toLocaleLowerCase('tr-TR').trim();
+    if (term.length < 2) { resultArea.style.display = 'none'; resultArea.innerHTML = ''; return; }
 
-    // window.data.personel veya staff'ın dizi olduğundan emin oluyoruz
-    const allPersonnel = window.data?.personel || window.data?.staff || [];
-    const searchTerm = query.toLocaleLowerCase('tr-TR').trim();
+    const chosen = new Set(unitEditor.personnel.map(n => n.toLocaleLowerCase('tr-TR')));
+    const names = [...new Set([...(window.data?.personel || []), ...(window.data?.staff || [])].map(_personName).filter(Boolean))];
+    const matches = names.filter(n => n.toLocaleLowerCase('tr-TR').includes(term)).slice(0, 10);
 
-    const filtered = allPersonnel.filter(p => {
-        if (!p) return false;
-        // Sadece string olan alanlarda arama yap (Güvenli yöntem)
-        const namePart = (p.adSoyad || p.ad || p.name || "").toLocaleLowerCase('tr-TR');
-        return namePart.includes(searchTerm);
-    });
-    // ... geri kalan render kodun aynı kalabilir
+    resultArea.innerHTML = matches.length
+        ? matches.map(n => {
+            const already = chosen.has(n.toLocaleLowerCase('tr-TR'));
+            return `<div class="unit-personnel-option${already ? ' is-added' : ''}" ${already ? '' : `onclick="window.addPersonnelToTempList(${jsArg(n)})"`}>
+                ${escapeHtml(n)}${already ? ' (eklendi)' : ''}</div>`;
+        }).join('')
+        : '<div class="um-muted" style="padding:8px 10px;">Eşleşen personel bulunamadı.</div>';
+    resultArea.style.display = 'block';
 };
 
 window.addPersonnelToTempList = function (name) {
-    if (!tempSelectedPersonnel.includes(name)) {
-        tempSelectedPersonnel.push(name);
+    const n = String(name || '').trim();
+    if (n && !unitEditor.personnel.some(x => x.toLocaleLowerCase('tr-TR') === n.toLocaleLowerCase('tr-TR'))) {
+        unitEditor.personnel.push(n);
         window.renderSelectedPersonnel();
     }
-    document.getElementById('personnelSearch').value = "";
-    document.getElementById('searchResultList').style.display = 'none';
+    const search = document.getElementById('unitPersonnelSearch');
+    if (search) { search.value = ''; search.focus(); }
+    const results = document.getElementById('unitPersonnelResults');
+    if (results) results.style.display = 'none';
 };
 
 window.removePersonnelFromTempList = function (index) {
-    tempSelectedPersonnel.splice(index, 1);
+    unitEditor.personnel.splice(index, 1);
     window.renderSelectedPersonnel();
 };
 
 window.renderSelectedPersonnel = function () {
-    const list = document.getElementById('selectedPersonnelList');
-    list.innerHTML = tempSelectedPersonnel.map((name, index) => `
-        <li class="list-group-item d-flex justify-content-between align-items-center" style="padding:5px 10px; background:#f9f9f9; border-bottom:1px solid #ddd; display:flex; justify-content:space-between;">
-            ${name}
-            <button onclick="window.removePersonnelFromTempList(${index})" style="background:none; border:none; color:red; cursor:pointer;">&times;</button>
-        </li>
-    `).join('') || '<small class="text-muted">Henüz personel atanmadı.</small>';
+    const list = document.getElementById('unitSelectedPersonnel');
+    if (!list) return;
+    list.innerHTML = unitEditor.personnel.map((name, index) => `
+        <li class="um-chip">
+            ${escapeHtml(name)}
+            <button type="button" class="um-remove" onclick="window.removePersonnelFromTempList(${index})" title="Çıkar">&times;</button>
+        </li>`).join('') || '<li><small class="um-muted">Henüz personel atanmadı.</small></li>';
 };
 
 // --- VERİ KAYDETME ---
 window.saveUnitData = async function () {
-    const nameEl = document.getElementById('modalUnitName');
-    const name = nameEl ? nameEl.value.trim() : "";
+    if (unitEditor.saving) return;
+    const name = (document.getElementById('unitNameInput')?.value || '').trim();
+    if (!name) { _unitAlert('Birim adı boş olamaz!', 'warning'); return; }
 
-    if (!name) { alert("Birim adı boş olamaz!"); return; }
-    if (!window.data) { window.data = {}; } // window.data undefined ise hata vermesini önler
-    if (!window.data.units) window.data.units = [];
-
-    const newUnit = {
-        id: window.currentEditingUnitId || Date.now().toString(),
-        name: name,
-        personnel: window.tempSelectedPersonnel,
-        updatedAt: new Date().toLocaleString('tr-TR')
-    };
-
-    if (window.currentEditingUnitId) {
-        const index = window.data.units.findIndex(u => u.id === window.currentEditingUnitId);
-        if (index > -1) window.data.units[index] = newUnit;
-    } else {
-        window.data.units.push(newUnit);
+    const units = (window.data.units || []).filter(u => u && typeof u === 'object');
+    const lower = name.toLocaleLowerCase('tr-TR');
+    if (units.some(u => String(u.id) !== unitEditor.id && _unitName(u).trim().toLocaleLowerCase('tr-TR') === lower)) {
+        _unitAlert(`"${name}" adında bir birim zaten var.`, 'warning');
+        return;
     }
 
-    // [BUGFIX] Bug 5: Targeted save for units
-    await window.saveData('units', window.data.units);
-    window.closeUnitModal();
-    if (typeof window.renderUnitManagement === "function") window.renderUnitManagement();
+    const stamp = new Date().toLocaleString('tr-TR');
+    let next;
+    if (unitEditor.id) {
+        if (!units.some(u => String(u.id) === unitEditor.id)) { _unitAlert('Düzenlenen birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        next = units.map(u => String(u.id) === unitEditor.id ? { ...u, name, personnel: [...unitEditor.personnel], updatedAt: stamp } : u);
+    } else {
+        next = [...units, { id: Date.now().toString(), name, personnel: [...unitEditor.personnel], updatedAt: stamp }];
+    }
+
+    unitEditor.saving = true;
+    try {
+        if (await window.saveData('units', next) === false) { _unitAlert('Birim kaydedilemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error'); return; }
+        const wasEdit = !!unitEditor.id;
+        window.closeUnitModal();
+        window.renderUnitManagement();
+        _unitAlert(wasEdit ? 'Birim güncellendi.' : 'Birim eklendi.', 'success');
+    } finally {
+        unitEditor.saving = false;
+    }
 };
 
-// "İlgili Birim" ve "Ürün Türü" kısımları da boş geliyorsa, onları da şu fonksiyonla besle
-window.fillEBYSSelects = function () {
-    const unitSelect = document.getElementById('purUnit');
-    const typeSelect = document.getElementById('purType');
-
-    // 1. BİRİMLERİ DOLDUR
-    if (unitSelect) {
-        const units = window.data?.units || [];
-        unitSelect.innerHTML = '<option value="">Birim Seçiniz...</option>' +
-            units.map(u => {
-                const name = typeof u === 'object' ? (u.name || u.birimAdi) : u;
-                return `<option value="${name}">${name}</option>`;
-            }).join('');
-    }
-
-    // 2. ÜRÜN TÜRLERİNİ DOLDUR (19 Veriyi Buraya Basıyoruz)
-    if (typeSelect) {
-        // window.data.productTypes admin panelinde kaydettiğin listedir
-        const types = window.data?.productTypes || [];
-
-        if (types.length > 0) {
-            typeSelect.innerHTML = '<option value="">Tür Seçiniz...</option>' +
-                types.map(t => {
-                    // Admin panelinde 'name' olarak kaydettiğin için t.name kullanıyoruz
-                    const typeName = typeof t === 'object' ? t.name : t;
-                    return `<option value="${typeName}">${typeName}</option>`;
-                }).join('');
-        } else {
-            typeSelect.innerHTML = '<option disabled>Türler yüklenemedi (Veri Boş)...</option>';
-        }
-    }
+window.deleteUnit = async function (unitId) {
+    const unit = (window.data.units || []).find(u => u && typeof u === 'object' && String(u.id) === String(unitId));
+    if (!unit) { _unitAlert('Birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+    const ok = typeof showCustomConfirm === 'function'
+        ? await showCustomConfirm('Birimi Sil', `"${_unitName(unit)}" birimi silinecek. Emin misiniz?`)
+        : window.confirm('Bu birimi silmek istediğinize emin misiniz?');
+    if (ok !== true) return;
+    const next = (window.data.units || []).filter(u => !(u && typeof u === 'object' && String(u.id) === String(unitId)));
+    if (await window.saveData('units', next) === false) { _unitAlert('Birim silinemedi.', 'error'); return; }
+    window.renderUnitManagement();
+    _unitAlert('Birim silindi.', 'info');
 };
 
 // --- TABLO RENDER ---
@@ -289,13 +242,13 @@ window.renderUnitManagement = function () {
     if (container) {
         container.innerHTML = units.map(u => `
             <tr>
-                <td><strong>${u.name}</strong></td>
-                <td><small>${(u.personnel || []).join(', ') || 'Personel yok'}</small></td>
+                <td><strong>${escapeHtml(u.name)}</strong></td>
+                <td><small>${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}</small></td>
                 <td style="text-align:right;">
-                    <button onclick="window.openUnitModal('${u.id}')" class="btn-edit" style="color:#2980b9; background:none; border:none; cursor:pointer; margin-right:10px;">
+                    <button onclick="window.openUnitModal(${jsArg(String(u.id))})" class="btn-edit" style="color:#2980b9; background:none; border:none; cursor:pointer; margin-right:10px;">
                         <i class="fas fa-edit"></i> Düzenle
                     </button>
-                    <button onclick="window.deleteUnit('${u.id}')" class="btn-delete" style="color:#c0392b; background:none; border:none; cursor:pointer;">
+                    <button onclick="window.deleteUnit(${jsArg(String(u.id))})" class="btn-delete" style="color:#c0392b; background:none; border:none; cursor:pointer;">
                         <i class="fas fa-trash"></i> Sil
                     </button>
                 </td>
@@ -306,15 +259,15 @@ window.renderUnitManagement = function () {
     if (defListContainer) {
         defListContainer.innerHTML = units.map(u => `
             <tr>
-                <td><strong>${u.name}</strong></td>
+                <td><strong>${escapeHtml(u.name)}</strong></td>
                 <td><span class="badge bg-light text-dark border">-</span></td>
-                <td><small class="text-muted">${(u.personnel || []).join(', ') || 'Personel yok'}</small></td>
+                <td><small class="text-muted">${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}</small></td>
                 <td class="text-end pe-3">
                     <div class="action-buttons justify-content-end">
-                        <button onclick="window.openUnitModal('${u.id}')" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                        <button onclick="window.openUnitModal(${jsArg(String(u.id))})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                             <i class="fa-solid fa-arrows-rotate"></i>
                         </button>
-                        <button onclick="window.deleteUnit('${u.id}')" class="btn-action btn-passive shadow-sm" title="Sil">
+                        <button onclick="window.deleteUnit(${jsArg(String(u.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
                             <i class="fas fa-trash fa-xs"></i>
                         </button>
                     </div>
@@ -359,7 +312,7 @@ window.startWorkflow = function (id) {
 
         tplDropdown.innerHTML =
             '<option value="manual">-- Yeni Özel İş Akışı (Manuel) --</option>' +
-            filtered.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+            filtered.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join('');
 
         tplDropdown.value = 'manual';
     }
@@ -450,18 +403,19 @@ window.renderManualSteps = function () {
             </td>
             <td>
                 <div class="position-relative w-100">
-                    <input type="text" class="form-control workflow-select-ghost w-100" placeholder="Personel arayın veya yazın..." value="${step.user}"
+                    <input type="text" class="form-control workflow-select-ghost w-100" placeholder="Personel arayın veya yazın..." value="${escapeHtml(step.user)}"
+                           oninput="WorkflowState.tempManualSteps[${index}].user = this.value"
                            onkeyup="window.searchPersonnelForStart(this.value, ${index})" style="border:1px solid transparent;">
                     <div id="startManualResults_${index}" class="search-results-popover" style="display:none; position:absolute; width:100%; background:white; border:1px solid #e2e8f0; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:1000; max-height:200px; overflow-y:auto; top:100%;"></div>
                 </div>
             </td>
             <td>
                 <select class="form-select workflow-select-ghost w-100" onchange="WorkflowState.tempManualSteps[${index}].tip = this.value">
-                    <option value="Paraf" ${step.tip === 'Paraf' ? 'selected' : ''}>Paraf</option>
-                    <option value="E-İmza & Mobil İmza" ${step.tip === 'E-İmza & Mobil İmza' ? 'selected' : ''}>E-İmza & Mobil İmza</option>
-                    <option value="Olur (Islak)" ${step.tip === 'Olur (Islak)' ? 'selected' : ''}>Olur (Islak)</option>
-                    <option value="Olur (E-İmza)" ${step.tip === 'Olur (E-İmza)' ? 'selected' : ''}>Olur (E-İmza)</option>
-                    <option value="Islak İmza" ${step.tip === 'Islak İmza' ? 'selected' : ''}>Islak İmza</option>
+                    <option value="Paraf" ${escapeHtml(step.tip === 'Paraf' ? 'selected' : '')}>Paraf</option>
+                    <option value="E-İmza & Mobil İmza" ${escapeHtml(step.tip === 'E-İmza & Mobil İmza' ? 'selected' : '')}>E-İmza & Mobil İmza</option>
+                    <option value="Olur (Islak)" ${escapeHtml(step.tip === 'Olur (Islak)' ? 'selected' : '')}>Olur (Islak)</option>
+                    <option value="Olur (E-İmza)" ${escapeHtml(step.tip === 'Olur (E-İmza)' ? 'selected' : '')}>Olur (E-İmza)</option>
+                    <option value="Islak İmza" ${escapeHtml(step.tip === 'Islak İmza' ? 'selected' : '')}>Islak İmza</option>
                 </select>
             </td>
             <td class="text-center">
@@ -579,19 +533,41 @@ window.selectPersonForWorkflow = function (index, name) {
 };
 
 // [BUGFIX] Bug 1 & Bug 2: Enforce authorization check & use targeted save to avoid permission-denied
+// [WHY]: Boş (veya listeden seçilmeden yazılmış, state'e hiç düşmeyen) onaylayıcıyla akış başlatılabiliyordu; kimsenin
+//        sırası gelmeyen adım akışı sonsuza dek takılı bırakıyordu. Şablon modunda ekranda düzenlenen adımlar yok sayılıp
+//        şablonun kendi adımları kullanılıyordu (EBYS-09).
+// [HOW]: Yazılan ad state'e anında yazılır. Başlatmadan önce ekrandaki her adımın onaylayıcısı dolu ve personel listesinde
+//        kayıtlı olmalı (ad kayıtlı biçimine çevrilir); şablon modunda da ekrandaki adımlar (sırayla şablon meta verisiyle) kullanılır.
+function _resolveWorkflowSteps(steps) {
+    if (!Array.isArray(steps) || steps.length === 0) return { error: 'En az bir onay adımı ekleyin.' };
+    const norm = v => String(v || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
+    const known = new Map([...(window.data.personel || []), ...(window.data.staff || [])]
+        .map(p => String(p?.name || p?.adSoyad || '').trim()).filter(Boolean).map(n => [norm(n), n]));
+    const resolved = [];
+    for (let i = 0; i < steps.length; i++) {
+        const typed = String(steps[i].user || '').trim();
+        if (!typed) return { error: `${i + 1}. adımın onaylayıcısı boş.` };
+        const name = known.get(norm(typed));
+        if (!name) return { error: `${i + 1}. adım: "${typed}" personel listesinde yok. Listeden seçin.` };
+        resolved.push({ ...steps[i], user: name, tip: steps[i].tip || 'Paraf' });
+    }
+    return { steps: resolved };
+}
+
 window.confirmStartWorkflow = async function () {
 
     const id = document.getElementById('startWorkflowReqId').value;
     const req = window.data.purchaseOrders.find(x => String(x.id) === String(id));
     if (!req) return;
 
+    const checked = _resolveWorkflowSteps(WorkflowState.tempManualSteps);
+    if (checked.error) {
+        if (typeof showAppAlert === 'function') showAppAlert(checked.error, 'warning'); else alert(checked.error);
+        return;
+    }
+
     // 🔥 MANUEL MOD
     if (WorkflowState.isManualMode) {
-
-        if (!WorkflowState.tempManualSteps.length) {
-            alert("En az bir adım ekleyin");
-            return;
-        }
 
         const prevHist = req.workflow?.history && Array.isArray(req.workflow.history) ? req.workflow.history : [];
         req.workflow = {
@@ -600,7 +576,7 @@ window.confirmStartWorkflow = async function () {
             currentStep: 0,
             finished: false,
             currentState: window.WorkflowEngine.states.INITIATION,
-            steps: WorkflowState.tempManualSteps.map(s => ({
+            steps: checked.steps.map(s => ({
                 user: s.user,
                 tip: s.tip,
                 status: "pending",
@@ -634,7 +610,12 @@ window.confirmStartWorkflow = async function () {
             return;
         }
 
-        const newWf = window.createWorkflowFromTemplate(tpl);
+        // Ekranda düzenlenen adımlar kullanılır; aynı sıradaki şablon adımının meta verisi (paralel grup vb.) korunur.
+        const tplSteps = tpl.steps || [];
+        const newWf = window.createWorkflowFromTemplate({
+            ...tpl,
+            steps: checked.steps.map((s, i) => ({ ...(tplSteps[i] || {}), order: i, user: s.user, tip: s.tip }))
+        });
         // [BUGFIX] Bug 1: Preserve prior history cleanly on restart after withdraw
         if (req.workflow?.history && Array.isArray(req.workflow.history)) {
             newWf.history = [...req.workflow.history, ...newWf.history];
@@ -652,7 +633,10 @@ window.confirmStartWorkflow = async function () {
     });
 
     // [BUGFIX] Bug 1: Targeted save only to purchaseOrders (Prevents global batch permission error)
-    await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    if (await window.saveData('purchaseOrders', window.data.purchaseOrders) === false) {
+        if (typeof showAppAlert === 'function') showAppAlert('İş akışı kaydedilemedi. Bağlantınızı kontrol edin.', 'error');
+        return;
+    }
 
     window.closeStartWorkflowModal();
 
@@ -771,32 +755,32 @@ window.viewWorkflow = async function (id) {
         return `
         <div style="display:flex;gap:12px;margin-bottom:4px;">
             <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:38px;">
-                <div style="width:38px;height:38px;border-radius:50%;background:${m.bg};border:2px solid ${m.border};
-                            display:flex;align-items:center;justify-content:center;font-size:17px;">${m.icon}</div>
+                <div style="width:38px;height:38px;border-radius:50%;background:${escapeHtml(m.bg)};border:2px solid ${escapeHtml(m.border)};
+                            display:flex;align-items:center;justify-content:center;font-size:17px;">${escapeHtml(m.icon)}</div>
                 ${connector}
             </div>
-            <div style="flex:1;background:${m.bg};border:1px solid ${m.border};border-radius:10px;padding:11px 14px;
+            <div style="flex:1;background:${escapeHtml(m.bg)};border:1px solid ${escapeHtml(m.border)};border-radius:10px;padding:11px 14px;
                         margin-bottom:${i < steps.length - 1 ? '4px' : '0'};">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                     <div>
-                        <div style="font-size:10px;font-weight:700;color:${m.color};text-transform:uppercase;letter-spacing:.5px;">${tipLabel}</div>
-                        <div style="font-size:14px;font-weight:700;color:var(--color-text);margin:3px 0;">${step.user || '—'}</div>
-                        <span style="font-size:11px;font-weight:600;background:${m.border};color:${m.color};padding:2px 10px;border-radius:20px;">${m.label}</span>
+                        <div style="font-size:10px;font-weight:700;color:${escapeHtml(m.color)};text-transform:uppercase;letter-spacing:.5px;">${escapeHtml(tipLabel)}</div>
+                        <div style="font-size:14px;font-weight:700;color:var(--color-text);margin:3px 0;">${escapeHtml(step.user || '—')}</div>
+                        <span style="font-size:11px;font-weight:600;background:${escapeHtml(m.border)};color:${escapeHtml(m.color)};padding:2px 10px;border-radius:20px;">${escapeHtml(m.label)}</span>
                     </div>
                     ${canAct ? `
                     <div style="display:flex;gap:6px;flex-shrink:0;">
-                        <button onclick="window.approveStep(${id})"
+                        <button onclick="window.approveStep(${jsArg(id)})"
                             style="padding:6px 14px;background:var(--color-success);color:var(--color-text-white);border:none;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;">
                             <i class="fas fa-check"></i> Onayla
                         </button>
-                        <button onclick="window.rejectStep(${id})"
+                        <button onclick="window.rejectStep(${jsArg(id)})"
                             style="padding:6px 14px;background:var(--color-danger);color:var(--color-text-white);border:none;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;">
                             <i class="fas fa-times"></i> Reddet
                         </button>
                     </div>` : ''}
                 </div>
-                ${step.note ? `<div style="margin-top:8px;padding:7px 10px;background:var(--color-surface-alt);border:1px solid var(--color-border-light);border-radius:6px;font-size:12px;color:var(--color-text-muted);font-style:italic;">💬 "${step.note}"</div>` : ''}
-                ${step.date ? `<div style="margin-top:5px;font-size:10px;color:var(--color-text-hint);text-align:right;"><i class="fas fa-clock" style="margin-right:3px;"></i>${step.date}</div>` : ''}
+                ${step.note ? `<div style="margin-top:8px;padding:7px 10px;background:var(--color-surface-alt);border:1px solid var(--color-border-light);border-radius:6px;font-size:12px;color:var(--color-text-muted);font-style:italic;">💬 "${escapeHtml(step.note)}"</div>` : ''}
+                ${step.date ? `<div style="margin-top:5px;font-size:10px;color:var(--color-text-hint);text-align:right;"><i class="fas fa-clock" style="margin-right:3px;"></i>${escapeHtml(step.date)}</div>` : ''}
             </div>
         </div>`;
     }).join('');
@@ -810,23 +794,23 @@ window.viewWorkflow = async function (id) {
             ${[...item.akis].reverse().map(a => `
             <div style="display:flex;flex-direction:column;gap:2px;padding:5px 0;border-bottom:1px solid var(--color-border-light);font-size:11px;">
                 <div style="display:flex;gap:8px;">
-                    <span style="color:var(--color-text-hint);min-width:120px;flex-shrink:0;">${a.tarih || ''}</span>
-                    <span style="color:var(--color-text-muted);min-width:80px;flex-shrink:0;font-weight:600;">${a.yapan || ''}</span>
-                    <span style="color:var(--color-text);">${a.islem || ''}</span>
+                    <span style="color:var(--color-text-hint);min-width:120px;flex-shrink:0;">${escapeHtml(a.tarih || '')}</span>
+                    <span style="color:var(--color-text-muted);min-width:80px;flex-shrink:0;font-weight:600;">${escapeHtml(a.yapan || '')}</span>
+                    <span style="color:var(--color-text);">${escapeHtml(a.islem || '')}</span>
                 </div>
-                ${a.not ? `<div style="margin-left:128px; color:var(--color-text-muted); font-style:italic;">💬 "${a.not}"</div>` : ''}
-                ${a.note ? `<div style="margin-left:128px; color:var(--color-text-muted); font-style:italic;">💬 "${a.note}"</div>` : ''}
+                ${a.not ? `<div style="margin-left:128px; color:var(--color-text-muted); font-style:italic;">💬 "${escapeHtml(a.not)}"</div>` : ''}
+                ${a.note ? `<div style="margin-left:128px; color:var(--color-text-muted); font-style:italic;">💬 "${escapeHtml(a.note)}"</div>` : ''}
             </div>`).join('')}
         </div>` : '';
 
     body.innerHTML = `
-        <div style="background:${ds.bg};border-radius:10px;padding:13px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px;">
-            <i class="fas ${ds.icon}" style="font-size:22px;color:${ds.color};flex-shrink:0;"></i>
+        <div style="background:${escapeHtml(ds.bg)};border-radius:10px;padding:13px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px;">
+            <i class="fas ${escapeHtml(ds.icon)}" style="font-size:22px;color:${escapeHtml(ds.color)};flex-shrink:0;"></i>
             <div style="flex:1;min-width:0;">
-                <div style="font-size:15px;font-weight:700;color:var(--color-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.urun || '—'}</div>
-                <div style="font-size:11px;color:var(--color-text-hint);margin-top:2px;">${item.evrakNo || ''} · ${item.talepEden || item.createdByName || ''} · ${item.tarih || ''}</div>
+                <div style="font-size:15px;font-weight:700;color:var(--color-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.urun || '—')}</div>
+                <div style="font-size:11px;color:var(--color-text-hint);margin-top:2px;">${escapeHtml(item.evrakNo || '')} · ${escapeHtml(item.talepEden || item.createdByName || '')} · ${escapeHtml(item.tarih || '')}</div>
             </div>
-            <span style="background:${ds.color};color:var(--color-text-white);padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;flex-shrink:0;white-space:nowrap;">${ds.text}</span>
+            <span style="background:${escapeHtml(ds.color)};color:var(--color-text-white);padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;flex-shrink:0;white-space:nowrap;">${escapeHtml(ds.text)}</span>
         </div>
         ${steps.length > 0 ? `
         <div style="font-size:11px;font-weight:700;color:var(--color-text-hint);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;">
@@ -937,11 +921,36 @@ window.addEventListener('onInventoryDataUpdated', (e) => {
     }
 });
 
+// [WHY]: Adım sahibi kontrolü yoktu; bayat "Onayla" butonu veya liste butonu başkasının adımını onun adına onaylıyordu,
+//        çift tıklama iki adımı birden geçiriyordu (EBYS-02).
+// [HOW]: Yalnız mevcut adımın sahibi (normalize ad) veya Firebase admin oturumu işlem yapabilir; talep başına işlem kilidi.
+const _workflowActionsInFlight = new Set();
+const _normName = s => String(s || '').trim().toLocaleLowerCase('tr-TR');
+
+function _canActOnCurrentStep(item) {
+    const wf = item && item.workflow;
+    // Durdurulmuş (askıya alınmış) akışta sıradaki kişi onay/red veremez (EBYS-13 çifti).
+    if (!wf || wf.finished || wf.started === false || wf.currentState === 'suspended') return false;
+    const step = (wf.steps || [])[wf.currentStep || 0];
+    if (!step) return false;
+    if (typeof window.isDbAdmin === 'function' && window.isDbAdmin()) return true;
+    const me = window.currentUser || (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null);
+    return !!(me && me.name && _normName(step.user) === _normName(me.name));
+}
+
+function _denyStepAction() {
+    if (typeof showAppAlert === 'function') showAppAlert('Bu adım için işlem yetkiniz yok (sıra sizde değil veya akış tamamlandı).', 'error');
+}
+
 // ✅ ENHANCED: State machine ile uyumlu onay sistemi
 window.approveStep = async function (id) {
+    const lockKey = String(id);
+    if (_workflowActionsInFlight.has(lockKey)) return;
+    _workflowActionsInFlight.add(lockKey);
     try {
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
         if (!item || !item.workflow) return;
+        if (!_canActOnCurrentStep(item)) { _denyStepAction(); return; }
 
         const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
 
@@ -1010,7 +1019,8 @@ window.approveStep = async function (id) {
             item.workflow.id,
             nextState,
             actor,
-            `${step?.tip || 'Adım'} onaylandı`
+            `${step?.tip || 'Adım'} onaylandı`,
+            { persist: false }
         );
 
         // 5. İNDEKSİ GÜNCELLE VE SENKRONİZE ET
@@ -1043,14 +1053,17 @@ window.approveStep = async function (id) {
         // [WHY]: window.saveData(window.data) attempts a batch write across ALL collections.
         //        Non-admin users have permission only on specific collections, so the batch fails.
         // [HOW]: We pass the collection name + its array directly so only purchaseOrders is written.
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        // Snapshot dizisi değişmiş olabilir; değiştirilmiş talep güncel dizideki yerine konularak tek seferde yazılır.
+        const saved = await window.saveData('purchaseOrders', (window.data.purchaseOrders || []).map(x => String(x.id) === String(id) ? item : x));
         window.closeWorkflowModal();
+        if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
 
         // 8. TÜM UI'LARI YENİLE
         refreshUI();
 
         if (typeof showAppAlert === 'function') {
-            showAppAlert(`Onay başarıyla verildi.`, "success");
+            if (saved === false) showAppAlert('Onay kaydedilemedi. Bağlantınızı kontrol edin.', 'error');
+            else showAppAlert(`Onay başarıyla verildi.`, "success");
         }
 
     } catch (error) {
@@ -1058,21 +1071,27 @@ window.approveStep = async function (id) {
         if (typeof showAppAlert === 'function') {
             showAppAlert(`Onay hatası: ${error.message}`, "error");
         }
+    } finally {
+        _workflowActionsInFlight.delete(lockKey);
     }
 };
 
 window.rejectStep = async function (id) {
+    const lockKey = String(id);
+    if (_workflowActionsInFlight.has(lockKey)) return;
+    _workflowActionsInFlight.add(lockKey);
     try {
-        const note = prompt("Lütfen RED nedenini belirtiniz (Zorunlu):");
-        if (note === null) return;
-
-        if (!note.trim()) {
-            alert("Red nedeni boş bırakılamaz!");
-            return window.rejectStep(id);
-        }
-
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
         if (!item || !item.workflow) return;
+        if (!_canActOnCurrentStep(item)) { _denyStepAction(); return; }
+
+        let note;
+        while (true) {
+            note = prompt("Lütfen RED nedenini belirtiniz (Zorunlu):");
+            if (note === null) return;
+            if (note.trim()) break;
+            alert("Red nedeni boş bırakılamaz!");
+        }
 
         const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
 
@@ -1085,7 +1104,8 @@ window.rejectStep = async function (id) {
             item.workflow.id,
             window.WorkflowEngine.states.CANCELLED,
             actor,
-            `Reddedildi: ${note.trim()}`
+            `Reddedildi: ${note.trim()}`,
+            { persist: false }
         );
 
         // Adımı ve durumu güncelle
@@ -1101,6 +1121,7 @@ window.rejectStep = async function (id) {
         item.workflow.currentState = window.WorkflowEngine.states.CANCELLED;
 
         // Eski akış sistemini de güncelle
+        if (!item.akis) item.akis = [];
         const rejectionTime = new Date().toLocaleString('tr-TR');
         item.akis.push({
             islem: `❌ REDDEDİLDİ: ${step?.tip || 'Onay'}`,
@@ -1136,16 +1157,18 @@ window.rejectStep = async function (id) {
         // [BUGFIX] Bug 3: Targeted save to purchaseOrders only.
         // [WHY]: Same permission issue as approveStep — non-admins can't overwrite the full DB snapshot.
         // [HOW]: Only the purchaseOrders collection is written, matching the collection-level Firestore rules.
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
+        // Snapshot dizisi değişmiş olabilir; değiştirilmiş talep güncel dizideki yerine konularak tek seferde yazılır.
+        const saved = await window.saveData('purchaseOrders', (window.data.purchaseOrders || []).map(x => String(x.id) === String(id) ? item : x));
         window.closeWorkflowModal();
+        if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
 
         if (typeof refreshUI === "function") refreshUI();
         if (typeof renderPurchaseModule === "function") renderPurchaseModule();
         if (typeof renderMyApprovals === "function") renderMyApprovals();
 
-        // Success notification
         if (typeof showAppAlert === 'function') {
-            showAppAlert("Talep reddedildi.", "warning");
+            if (saved === false) showAppAlert('Red kaydedilemedi. Bağlantınızı kontrol edin.', 'error');
+            else showAppAlert("Talep reddedildi.", "warning");
         }
 
     } catch (error) {
@@ -1153,54 +1176,58 @@ window.rejectStep = async function (id) {
         if (typeof showAppAlert === 'function') {
             showAppAlert(`Red işlemi yapılamadı: ${error.message}`, "error");
         }
+    } finally {
+        _workflowActionsInFlight.delete(lockKey);
     }
 };
 
+// [WHY]: stopWorkflow hiçbir zaman başarılı olamıyordu: geçiş tablosunda aktif durumlardan 'suspended'a geçiş yoktu; akis dizisi
+//        olmayan talepte çöküyor, geçiş ayrıca tüm diziyi yazıyor ve sonuç kontrol edilmiyordu (EBYS-13).
+// [HOW]: Yalnız Firebase admin oturumu durdurur; yalnız başlamış ve bitmemiş akış. Geçiş persist:false ile yapılır, talep
+//        güncel dizideki yerine konularak tek seferde yazılır; hata "başarılı" gösterilmez. Durdurulan akışta adım sahibi
+//        işlem yapamaz; talep "Durduruldu" olur ve admin tablosunda yeniden "Akışı Başlat" ile başlatılabilir (geçmiş korunur).
 window.stopWorkflow = async function (id) {
+    const lockKey = 'stop_' + String(id);
+    if (_workflowActionsInFlight.has(lockKey)) return;
+    _workflowActionsInFlight.add(lockKey);
+    const notify = (msg, type) => { if (typeof showAppAlert === 'function') showAppAlert(msg, type); else alert(msg); };
     try {
-        if (!confirm("Akış durdurulsun mu?")) return;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { notify('Akışı yalnız yönetici durdurabilir.', 'error'); return; }
 
-        const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
-        if (!item || !item.workflow) return;
+        const find = () => (window.data.purchaseOrders || []).find(x => String(x.id) === String(id));
+        const initial = find();
+        if (!initial || !initial.workflow) { notify('Talep veya akış bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        if (!initial.workflow.started || initial.workflow.finished) { notify('Yalnız devam eden bir akış durdurulabilir.', 'warning'); return; }
 
-        const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+        const ok = typeof showCustomConfirm === 'function'
+            ? await showCustomConfirm('Akışı Durdur', 'Akış askıya alınacak; sıradaki onaylayıcı işlem yapamayacak. Daha sonra "Akışı Başlat" ile yeniden başlatılabilir. Devam edilsin mi?')
+            : window.confirm('Akış durdurulsun mu?');
+        if (ok !== true) return;
 
-        // State machine ile suspended state'ine geç
-        await window.transitionWorkflowState(
-            item.workflow.id,
-            window.WorkflowEngine.states.SUSPENDED,
-            actor,
-            "Akış askıya alındı"
-        );
+        // Onay kutusu açıkken snapshot gelmiş olabilir: güncel kayıt ve durum yeniden kontrol edilir
+        const item = find();
+        if (!item || !item.workflow || !item.workflow.started || item.workflow.finished) { notify('Akış bu arada değişti; işlem iptal edildi.', 'warning'); return; }
 
-        // Backward compatibility için eski mantığı da güncelle
+        const actor = window.currentUser?.name || "Yönetici";
+        await window.transitionWorkflowState(item.workflow.id, window.WorkflowEngine.states.SUSPENDED, actor, "Akış askıya alındı", { persist: false });
+
         item.workflow.started = false;
+        item.workflow.suspendedAt = new Date().toISOString();
+        item.workflow.suspendedBy = actor;
         item.durum = "Durduruldu";
+        if (!Array.isArray(item.akis)) item.akis = [];
+        item.akis.push({ islem: "⏸️ Akış durduruldu", yapan: actor, tarih: new Date().toLocaleString('tr-TR') });
 
-        // Eski akış sistemini de güncelle
-        item.akis.push({
-            islem: "Akış durduruldu",
-            yapan: actor,
-            tarih: new Date().toLocaleString('tr-TR')
-        });
-
-        // Kaydet ve UI güncelle
-        // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
-
+        const saved = await window.saveData('purchaseOrders', (window.data.purchaseOrders || []).map(x => String(x.id) === String(id) ? item : x));
         if (typeof refreshUI === "function") refreshUI();
         if (typeof renderPurchaseModule === "function") renderPurchaseModule();
-
-        // Success notification
-        if (typeof showAppAlert === 'function') {
-            showAppAlert("Akış durduruldu.", "info");
-        }
-
+        if (saved === false) notify('Akış durdurulamadı: kayıt yazılamadı.', 'error');
+        else notify("Akış durduruldu (askıya alındı).", "info");
     } catch (error) {
         console.error('Akış durdurulamadı:', error);
-        if (typeof showAppAlert === 'function') {
-            showAppAlert(`Akış durdurulamadı: ${error.message}`, "error");
-        }
+        notify(`Akış durdurulamadı: ${error.message}`, "error");
+    } finally {
+        _workflowActionsInFlight.delete(lockKey);
     }
 };
 
@@ -1305,7 +1332,7 @@ window.renderMyApprovals = function () {
             <div class="approval-card ${isCurrent ? 'active-step' : ''} d-flex flex-column">
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="approval-header-info">
-                        <h5 class="fw-bold">${item.urun || 'İsimsiz Talep'}</h5>
+                        <h5 class="fw-bold">${escapeHtml(item.urun || 'İsimsiz Talep')}</h5>
                         <span class="badge ${badgeClass}">${statusText}</span>
                     </div>
                     <div class="approval-id-badge">
@@ -1316,36 +1343,36 @@ window.renderMyApprovals = function () {
                 <div class="card-details">
                     <div class="detail-item">
                         <i class="fas fa-file-invoice" title="Evrak No"></i>
-                        <span class="font-monospace fw-bold detail-value">${item.evrakNo || '—'}</span>
+                        <span class="font-monospace fw-bold detail-value">${escapeHtml(item.evrakNo || '—')}</span>
                     </div>
                     <div class="detail-item">
                         <i class="fas fa-user" title="Talep Eden"></i>
-                        <span>${item.talepEden || item.createdByName || '—'}</span>
+                        <span>${escapeHtml(item.talepEden || item.createdByName || '—')}</span>
                     </div>
                     <div class="detail-item">
                         <i class="fas fa-building" title="Birim"></i>
-                        <span>${item.birim || '—'}</span>
+                        <span>${escapeHtml(item.birim || '—')}</span>
                     </div>
                     <div class="detail-item">
                         <i class="fas fa-calendar-alt" title="Tarih"></i>
-                        <span>${item.tarih || '—'}</span>
+                        <span>${escapeHtml(item.tarih || '—')}</span>
                     </div>
                 </div>
 
                 <div class="d-flex flex-row justify-content-between align-items-center mt-auto pt-3" style="border-top: 1px dashed #e2e8f0; display: flex !important; flex-direction: row !important; gap: 8px;">
-                    <button onclick="window.openPurchaseDetail('${item.id}', 'view')" class="btn-modern-card btn-detail" style="flex: 1; justify-content: center;">
+                    <button onclick="window.openPurchaseDetail(${jsArg(String(item.id))}, 'view')" class="btn-modern-card btn-detail" style="flex: 1; justify-content: center;">
                         <i class="fas fa-search-plus"></i> Detay
                     </button>
                     
                     ${isCurrent ? `
-                        <button onclick="window.rejectStep('${item.id}')" class="btn-modern-card btn-danger" style="flex: 1; justify-content: center;">
+                        <button onclick="window.rejectStep(${jsArg(String(item.id))})" class="btn-modern-card btn-danger" style="flex: 1; justify-content: center;">
                             <i class="fas fa-times"></i> Reddet
                         </button>
-                        <button onclick="window.approveStep('${item.id}')" class="btn-modern-card btn-success" style="flex: 1; justify-content: center;">
+                        <button onclick="window.approveStep(${jsArg(String(item.id))})" class="btn-modern-card btn-success" style="flex: 1; justify-content: center;">
                             <i class="fas fa-check"></i> Onayla
                         </button>
                     ` : `
-                        <button onclick="window.viewWorkflow('${item.id}')" class="btn-modern-card" style="flex: 2; justify-content: center; background: var(--color-primary-light); color: var(--color-primary);">
+                        <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-modern-card" style="flex: 2; justify-content: center; background: var(--color-primary-light); color: var(--color-primary);">
                             <i class="fas fa-history"></i> Akış Takibi
                         </button>
                     `}
@@ -1389,10 +1416,6 @@ window.renderMyApprovals = function () {
 
 
 // edm-workflow.js'nin EN ALTINA ekle
-window.openNewPurchaseModal = openNewPurchaseModal;
-window.closePurchaseModal = closePurchaseModal;
-window.initEBYSModal = initEBYSModal;
-window.addNewUnit = addNewUnit;
 
 // --- İŞ AKIŞI ŞABLONLARI (WORKFLOW TEMPLATES) ---
 window.openTemplateModal = function (id = null) {
@@ -1457,7 +1480,7 @@ window.renderTemplateSteps = function () {
                 <div class="position-relative w-100">
                     <input type="text"
                         class="form-control workflow-select-ghost w-100"
-                        value="${step.user || ''}"
+                        value="${escapeHtml(step.user || '')}"
                         placeholder="Personel..."
                         onkeyup="window.searchPersonnelForTemplate(this.value, 'step', ${index})">
                     
@@ -1476,7 +1499,7 @@ window.renderTemplateSteps = function () {
             "Olur (E-İmza)",
             "Islak İmza"
         ].map(t => `
-                        <option value="${t}" ${step.tip === t ? 'selected' : ''}>${t}</option>
+                        <option value="${t}" ${escapeHtml(step.tip === t ? 'selected' : '')}>${t}</option>
                     `).join('')}
                 </select>
             </td>
@@ -1579,12 +1602,13 @@ window.WorkflowEngine = {
     },
 
     // State geçiş kuralları
+    // [WHY]: Hiçbir aktif durumdan 'suspended'a geçiş yoktu; stopWorkflow her zaman 'Geçersiz state geçişi' ile düşüyordu (EBYS-13).
     transitions: {
-        'initiation': ['manager_approval', 'completed', 'cancelled'],
-        'manager_approval': ['hr_approval', 'finance_approval', 'completed', 'cancelled', 'initiation'],
-        'hr_approval': ['finance_approval', 'director_approval', 'completed', 'cancelled', 'manager_approval'],
-        'finance_approval': ['director_approval', 'completed', 'cancelled', 'manager_approval'],
-        'director_approval': ['completed', 'cancelled', 'finance_approval'],
+        'initiation': ['manager_approval', 'completed', 'cancelled', 'suspended'],
+        'manager_approval': ['hr_approval', 'finance_approval', 'completed', 'cancelled', 'initiation', 'suspended'],
+        'hr_approval': ['finance_approval', 'director_approval', 'completed', 'cancelled', 'manager_approval', 'suspended'],
+        'finance_approval': ['director_approval', 'completed', 'cancelled', 'manager_approval', 'suspended'],
+        'director_approval': ['completed', 'cancelled', 'finance_approval', 'suspended'],
         'completed': ['initiation'],
         'cancelled': ['initiation'],
         'suspended': ['initiation', 'cancelled', 'manager_approval']
@@ -1714,7 +1738,9 @@ window.createWorkflowFromTemplate = function (tpl) {
 };
 
 // State transition engine - Tek state management
-window.transitionWorkflowState = async function (workflowId, targetState, actor, note = '') {
+// options.persist=false: çağıran (approveStep/rejectStep) talebi tek seferde kaydeder. Ara kayıt, dönen snapshot'ın
+// window.data.purchaseOrders'ı yenilemesine ve çağıranın sonraki değişikliklerinin bayat nesnede kaybolmasına yol açıyordu.
+window.transitionWorkflowState = async function (workflowId, targetState, actor, note = '', options = {}) {
     const workflow = await window.getWorkflow(workflowId);
     if (!workflow) {
         throw new Error('Workflow bulunamadı: ' + workflowId);
@@ -1741,8 +1767,7 @@ window.transitionWorkflowState = async function (workflowId, targetState, actor,
         action: 'transition',
         note: note,
         metadata: {
-            userAgent: navigator.userAgent,
-            ip: await window.getClientIP()
+            userAgent: navigator.userAgent
         }
     };
 
@@ -1753,8 +1778,10 @@ window.transitionWorkflowState = async function (workflowId, targetState, actor,
     // Update backward compatibility fields
     window.updateBackwardCompatibility(workflow, targetState);
 
-    // Save to Firebase
-    await window.saveWorkflow(workflow);
+    // Save to Firebase (purchaseOrders); başarısızlık onayı "başarılı" gösterilmesin diye hata olarak yükselir
+    if (options.persist !== false && !(await window.saveWorkflow(workflow))) {
+        throw new Error('Akış durumu kaydedilemedi.');
+    }
 
     // Trigger events
     window.onWorkflowStateChanged(workflow, transition);
@@ -1830,72 +1857,27 @@ window.getUserRole = function (username) {
     return personel?.role || personel?.rol || 'user'; // Default rol
 };
 
-// Workflow getir - Firebase'den workflow nesnesi
+// [WHY]: Akış kök 'workflows' koleksiyonunda da tutuluyordu; kurallar orayı reddettiği için her geçiş hata
+//        verip purchaseOrders kaydı hiç yapılmıyordu (EBYS-16). Tek kaynak: ${COLLECTION_ROOT}/purchaseOrders içindeki item.workflow.
 window.getWorkflow = async function (workflowId) {
-    // Önce mevcut data içinde ara
-    const purchaseOrder = (window.data.purchaseOrders || []).find(item =>
-        item.workflow?.id === workflowId
-    );
-
-    if (purchaseOrder) {
-        return purchaseOrder.workflow;
-    }
-
-    // Firebase'den ara (gerekirse)
-    try {
-        const db = getFirestore();
-        const workflowDoc = await doc(db, 'workflows', workflowId);
-        const workflowSnap = await getDoc(workflowDoc);
-
-        if (workflowSnap.exists()) {
-            return workflowSnap.data();
-        }
-    } catch (error) {
-        console.error('Workflow getirme hatası:', error);
-    }
-
-    return null;
+    const purchaseOrder = (window.data.purchaseOrders || []).find(item => item.workflow?.id === workflowId);
+    return purchaseOrder ? purchaseOrder.workflow : null;
 };
 
-// Workflow kaydet - Firebase'e workflow nesnesi
 window.saveWorkflow = async function (workflow) {
-    try {
-        const db = getFirestore();
-
-        // Hem workflows koleksiyonuna hem de purchaseOrder'a kaydet
-        await setDoc(doc(db, 'workflows', workflow.id), workflow);
-
-        // İlgili purchaseOrder'ı güncelle
-        const purchaseOrder = (window.data.purchaseOrders || []).find(item =>
-            item.workflow?.id === workflow.id
-        );
-
-        if (purchaseOrder) {
-            purchaseOrder.workflow = workflow;
-            // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-            await window.saveData('purchaseOrders', window.data.purchaseOrders);
-        }
-
-        console.log('✅ Workflow kaydedildi:', workflow.id);
-        return true;
-    } catch (error) {
-        console.error('❌ Workflow kaydetme hatası:', error);
+    const purchaseOrder = (window.data.purchaseOrders || []).find(item => item.workflow?.id === workflow.id);
+    if (!purchaseOrder) {
+        console.error('❌ Workflow kaydı: bağlı satın alma talebi bulunamadı:', workflow.id);
         return false;
     }
+    purchaseOrder.workflow = workflow;
+    const saved = await window.saveData('purchaseOrders', window.data.purchaseOrders);
+    if (saved === false) console.error('❌ Workflow kaydedilemedi:', workflow.id);
+    return saved !== false;
 };
 
-// Client IP adresini al - Audit trail için
-window.getClientIP = async function () {
-    try {
-        // Simple IP detection service
-        const response = await fetch('https://api.ipify.org?format=json');
-        const data = await response.json();
-        return data.ip;
-    } catch (error) {
-        console.log('IP alınamadı, localhost kullanılıyor');
-        return '127.0.0.1';
-    }
-};
+// [WHY]: Her geçişte kullanıcının IP'si api.ipify.org'a sorulup herkesin okuyabildiği geçmişe yazılıyordu;
+//        zaman aşımı yoktu ve ipify'ı engelleyen ağlarda onay takılıyordu (SEC-04). IP artık toplanmıyor.
 
 // Workflow geçmişini formatla - UI için
 window.formatWorkflowHistory = function (workflow) {
@@ -2248,7 +2230,7 @@ window.renderTemplateList = function () {
         ? '<tr><td colspan="4" class="text-center p-4 text-muted">Henüz şablon tanımlanmadı.</td></tr>'
         : templates.map(tpl => `
         <tr>
-            <td><strong>${tpl.name}</strong></td>
+            <td><strong>${escapeHtml(tpl.name)}</strong></td>
             <td>
                 <span class="badge bg-secondary" style="border-radius:12px; padding: 5px 12px;">
                     ${tpl.steps?.length || 0} Adım
@@ -2256,16 +2238,16 @@ window.renderTemplateList = function () {
             </td>
             <td>
                 <small class="text-muted">
-                    ${(tpl.auth && tpl.auth.length > 0) ? tpl.auth.join(', ') : 'Herkes'}
+                    ${escapeHtml((tpl.auth && tpl.auth.length > 0) ? tpl.auth.join(', ') : 'Herkes')}
                 </small>
             </td>
             <td class="text-end pe-3">
                 <div class="action-buttons justify-content-end">
-                    <button onclick="window.openTemplateModal('${tpl.id}')" 
+                    <button onclick="window.openTemplateModal(${jsArg(String(tpl.id))})" 
                             class="btn-action btn-buy shadow-sm" title="Düzenle">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button onclick="window.deleteTemplate('${tpl.id}')" 
+                    <button onclick="window.deleteTemplate(${jsArg(String(tpl.id))})" 
                             class="btn-action btn-passive shadow-sm" title="Sil">
                         <i class="fas fa-trash"></i>
                     </button>
@@ -2441,8 +2423,8 @@ window.renderWorkflowPreview = function (steps) {
 
     container.innerHTML = steps.map((s, i) => `
         <div style="padding:4px 0;">
-            <b>${i + 1}.</b> ${s.user || "-"} 
-            <span style="color:#64748b;">(${s.type || "onay"})</span>
+            <b>${i + 1}.</b> ${escapeHtml(s.user || "-")} 
+            <span style="color:#64748b;">(${escapeHtml(s.type || "onay")})</span>
         </div>
     `).join("");
 };
@@ -2482,7 +2464,6 @@ window.WorkflowRollbackManager = {
             // Metadata
             metadata: {
                 userAgent: navigator.userAgent,
-                ip: await window.getClientIP(),
                 stateLabel: window.getStateLabel(workflow.currentState),
                 stepCount: workflow.steps?.length || 0,
                 hasParallelSteps: (workflow.parallelStates?.length || 0) > 0
@@ -2548,8 +2529,7 @@ window.WorkflowRollbackManager = {
                 checkpointId: targetCheckpointId,
                 checkpointReason: checkpoint.reason,
                 checkpointTimestamp: checkpoint.timestamp,
-                userAgent: navigator.userAgent,
-                ip: await window.getClientIP()
+                userAgent: navigator.userAgent
             }
         };
 

@@ -238,11 +238,11 @@ const showReportModal = function () {
             const badgeClass = log.securityLevel.includes('Bloke') ? 'sar-badge-blocked' : 'sar-badge-verified';
             return `
                 <tr>
-                    <td style="font-weight: 500;">${log.type}</td>
-                    <td>${log.item} <strong>(${log.qty} Adet)</strong></td>
-                    <td style="color: #94a3b8;">${log.user}</td>
-                    <td style="font-size: 0.8rem; color: #64748b;">${log.timestamp}</td>
-                    <td><span class="sar-badge ${badgeClass}">${log.securityLevel}</span></td>
+                    <td style="font-weight: 500;">${escapeHtml(log.type)}</td>
+                    <td>${escapeHtml(log.item)} <strong>(${escapeHtml(log.qty)} Adet)</strong></td>
+                    <td style="color: #94a3b8;">${escapeHtml(log.user)}</td>
+                    <td style="font-size: 0.8rem; color: #64748b;">${escapeHtml(log.timestamp)}</td>
+                    <td><span class="sar-badge ${badgeClass}">${escapeHtml(log.securityLevel)}</span></td>
                 </tr>
             `;
         }).join('');
@@ -317,9 +317,10 @@ const closeReportModal = function () {
 const initializeSecurityProxies = function () {
     const originalConfirmRequest = window.confirmRequest;
     if (originalConfirmRequest && !originalConfirmRequest._isSecured) {
-        const securedConfirm = async function (index) {
-            const request = window.data?.requests?.[index];
-            if (!request) return originalConfirmRequest(index);
+        // Talep artık id ile hedefleniyor (ITSM-05); sarmalayıcı aynı referansla arar.
+        const securedConfirm = async function (requestId) {
+            const request = (window.data?.requests || []).find(r => String(r.id) === String(requestId));
+            if (!request) return originalConfirmRequest(requestId);
 
             const currentUser = window.currentUser?.name;
             const requestor = request.personel;
@@ -373,7 +374,7 @@ const initializeSecurityProxies = function () {
                 });
             }
 
-            return originalConfirmRequest(index);
+            return originalConfirmRequest(requestId);
         };
         securedConfirm._isSecured = true;
         window.confirmRequest = securedConfirm;

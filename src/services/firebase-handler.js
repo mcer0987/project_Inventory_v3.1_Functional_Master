@@ -126,6 +126,47 @@ export const fireDb = initializeFirestore(app, {
 // PM NOTU: global scriptler için db window'a bağlandı
 window.fireDb = fireDb;
 
+// [WHY]: system_config kökte ortam ayrımsızdı; localhost'tan kill switch / force logout / mesaj testi canlı kullanıcıları etkiliyordu (RULE-04, VIP-05).
+// [HOW]: Tüm sistem ayarları ${COLLECTION_ROOT}/system_config/items/{admin_settings|admin_messages} altında. Kural: oturumlu okur, admin yazar.
+export const systemConfigRef = window.systemConfigRef = (name) => doc(fireDb, COLLECTION_ROOT, 'system_config', 'items', name);
+
+// [WHY]: VIP panelinden "Force Logout" (Oturumu Sonlandır) komutu verilen kullanıcının tarayıcısında çıkış yapılması.
+//        Eski alan (force_logout_user_id) hiç temizlenmiyor ve zaman/tekillik kontrolü yoktu: hedef kişi sonraki her
+//        admin_settings snapshot'ında (kill switch, sayfa yenileme, yeniden giriş) tekrar atılıyordu; admin kendini
+//        hedeflerse sürekli kilitleniyordu (VIP-06).
+// [HOW]: Komut { targetId, issuedAt, nonce } nesnesidir. Yalnız taze (FORCE_LOGOUT_TTL_MS) ve bu tarayıcıda daha önce
+//        işlenmemiş (nonce) komut uygulanır; Firebase admin oturumu hiçbir zaman atılmaz. Eski alan yok sayılır.
+//        Kimlik: id, giriş kodu veya ad (sistem üçünü de farklı bağlamlarda kullanıyor).
+export const handleForceLogoutCommand = window.handleForceLogoutCommand = function (cmd) {
+    if (!cmd || !cmd.targetId || !cmd.nonce) return false;
+    const FORCE_LOGOUT_TTL_MS = 10 * 60 * 1000;
+    const doneKey = `force_logout_done_${cmd.nonce}`;
+    const fresh = Number(cmd.issuedAt) > 0 && Math.abs(Date.now() - Number(cmd.issuedAt)) < FORCE_LOGOUT_TTL_MS;
+    const isAdminSession = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+    const localUser = window.currentUser || window.getActiveUser();
+    const targetId = String(cmd.targetId);
+    const isMatch = !!localUser && (
+        (localUser.id   && String(localUser.id)   === targetId) ||
+        (localUser.code && String(localUser.code) === targetId) ||
+        (localUser.name && String(localUser.name) === targetId)
+    );
+
+    if (fresh && isMatch && !isAdminSession && localStorage.getItem(doneKey) !== '1') {
+        localStorage.setItem(doneKey, '1');
+        console.warn('🚨 [Force Logout] Bu oturum yönetici tarafından sonlandırıldı. Hedef ID:', targetId);
+        if (typeof window.logout === 'function') {
+            window.logout('force_logout');
+        } else {
+            // Fallback: logout fonksiyonu henüz yüklenmemişse manuel temizle
+            window.clearSession();
+            window.location.replace('index.html');
+        }
+        return true;
+    }
+    return false;
+};
+
+
 if (!window.data) {
     window.data = { b1: [], b2: [], b3: [], personel: [], requests: [], productTypes: [], tasks: [], config: {}, assignments: [] };
 }
@@ -182,7 +223,8 @@ window.startRealtimeSync = function () {
 
             const items = [];
             snapshot.forEach(docSnap => {
-                items.push(docSnap.data());
+                // Kayıtta id alanı yoksa doküman id'si kullanılır; aksi halde düzenleme/silme hedefsiz kalıyor ve kayıt temp_ id ile çoğalıyordu.
+                items.push({ id: docSnap.id, ...docSnap.data() });
             });
 
             // Veriyi global hafızaya ve Mirror'a (kopya) al
@@ -236,19 +278,14 @@ window.startRealtimeSync = function () {
     });
 
     // B. SİSTEM AYARLARINI DİNLE
-    _syncUnsubscribers.push(onSnapshot(doc(fireDb, "system_config", "admin_settings"), (docSnap) => {
+    _syncUnsubscribers.push(onSnapshot(systemConfigRef("admin_settings"), (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
             window.data.config = data;
             console.log("⚙️ Hash updated.");
 
-            // [DECOMMISSIONED] Launchpad global şalter dinleme mantığı kaldırıldı.
-            if (data.hasOwnProperty('launchpadDisabledGlobal')) {
-                localStorage.setItem('launchpadDisabledGlobal', data.launchpadDisabledGlobal);
-                if (typeof window.updateActionButtonsState === 'function') {
-                    window.updateActionButtonsState();
-                }
-            }
+            // Launchpad bayrağı artık dinlenmez (VIP-10 / K9-a); eski istemcilerdeki kopyası temizlenir.
+            localStorage.removeItem('launchpadDisabledGlobal');
 
             // [WHY]: Kill Switch entegrasyonu. Firestore'daki 'maintenance' bayrağını dinleyerek normal kullanıcıları bakım moduna alırız.
             // [HOW]: Admin vizesi (admin_auth) yoksa ve maintenance aktifse localStorage'a yazar ve sayfayı yenileriz.
@@ -281,38 +318,8 @@ window.startRealtimeSync = function () {
                 }
             }
 
-            // [WHY]: VIP panelinden "Force Logout" (Oturumu Sonlandır) komutu verilen kullanıcının
-            //        tarayıcısında anında çıkış yapılması gerekiyor. Firebase'e yazılan force_logout_user_id
-            //        alanı tüm açık client'lara broadcast edilir; bu blok kendi ID'siyle eşleşen kullanıcıyı yakalar.
-            // [HOW]: window.currentUser null-guard'ı ile korunur (sayfa yüklenmeden önce null olabilir).
-            //        Kullanıcı kimliği için id, code ve name alanlarının üçü de karşılaştırılır;
-            //        bu, sistemin farklı bağlamlarda (personel id'si, giriş kodu, isim) kayıt tutmasından kaynaklanır.
-            if (data.force_logout_user_id) {
-                const targetId = data.force_logout_user_id;
-
-                // 🛡️ NULL-GUARD: window.currentUser henüz yüklenmemiş olabilir (async Firebase init race condition).
-                // localStorage'dan da okuyarak ikincil güvenlik ağı kuruyoruz.
-                const localUser = window.currentUser || window.getActiveUser();
-
-                if (localUser) {
-                    const isMatch = (
-                        (localUser.id   && String(localUser.id)   === String(targetId)) ||
-                        (localUser.code && String(localUser.code) === String(targetId)) ||
-                        (localUser.name && String(localUser.name) === String(targetId))
-                    );
-
-                    if (isMatch) {
-                        console.warn('🚨 [Force Logout] Bu oturum yönetici tarafından sonlandırıldı. Hedef ID:', targetId);
-                        if (typeof window.logout === 'function') {
-                            window.logout('force_logout');
-                        } else {
-                            // Fallback: logout fonksiyonu henüz yüklenmemişse manuel temizle
-                            window.clearSession();
-                            window.location.replace('index.html');
-                        }
-                    }
-                }
-            }
+            // Force logout: tek seferlik, taze komut (VIP-06) — bkz. handleForceLogoutCommand
+            handleForceLogoutCommand(data.force_logout);
         }
     }, (err) => {
         if (err.code === "permission-denied") console.warn("⏳ [Güvenlik] Firebase yetki onayı bekleniyor (admin_settings)...");
@@ -322,7 +329,7 @@ window.startRealtimeSync = function () {
     // C. SİSTEM MESAJLARINI DİNLE
     // [WHY]: God-Eye panelinden gönderilen yönetici mesajlarını gerçek zamanlı yakalamak için.
     // [HOW]: system_config/admin_messages belgesindeki target_user_id ile mevcut kullanıcının id/code/name alanlarını karşılaştırır ve eşleşirse alert gösterir.
-    _syncUnsubscribers.push(onSnapshot(doc(fireDb, "system_config", "admin_messages"), (docSnap) => {
+    _syncUnsubscribers.push(onSnapshot(systemConfigRef("admin_messages"), (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
             
@@ -378,7 +385,7 @@ export const saveData = window.saveData = async function (arg1, arg2) {
     // [HOW]: Eğer window.userAuth yoksa, veritabanına yazma işlemini anında reddet (Frontend Guard).
     if (!window.userAuth) {
         console.error("❌ Yetkisiz Yazma Denemesi: Oturum bulunamadı.");
-        return;
+        return false;
     }
 
     // [ADIM 1] Akıllı Parametre Yönetimi: Gelen verinin tipine göre davranış belirle
@@ -466,8 +473,11 @@ export const saveData = window.saveData = async function (arg1, arg2) {
         }
 
         console.log(`☁️ Firebase Senkronize Edildi (Chunked): ${arg1 || 'Toplu Kayıt'}`);
+        return true;
     } catch (e) {
+        // [WHY]: Hata yutulduğu için çağıranlar başarısız kaydı "başarılı" gösteriyordu (DATA-02); sonuç artık döndürülüyor.
         console.error("❌ Kayıt Hatası:", e);
+        return false;
     }
 };
 
@@ -592,7 +602,9 @@ export const runStockTransaction = window.runStockTransaction = async function (
     // aktif ortam root'una yönlendirilir. Prod/demo karışımını önler.
     const docRef = doc(fireDb, COLLECTION_ROOT, colName, "items", String(docId));
 
-    await runTransaction(fireDb, async (transaction) => {
+    // [WHY]: Çağıranlar sonucu göremediği için "başarılı" mesajı stoğun gerçekten değişip değişmediğini söylemiyordu.
+    // [HOW]: Transaction önceki ve yeni adedi döndürür; stok alanı hiç yoksa 'adet' yazılır (sessiz no-op olmaz).
+    return runTransaction(fireDb, async (transaction) => {
         const sfDoc = await transaction.get(docRef);
         if (!sfDoc.exists()) {
             throw new Error("İlgili stok kaydı veritabanında bulunamadı!");
@@ -615,11 +627,14 @@ export const runStockTransaction = window.runStockTransaction = async function (
         const updateData = {};
         if (data.adet !== undefined) updateData.adet = newQty;
         if (data.qty !== undefined) updateData.qty = newQty;
+        if (data.adet === undefined && data.qty === undefined) updateData.adet = newQty;
         updateData.durumu = newStatus;
         updateData.status = newStatus;
 
         transaction.update(docRef, updateData);
+        return { before: currentQty, after: newQty };
+    }).then(result => {
+        console.log(`✅ [TRANSACTION BAŞARILI] ${colName}/${docId} stoğu güncellendi: ${result.before} → ${result.after}`);
+        return result;
     });
-
-    console.log(`✅ [TRANSACTION BAŞARILI] ${colName}/${docId} stoğu güncellendi. Delta: ${delta}`);
 };

@@ -503,33 +503,49 @@ export const sortTable = function (columnName, depo) {
     renderTable(depo, false, currentLimit);
 };
 
-export const toggleCardView = function (depo) {
-    window._cardViewActive[depo] = !window._cardViewActive[depo];
+// [WHY]: _cardViewActive hiç başlatılmıyordu (toggle TypeError) ve mobil/TV CSS'i tabloyu gizleyip boş kart alanı gösteriyordu (INV-03).
+// [HOW]: Durum nesnesi başlatılır; mobil (≤768px) ve TV (≥2560px) ekranda kart modu otomatik açılır.
+//        Tablo seçimi 'force-table-view' sınıfıyla işaretlenir; CSS bu sınıfla medya sorgusunu ezer.
+window._cardViewActive = window._cardViewActive || {};
+const CARD_VIEW_DEPOS = ['b1', 'b2'];
+const AUTO_CARD_MQ = window.matchMedia('(max-width: 768px), (min-width: 2560px)');
 
+function applyCardViewState(depo) {
+    const active = !!window._cardViewActive[depo];
+    const section = document.getElementById(depo);
     const tableWrapper = document.querySelector(`#${depo} .table-responsive-wrapper`);
     const cardContainer = document.getElementById(`cardView${depo.toUpperCase()}`);
     const toggleBtn = document.getElementById(`viewToggle${depo.toUpperCase()}`);
 
-    if (window._cardViewActive[depo]) {
-        if (tableWrapper) tableWrapper.style.display = 'none';
-        if (cardContainer) cardContainer.style.display = 'block';
-        if (toggleBtn) {
-            toggleBtn.innerHTML = '<i class="fas fa-table"></i>';
-            toggleBtn.title = 'Tablo Görünümüne Geç';
-            toggleBtn.classList.add('view-toggle-active');
-        }
-        renderMobileCards(depo);
-    } else {
-        if (tableWrapper) tableWrapper.style.display = '';
-        if (cardContainer) cardContainer.style.display = 'none';
-        if (toggleBtn) {
-            toggleBtn.innerHTML = '<i class="fas fa-th-large"></i>';
-            toggleBtn.title = 'Kart Görünümüne Geç';
-            toggleBtn.classList.remove('view-toggle-active');
-        }
-        renderTable(depo);
+    if (section) section.classList.toggle('force-table-view', !active);
+    if (tableWrapper) tableWrapper.style.display = active ? 'none' : '';
+    if (cardContainer) cardContainer.style.display = active ? 'block' : 'none';
+    if (toggleBtn) {
+        toggleBtn.innerHTML = active ? '<i class="fas fa-table"></i>' : '<i class="fas fa-th-large"></i>';
+        toggleBtn.title = active ? 'Tablo Görünümüne Geç' : 'Kart Görünümüne Geç';
+        toggleBtn.classList.toggle('view-toggle-active', active);
     }
+}
+
+export const toggleCardView = function (depo) {
+    window._cardViewActive[depo] = !window._cardViewActive[depo];
+    applyCardViewState(depo);
+    if (window._cardViewActive[depo]) renderMobileCards(depo);
+    else renderTable(depo);
 };
+
+function _detectAndApplyCardView() {
+    CARD_VIEW_DEPOS.forEach(depo => {
+        window._cardViewActive[depo] = AUTO_CARD_MQ.matches;
+        applyCardViewState(depo);
+        if (AUTO_CARD_MQ.matches && (window.data?.[depo] || []).length) renderMobileCards(depo);
+    });
+}
+AUTO_CARD_MQ.addEventListener('change', () => {
+    _detectAndApplyCardView();
+    CARD_VIEW_DEPOS.forEach(depo => { if (!AUTO_CARD_MQ.matches) renderTable(depo); });
+});
+_detectAndApplyCardView();
 
 export const patchDOMForCollection = function (colName, changes) {
     if (!changes || changes.length === 0) return;

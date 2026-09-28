@@ -63,7 +63,7 @@ window.todoModule = {
                             <option value="all" ${this.state.adminFilter === 'all' ? 'selected' : ''}>Tüm Görevler</option>
                             <option value="pool" ${this.state.adminFilter === 'pool' ? 'selected' : ''} style="font-weight: bold; color: var(--color-primary);">📦 Görev Havuzu (Atanmamış)</option>
                             <optgroup label="Personeller">
-                                ${personnelList.map(p => `<option value="${p.name}" ${this.state.adminFilter === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                                ${personnelList.map(p => `<option value="${escapeHtml(p.name)}" ${this.state.adminFilter === p.name ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
                             </optgroup>
                         </select>
 
@@ -173,21 +173,21 @@ window.todoModule = {
         return filteredTasks.sort((a, b) => b.id - a.id).map(task => {
             console.log(`Render Card: ${task.title} | ID: ${task.id}`);
             const isCompleted = task.status === 'Completed';
-            const priorityClass = `priority-${task.priority.toLowerCase()}`;
+            const priorityClass = `priority-${escapeHtml(String(task.priority || 'Medium').toLowerCase())}`;
             const typeClass = task.isPersonal ? 'personal-task' : 'assigned-task';
 
             return `
-                <div class="task-card ${typeClass} ${priorityClass} ${isCompleted ? 'completed' : ''}" id="task-${task.id}">
+                <div class="task-card ${typeClass} ${priorityClass} ${isCompleted ? 'completed' : ''}" id="task-${escapeHtml(task.id)}">
                     <div class="task-card-header d-flex justify-content-between align-items-center mb-2">
-                        <h3 class="task-title mb-0" title="${task.title}">${task.title}</h3>
+                        <h3 class="task-title mb-0" title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</h3>
                         <div class="task-status-wrapper">
                             <input class="task-status-checkbox" type="checkbox" ${isCompleted ? 'checked' : ''} 
-                                   onchange="todoModule.toggleTaskStatus('${task.id}')" title="Tamamlandı İşaretle">
+                                   onchange="todoModule.toggleTaskStatus(${jsArg(String(task.id))})" title="Tamamlandı İşaretle">
                         </div>
                     </div>
                     
                     <div class="task-card-body">
-                        <p class="task-desc">${task.description}</p>
+                        <p class="task-desc">${escapeHtml(task.description)}</p>
                         
                         <!-- Checklist Section -->
                         <div class="task-checklist mb-3">
@@ -196,22 +196,22 @@ window.todoModule = {
                                     <i class="fas fa-tasks"></i> Alt Maddeler 
                                     ${this.getChecklistStats(task.checklist || [])}
                                 </small>
-                                <button onclick="todoModule.openChecklistModal('${task.id}')" class="btn-madde-ekle"><i class="fas fa-list-check"></i> Yönet</button>
+                                <button onclick="todoModule.openChecklistModal(${jsArg(String(task.id))})" class="btn-madde-ekle"><i class="fas fa-list-check"></i> Yönet</button>
                             </div>
-                            <div id="checklist-${task.id}">
+                            <div id="checklist-${escapeHtml(task.id)}">
                                 ${this.generateChecklistItems(task.id, task.checklist || [], 3)}
                             </div>
                         </div>
 
                         ${!task.isPersonal ? `
-                        <div class="task-interactions mt-3" id="interactions-${task.id}">
+                        <div class="task-interactions mt-3" id="interactions-${escapeHtml(task.id)}">
                             ${this.generateInteractions(task.interactions || [])}
                         </div>
 
                         <div class="interaction-input-group mt-2">
                             <input type="text" class="interaction-input" placeholder="Mesaj veya not yazın..." 
-                                   id="input-${task.id}" onkeydown="if(event.key==='Enter') todoModule.addInteraction('${task.id}')">
-                            <button class="interaction-send-btn" onclick="todoModule.addInteraction('${task.id}')" title="Gönder">
+                                   id="input-${escapeHtml(task.id)}" onkeydown="if(event.key==='Enter') todoModule.addInteraction(${jsArg(String(task.id))})">
+                            <button class="interaction-send-btn" onclick="todoModule.addInteraction(${jsArg(String(task.id))})" title="Gönder">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
                         </div>
@@ -226,18 +226,18 @@ window.todoModule = {
 
                     <div class="task-meta mt-auto pt-3 border-top d-flex align-items-center gap-2 flex-wrap">
                         <span class="task-badge badge-personnel">
-                            👤 ${task.assigneeId === 'pool' ? 'Havuz' : task.assigneeId}
+                            👤 ${escapeHtml(task.assigneeId === 'pool' ? 'Havuz' : task.assigneeId)}
                         </span>
                         <span class="task-badge badge-date">
-                            ⏰ ${task.dueDate || 'Belirtilmedi'}
+                            ⏰ ${escapeHtml(task.dueDate || 'Belirtilmedi')}
                         </span>
                         ${task.priority === 'High' ? `<span class="task-badge badge-priority-high">🔥 ACİL</span>` : ''}
                         
                         <div class="ms-auto d-flex gap-1">
                             ${(!task.assigneeId || task.assigneeId === 'pool') && viewMode === 'admin' ?
-                    `<button onclick="todoModule.openAssignModal('${task.id}')" class="btn btn-sm btn-outline-primary action-btn" title="Personele Ata"><i class="fas fa-user-plus"></i></button>` : ''}
-                            <button onclick="todoModule.openEditTaskModal('${task.id}')" class="btn btn-sm btn-outline-secondary action-btn" title="Görevi Düzenle"><i class="fas fa-edit"></i></button>
-                            <button onclick="todoModule.deleteTask('${task.id}')" class="btn btn-sm btn-outline-danger action-btn" title="Görevi Sil"><i class="fas fa-trash"></i></button>
+                    `<button onclick="todoModule.openAssignModal(${jsArg(String(task.id))})" class="btn btn-sm btn-outline-primary action-btn" title="Personele Ata"><i class="fas fa-user-plus"></i></button>` : ''}
+                            <button onclick="todoModule.openEditTaskModal(${jsArg(String(task.id))})" class="btn btn-sm btn-outline-secondary action-btn" title="Görevi Düzenle"><i class="fas fa-edit"></i></button>
+                            <button onclick="todoModule.deleteTask(${jsArg(String(task.id))})" class="btn btn-sm btn-outline-danger action-btn" title="Görevi Sil"><i class="fas fa-trash"></i></button>
                         </div>
                     </div>
                 </div>
@@ -264,14 +264,14 @@ window.todoModule = {
 
         let html = displayItems.map((item, idx) => `
             <div class="d-flex align-items-center gap-2 ps-2 mb-1 checklist-item">
-                <input type="checkbox" ${item.done ? 'checked' : ''} onchange="todoModule.toggleChecklistItem('${taskId}', ${idx})" class="checklist-checkbox">
-                <span class="small ${item.done ? 'text-decoration-line-through text-muted' : ''}">${item.text}</span>
+                <input type="checkbox" ${escapeHtml(item.done ? 'checked' : '')} onchange="todoModule.toggleChecklistItem(${jsArg(String(taskId))}, ${idx})" class="checklist-checkbox">
+                <span class="small ${escapeHtml(item.done ? 'text-decoration-line-through text-muted' : '')}">${escapeHtml(item.text)}</span>
             </div>
         `).join('');
 
         if (moreCount > 0) {
             html += `
-                <div class="checklist-more-link" onclick="todoModule.openChecklistModal('${taskId}')">
+                <div class="checklist-more-link" onclick="todoModule.openChecklistModal(${jsArg(String(taskId))})">
                     <i class="fas fa-ellipsis-h"></i> ve ${moreCount} adet daha...
                 </div>
             `;
@@ -283,9 +283,9 @@ window.todoModule = {
     generateInteractions: function (interactions) {
         return interactions.map(i => `
             <div class="interaction-item">
-                <span class="user">${i.user}:</span>
-                <span class="text">${i.message || i.text || ""}</span>
-                <span class="date">${i.time || i.date || ""}</span>
+                <span class="user">${escapeHtml(i.user)}:</span>
+                <span class="text">${escapeHtml(i.message || i.text || "")}</span>
+                <span class="date">${escapeHtml(i.time || i.date || "")}</span>
             </div>
         `).join('');
     },
@@ -402,7 +402,7 @@ window.todoModule = {
                 this.tempChecklist.map((item, idx) => `
                         <div class="temp-item">
                             <i class="fas fa-grip-vertical text-muted" style="font-size: 11px; opacity: 0.5;"></i>
-                            <input type="text" value="${item.text}" onchange="todoModule.editTempItem(${idx}, this.value)">
+                            <input type="text" value="${escapeHtml(item.text)}" onchange="todoModule.editTempItem(${idx}, this.value)">
                             <button class="btn-remove" onclick="todoModule.removeFromTempChecklist(${idx})" title="Sil">
                                 <i class="fas fa-trash-alt"></i>
                             </button>
@@ -412,7 +412,7 @@ window.todoModule = {
 
                 <div class="d-flex justify-content-end gap-2 pt-2">
                     <button onclick="todoModule.closeChecklistModal()" class="btn btn-outline-secondary btn-sm px-4">Vazgeç</button>
-                    <button onclick="todoModule.saveChecklist('${String(taskId)}')" class="btn btn-success btn-sm px-4">Kaydet</button>
+                    <button onclick="todoModule.saveChecklist(${jsArg(String(taskId))})" class="btn btn-success btn-sm px-4">Kaydet</button>
                 </div>
             </div>
         `;
@@ -627,7 +627,7 @@ window.todoModule = {
                         <label>${assigneeLabel}</label>
                         <select id="todoTaskAssignee" class="form-select" ${isLocked ? 'disabled' : ''}>
                             <option value="pool">📦 Görev Havuzu</option>
-                            ${personnelList.map(p => `<option value="${p.name}" ${p.name === defaultAssignee ? 'selected' : ''}>${p.name}</option>`).join('')}
+                            ${personnelList.map(p => `<option value="${escapeHtml(p.name)}" ${escapeHtml(p.name === defaultAssignee ? 'selected' : '')}>${escapeHtml(p.name)}</option>`).join('')}
                         </select>
                     </div>
                     <div class="col-md-6 form-group mb-3">
@@ -661,7 +661,7 @@ window.todoModule = {
             `<div style="min-width: 250px;">
                 <p>Bu görevi kime atamak istersiniz?</p>
                 <select id="quickAssignSelect" class="form-select">
-                    ${personnelList.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                    ${personnelList.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
                 </select>
             </div>`,
             async () => {

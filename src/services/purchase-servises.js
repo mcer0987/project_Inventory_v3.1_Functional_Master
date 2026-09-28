@@ -33,7 +33,7 @@ window.handlePurchaseFileChange = function (input) {
         Array.from(input.files).forEach(file => {
             const tag = document.createElement('div');
             tag.className = 'file-tag-slim';
-            tag.innerHTML = `<i class="fas fa-file"></i> ${file.name}`;
+            tag.innerHTML = `<i class="fas fa-file"></i> ${escapeHtml(file.name)}`;
             list.appendChild(tag);
         });
     }
@@ -88,7 +88,8 @@ window.openNewPurchaseModal = function () {
     if (filesDiv) { filesDiv.style.display = 'none'; filesDiv.innerHTML = ''; }
     if (wfDiv) { wfDiv.style.display = 'none'; wfDiv.innerHTML = ''; }
     if (fileArea) fileArea.style.display = 'block';
-    if (rejectBtn) rejectBtn.style.display = 'none';
+    if (rejectBtn) { rejectBtn.style.display = 'none'; rejectBtn.onclick = null; }
+    _resetPurchaseFileInputs();
 
     // 5. Populate fresh auto-generated values
     const now = new Date();
@@ -100,40 +101,45 @@ window.openNewPurchaseModal = function () {
     const elUser = document.getElementById('purUser');
     if (elDoc) elDoc.value = docCode;
     if (elDate) elDate.value = now.toLocaleDateString('tr-TR');
-    if (elUser) elUser.value = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+    if (elUser) elUser.value = _purchaseRequester().name || "Bilinmeyen Kullanıcı";
 
     fillPurchaseSelects();
 
     modal.style.display = "block";
 };
 
+// [WHY]: Talep eden, yeni talepte ölü initEBYSModal'daki sabit "Muhammed CER" yedeğine düşebiliyor; kayıtta ise elle
+//        değiştirilebilen form alanından okunuyordu (EBYS-06).
+// [HOW]: Talep eden her zaman oturumdaki aktif kullanıcıdır (getActiveUser → currentUser); form alanı yalnız gösterimdir.
+function _purchaseRequester() {
+    const u = (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null) || window.currentUser || {};
+    return { name: String(u.name || '').trim(), code: String(u.code || u.id || '').trim() };
+}
+
 // -----------------------------
 // SELECT DOLDUR
 // -----------------------------
+// [WHY]: "Belge / Ürün Türü" yalnız modal açılırken bir kez dolduruluyordu; türler (veya birimler) modal açıkken ya da
+//        henüz tanımlanmamışken gelirse liste boş kalıyor, zorunlu alan yüzünden form ilerlemiyordu. Adlar kaçışsız basılıyordu.
+// [HOW]: Liste ${COLLECTION_ROOT}/productTypes/items (window.data.productTypes) ve units'ten; tekil, sıralı, kaçışlı.
+//        Mevcut seçim korunur; boşsa nereden tanımlanacağı yazılır. Modal açıkken snapshot gelince yeniden doldurulur (dosya sonu).
+function _fillNamedSelect(select, items, placeholder, emptyText) {
+    if (!select) return;
+    const current = select.value;
+    const names = [...new Set(items.map(x => String((x && typeof x === 'object' ? (x.name || x.birimAdi) : x) || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'tr'));
+    select.innerHTML = (names.length ? `<option value="">${placeholder}</option>` : `<option value="">${emptyText}</option>`) +
+        names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    if (!current) return;
+    if (!names.includes(current)) select.add(new Option(current, current));
+    select.value = current;
+}
+
 function fillPurchaseSelects() {
-
-    const unitSelect = document.getElementById('purUnit');
-    const typeSelect = document.getElementById('purType');
-
-    if (unitSelect) {
-        const units = window.data.units || [];
-        unitSelect.innerHTML =
-            '<option value="">Birim Seçiniz</option>' +
-            units.map(u => {
-                const name = typeof u === "object" ? u.name : u;
-                return `<option value="${name}">${name}</option>`;
-            }).join('');
-    }
-
-    if (typeSelect) {
-        const types = window.data.productTypes || [];
-        typeSelect.innerHTML =
-            '<option value="">Tür Seçiniz</option>' +
-            types.map(t => {
-                const name = typeof t === "object" ? t.name : t;
-                return `<option value="${name}">${name}</option>`;
-            }).join('');
-    }
+    _fillNamedSelect(document.getElementById('purUnit'), window.data.units || [],
+        'Birim Seçiniz', 'Tanımlı birim yok — Tanımlar › Birimler');
+    _fillNamedSelect(document.getElementById('purType'), window.data.productTypes || [],
+        'Tür Seçiniz', 'Tanımlı ürün türü yok — Tanımlar › Ürün Türleri');
 }
 
 // -----------------------------
@@ -156,11 +162,16 @@ window.savePurchaseRequest = async function (e) {
             console.log("✅ Dosya yükleme tamamlandı.");
         }
 
+        const requester = _purchaseRequester();
+        if (!requester.name) {
+            if (typeof showAppAlert === 'function') showAppAlert('Talep oluşturmak için giriş yapmalısınız.', 'error');
+            return false;
+        }
         const newRequest = {
             id: Date.now(),
             evrakNo: document.getElementById('purDocName')?.value || "",
             tarih: document.getElementById('purDate')?.value || "",
-            talepEden: document.getElementById('purUser')?.value || window.currentUser?.name || "",
+            talepEden: requester.name,
             urun: document.getElementById('purName')?.value || "",
             adet: parseFloat(document.getElementById('purQty')?.value) || 1,
             butce: parseFloat(document.getElementById('purBudget')?.value) || 0,
@@ -168,8 +179,8 @@ window.savePurchaseRequest = async function (e) {
             tur: document.getElementById('purType')?.value || "",
             oncelik: document.getElementById('purPriority')?.value || "Normal",
             aciklama: document.getElementById('purDesc')?.value || "",
-            createdBy: String(window.currentUser?.code || window.currentUser?.id || "unknown"),
-            createdByName: window.currentUser?.name || "Bilinmeyen",
+            createdBy: requester.code || "unknown",
+            createdByName: requester.name,
             durum: "Onay Bekliyor",
             createdAt: Date.now(),
             files: uploadedFiles.map(f => ({
@@ -181,7 +192,7 @@ window.savePurchaseRequest = async function (e) {
             akis: [
                 {
                     islem: "Talep Oluşturuldu",
-                    yapan: window.currentUser?.name,
+                    yapan: requester.name,
                     tarih: new Date().toLocaleString('tr-TR')
                 }
             ],
@@ -390,32 +401,32 @@ window.renderPurchaseModule = function (options = {}) {
                     return `
                     <tr class="align-middle ${isCancelled ? 'passive-row' : ''}">
                         <td>
-                            <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${item.evrakNo || "-"}</div>
+                            <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${escapeHtml(item.evrakNo || "-")}</div>
                         </td>
                         <td>
-                            <div style="font-size:12px; color:#64748b; font-weight:500;">${item.tarih || "-"}</div>
+                            <div style="font-size:12px; color:#64748b; font-weight:500;">${escapeHtml(item.tarih || "-")}</div>
                         </td>
                         <td>
-                            <div style="font-size:13px; font-weight:600; color:#1e293b;">${item.talepEden || item.createdByName || "-"}</div>
+                            <div style="font-size:13px; font-weight:600; color:#1e293b;">${escapeHtml(item.talepEden || item.createdByName || "-")}</div>
                             <small class="text-muted" style="font-size:10px;">EBYS Birimi</small>
                         </td>
                         <td>
-                            <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${item.urun || "-"}</div>
+                            <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${escapeHtml(item.urun || "-")}</div>
                             <div style="font-size:11px; color:#94a3b8; font-weight:500; margin-top:2px;">
-                                <i class="fas fa-building me-1"></i> ${item.birim || "Genel"}
+                                <i class="fas fa-building me-1"></i> ${escapeHtml(item.birim || "Genel")}
                             </div>
                         </td>
                         <td>${durumHTML}</td>
                         <td class="text-end">
                             <div class="d-flex justify-content-end gap-1">
                                 <!-- Görüntüle -->
-                                <button onclick="window.openPurchaseDetail(${item.id}, 'view')" class="btn-action btn-passive" title="Görüntüle">
+                                <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'view')" class="btn-action btn-passive" title="Görüntüle">
                                     <i class="fas fa-eye fa-xs"></i>
                                 </button>
             
                                 ${window.isAdminPanel ? `
                                     <!-- Düzenle (Admin için her zaman açık) -->
-                                    <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                    <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'edit')" 
                                             class="btn-action btn-edit" 
                                             title="Düzenle">
                                         <i class="fas fa-edit fa-xs"></i>
@@ -423,31 +434,31 @@ window.renderPurchaseModule = function (options = {}) {
                                     
                                     ${!isStarted ? `
                                         <!-- Akışı Başlat -->
-                                        <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                        <button onclick="window.startWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Başlat">
                                             <i class="fas fa-play fa-xs"></i>
                                         </button>
                                     ` : `
                                         <!-- Akışı Görüntüle -->
-                                        <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                        <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Görüntüle">
                                             <i class="fas fa-stream fa-xs"></i>
                                         </button>
                                     `}
                                     
                                     ${!isCancelled ? `
                                         <!-- [BUGFIX] Admin Geri Çek / İptal (cancelPurchaseRequest) butonu -->
-                                        <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                        <button onclick="window.cancelPurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
                                             <i class="fas fa-ban fa-xs"></i>
                                         </button>
                                     ` : ''}
 
                                     <!-- Sil -->
-                                    <button onclick="window.deletePurchaseRequest('${item.id}')" class="btn-action btn-danger" title="Sil">
+                                    <button onclick="window.deletePurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="Sil">
                                         <i class="fas fa-trash-alt fa-xs"></i>
                                     </button>
                                 ` : `
                                     ${!isCancelled ? `
                                         <!-- Düzenle -->
-                                        <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                        <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'edit')" 
                                                 class="btn-action btn-edit" 
                                                 ${isStarted ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
                                                 title="${isStarted ? 'Süreç başladığı için düzenlenemez' : 'Düzenle'}">
@@ -456,18 +467,18 @@ window.renderPurchaseModule = function (options = {}) {
                     
                                         ${!isStarted ? `
                                             <!-- Akışı Başlat -->
-                                            <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                            <button onclick="window.startWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Başlat">
                                                 <i class="fas fa-play fa-xs"></i>
                                             </button>
                                         ` : `
                                             <!-- Akışı Görüntüle -->
-                                            <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                            <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Görüntüle">
                                                 <i class="fas fa-stream fa-xs"></i>
                                             </button>
                                         `}
                                         
                                         <!-- İptal Et / Geri Çek -->
-                                        <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                        <button onclick="window.cancelPurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
                                             <i class="fas fa-ban fa-xs"></i>
                                         </button>
                                     ` : ''}
@@ -478,7 +489,7 @@ window.renderPurchaseModule = function (options = {}) {
                     `;
                 } catch (err) {
                     console.error("❌ Satır render hatası:", err, item);
-                    return `<tr><td colspan="6" style="color:red; font-size:10px;">Veri hatası (ID: ${item.id})</td></tr>`;
+                    return `<tr><td colspan="6" style="color:red; font-size:10px;">Veri hatası (ID: ${escapeHtml(item.id)})</td></tr>`;
                 }
             }).join("")
             : `
@@ -525,32 +536,32 @@ window.renderServicesModule = function () {
             return `
                 <tr ${rowStyle} class="align-middle ${isCancelled ? 'passive-row' : ''}">
                     <td>
-                        <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${item.evrakNo || "-"}</div>
+                        <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${escapeHtml(item.evrakNo || "-")}</div>
                     </td>
                     <td>
-                        <div style="font-size:12px; color:#64748b; font-weight:500;">${item.tarih || "-"}</div>
+                        <div style="font-size:12px; color:#64748b; font-weight:500;">${escapeHtml(item.tarih || "-")}</div>
                     </td>
                     <td>
-                        <div style="font-size:13px; font-weight:600; color:#1e293b;">${item.talepEden || item.createdByName || "-"}</div>
+                        <div style="font-size:13px; font-weight:600; color:#1e293b;">${escapeHtml(item.talepEden || item.createdByName || "-")}</div>
                         <small class="text-muted" style="font-size:10px;">EBYS Birimi</small>
                     </td>
                     <td>
-                        <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${item.urun || "-"}</div>
+                        <div style="font-size:13px; font-weight:600; color:var(--color-primary);">${escapeHtml(item.urun || "-")}</div>
                         <div style="font-size:11px; color:#94a3b8; font-weight:500; margin-top:2px;">
-                            <i class="fas fa-building me-1"></i> ${item.birim || "Genel"}
+                            <i class="fas fa-building me-1"></i> ${escapeHtml(item.birim || "Genel")}
                         </div>
                     </td>
                     <td>${durumHTML}</td>
                     <td class="text-end">
                         <div class="d-flex justify-content-end gap-1">
                             <!-- Görüntüle -->
-                            <button onclick="window.openPurchaseDetail(${item.id}, 'view')" class="btn-action btn-passive" title="Görüntüle">
+                            <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'view')" class="btn-action btn-passive" title="Görüntüle">
                                 <i class="fas fa-eye fa-xs"></i>
                             </button>
         
                             ${window.isAdminPanel ? `
                                 <!-- Düzenle (Admin için her zaman açık) -->
-                                <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'edit')" 
                                         class="btn-action btn-edit" 
                                         title="Düzenle">
                                     <i class="fas fa-edit fa-xs"></i>
@@ -558,31 +569,31 @@ window.renderServicesModule = function () {
                                 
                                 ${!isStarted ? `
                                     <!-- Akışı Başlat -->
-                                    <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                    <button onclick="window.startWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Başlat">
                                         <i class="fas fa-play fa-xs"></i>
                                     </button>
                                 ` : `
                                     <!-- Akışı Görüntüle -->
-                                    <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                    <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Görüntüle">
                                         <i class="fas fa-stream fa-xs"></i>
                                     </button>
                                 `}
                                 
                                 ${!isCancelled ? `
                                     <!-- [BUGFIX] Admin Geri Çek / İptal (cancelPurchaseRequest) butonu -->
-                                    <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                    <button onclick="window.cancelPurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
                                         <i class="fas fa-ban fa-xs"></i>
                                     </button>
                                 ` : ''}
 
                                 <!-- Sil -->
-                                <button onclick="window.deletePurchaseRequest('${item.id}')" class="btn-action btn-danger" title="Sil">
+                                <button onclick="window.deletePurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="Sil">
                                     <i class="fas fa-trash-alt fa-xs"></i>
                                 </button>
                             ` : `
                                 ${!isCancelled ? `
                                     <!-- Düzenle -->
-                                    <button onclick="window.openPurchaseDetail(${item.id}, 'edit')" 
+                                    <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'edit')" 
                                             class="btn-action btn-edit" 
                                             ${isStarted ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
                                             title="${isStarted ? 'Süreç başladığı için düzenlenemez' : 'Düzenle'}">
@@ -591,18 +602,18 @@ window.renderServicesModule = function () {
                 
                                     ${!isStarted ? `
                                         <!-- Akışı Başlat -->
-                                        <button onclick="window.startWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Başlat">
+                                        <button onclick="window.startWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Başlat">
                                             <i class="fas fa-play fa-xs"></i>
                                         </button>
                                     ` : `
                                         <!-- Akışı Görüntüle -->
-                                        <button onclick="window.viewWorkflow('${item.id}')" class="btn-action btn-buy" title="Akışı Görüntüle">
+                                        <button onclick="window.viewWorkflow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="Akışı Görüntüle">
                                             <i class="fas fa-stream fa-xs"></i>
                                         </button>
                                     `}
                                     
                                     <!-- İptal Et / Geri Çek -->
-                                    <button onclick="window.cancelPurchaseRequest('${item.id}')" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
+                                    <button onclick="window.cancelPurchaseRequest(${jsArg(String(item.id))})" class="btn-action btn-danger" title="${isStarted ? 'Geri Çek (Taslağa Al)' : 'Talebi İptal Et'}">
                                         <i class="fas fa-ban fa-xs"></i>
                                     </button>
                                 ` : ''}
@@ -636,28 +647,28 @@ window.renderServicesModule = function () {
             return `
             <tr>
                 <td>
-                    <div class="fw-bold text-dark">${item.urunAciklama || 'İsimsiz Ürün'}</div>
-                    <small class="text-muted">${item.marka || ''}${item.sn ? ' — SN: ' + item.sn : ''}</small>
-                    ${item.sevkTarihi ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">📅 ${item.sevkTarihi}</div>` : ''}
+                    <div class="fw-bold text-dark">${escapeHtml(item.urunAciklama || 'İsimsiz Ürün')}</div>
+                    <small class="text-muted">${escapeHtml(item.marka || '')}${escapeHtml(item.sn ? ' — SN: ' + item.sn : '')}</small>
+                    ${item.sevkTarihi ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">📅 ${escapeHtml(item.sevkTarihi)}</div>` : ''}
                 </td>
                 <td>
-                    <div style="font-size:10px;color:#888;margin-bottom:3px;">🏢 ${item.hedef || '-'}</div>
+                    <div style="font-size:10px;color:#888;margin-bottom:3px;">🏢 ${escapeHtml(item.hedef || '-')}</div>
                     <span style="background:${sc.bg};color:${sc.color};padding:2px 10px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">
-                        ${item.durum || 'Serviste'}
+                        ${escapeHtml(item.durum || 'Serviste')}
                     </span>
                 </td>
                 <td class="text-end" style="white-space:nowrap;">
-                    <button onclick="window.viewServiceItem(${item.id})"
+                    <button onclick="window.viewServiceItem(${jsArg(item.id)})"
                             class="btn btn-sm btn-outline-secondary"
                             title="Görüntüle" style="margin-right:3px;">
                         <i class="fas fa-eye"></i>
                     </button>
-                    <button onclick="window.updateServiceStatus(${item.id})"
+                    <button onclick="window.updateServiceStatus(${jsArg(item.id)})"
                             class="btn btn-sm btn-outline-warning"
                             title="Durum Güncelle" style="margin-right:3px;">
                         <i class="fas fa-sync-alt"></i>
                     </button>
-                    <button onclick="window.receiveFromService(${item.id})"
+                    <button onclick="window.receiveFromService(${jsArg(item.id)})"
                             class="btn btn-sm btn-outline-success"
                             title="Depoya Geri Al">
                         <i class="fas fa-warehouse"></i>
@@ -739,7 +750,7 @@ window.viewServiceItem = function (serviceId) {
     const _f = (label, value) => `
         <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;">
             <label style="display:block;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;margin-bottom:3px;">${label}</label>
-            <span style="font-size:13px;color:#2c3e50;font-weight:500;">${value}</span>
+            <span style="font-size:13px;color:#2c3e50;font-weight:500;">${escapeHtml(value)}</span>
         </div>`;
 
     const statusColors = {
@@ -758,8 +769,8 @@ window.viewServiceItem = function (serviceId) {
                 <i class="fas fa-tools" style="color:white;font-size:17px;"></i>
             </div>
             <div>
-                <h3 style="margin:0;font-size:16px;color:#1a1a2e;font-weight:700;">${record.urunAciklama || 'İsimsiz Ürün'}</h3>
-                <small style="color:#888;">${record.marka || ''}${record.sn ? ' — SN: ' + record.sn : ''}</small>
+                <h3 style="margin:0;font-size:16px;color:#1a1a2e;font-weight:700;">${escapeHtml(record.urunAciklama || 'İsimsiz Ürün')}</h3>
+                <small style="color:#888;">${escapeHtml(record.marka || '')}${escapeHtml(record.sn ? ' — SN: ' + record.sn : '')}</small>
             </div>
         </div>
 
@@ -776,7 +787,7 @@ window.viewServiceItem = function (serviceId) {
             <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Güncel Durum</label>
             <div style="margin-top:6px;">
                 <span style="background:${sc.bg};color:${sc.color};padding:4px 14px;border-radius:20px;font-size:13px;font-weight:600;">
-                    ${record.durum || 'Serviste'}
+                    ${escapeHtml(record.durum || 'Serviste')}
                 </span>
             </div>
         </div>
@@ -784,7 +795,7 @@ window.viewServiceItem = function (serviceId) {
         ${record.not ? `
         <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:12px;">
             <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Sevk Notu</label>
-            <p style="margin:6px 0 0;color:#333;font-size:13px;">${record.not}</p>
+            <p style="margin:6px 0 0;color:#333;font-size:13px;">${escapeHtml(record.not)}</p>
         </div>` : ''}
 
         ${orig.açıklama ? `
@@ -887,13 +898,13 @@ function renderPurchaseTable(data) {
     // Satın Alma Talepleri JS Render Örneği
     tbody.innerHTML = paginatedData.map(item => `
         <tr>
-            <td><strong>${item.evrakNo || '-'}</strong></td>
-            <td><span class="text-muted">${item.tarih || '-'}</span></td>
-            <td>${item.talepEden || '-'}</td>
-            <td>${item.urun || '-'}</td>
+            <td><strong>${escapeHtml(item.evrakNo || '-')}</strong></td>
+            <td><span class="text-muted">${escapeHtml(item.tarih || '-')}</span></td>
+            <td>${escapeHtml(item.talepEden || '-')}</td>
+            <td>${escapeHtml(item.urun || '-')}</td>
             <td>
                 <span class="badge-soft bg-soft-warning">
-                    ${item.durum || 'Bekliyor'}
+                    ${escapeHtml(item.durum || 'Bekliyor')}
                 </span>
             </td>
             <td class="text-end">
@@ -915,64 +926,7 @@ function renderPaginationControls(totalItems, containerId) {
     document.getElementById(containerId).innerHTML = html;
 }
 
-// 1. Modalı Kapatma
-window.closeEditModal = function () {
-    document.getElementById("editRequestModal").style.display = "none";
-};
-
-// 2. Modalı Açma ve Verileri Doldurma
-window.editRequest = function (id) {
-    const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
-    if (!item) return;
-
-    // Inputları aç
-    const inputs = document.querySelectorAll("#purchaseForm .modern-input");
-    inputs.forEach(input => input.disabled = false);
-
-    // Verileri doldur
-    document.getElementById("purDocName").value = item.evrakNo;
-    document.getElementById("purName").value = item.urun;
-    // ... diğer alanları yukarıdaki gibi doldur ...
-
-    // Kaydet butonunu göster ve modalı aç
-    document.querySelector(".btn-modern-save").style.display = "block";
-    document.getElementById("purchaseModal").style.display = "block";
-
-    // Form submit olayını "Update" olarak değiştir
-    const form = document.getElementById("purchaseForm");
-    form.onsubmit = (e) => window.updatePurchaseRequest(e, id);
-};
-
-// 3. Form Gönderildiğinde Kaydetme
-document.getElementById("editRequestForm")?.addEventListener("submit", async function (e) {
-    e.preventDefault();
-
-    const id = document.getElementById("edit_id").value;
-    const itemIndex = window.data.purchaseOrders.findIndex(x => Number(x.id) === Number(id));
-
-    if (itemIndex !== -1) {
-        // Veriyi güncelle
-        window.data.purchaseOrders[itemIndex].urun = document.getElementById("edit_urun").value;
-
-        // Log ekle
-        window.data.purchaseOrders[itemIndex].akis.push({
-            islem: "Talep güncellendi",
-            yapan: window.currentUser?.name,
-            tarih: new Date().toLocaleString()
-        });
-
-        // Kaydet ve Arayüzü Yenile
-        // [BUGFIX] Bug 5: Targeted save for purchaseOrders
-        await window.saveData('purchaseOrders', window.data.purchaseOrders);
-        window.closeEditModal();
-
-        // Admin tablosunu yenilemek için kullandığın ana fonksiyonu çağır
-        if (typeof renderAdminDashboard === "function") renderAdminDashboard();
-
-        // Başarı mesajı (opsiyonel)
-        if (window.showToast) window.showToast("Kayıt başarıyla güncellendi.");
-    }
-});
+// [WHY]: Hiç açılmayan #editRequestModal için closeEditModal/editRequest ve form dinleyicisi kaldırıldı; aynı ad ürün türü modalının kapanmasını engelliyordu (ADM-03).
 
 window.viewRequest = function (id) {
     const item = window.data.purchaseOrders.find(x => Number(x.id) === Number(id));
@@ -989,10 +943,10 @@ window.viewRequest = function (id) {
 
     // Selectbox'ları doldur (Eğer admin panelinde seçenekler yüklü değilse metin olarak ekle)
     const unitSelect = document.getElementById("purUnit");
-    unitSelect.innerHTML = `<option>${item.birim}</option>`;
+    unitSelect.innerHTML = `<option>${escapeHtml(item.birim)}</option>`;
 
     const typeSelect = document.getElementById("purType");
-    typeSelect.innerHTML = `<option>${item.kategori || "Genel"}</option>`;
+    typeSelect.innerHTML = `<option>${escapeHtml(item.kategori || "Genel")}</option>`;
 
     // Görüntüleme modunda inputları kilitle
     const inputs = document.querySelectorAll("#purchaseForm .modern-input");
@@ -1001,13 +955,6 @@ window.viewRequest = function (id) {
     // Kaydet butonunu gizle, modalı aç
     document.querySelector(".btn-modern-save").style.display = "none";
     document.getElementById("purchaseModal").style.display = "block";
-};
-
-window.closePurchaseModal = function () {
-    document.getElementById("purchaseModal").style.display = "none";
-    // Input kilitlerini kaldır (bir sonraki açılış için temizlik)
-    const inputs = document.querySelectorAll("#purchaseForm .modern-input");
-    inputs.forEach(input => input.disabled = false);
 };
 
 window.uploadFiles = async function (files) {
@@ -1060,36 +1007,9 @@ window.uploadFiles = async function (files) {
     }
 }
 
-window.archiveOldRequests = async function () {
-
-    const active = [];
-    const archive = [];
-
-    (window.data.purchaseOrders || []).forEach(item => {
-
-        if (
-            item.durum === "Onaylandı" ||
-            item.durum === "Reddedildi"
-        ) {
-            archive.push(item);
-        } else {
-            active.push(item);
-        }
-    });
-
-    window.data.purchaseOrders = active;
-
-    if (!window.data.archive)
-        window.data.archive = [];
-
-    window.data.archive.push(...archive);
-
-    // [BUGFIX] Bug 5: Targeted save for purchaseOrders and archive individually
-    await window.saveData('purchaseOrders', window.data.purchaseOrders);
-    await window.saveData('archive', window.data.archive);
-
-    renderPurchaseModule();
-}
+// [WHY]: archiveOldRequests onaylanan/reddedilen talepleri purchaseOrders'dan siliyor, dinlenmeyen ve kaydedilmeyen 'archive'
+//        koleksiyonuna "taşıyordu" (saveData listesinde yok → sessiz no-op): çağrılırsa talepler kalıcı olarak kaybolurdu (DATA-10).
+//        Hiçbir yerden çağrılmıyordu; Karar K12 verilene kadar kaldırıldı.
 
 // ─────────────────────────────────────────────────────────────
 // TALEP DETAY MODAL — GÖRÜNTÜLE / DÜZENLE
@@ -1126,7 +1046,10 @@ window.openPurchaseDetail = function (id, mode) {
     setTimeout(() => {
         const sel = (selId, val) => {
             const el = document.getElementById(selId);
-            if (el) [...el.options].forEach(o => { o.selected = o.value === val; });
+            if (!el) return;
+            // Kayıttaki değer artık tanımlı değilse (silinmiş tür/birim) kaybolmasın diye seçenek olarak eklenir.
+            if (val && ![...el.options].some(o => o.value === val)) el.add(new Option(val, val));
+            [...el.options].forEach(o => { o.selected = o.value === val; });
         };
         sel('purUnit', item.birim);
         sel('purType', item.tur);
@@ -1193,7 +1116,8 @@ window.openPurchaseDetail = function (id, mode) {
             }
         } else {
             const rejectBtn = document.getElementById('purRejectBtn');
-            if (rejectBtn) rejectBtn.style.display = 'none';
+            if (rejectBtn) { rejectBtn.style.display = 'none'; rejectBtn.onclick = null; }
+            if (saveBtn) saveBtn.onclick = null;
         }
 
     } else { // edit
@@ -1204,7 +1128,13 @@ window.openPurchaseDetail = function (id, mode) {
         if (saveBtn) {
             saveBtn.style.display = 'block';
             saveBtn.innerHTML = '<i class="fas fa-save me-2"></i> Değişiklikleri Kaydet';
+            // [WHY]: Görüntüleme modunda bağlanan "Onayla" onclick'i düzenlemede kalıyor, kayıt yerine onay veriyordu (EBYS-02).
+            saveBtn.onclick = null;
+            saveBtn.classList.remove('btn-success');
+            saveBtn.classList.add('btn-modern-save');
         }
+        const staleRejectBtn = document.getElementById('purRejectBtn');
+        if (staleRejectBtn) { staleRejectBtn.style.display = 'none'; staleRejectBtn.onclick = null; }
 
         // Mevcut dosyaları göster (silinebilir)
         if (filesDiv) {
@@ -1238,14 +1168,14 @@ function _purFilesHTML(item, canDelete) {
     const rows = files.map((f, i) => `
         <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f1f5f9;font-size:13px;">
             <i class="fas fa-file-alt" style="color:#94a3b8;flex-shrink:0;"></i>
-            <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${f.name}">${f.name}</span>
-            <small style="color:#cbd5e1;flex-shrink:0;">${f.uploadedAt || ''}</small>
-            <a href="${f.url}" target="_blank"
+            <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+            <small style="color:#cbd5e1;flex-shrink:0;">${escapeHtml(f.uploadedAt || '')}</small>
+            <a href="${escapeHtml(safeUrl(f.url))}" target="_blank" rel="noopener noreferrer"
                style="padding:3px 9px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;color:#475569;text-decoration:none;">
                 <i class="fas fa-download"></i>
             </a>
             ${canDelete ? `
-            <button onclick="window.deleteRequestFile(${item.id}, ${i})"
+            <button onclick="window.deleteRequestFile(${jsArg(item.id)}, ${i})"
                 style="padding:3px 9px;font-size:11px;border:1px solid #fca5a5;border-radius:5px;background:none;color:#ef4444;cursor:pointer;">
                 <i class="fas fa-trash"></i>
             </button>` : ''}
@@ -1348,13 +1278,13 @@ function _purWorkflowHTML(item) {
     const rows = allLogs.map((a, idx) => `
         <div class="${idx >= visibleCount ? 'pur-log-hidden' : ''}" style="display:${idx >= visibleCount ? 'none' : 'flex'};flex-direction:column;padding:8px 0;border-bottom:1px solid #f8fafc;font-size:12px;">
             <div style="display:flex;gap:10px;">
-                <span style="color:#94a3b8;min-width:130px;flex-shrink:0;">${a.tarih || ''}</span>
-                <span style="color:#64748b;min-width:90px;flex-shrink:0;font-weight:600;">${a.yapan || ''}</span>
-                <span style="color:#1e293b;">${a.islem || ''}</span>
+                <span style="color:#94a3b8;min-width:130px;flex-shrink:0;">${escapeHtml(a.tarih || '')}</span>
+                <span style="color:#64748b;min-width:90px;flex-shrink:0;font-weight:600;">${escapeHtml(a.yapan || '')}</span>
+                <span style="color:#1e293b;">${escapeHtml(a.islem || '')}</span>
                 ${a.type === 'ebys' ? '<span style="background:#e0e7ff;color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:8px;">EBYS</span>' : ''}
             </div>
             ${a.not ? `<div style="margin-top:4px;padding:6px 10px;background:#f8fafc;border-radius:6px;color:#475569;font-style:italic;font-size:11px;">
-                💬 ${a.not}
+                💬 ${escapeHtml(a.not)}
             </div>` : ''}
         </div>`).join('');
 
@@ -1668,7 +1598,8 @@ window.closePurchaseModal = function () {
     if (title) title.innerHTML = '<i class="fas fa-file-invoice me-2"></i> Satın Alma Talebi';
 
     const rejectBtn = document.getElementById('purRejectBtn');
-    if (rejectBtn) rejectBtn.style.display = 'none';
+    if (rejectBtn) { rejectBtn.style.display = 'none'; rejectBtn.onclick = null; }
+    _resetPurchaseFileInputs();
 
     if (saveBtn) {
         saveBtn.classList.remove('btn-success');
@@ -1676,6 +1607,14 @@ window.closePurchaseModal = function () {
         saveBtn.onclick = null; // updatePurchaseRequest'e form submit bakıyor zaten
     }
 };
+
+// Seçilmiş dosya listesi ve input'u bir önceki talepten taşınmasın (EBYS-01).
+function _resetPurchaseFileInputs() {
+    const fileList = document.getElementById('purFileList');
+    const fileInput = document.getElementById('purchaseFile');
+    if (fileList) fileList.innerHTML = '';
+    if (fileInput) fileInput.value = '';
+}
 
 window.refreshPurchaseModule = function () {
     window.state = {
@@ -1707,5 +1646,11 @@ window.addEventListener('onInventoryDataUpdated', function (e) {
         if (typeof window.renderPurchaseStats === 'function') {
             window.renderPurchaseStats();
         }
+    }
+    // Modal açıkken tanımlanan tür/birim anında listeye gelsin (görüntüleme modunda kilitli alanlara dokunulmaz).
+    if (collection === 'productTypes' || collection === 'units') {
+        const modal = document.getElementById('purchaseModal');
+        const typeSel = document.getElementById('purType');
+        if (modal && modal.style.display !== 'none' && typeSel && !typeSel.disabled) fillPurchaseSelects();
     }
 });

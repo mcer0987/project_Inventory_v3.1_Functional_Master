@@ -631,8 +631,8 @@
         // Viewport deÄŸiÅŸimlerini dinle
         window.addEventListener('resize', _updatePlatformInfo);
         
-        // God-Eye radarÄ±nÄ± baÅŸlat
-        _initGodEyeMock();
+        // [WHY]: Her 15 sn gerçek terminale sahte "X kullanıcısı talep onayladı" logu basılıyordu (VIP-03); kaldırıldı.
+        //        God-Eye radarı gerçek presence gelene kadar DEMO olarak etiketli (Karar K8-b).
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -663,120 +663,113 @@
     };
 
     // Tekerrür (Birebir Kopya) Kayıtları Temizleyici
-    // [WHY]: Veritabanında yanlışlıkla ya da çift import/kayıt sebebiyle oluşan birebir kopya ürünlerin temizlenmesi.
-    // [HOW]: Heuristic eşleşme ile id ve önbellek index alanları hariç tüm alanları veya seri numarası birebir aynı olan kopyaları tespit eder.
-    //        V2 Batch mimarisine sadık kalarak (window.saveData) silme işlemini güvenli şekilde yapar.
-    window.vipCleanDuplicates = async function() {
-        if (!window.userAuth) {
-            alert("Oturum yetkiniz yok!");
+    // [WHY]: VIP-01: seri no kuralı b3 hareket defterine de uygulanıyordu; aynı cihazın zimmet → iade → yeniden zimmet
+    //        kayıtlarından en yenisi (çoğunlukla aktif zimmet) siliniyordu; "N/A", "--", "bilinmiyor" gibi yer tutucular
+    //        farklı ürünleri birleştiriyordu; onay kutusu yalnız toplam sayıyı gösteriyordu.
+    //        VIP-02: silme, onaydan ÖNCE alınmış kopyayla üç koleksiyonun tamamını yeniden yazıyordu (dialog açıkken gelen
+    //        kayıtlar silinir, düzenlemeler ezilirdi); başarısızlıkta da "başarıyla silindi" deniyordu.
+    // [HOW]: Yalnız B1/B2 taranır (b3 kapsam dışı). Yer tutucu seri numaraları boş sayılır. Onay kutusunda depo bazında
+    //        sayı + ilk satırların önizlemesi gösterilir. Onaydan SONRA güncel diziden yeniden hesaplanır ve yalnız
+    //        önizlemede sayılan VE hâlâ kopya olan kayıtlar id ile silinir (başka hiçbir doküman yazılmaz).
+    //        Çift tıklama kilidi, yalnız Firebase admin oturumu, sonuç doğru bildirilir.
+    const _DUP_COLLECTIONS = ['b1', 'b2'];
+    const _DUP_PREVIEW_ROWS = 10;
+    const _PLACEHOLDER_SERIALS = new Set(['yok', 'none', 'null', 'undefined', 'n/a', 'na', 'n.a.', 'bilinmiyor', 'belirsiz',
+        'tanımsız', 'tanimsiz', 'unknown', 'sn yok', 'seri no yok', '?', 'x']);
+
+    const _normSerial = function (raw) {
+        const s = String(raw ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
+        if (!s || _PLACEHOLDER_SERIALS.has(s) || /^[-_.\/*\s]+$/.test(s) || /^0+$/.test(s)) return '';
+        return s;
+    };
+
+    const _dupSignature = function (item) {
+        return JSON.stringify(Object.keys(item)
+            .filter(k => k !== 'id' && !k.startsWith('_'))
+            .sort()
+            .map(k => [k, typeof item[k] === 'string' ? item[k].trim() : (item[k] ?? '')]));
+    };
+
+    // Liste sırasındaki ilk kayıt tutulur; sonrakiler { colName, item, reason } olarak döner.
+    const _findDuplicates = function (colName) {
+        const seenSerial = new Set(), seenSig = new Set(), dups = [];
+        (window.data?.[colName] || []).forEach(item => {
+            if (!item || typeof item !== 'object' || item.id == null || item.id === '') return;
+            const serial = _normSerial(item.seriNo ?? item.serialNo ?? item.seri ?? item.sn);
+            const sig = _dupSignature(item);
+            if (serial && seenSerial.has(serial)) { dups.push({ colName, item, reason: 'Aynı seri no' }); return; }
+            if (seenSig.has(sig)) { dups.push({ colName, item, reason: 'Birebir kopya' }); return; }
+            if (serial) seenSerial.add(serial);
+            seenSig.add(sig);
+        });
+        return dups;
+    };
+
+    const _dupKey = d => `${d.colName}|${d.item.id}`;
+    const _dupAlert = (msg, type) => { if (typeof showAppAlert === 'function') showAppAlert(msg, type); else alert(msg); };
+    let _dupCleaning = false;
+
+    window.vipCleanDuplicates = async function (btn) {
+        if (_dupCleaning) return;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error');
             return;
         }
-
-        let totalDuplicates = 0;
-        const collections = ['b1', 'b2', 'b3'];
-        const uniqueDataMap = {};
-
-        // 1. Tarama ve Tekerrür Sayısını Hesaplama
-        for (const colName of collections) {
-            const items = window.data && window.data[colName] ? window.data[colName] : [];
-            const seenSignatures = new Set();
-            const seenSerials = new Set();
-            const uniqueItems = [];
-
-            items.forEach(item => {
-                if (!item || typeof item !== 'object') return;
-
-                const serialRaw = item.seriNo || item.serialNo || item.seri || item.sn || "";
-                const serial = String(serialRaw).trim().toLocaleLowerCase('tr-TR');
-                let isDuplicate = false;
-
-                // Seri Numarası Kontrolü
-                if (serial !== "" && serial !== "yok" && serial !== "-" && serial !== "0") {
-                    if (seenSerials.has(serial)) {
-                        isDuplicate = true;
-                    } else {
-                        seenSerials.add(serial);
-                    }
-                }
-
-                // Milimetrik Eşleşme Kontrolü (sadece id ve önbellek index alanları hariç)
-                if (!isDuplicate) {
-                    const cleanObj = {};
-                    const keys = Object.keys(item)
-                        .filter(k => k !== 'id' && !k.startsWith('__') && !k.startsWith('_'))
-                        .sort();
-
-                    for (const key of keys) {
-                        let val = item[key];
-                        if (typeof val === 'string') {
-                            val = val.trim();
-                        }
-                        cleanObj[key] = val ?? "";
-                    }
-
-                    const signature = JSON.stringify(cleanObj);
-
-                    if (seenSignatures.has(signature)) {
-                        isDuplicate = true;
-                    } else {
-                        seenSignatures.add(signature);
-                    }
-                }
-
-                if (isDuplicate) {
-                    totalDuplicates++;
-                } else {
-                    uniqueItems.push(item);
-                }
-            });
-
-            uniqueDataMap[colName] = uniqueItems;
-        }
-
-        // 2. Kullanıcı Bildirimi ve Onay
-        if (totalDuplicates === 0) {
-            if (typeof showAppAlert === 'function') {
-                showAppAlert("🔍 Tekerrür eden (birebir kopya) kayıt bulunamadı.", "info");
-            } else {
-                alert("🔍 Tekerrür eden (birebir kopya) kayıt bulunamadı.");
-            }
-            return;
-        }
-
-        const confirmTitle = "Tekerrür Temizliği Onayı";
-        const confirmMsg = `Bulunan Birebir Kopya (Tekerrür) Sayısı: ${totalDuplicates} adet.\nBu kopya kayıtları kalıcı olarak veritabanından silmek istiyor musunuz?`;
-        
-        let onay = false;
-        if (typeof showCustomConfirm === 'function') {
-            onay = await showCustomConfirm(confirmTitle, confirmMsg);
-        } else {
-            onay = confirm(confirmMsg);
-        }
-
-        if (!onay) return;
-
-        // 3. V2 Batch Mimarisi İle Kayıt ve Silme
+        _dupCleaning = true;
+        if (btn) btn.disabled = true;
         try {
-            for (const colName of collections) {
-                if (uniqueDataMap[colName]) {
-                    await window.saveData(colName, uniqueDataMap[colName]);
-                }
+            // 1. Önizleme
+            const preview = _DUP_COLLECTIONS.flatMap(_findDuplicates);
+            if (preview.length === 0) {
+                _dupAlert('🔍 B1/B2 depolarında tekerrür eden kayıt bulunamadı. (B3 hareket defteri taranmaz.)', 'info');
+                return;
+            }
+            // Onay kutusu (script.js showCustomConfirm) metni textContent + pre-line ile basar: önizleme düz metin satırlarıdır.
+            const perCol = _DUP_COLLECTIONS.map(c => `${c.toUpperCase()}: ${preview.filter(d => d.colName === c).length}`).join(' · ');
+            const rows = preview.slice(0, _DUP_PREVIEW_ROWS).map((d, i) =>
+                `${i + 1}. ${d.colName.toUpperCase()} · ${d.item.ürün || d.item.name || '-'} · Raf ${d.item.raf || '-'} · SN ${d.item.seriNo || d.item.sn || '-'} · Adet ${d.item.adet ?? '-'} — ${d.reason}`);
+            const more = preview.length > _DUP_PREVIEW_ROWS ? [`… ve ${preview.length - _DUP_PREVIEW_ROWS} kayıt daha.`] : [];
+            const message = [
+                `Silinecek kayıt: ${preview.length} (${perCol}). Her grubun ilk kaydı tutulur; B3 hareket defteri kapsam dışıdır.`,
+                '',
+                ...rows,
+                ...more,
+                '',
+                'Bu kayıtlar kalıcı olarak silinecek. Devam edilsin mi?'
+            ].join('\n');
+            const ok = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('Tekerrür Temizliği Onayı', message)
+                : confirm(`${preview.length} tekerrür kaydı silinsin mi?`);
+            if (ok !== true) return;
+
+            // 2. Onaydan SONRA güncel diziden yeniden hesapla; yalnız önizlemede sayılan ve hâlâ kopya olanlar silinir
+            const shown = new Set(preview.map(_dupKey));
+            const toDelete = _DUP_COLLECTIONS.flatMap(_findDuplicates).filter(d => shown.has(_dupKey(d)));
+            const skipped = preview.length - toDelete.length;
+            if (toDelete.length === 0) {
+                _dupAlert('Veriler bu arada değişti; silinecek kayıt kalmadı. Hiçbir şey silinmedi.', 'warning');
+                return;
             }
 
-            if (typeof showAppAlert === 'function') {
-                showAppAlert(`🧹 ${totalDuplicates} adet tekerrür eden kopya kayıt başarıyla silindi!`, "success");
-            } else {
-                alert(`🧹 ${totalDuplicates} adet tekerrür eden kopya kayıt başarıyla silindi!`);
+            // 3. Yalnız bu dokümanlar silinir
+            console.info('[vipCleanDuplicates] silinecek:', toDelete.map(_dupKey).join(', '), '| atlanan:', skipped);
+            const { doc, writeBatch } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+            for (let i = 0; i < toDelete.length; i += 450) {
+                const batch = writeBatch(window.fireDb);
+                toDelete.slice(i, i + 450).forEach(d => batch.delete(
+                    doc(window.fireDb, window.COLLECTION_ROOT, d.colName, 'items', String(d.item.id).replace(/\//g, '_'))));
+                await batch.commit();
             }
 
-            if (typeof _appendLog === 'function') {
-                _appendLog('success', [`🧹 TEKERRÜR TEMİZLİĞİ: Toplam ${totalDuplicates} kopya kayıt silindi.`]);
-            }
+            const note = skipped > 0 ? ` (${skipped} kayıt bu arada değiştiği için silinmedi.)` : '';
+            _dupAlert(`🧹 ${toDelete.length} tekerrür kaydı silindi.${note}`, 'success');
+            _appendLog('success', [`🧹 TEKERRÜR TEMİZLİĞİ: ${toDelete.length} kayıt silindi (${toDelete.map(_dupKey).join(', ')}).${note}`]);
         } catch (error) {
-            console.error("Tekerrür temizlik hatası:", error);
-            if (typeof showAppAlert === 'function') {
-                showAppAlert("Temizlik sırasında bir hata oluştu: " + error.message, "error");
-            }
+            console.error('Tekerrür temizlik hatası:', error);
+            _dupAlert('Temizlik başarısız; kayıt silinmedi ya da yalnız bir kısmı silindi: ' + error.message, 'error');
+        } finally {
+            _dupCleaning = false;
+            if (btn) btn.disabled = false;
         }
     };
 
@@ -792,7 +785,7 @@
         try {
             const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
             const db = window.fireDb;
-            const settingsRef = doc(db, "system_config", "admin_settings");
+            const settingsRef = window.systemConfigRef("admin_settings");
             
             const snap = await getDoc(settingsRef);
             let isMaintenance = false;
@@ -828,20 +821,6 @@
         }
     };
 
-    // God-Eye Sahte (Mock) CanlÄ±lÄ±k LoglarÄ±
-    function _initGodEyeMock() {
-        const fakeUsers = ["Ahmet YÄ±lmaz", "AyÅŸe Kaya", "Mehmet Demir", "Fatma Ã‡elik"];
-        const fakeActions = ["zimmet ekledi", "talep onayladÄ±", "oturum aÃ§tÄ±", "sayfa yeniledi"];
-        
-        setInterval(() => {
-            if(document.getElementById('systemControlTab').style.display !== 'none') {
-                const u = fakeUsers[Math.floor(Math.random() * fakeUsers.length)];
-                const a = fakeActions[Math.floor(Math.random() * fakeActions.length)];
-                _appendLog('info', [`ğŸ‘ï¸ [God-Eye] ${u} az Ã¶nce ${a}.`]);
-            }
-        }, 15000); // 15 saniyede bir sahte radar logu
-    }
-
     // showAdminTab interceptor â€” VIP sekmesi aÃ§Ä±ldÄ±ÄŸÄ±nda baÅŸlat
     function _hookShowAdminTab() {
         // showAdminTab henÃ¼z tanÄ±mlÄ± deÄŸilse tekrar dene
@@ -865,8 +844,10 @@
                 if (mainContent) mainContent.classList.add('vip-bg');
                 document.body.classList.add('vip-portal-active');
 
+                // [WHY]: Yerel _initVipPanel çağrılıyordu; window._initVipPanel sarmalayıcı zinciri (buton durumları, radar
+                //        tıklamaları) hiç çalışmıyordu, aktivite paneli / mesaj / oturum sonlandırma ulaşılamazdı (VIP-04).
                 requestAnimationFrame(() => {
-                    setTimeout(_initVipPanel, 50);
+                    setTimeout(() => window._initVipPanel(), 50);
                 });
             } else {
                 // Normal dÃ¼nyaya dÃ¶nÃ¼ÅŸ
@@ -892,51 +873,11 @@
 
 
 
-// YENİ: Global Launchpad ve İpuçları Şartel Senkronizasyonu (Veritabanı üzerinden tetiklenecek)
-window.toggleLaunchpadGlobal = async function() {
-    try {
-        if(!window.fireDb) return;
-        const { doc, getDoc, setDoc } = window.fbFunctions;
-        const settingsRef = doc(window.fireDb, "system_config", "admin_settings");
-        const snap = await getDoc(settingsRef);
-        
-        let newState = true;
-        if(snap.exists()) {
-            newState = !snap.data().launchpadDisabledGlobal;
-        }
-        
-        await setDoc(settingsRef, { launchpadDisabledGlobal: newState }, { merge: true });
-        
-        localStorage.setItem('launchpadDisabledGlobal', newState);
-        if(typeof window.updateActionButtonsState === 'function') { window.updateActionButtonsState(); }
-        
-        // localStorage güncellemesi firebase-handler içindeki onSnapshot'a bırakıldı.
-        if(typeof showAppAlert === 'function') {
-            showAppAlert(newState ? 'Launchpad sistemden DEAKTİF edildi (Global).' : 'Launchpad tekrar Aktif edildi (Global).', newState ? 'warning' : 'success');
-        }
-    } catch(e) {
-        console.error("Şartel değiştirilemedi", e);
-    }
-};
-
+// [WHY]: Kaldırılmış Launchpad hâlâ system_config'e yazıyor (toggleLaunchpadGlobal), devre dışı VIP butonunu
+//        "Launchpad: Açık" diye canlandırıyordu; bayrak her istemcinin localStorage'ına kopyalanıyordu (VIP-10).
+// [HOW]: Karar K9-a: yazıcı, VIP butonu ve firebase-handler dinleyicisi kaldırıldı; burada yalnız İpuçları butonu kaldı.
 window.updateActionButtonsState = function() {
-    const lpBtn = document.getElementById('vipToggleLaunchpadBtn');
     const tipsBtn = document.getElementById('vipToggleTipsBtn');
-
-    if (lpBtn) {
-        const isLpDisabled = localStorage.getItem('launchpadDisabledGlobal') === 'true';
-        if (isLpDisabled) {
-            lpBtn.style.background = 'rgba(255,45,85,0.1)';
-            lpBtn.style.color = 'var(--vip-danger)';
-            lpBtn.style.border = '1px solid var(--vip-danger)';
-            lpBtn.innerHTML = '<i class="fas fa-rocket me-2"></i>Launchpad: Kapali';
-        } else {
-            lpBtn.style.background = 'rgba(0,255,136,0.1)';
-            lpBtn.style.color = 'var(--vip-matrix)';
-            lpBtn.style.border = '1px solid var(--vip-matrix)';
-            lpBtn.innerHTML = '<i class="fas fa-rocket me-2"></i>Launchpad: Acik';
-        }
-    }
 
     if (tipsBtn) {
         const isTipsDisabled = localStorage.getItem('systemTipsDisabled') === 'true';
@@ -1013,7 +954,8 @@ function _onRadarDotClick(e) {
     const userData = {
         id:     this.dataset.userId     || 'user-unknown',
         name:   this.dataset.userName   || 'Bilinmeyen Kullanici',
-        module: this.dataset.userModule || 'Bilinmeyen Modul'
+        module: this.dataset.userModule || 'Bilinmeyen Modul',
+        demo:   this.dataset.demo === 'true'
     };
 
     _currentTargetUser = userData;
@@ -1033,14 +975,13 @@ function _openUserActivityPanel(userData) {
 
     // Header bilgileri
     const nameEl = document.getElementById('uapUserName');
-    if (nameEl) nameEl.textContent = userData.name;
+    if (nameEl) nameEl.textContent = userData.name + (userData.demo ? ' · DEMO' : '');
 
     const moduleEl = document.getElementById('uapUserModule');
     if (moduleEl) moduleEl.innerHTML = '<i class="fas fa-cube me-1"></i>' + userData.module;
 
     // Ä°statistikler (mock + window.data analizi)
     const actionCount = _computeUserActionCount(userData.module);
-    const sessionMin  = Math.floor(Math.random() * 45) + 5;
 
     const statActions = document.getElementById('uapStatActions');
     const statSession = document.getElementById('uapStatSession');
@@ -1048,7 +989,8 @@ function _openUserActivityPanel(userData) {
     const statRisk    = document.getElementById('uapStatRisk');
 
     if (statActions) statActions.textContent = actionCount;
-    if (statSession) statSession.textContent = sessionMin + 'dk';
+    // [WHY]: Oturum süresi Math.random() ile uyduruluyordu (VIP-03); presence verisi olmadığı için gösterilmez.
+    if (statSession) statSession.textContent = '—';
     if (statModule)  statModule.textContent  = userData.module;
     if (statRisk) {
         const risk = actionCount > 10 ? 'HIGH' : actionCount > 5 ? 'MED' : 'LOW';
@@ -1099,10 +1041,10 @@ window.vipCloseUserPanel = function() {
 
 // KullanÄ±cÄ±nÄ±n modÃ¼lÃ¼ne gÃ¶re window.data'dan eylem sayÄ±sÄ±nÄ± hesapla
 function _computeUserActionCount(moduleName) {
-    if (!window.data) return Math.floor(Math.random() * 8) + 1;
+    if (!window.data) return 0;
     const moduleKeyMap = { 'B1 Depo': 'b1', 'B2 Depo': 'b2', 'Satin Alma': 'requests', 'Personel': 'personel' };
     const key = moduleKeyMap[moduleName];
-    if (!key || !window.data[key]) return Math.floor(Math.random() * 8) + 1;
+    if (!key || !window.data[key]) return 0;
     const arr = Array.isArray(window.data[key]) ? window.data[key] : Object.values(window.data[key]);
     return Math.min(arr.length, 99);
 }
@@ -1123,7 +1065,10 @@ function _renderActivityList(moduleName) {
         { icon: 'fa-arrow-right-from-bracket', text: 'Oturum baÅŸlattÄ±',     min: 35 }
     ];
 
-    list.innerHTML = templates.map(function(t) {
+    // Örnek aktivite listesidir (gerçek oturum/presence izlenmiyor; Karar K8-b).
+    list.innerHTML = '<li class="uap-activity-item uap-demo-note" style="color: var(--vip-warning);">' +
+        '<i class="fas fa-flask uap-activity-icon"></i><div>DEMO — örnek aktivite; gerçek oturum izlenmiyor</div></li>' +
+        templates.map(function(t) {
         return '<li class="uap-activity-item">' +
             '<i class="fas ' + t.icon + ' uap-activity-icon"></i>' +
             '<div>' +
@@ -1158,7 +1103,7 @@ window.vipSendSystemMessage = async function() {
         if (!window.fireDb) throw new Error('Firestore baÄŸlantÄ±sÄ± yok');
 
         const { doc, setDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
-        const msgRef = doc(window.fireDb, "system_config", "admin_messages");
+        const msgRef = window.systemConfigRef("admin_messages");
         await setDoc(msgRef, {
             target_user_id: userId,
             target_user_name: userName,
@@ -1227,22 +1172,42 @@ window.vipForceLogout = async function() {
     const userName = _currentTargetUser.name;
     const btn      = document.getElementById('uapForceLogoutBtn');
 
+    // [WHY]: Admin kendini hedeflerse her snapshot'ta tekrar atılıyordu (VIP-06). DEMO radar noktaları gerçek kişi değildir;
+    //        adları gerçek bir personelle aynıysa o kişi atılırdı (VIP-03).
+    const me = window.currentUser || (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null);
+    const isSelf = !!me && [me.id, me.code, me.name].some(v => v != null && v !== '' && (String(v) === String(userId) || String(v) === String(userName)));
+    if (isSelf || _currentTargetUser.demo) {
+        const why = isSelf ? 'Kendi oturumunuzu hedefleyemezsiniz.' : 'DEMO radar noktası gerçek bir oturum değildir.';
+        if (typeof _appendLog === 'function') _appendLog('warn', ['[God-Eye] Force Logout reddedildi: ' + why]);
+        if (typeof showAppAlert === 'function') showAppAlert('Force Logout uygulanmadı: ' + why, 'warning');
+        return;
+    }
+
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> UygulanÄ±yor...'; }
 
     try {
         if (!window.fireDb) throw new Error('Firestore baglantisi yok');
 
-        const { doc, setDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
+        const { setDoc, deleteField } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
 
         // [WHY]: force_logout_user_id alanÄ±nÄ± Firestore'a yaz.
         // [HOW]: firebase-handler.js bu alanÄ± onSnapshot ile dinleyerek
         //        hedef kullanÄ±cÄ±nÄ±n oturumunu client-side sonlandÄ±rÄ±r.
-        const settingsRef = doc(window.fireDb, "system_config", "admin_settings");
+        const settingsRef = window.systemConfigRef("admin_settings");
+        // VIP-06: tek seferlik komut { targetId, issuedAt, nonce }; istemci yalnız taze ve daha önce işlemediği nonce'u uygular.
+        //         Eski düz alanlar (her snapshot'ta yeniden tetikleniyordu) silinir.
         await setDoc(settingsRef, {
-            force_logout_user_id: userId,
-            force_logout_user_name: userName,
-            force_logout_by: (window.currentUser && window.currentUser.name) || 'Admin',
-            force_logout_at: serverTimestamp()
+            force_logout: {
+                targetId: String(userId),
+                targetName: userName,
+                issuedAt: Date.now(),
+                nonce: Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10),
+                by: (window.currentUser && window.currentUser.name) || 'Admin'
+            },
+            force_logout_user_id: deleteField(),
+            force_logout_user_name: deleteField(),
+            force_logout_by: deleteField(),
+            force_logout_at: deleteField()
         }, { merge: true });
 
         if (typeof _appendLog === 'function') {
@@ -1303,7 +1268,7 @@ window.vipToggleHeatmap = function(btn) {
         if (heatmapSVG) heatmapSVG.classList.remove('visible');
         if (radarInner) radarInner.style.display = 'block';
         if (toggleBtn)  { toggleBtn.classList.remove('heatmap-active'); toggleBtn.innerHTML = '<i class="fas fa-fire-flame-curved"></i> HEATMAP'; }
-        if (statusText) statusText.innerHTML = '<i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>3 aktif oturum izleniyor';
+        if (statusText) statusText.innerHTML = '<i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>DEMO — örnek oturumlar (gerçek presence yok)';
     }
 };
 

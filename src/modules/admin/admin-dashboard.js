@@ -239,6 +239,7 @@ window.renderAdminRequestTable = function () {
     const countBadge = document.getElementById('pendingRequestCount');
     if (!tableBody) return;
 
+    const esc = window.escapeHtml;
     const allRequests = window.data.requests || [];
     tableBody.innerHTML = '';
     let pendingCount = 0;
@@ -254,7 +255,9 @@ window.renderAdminRequestTable = function () {
         // Tamamlanma durumları (completed veya TESLİM ALINDI)
         const isCompleted = durumStr === 'COMPLETED' || durumStr === 'TESLİM ALINDI';
         // Bekleme durumları
-        const isPending = !isApproved && !isRejected && !isCompleted;
+        const isDraft = durumStr === 'DRAFT' || durumStr === 'TASLAK';
+        // [WHY]: Geri çekilmiş (taslak) talepler 'Bekliyor' görünüp onaylanabiliyordu (ITSM-05).
+        const isPending = !isApproved && !isRejected && !isCompleted && !isDraft;
 
         if (isPending) pendingCount++;
 
@@ -271,6 +274,8 @@ window.renderAdminRequestTable = function () {
             badgeHTML = `<span class="p-badge p-badge-completed" style="background: var(--badge-completed-bg); color: var(--badge-completed-text); border: 1px solid var(--badge-completed-border); padding:4px 8px; border-radius:12px; font-size:11px; font-weight:600;">
                             <i class="fas fa-check-double"></i> TESLİM ALINDI
                          </span>`;
+        } else if (isDraft) {
+            badgeHTML = `<span class="p-badge" style="background:#f1f5f9; color:#475569; padding:4px 8px; border-radius:12px; font-size:11px; font-weight:600;">TASLAK</span>`;
         } else {
             badgeHTML = `<span class="p-badge p-badge-waiting">
                             <i class="fas fa-clock"></i> BEKLEMEDE
@@ -280,15 +285,15 @@ window.renderAdminRequestTable = function () {
         tableBody.innerHTML += `
             <tr class="align-middle">
                 <td class="ps-3">
-                    <div style="font-size: 11px; color: #94a3b8; font-weight: 500;">${req.tarih || '-'}</div>
+                    <div style="font-size: 11px; color: #94a3b8; font-weight: 500;">${esc(req.tarih || '-')}</div>
                 </td>
                 <td>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b;">${req.personel || '-'}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #1e293b;">${esc(req.personel || '-')}</div>
                 </td>
                 <td>
-                    <div style="font-weight: 600; font-size: 14px; color: #0f172a;">${req.ürün || '-'}</div>
+                    <div style="font-weight: 600; font-size: 14px; color: #0f172a;">${esc(req.ürün || '-')}</div>
                     <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
-                        <i class="fas fa-layer-group me-1"></i> ${req.adet || 1} Adet
+                        <i class="fas fa-layer-group me-1"></i> ${esc(req.adet || 1)} Adet
                     </div>
                 </td>
                 <td class="text-center">
@@ -297,14 +302,14 @@ window.renderAdminRequestTable = function () {
                 <td class="text-end pe-3">
                     <div class="d-flex justify-content-end gap-2">
                         ${isPending ? `
-                            <button onclick="window.confirmRequest(${index})" class="p-btn-icon play" title="Onayla">
+                            <button onclick="window.confirmRequest(${jsArg(req.id)})" class="p-btn-icon play" title="Onayla">
                                 <i class="fas fa-check"></i>
                             </button>
-                            <button onclick="window.rejectRequest(${index})" class="p-btn-icon delete" title="Reddet">
+                            <button onclick="window.rejectRequest(${jsArg(req.id)})" class="p-btn-icon delete" title="Reddet">
                                 <i class="fas fa-times"></i>
                             </button>
                         ` : `
-                            <button onclick="window.deleteRequest(${index})" class="p-btn-icon delete" title="Kayıttan Sil">
+                            <button onclick="window.deleteRequest(${jsArg(req.id)})" class="p-btn-icon delete" title="Kayıttan Sil">
                                 <i class="fas fa-trash"></i>
                             </button>
                         `}
@@ -333,33 +338,7 @@ window.renderAdminRequestTable = function () {
 // Artık tüm veriler firebase-handler.js içindeki tek bir noktadan dinlenmekte ve
 // 'onInventoryDataUpdated' eventi ile UI güncellemeleri tetiklenmektedir (PubSub mimarisi).
 
-// Ürün Türlerini (Ayarlar Dökümanını) Ayrı Dinle
-import { onSnapshot as onDocSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-onDocSnapshot(doc(window.fireDb, "settings", "productTypes"), (docSnap) => {
-    if (docSnap.exists()) {
-        const data = docSnap.data();
-        // Dökümanın içindeki 'list' dizisini alıyoruz
-        window.data.productTypes = data.list || [];
-
-        console.log("⚡ Ürün türleri güncellendi:", window.data.productTypes);
-
-        if (window.renderProductTypesTable) window.renderProductTypesTable();
-        if (window.updateProductTypeDropdowns) window.updateProductTypeDropdowns();
-        if (typeof window.renderExitCharts === 'function') window.renderExitCharts();
-
-        // ✅ Ayarlar yüklendi olarak işaretle
-        if (window.LoadingCoordinator) {
-            window.LoadingCoordinator.markLoaded("settings");
-        }
-    }
-}, (err) => {
-    if (err.code === "permission-denied") {
-        console.warn("⏳ [Güvenlik] Firebase yetki onayı bekleniyor (productTypes)...");
-    } else {
-        console.error("Dinleme hatası (productTypes):", err);
-    }
-});
+// [WHY]: Kök settings/productTypes dinleyicisi kaldırıldı; ürün türleri firebase-handler üzerinden ${COLLECTION_ROOT}/productTypes/items'tan gelir (ADM-02).
 
 // 1. ÜRÜN TÜRÜ KURALI (Sarf geçmiyorsa demirbaş say)
 window.processIsDemirbas = function (item) {
@@ -475,7 +454,6 @@ window.renderProductTypesTable = function () {
         if (!type.id) return;
 
         const isDemirbas = type.isDemirbas === true || type.isDemirbas === "true";
-        const typeNameForJS = type.name.replace(/'/g, "\\'");
 
         // --- ESKİ TABLO (3 Sütunlu) ---
         if (listBody) {
@@ -484,7 +462,7 @@ window.renderProductTypesTable = function () {
                     <td class="ps-3" style="width: 40%;">
                         <div class="d-flex align-items-center">
                             <i class="fas fa-tag me-2 text-primary opacity-75"></i>
-                            <span class="fw-bold text-dark">${type.name}</span>
+                            <span class="fw-bold text-dark">${escapeHtml(type.name)}</span>
                         </div>
                     </td>
                     <td class="text-center" style="width: 30%;">
@@ -495,10 +473,10 @@ window.renderProductTypesTable = function () {
                     </td>
                     <td class="text-end pe-3">
                         <div class="action-buttons justify-content-end">
-                            <button onclick="editProductType('${type.id}', '${typeNameForJS}', ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                            <button onclick="editProductType(${jsArg(String(type.id))}, ${jsArg(String(type.name))}, ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                                 <i class="fa-solid fa-arrows-rotate"></i>
                             </button>
-                            <button onclick="deleteProductType('${type.id}')" class="btn-action btn-passive shadow-sm" title="Sil">
+                            <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
                                 <i class="fas fa-trash fa-xs"></i>
                             </button>
                         </div>
@@ -514,7 +492,7 @@ window.renderProductTypesTable = function () {
                     <td class="ps-3">
                         <div class="d-flex align-items-center">
                             <i class="fas fa-tag me-2 text-info opacity-75"></i>
-                            <span class="fw-bold text-dark">${type.name}</span>
+                            <span class="fw-bold text-dark">${escapeHtml(type.name)}</span>
                         </div>
                     </td>
                     <td class="text-center">
@@ -528,10 +506,10 @@ window.renderProductTypesTable = function () {
                     </td>
                     <td class="text-end pe-3">
                         <div class="action-buttons justify-content-end">
-                            <button onclick="editProductType('${type.id}', '${typeNameForJS}', ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                            <button onclick="editProductType(${jsArg(String(type.id))}, ${jsArg(String(type.name))}, ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button onclick="deleteProductType('${type.id}')" class="btn-action btn-passive shadow-sm" title="Sil">
+                            <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -565,177 +543,98 @@ window.editProductType = function (id, name, isDemirbas) {
 };
 
 // 2. Modalı Kapat
-window.closeEditModal = function () {
+// [WHY]: Aynı adlı closeEditModal purchase-servises'te ölü bir modal için tanımlıydı ve bunu eziyordu; ürün türü modalı
+//        hiç kapanmıyor, açık overlay sayfayı ve zaman aşımını kilitliyordu (ADM-03).
+window.closeProductTypeModal = function () {
     const modal = document.getElementById('editProductTypeModal');
     if (modal) modal.style.display = 'none';
 };
 
-// --- 1. YENİ TÜR EKLEME ---
-window.addNewProductType = async function () {
-    const nameInput = document.getElementById('newProductType');
-    const isDemirbasCheck = document.getElementById('isDemirbasCheck');
-    const name = nameInput.value.trim();
-    const isDemirbas = isDemirbasCheck.checked;
-
-    if (!name) {
-        showAppAlert("Tür adı giriniz", "warning");
-        return;
-    }
-
-    try {
-        const { collection, addDoc } = window.FirebaseModules;
-
-        // Doğrudan "productTypes" koleksiyonuna ekliyoruz!
-        await addDoc(collection(window.fireDb, "productTypes"), {
-            name: name,
-            isDemirbas: isDemirbas,
-            createdAt: Date.now()
-        });
-
-        // Formu temizle
-        nameInput.value = '';
-        isDemirbasCheck.checked = false;
-
-        showAppAlert("Yeni tür başarıyla eklendi.", "success");
-        // Not: Tabloyu ve dropdown'ı yenilemeye gerek yok, script.js'deki onSnapshot tetiklenecek!
-    } catch (err) {
-        console.error("❌ Ekleme hatası:", err);
-        showAppAlert("Tür eklenirken bir hata oluştu.", "danger");
-    }
+// [WHY]: Ürün türleri kök 'productTypes' koleksiyonuna yazılıyordu; kurallar reddediyor, arayüz ise
+//        ${COLLECTION_ROOT}/productTypes/items'ı okuduğu için değişiklik görünmüyordu (ADM-02, RULE-03).
+// [HOW]: Tüm işlemler aktif ortamın productTypes/items yoluna, açık id ile yapılır (id listeye veriyle birlikte gelir).
+const _productTypeDoc = (id) => {
+    const { doc } = window.FirebaseModules;
+    return doc(window.fireDb, window.AppEnv.COLLECTION_ROOT, 'productTypes', 'items', String(id));
 };
 
-// --- TANIMLAR SEKMESİ İÇİN YENİ TÜR EKLEME ---
-/**
- * Bu fonksiyon teknik olarak window.addNewProductType ile aynı işlevi görür.
- * Ancak "Tanımlar" sekmesindeki yeni modern arayüze ait input ID'lerini (defNewProductType, defIsDemirbasCheck) 
- * kullandığı için ayrıştırılmıştır. Veri tabanı (Firebase) tarafında aynı koleksiyonu günceller.
- */
-window.defAddNewProductType = async function () {
-    const nameInput = document.getElementById('defNewProductType');
-    const isDemirbasCheck = document.getElementById('defIsDemirbasCheck');
+async function _createProductType(nameInput, isDemirbasCheck) {
     const name = nameInput.value.trim();
     const isDemirbas = isDemirbasCheck.checked;
+    if (!name) { showAppAlert("Tür adı giriniz", "warning"); return; }
 
-    if (!name) {
-        showAppAlert("Tür adı giriniz", "warning");
-        return;
-    }
+    const exists = (window.data.productTypes || []).some(t =>
+        String(t.name || '').trim().toLocaleLowerCase('tr-TR') === name.toLocaleLowerCase('tr-TR'));
+    if (exists) { showAppAlert("Bu ürün türü zaten mevcut!", "warning"); return; }
 
     try {
-        const { collection, addDoc } = window.FirebaseModules;
-
-        await addDoc(collection(window.fireDb, "productTypes"), {
-            name: name,
-            isDemirbas: isDemirbas,
-            createdAt: Date.now()
-        });
-
-        // Formu temizle
+        const { setDoc } = window.FirebaseModules;
+        const id = `pt_${Date.now()}`;
+        await setDoc(_productTypeDoc(id), { id, name, isDemirbas, createdAt: Date.now() });
         nameInput.value = '';
         isDemirbasCheck.checked = false;
-
         showAppAlert("Yeni tür başarıyla eklendi.", "success");
     } catch (err) {
         console.error("❌ Ekleme hatası:", err);
-        showAppAlert("Tür eklenirken bir hata oluştu.", "danger");
+        showAppAlert("Tür eklenirken bir hata oluştu.", "error");
     }
+}
+
+// --- 1. YENİ TÜR EKLEME ---
+window.addNewProductType = function () {
+    return _createProductType(document.getElementById('newProductType'), document.getElementById('isDemirbasCheck'));
+};
+
+// --- TANIMLAR SEKMESİ İÇİN YENİ TÜR EKLEME (farklı input id'leri, aynı veri yolu) ---
+window.defAddNewProductType = function () {
+    return _createProductType(document.getElementById('defNewProductType'), document.getElementById('defIsDemirbasCheck'));
 };
 
 // --- 2. GÜNCELLEME (DEĞİŞİKLİKLERİ KAYDET) ---
 window.saveProductTypeUpdate = async function () {
-    const idInput = document.getElementById('editTypeId'); // Firebase Doc ID burada
+    const idInput = document.getElementById('editTypeId');
     const nameInput = document.getElementById('editTypeName');
     const checkInput = document.getElementById('editIsDemirbas');
-
     if (!idInput || !nameInput) return;
 
     const docId = idInput.value;
     const newName = nameInput.value.trim();
     const newIsDemirbas = checkInput.checked;
-
-    if (!newName) {
-        showAppAlert("Tür adı boş olamaz!", "danger");
-        return;
-    }
+    if (!newName) { showAppAlert("Tür adı boş olamaz!", "error"); return; }
 
     try {
-        const { doc, updateDoc } = window.FirebaseModules;
-        const firestoreDb = window.fireDb;
+        const { updateDoc } = window.FirebaseModules;
+        await updateDoc(_productTypeDoc(docId), { name: newName, isDemirbas: newIsDemirbas });
 
-        // Sadece ilgili dökümanı güncelliyoruz
-        const typeDocRef = doc(firestoreDb, "productTypes", docId);
-        await updateDoc(typeDocRef, {
-            name: newName,
-            isDemirbas: newIsDemirbas
-        });
-
-        // 🔥 ürünlerde eski type adını güncelle
         const oldName = window.cachedEditingTypeName;
-
         if (oldName && oldName !== newName) {
-            await window.syncProductTypesToProducts(oldName, newName);
+            const synced = await window.syncProductTypesToProducts(oldName, newName);
+            if (synced === false) showAppAlert("Tür güncellendi ancak ürünlerdeki tür adı kaydedilemedi.", "warning");
         }
 
-        // 🔥 UI'yı anında yenile
-        await window.forceProductTypeSync();
-
-        closeEditModal();
+        window.forceProductTypeSync();
+        window.closeProductTypeModal();
         showAppAlert("Ürün türü güncellendi.", "success");
     } catch (error) {
         console.error("❌ Kayıt hatası:", error);
-        showAppAlert("Güncelleme başarısız.", "danger");
+        showAppAlert("Güncelleme başarısız.", "error");
     }
 };
 
 // --- 3. SİLME İŞLEMİ ---
 window.deleteProductType = async function (docId) {
-    if (!confirm("Bu ürün türünü silmek istediğinize emin misiniz?")) return;
+    const type = (window.data.productTypes || []).find(t => String(t.id) === String(docId));
+    const onay = await showCustomConfirm('Ürün Türünü Sil', `"${type ? type.name : docId}" ürün türü silinecek. Onaylıyor musunuz?`);
+    if (!onay) return;
 
     try {
-        const { doc, deleteDoc } = window.FirebaseModules;
-
-        // ID'sine göre doğrudan dökümanı siliyoruz
-        const typeDocRef = doc(window.fireDb, "productTypes", docId);
-        await deleteDoc(typeDocRef);
-
-        showAppAlert("Ürün türü silindi.", "danger");
+        const { deleteDoc } = window.FirebaseModules;
+        await deleteDoc(_productTypeDoc(docId));
+        showAppAlert("Ürün türü silindi.", "success");
     } catch (error) {
         console.error("❌ Silme hatası:", error);
+        showAppAlert("Ürün türü silinemedi.", "error");
     }
-};
-
-// Yeni bir ürün türü yaratmak. Bu isimde ürün var mı?" diye kontrol eder (mükerrer kayıt engelleme).
-window.saveNewProductType = async function () {
-    const nameInput = document.getElementById('newTypeName');
-    const isDemirbasInput = document.getElementById('newTypeIsDemirbas');
-    const name = nameInput.value.trim();
-    const isDemirbas = isDemirbasInput.checked;
-
-    if (!name) {
-        if (typeof showAppAlert === 'function') showAppAlert("Lütfen bir ürün türü adı girin.", "warning");
-        return;
-    }
-
-    const currentTypes = window.getActiveProductTypes();
-    if (currentTypes.find(t => t.name.toLowerCase() === name.toLowerCase())) {
-        if (typeof showAppAlert === 'function') showAppAlert("Bu ürün türü zaten mevcut!", "warning");
-        return;
-    }
-
-    currentTypes.push({ name: name, isDemirbas: isDemirbas });
-
-    // Firebase'e kaydet (firebase-handler'daki methoduna göre)
-    if (typeof window.firebaseOperations !== 'undefined' && window.firebaseOperations.updateData) {
-        await window.firebaseOperations.updateData('productTypes', currentTypes);
-    } else {
-        window.data.productTypes = currentTypes;
-    }
-
-    if (typeof showAppAlert === 'function') showAppAlert(`"${name}" başarıyla eklendi!`, "success");
-    nameInput.value = '';
-    isDemirbasInput.checked = false;
-
-    renderProductTypesTable();
 };
 
 window.checkExitIsDemirbas = function (exit) {
@@ -964,8 +863,8 @@ window.renderCriticalStockTable = function () {
             rows.push(`
                 <tr class="align-middle">
                     <td>
-                        <div class="fw-bold text-truncate" title="${item.ürün || item.name}">${item.ürün || item.name}</div>
-                        <small class="text-muted d-block">${item.depo} | ${item.rafNo || '-'}</small>
+                        <div class="fw-bold text-truncate" title="${escapeHtml(item.ürün || item.name)}">${escapeHtml(item.ürün || item.name)}</div>
+                        <small class="text-muted d-block">${escapeHtml(item.depo)} | ${escapeHtml(item.rafNo || '-')}</small>
                     </td>
                     <td class="text-center">
                         <span class="fw-bold ${mevcut <= 1 ? 'text-danger' : 'text-dark'}">${mevcut}</span>
@@ -976,7 +875,7 @@ window.renderCriticalStockTable = function () {
                         <div class="action-buttons">
                             <button class="btn-action btn-buy" title="Satın Al"><i class="fas fa-shopping-cart"></i></button>
                             <button class="btn-action btn-mail" title="Bildirim Gönder"><i class="fas fa-envelope"></i></button>
-                            <button class="btn-action btn-passive" onclick="deleteType('${item.name}')" title="Pasif Yap"><i class="fas fa-trash"></i></button>
+                            <button class="btn-action btn-passive" onclick="deleteType(${jsArg(String(item.name))})" title="Pasif Yap"><i class="fas fa-trash"></i></button>
                         </div>
                     </td>
                 </tr>`);
@@ -1518,21 +1417,24 @@ window.updateProductTypeDropdowns = function () {
     });
 };
 
-window.syncProductTypesToProducts = function (oldName, newName) {
-
-    ['b1', 'b2'].forEach(depo => {
-
-        (window.data?.[depo] || []).forEach(item => {
-
-            if (item.tür === oldName) item.tür = newName;
-            if (item.type === oldName) item.type = newName;
-            if (item.prodType === oldName) item.prodType = newName;
-
+// [WHY]: Ad değişikliği b1/b2 ürünlerinde yalnız bellekte yapılıyordu; kaydedilmediği için snapshot ile geri geliyordu (ADM-02).
+window.syncProductTypesToProducts = async function (oldName, newName) {
+    let ok = true;
+    for (const depo of ['b1', 'b2']) {
+        let changed = false;
+        const items = (window.data?.[depo] || []).map(item => {
+            if (item.tür !== oldName && item.type !== oldName && item.prodType !== oldName) return item;
+            changed = true;
+            const next = { ...item };
+            if (next.tür === oldName) next.tür = newName;
+            if (next.type === oldName) next.type = newName;
+            if (next.prodType === oldName) next.prodType = newName;
+            return next;
         });
-
-    });
-
+        if (changed && await window.saveData(depo, items) === false) ok = false;
+    }
     console.log(`✔ Tür güncellendi: ${oldName} → ${newName}`);
+    return ok;
 };
 
 // "Özel Takip" Dashboard'u
@@ -1575,7 +1477,7 @@ window.renderCustomWatchDashboard = function () {
         <div class="watch-card" onclick="openWatchDetail(${JSON.stringify(item).replace(/"/g, '&quot;')})">
 
             <div class="watch-header">
-                <div class="title">${item.ürün}</div>
+                <div class="title">${escapeHtml(item.ürün)}</div>
                 <div class="qty ${isLow ? 'danger' : 'success'}">${qty}</div>
             </div>
 
@@ -1757,22 +1659,26 @@ window.openLocationModal = function (id = null) {
     const units = window.data.units || [];
     units.forEach(u => {
         const unitName = typeof u === 'object' ? (u.name || u.birimAdi) : u;
-        if (unitName) {
-            unitSelect.innerHTML += `<option value="${unitName}">${unitName}</option>`;
-        }
+        if (unitName) unitSelect.add(new Option(unitName, unitName));
     });
 
-    if (id && window.data.locations && window.data.locations[id]) {
-        const loc = window.data.locations[id];
+    // [WHY]: Düzenleme window.data.locations[id] ile (dizi + id) aranıyordu: form boş açılıyor, kaydedince kayıt eziliyor ve
+    //        atanmış kişiler kayboluyordu (ADM-04).
+    // [HOW]: Kayıt id ile bulunur; kayıtlı birim listede yoksa seçenek olarak eklenir; kişiler rozet listesinden çizilir.
+    const loc = id ? (window.data.locations || []).find(l => String(l.id) === String(id)) : null;
+    if (id && !loc) {
+        showAppAlert('Mahal bulunamadı; liste güncellenmiş olabilir.', 'error');
+        return;
+    }
+    if (loc) {
         title.innerHTML = '<i class="fas fa-edit text-info me-2"></i> Mahali Düzenle';
         document.getElementById('loc_code').value = loc.code || '';
+        if (loc.unit && ![...unitSelect.options].some(o => o.value === loc.unit)) unitSelect.add(new Option(loc.unit, loc.unit));
         document.getElementById('loc_unit').value = loc.unit || '';
         document.getElementById('loc_campus').value = loc.campus || '';
         document.getElementById('loc_corridor').value = loc.corridor || '';
-
-        if (loc.persons && Array.isArray(loc.persons)) {
-            loc.persons.forEach(p => window.addPersonToLocation(p));
-        }
+        window.locationSelectedPersons = Array.isArray(loc.persons) ? loc.persons.map(p => ({ ...p })) : [];
+        _renderLocationPersons();
     } else {
         title.innerHTML = '<i class="fas fa-map-marker-alt text-info me-2"></i> Yeni Mahal Tanımla';
     }
@@ -1799,8 +1705,8 @@ window.searchPersonnelForLocation = function (query) {
             // Personel verisinde birim hangi isimle tutuluyor olabilirse hepsini dene
             const pUnit = p.birim || p.unit || p.department || p.bolum || p.departman || p.birimAdi || '';
             return `
-                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" onclick="window.addPersonToLocation({name:'${p.name}', unit:'${pUnit}'})">
-                    <strong>${p.name}</strong> ${pUnit ? `<small class="text-muted">(${pUnit})</small>` : ''}
+                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" onclick="window.addPersonToLocation({name:${jsArg(String(p.name))}, unit:${jsArg(String(pUnit))}})">
+                    <strong>${escapeHtml(p.name)}</strong> ${pUnit ? `<small class="text-muted">(${escapeHtml(pUnit)})</small>` : ''}
                 </div>
             `;
         }).join('');
@@ -1810,72 +1716,71 @@ window.searchPersonnelForLocation = function (query) {
     }
 };
 
-window.addPersonToLocation = function (person) {
-    if (window.locationSelectedPersons.find(p => p.name === person.name)) return;
-
-    window.locationSelectedPersons.push(person);
+// [WHY]: Kişi çıkarınca rozetler addPersonToLocation ile yeniden çizilmeye çalışılıyordu; kişi zaten listede olduğu için
+//        fonksiyon hemen dönüyor ve TÜM rozetler siliniyordu (ADM-04).
+// [HOW]: Rozetler her zaman locationSelectedPersons dizisinden çizilir; ekle/çıkar yalnız diziyi değiştirir.
+function _renderLocationPersons() {
     const container = document.getElementById('loc_selectedPersons');
+    if (!container) return;
+    container.innerHTML = window.locationSelectedPersons.map(p => `
+        <span class="badge bg-light text-dark border d-flex align-items-center gap-2 p-2">${escapeHtml(p.name)}
+            <i class="fas fa-times text-danger" style="cursor:pointer;" onclick="window.removePersonFromLocation(${jsArg(String(p.name))})"></i></span>`).join('');
+}
 
-    const badge = document.createElement('span');
-    badge.className = 'badge bg-light text-dark border d-flex align-items-center gap-2 p-2';
-    badge.innerHTML = `${person.name} <i class="fas fa-times text-danger" style="cursor:pointer;" onclick="window.removePersonFromLocation('${person.name}')"></i>`;
-    container.appendChild(badge);
-
+window.addPersonToLocation = function (person) {
+    if (!person || !person.name) return;
+    if (!window.locationSelectedPersons.some(p => p.name === person.name)) {
+        window.locationSelectedPersons.push(person);
+        _renderLocationPersons();
+    }
     document.getElementById('loc_personSearch').value = '';
     document.getElementById('loc_personResults').style.display = 'none';
 };
 
 window.removePersonFromLocation = function (name) {
     window.locationSelectedPersons = window.locationSelectedPersons.filter(p => p.name !== name);
-    const container = document.getElementById('loc_selectedPersons');
-    container.innerHTML = '';
-    window.locationSelectedPersons.forEach(p => window.addPersonToLocation(p));
+    _renderLocationPersons();
 };
 
+// [WHY]: Kayıt tam nesneyle değiştiriliyor (form dışı alanlar kayboluyor), düzenlenen kayıt bulunamazsa sessizce hiçbir şey
+//        yazılmıyor, saveData sonucu kontrol edilmeden "güncellendi" deniyordu (ADM-04).
+// [HOW]: Mevcut kayıt id ile bulunup {...mevcut, ...form} ile birleştirilir; yalnız 'locations' yazılır ve sonuç kontrol edilir.
 window.saveLocation = async function (e) {
     if (e) e.preventDefault();
 
     const id = document.getElementById('loc_id').value;
-    const newLoc = {
-        id: id || 'loc_' + Date.now(),
-        code: document.getElementById('loc_code').value,
+    const locations = [...(window.data.locations || [])];
+    const existing = id ? locations.find(l => String(l.id) === String(id)) : null;
+    if (id && !existing) { showAppAlert('Düzenlenen mahal bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+
+    const now = Date.now();
+    const formFields = {
+        code: document.getElementById('loc_code').value.trim(),
         unit: document.getElementById('loc_unit').value,
         campus: document.getElementById('loc_campus').value,
         corridor: document.getElementById('loc_corridor').value,
-        persons: window.locationSelectedPersons,
-        updatedAt: Date.now(),
-        createdAt: id ? (window.data.locations?.find(l => l.id === id)?.createdAt || Date.now()) : Date.now()
+        persons: window.locationSelectedPersons.map(p => ({ ...p })),
+        updatedAt: now
     };
+    const next = existing
+        ? locations.map(l => String(l.id) === String(id) ? { ...l, ...formFields, id: l.id } : l)
+        : [...locations, { id: 'loc_' + now, ...formFields, createdAt: now }];
 
-    if (!window.data.locations) window.data.locations = [];
-
-    if (id) {
-        const idx = window.data.locations.findIndex(l => l.id === id);
-        if (idx !== -1) window.data.locations[idx] = newLoc;
-    } else {
-        window.data.locations.push(newLoc);
+    if (await window.saveData('locations', next) === false) {
+        showAppAlert('Mahal kaydedilemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
+        return;
     }
-
-    try {
-        await window.saveData('locations', window.data.locations);
-        showAppAlert(id ? "Mahal güncellendi." : "Yeni mahal eklendi.", "success");
-        window.closeLocationModal();
-    } catch (err) {
-        console.error("Mahal kaydetme hatası:", err);
-        showAppAlert("Hata oluştu!", "danger");
-    }
+    showAppAlert(existing ? "Mahal güncellendi." : "Yeni mahal eklendi.", "success");
+    window.closeLocationModal();
+    window.renderLocationsTable();
 };
 
 window.deleteLocation = async function (id) {
     if (!confirm("Bu mahali silmek istediğinize emin misiniz?")) return;
-
-    try {
-        window.data.locations = window.data.locations.filter(l => l.id !== id);
-        await window.saveData('locations', window.data.locations);
-        showAppAlert("Mahal silindi.", "info");
-    } catch (err) {
-        console.error("Mahal silme hatası:", err);
-    }
+    const next = (window.data.locations || []).filter(l => String(l.id) !== String(id));
+    if (await window.saveData('locations', next) === false) { showAppAlert('Mahal silinemedi.', 'error'); return; }
+    window.renderLocationsTable();
+    showAppAlert("Mahal silindi.", "info");
 };
 
 window.renderLocationsTable = function () {
@@ -1896,20 +1801,20 @@ window.renderLocationsTable = function () {
 
         return `
         <tr class="align-middle">
-            <td class="fw-bold text-dark">${loc.code || '-'}</td>
-            <td>${loc.unit || '-'}</td>
+            <td class="fw-bold text-dark">${escapeHtml(loc.code || '-')}</td>
+            <td>${escapeHtml(loc.unit || '-')}</td>
             <td>
-                <span class="badge bg-soft-primary text-primary">${loc.campus || '-'}</span>
-                <small class="text-muted ms-1">${loc.corridor || '-'} Koridoru</small>
+                <span class="badge bg-soft-primary text-primary">${escapeHtml(loc.campus || '-')}</span>
+                <small class="text-muted ms-1">${escapeHtml(loc.corridor || '-')} Koridoru</small>
             </td>
             <td>
                 <div class="person-tag-container" title="${persons.map(p => p.name).join(', ')}">
-                    ${visiblePersons.map(p => `<span class="badge bg-light text-dark border-0 person-tag">${p.name}</span>`).join('')}
+                    ${visiblePersons.map(p => `<span class="badge bg-light text-dark border-0 person-tag">${escapeHtml(p.name)}</span>`).join('')}
                     ${hasMore ? `
                         <div class="person-tag-more">
                             +${moreCount}
                             <div class="person-popover">
-                                ${persons.map(p => `<div class="popover-item">${p.name}</div>`).join('')}
+                                ${persons.map(p => `<div class="popover-item">${escapeHtml(p.name)}</div>`).join('')}
                             </div>
                         </div>
                     ` : ''}
@@ -1918,10 +1823,10 @@ window.renderLocationsTable = function () {
             </td>
             <td class="text-end">
                 <div class="d-flex justify-content-end gap-2">
-                    <button onclick="window.openLocationModal('${loc.id}')" class="p-btn-icon play" title="Düzenle">
+                    <button onclick="window.openLocationModal(${jsArg(String(loc.id))})" class="p-btn-icon play" title="Düzenle">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button onclick="window.deleteLocation('${loc.id}')" class="p-btn-icon delete" title="Sil">
+                    <button onclick="window.deleteLocation(${jsArg(String(loc.id))})" class="p-btn-icon delete" title="Sil">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -1934,12 +1839,3 @@ window.renderLocationsTable = function () {
     }
 };
 
-// [DECOMMISSIONED] Launchpad modülü askıya alındı. Bu fonksiyon artık no-op.
-window.updateAdminLaunchpadButtonsVisibility = function () {
-    // No-op
-};
-
-// Trigger it immediately on script execution
-if (typeof window.updateAdminLaunchpadButtonsVisibility === 'function') {
-    window.updateAdminLaunchpadButtonsVisibility();
-}

@@ -4216,6 +4216,17 @@ tr.selectable-row:active>td {
     color: #94a3b8;
 }
 
+/* Kullanıcı tablo görünümünü seçtiyse (toggle) medya sorgusundaki otomatik kart modunu ezer — INV-03 */
+#b1.force-table-view .table-responsive-wrapper,
+#b2.force-table-view .table-responsive-wrapper {
+    display: block !important;
+}
+
+#b1.force-table-view #cardViewB1,
+#b2.force-table-view #cardViewB2 {
+    display: none !important;
+}
+
 /* ---- Responsive: Mobil → Otomatik Kart Modu ---- */
 @media (max-width: 768px) {
 

@@ -31,6 +31,7 @@
     <link rel="stylesheet" href="dark-theme.css">
     <script src="dark-mode-toggle.js"></script>
     <script src="src/utils/session-store.js"></script>
+    <script src="src/utils/html.js"></script>
     <link rel="stylesheet" href="todo-module.css">
     <script src="todo-module.js"></script>
 
@@ -670,6 +671,7 @@
                             <th>Tarih</th>
                             <th>Ürün</th>
                             <th>Durum</th>
+                            <th>Teslim Alım Tarihi</th>
                             <th>İşlem</th>
                         </tr>
                     </thead>
@@ -805,42 +807,7 @@
         </div>
     </div> <!-- /inventory-screen -->
 
-    <!-- Birim Yönetimi İçin Gelişmiş Modal -->
-        <div id="unitModal" class="modal"
-            style="display:none; background: rgba(0,0,0,0.5); position: fixed; top:0; left:0; width:100%; height:100%; z-index:9999;">
-            <div class="modal-content"
-                style="background:white; width:500px; margin: 50px auto; padding:20px; border-radius:8px;">
-                <h3 id="unitModalTitle">Yeni Birim Tanımla</h3>
-                <hr>
-                <div class="form-group">
-                    <label>Birim Adı:</label>
-                    <input type="text" id="modalUnitName" class="form-control" placeholder="Örn: Bilgi İşlem"
-                        style="width:100%; margin-bottom:15px;" autocomplete="off">
-                </div>
-
-                <div class="form-group">
-                    <label>Personel Ekle (Ara/Seç):</label>
-                    <input type="text" id="personnelSearch" onkeyup="window.searchPersonnelForUnit(this.value)"
-                        placeholder="Personel Adı Yazın..." class="form-control" style="width:100%;" autocomplete="off">
-                    <div id="searchResultList"
-                        style="border:1px solid #ddd; display:none; max-height:150px; overflow-y:auto; position:absolute; width:460px; background:white; z-index:10;">
-                    </div>
-                </div>
-
-                <div class="selected-personnel-area" style="margin-top:20px;">
-                    <label><b>Atanan Personeller:</b></label>
-                    <ul id="selectedPersonnelList" class="list-group"
-                        style="margin-top:10px; max-height:150px; overflow-y:auto;">
-                    </ul>
-                </div>
-
-                <div class="modal-footer" style="margin-top:20px; text-align:right;">
-                    <button onclick="window.closeUnitModal()" class="btn-cancel">Vazgeç</button>
-                    <button onclick="window.saveUnitData()" class="btn-save"
-                        style="background:#27ae60; color:white; padding:8px 15px; border:none; border-radius:4px;">Kaydet</button>
-                </div>
-            </div>
-        </div>
+    <!-- Birim modalı (#unitModal) edm-workflow.js tarafından enjekte edilir (EBYS-15; iki sayfada tek kaynak) -->
 
         <!-- Akış Başlatma Seçenekleri Modalı -->
         <div id="startWorkflowModal" class="modern-modal"

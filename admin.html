@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="admin-dark-fix.css">
     <script src="dark-mode-toggle.js"></script>
     <script src="src/utils/session-store.js"></script>
+    <script src="src/utils/html.js"></script>
     <link rel="stylesheet" href="todo-module.css">
     <script src="todo-module.js"></script>
 
@@ -307,7 +308,7 @@
                         <span class="todo-nav-badge badge-hidden" id="admin-nav-todo-count">0</span>
                     </div>
 
-                    <button onclick="localStorage.setItem('launchpadBypassed', 'true'); window.location.href='index.html'" class="btn-status-action"
+                    <button onclick="window.location.href='index.html'" class="btn-status-action"
                         title="Ana Sayfaya Dön">
                         <i class="fas fa-home"></i>
                     </button>
@@ -1288,12 +1289,6 @@
                             style="background: rgba(0,255,136,0.1); color: var(--vip-matrix); border: 1px solid var(--vip-matrix); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-database me-2"></i>1-Tık DB Snapshot
                         </button>
-                        <button class="btn w-100 fw-bold" disabled
-                            id="vipToggleLaunchpadBtn"
-                            style="background: rgba(128,128,128,0.05); color: #64748b; border: 1px solid #475569; padding: 12px; border-radius: 8px; cursor: not-allowed; display: flex; align-items: center; justify-content: center;"
-                            title="Launchpad modülü devre dışı bırakıldı.">
-                            <i class="fas fa-rocket me-2"></i>Launchpad: Askıda
-                        </button>
                         <button class="btn w-100 fw-bold" onclick="window.toggleSystemTips()"
                             id="vipToggleTipsBtn"
                             style="background: rgba(14,165,233,0.1); color: var(--color-info); border: 1px solid var(--color-info); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
@@ -1304,7 +1299,7 @@
                             style="background: rgba(255,45,85,0.1); color: var(--vip-danger); border: 1px solid var(--vip-danger); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-power-off me-2"></i>GLOBAL KILL SWITCH
                         </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipCleanDuplicates()"
+                        <button class="btn w-100 fw-bold" onclick="window.vipCleanDuplicates(this)"
                             style="background: rgba(168,85,247,0.1); color: #c084fc; border: 1px solid #c084fc; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-magic me-2"></i>Tekerrürleri Temizle
                         </button>
@@ -1316,7 +1311,7 @@
                     <div class="vip-card-header">
                         <div class="header-left">
                             <i class="fas fa-eye" style="color: var(--vip-neon-blue);"></i>
-                            <span>God-Eye (Canli Radar)</span>
+                            <span>God-Eye (Canli Radar)</span> <span class="badge" title="Örnek veri: gerçek oturum/presence izlenmiyor (Karar K8-b)" style="background: var(--vip-warning, #f59e0b); color: #111; font-size: 0.6rem; margin-left: 6px;">DEMO</span>
                         </div>
                         <div class="header-right">
                             <button id="godEyeHeatmapToggle" onclick="window.vipToggleHeatmap(this)" title="Heatmap Moduna Gec">
@@ -1331,9 +1326,9 @@
                         <div id="godEyeRadarContainer">
                             <div class="god-eye-radar" id="godEyeRadarInner">
                                 <div class="radar-scanner"></div>
-                                <div class="radar-dot" data-user-id="user-1" data-user-name="Ahmet Yilmaz" data-user-module="B1 Depo" style="top: 30%; left: 40%;"></div>
-                                <div class="radar-dot" data-user-id="user-2" data-user-name="Ayse Kaya" data-user-module="Satin Alma" style="top: 70%; left: 60%; animation-delay: 1s;"></div>
-                                <div class="radar-dot" data-user-id="user-3" data-user-name="Mehmet Demir" data-user-module="Personel" style="top: 50%; left: 20%; animation-delay: 2.5s;"></div>
+                                <div class="radar-dot" data-demo="true" data-user-id="user-1" data-user-name="Ahmet Yilmaz" data-user-module="B1 Depo" style="top: 30%; left: 40%;"></div>
+                                <div class="radar-dot" data-demo="true" data-user-id="user-2" data-user-name="Ayse Kaya" data-user-module="Satin Alma" style="top: 70%; left: 60%; animation-delay: 1s;"></div>
+                                <div class="radar-dot" data-demo="true" data-user-id="user-3" data-user-name="Mehmet Demir" data-user-module="Personel" style="top: 50%; left: 20%; animation-delay: 2.5s;"></div>
                             </div>
                             <!-- Heatmap SVG (baslangicta gizli, JS ile doldurulur) -->
                             <svg id="godEyeHeatmapSVG" viewBox="-110 -110 220 220" xmlns="http://www.w3.org/2000/svg">
@@ -1341,7 +1336,7 @@
                         </div>
                         <!-- Durum Bilgisi -->
                         <div style="font-size: 0.7rem; color: var(--vip-text-muted); text-align: center; letter-spacing: 0.5px;">
-                            <span id="godEyeStatusText"><i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>3 aktif oturum izleniyor</span>
+                            <span id="godEyeStatusText"><i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>DEMO — örnek oturumlar (gerçek presence yok)</span>
                         </div>
                     </div>
                 </div>
@@ -1434,39 +1429,6 @@
                         style="border-radius: 12px; font-weight: 600;">Vazgeç</button>
                     <button type="submit" class="btn btn-info px-5 py-2 text-white shadow-lg"
                         style="border-radius: 12px; background: #0ea5e9; font-weight: 600;">Kaydet</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Talep Düzenleme Modalı -->
-    <div id="editRequestModal" class="modern-modal"
-        style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6);">
-        <div class="modern-modal-content"
-            style="background:#fff; margin:5% auto; padding:25px; width:500px; border-radius:15px;">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="mb-0">📝 Talebi Düzenle</h5>
-                <button onclick="closeEditModal()" class="btn-close"
-                    style="border:none; background:none; font-size:24px; cursor:pointer;">&times;</button>
-            </div>
-            <hr>
-            <form id="editRequestForm" autocomplete="off">
-                <input type="hidden" id="edit_id">
-                <div class="mb-3">
-                    <label class="form-label">Ürün / Kategori</label>
-                    <input type="text" id="edit_urun" class="form-control" required>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Birim</label>
-                    <input type="text" id="edit_birim" class="form-control" readonly style="background:#f8fafc;">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Evrak No</label>
-                    <input type="text" id="edit_evrakNo" class="form-control" readonly style="background:#f8fafc;">
-                </div>
-                <div class="d-grid gap-2 mt-4">
-                    <button type="submit" class="btn btn-primary">Değişiklikleri Kaydet</button>
-                    <button type="button" onclick="closeEditModal()" class="btn btn-light">İptal</button>
                 </div>
             </form>
         </div>
@@ -1669,7 +1631,7 @@
         <div class="app-modal-card">
             <div class="app-modal-header">
                 <div class="app-modal-title"><i class="fas fa-edit"></i> Tür Düzenle</div>
-                <button class="app-modal-close" onclick="closeEditModal()"><i class="fas fa-times"></i></button>
+                <button class="app-modal-close" onclick="closeProductTypeModal()"><i class="fas fa-times"></i></button>
             </div>
             <div class="app-modal-body">
                 <input type="hidden" id="editTypeId">
@@ -1692,7 +1654,7 @@
                 <div class="app-modal-footer">
                     <button class="btn-save" onclick="saveProductTypeUpdate()"><i class="fas fa-save"></i>
                         Kaydet</button>
-                    <button class="btn-cancel" onclick="closeEditModal()">İptal</button>
+                    <button class="btn-cancel" onclick="closeProductTypeModal()">İptal</button>
                 </div>
             </div>
         </div>

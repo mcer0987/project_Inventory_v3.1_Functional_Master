@@ -513,17 +513,17 @@ window.renderRequestsTable = function () {
                     (isCompleted ? 'Teslim Alındı' : req.durum || 'Bilinmiyor')));
 
         row.innerHTML = `
-            <td style="text-align:center;"><input type="checkbox" class="req-checkbox" value="${index}"></td>
-            <td>${req.tarih || "-"}</td>
-            <td>${req.personel || "-"}</td>
-            <td>${req.ürün || "-"} <strong>(${req.adet || 1} Adet)</strong></td>
-            <td style="color:#7f8c8d;">${req.not || "-"}</td>
-            <td style="font-weight:bold; color:#2c3e50;">${req.sn || "-"}</td>
-            <td style="text-align:center;"><span class="status-badge-pill ${statusClass}">${statusText}</span></td>
+            <td style="text-align:center;"><input type="checkbox" class="req-checkbox" value="${escapeHtml(req.id)}"></td>
+            <td>${escapeHtml(req.tarih || "-")}</td>
+            <td>${escapeHtml(req.personel || "-")}</td>
+            <td>${escapeHtml(req.ürün || "-")} <strong>(${escapeHtml(req.adet || 1)} Adet)</strong></td>
+            <td style="color:#7f8c8d;">${escapeHtml(req.not || "-")}</td>
+            <td style="font-weight:bold; color:#2c3e50;">${escapeHtml(req.sn || "-")}</td>
+            <td style="text-align:center;"><span class="status-badge-pill ${statusClass}">${escapeHtml(statusText)}</span></td>
             <td style="text-align:center;">
                 ${isPending ? `
-                    <button onclick="confirmRequest(${index})" class="req-approve-btn">Onayla</button>
-                    <button onclick="rejectRequest(${index})" class="req-reject-btn">Reddet</button>
+                    <button onclick="confirmRequest(${jsArg(req.id)})" class="req-approve-btn">Onayla</button>
+                    <button onclick="rejectRequest(${jsArg(req.id)})" class="req-reject-btn">Reddet</button>
                 ` : `<span class="req-done-text">${isCompleted ? 'Teslim Alındı' : 'İşlem Yapıldı'}</span>`}
             </td>
         `;
@@ -543,7 +543,7 @@ function renderMyRequestsTable() {
     );
 
     if (myReqs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Henüz bir talebiniz bulunmuyor.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Henüz bir talebiniz bulunmuyor.</td></tr>';
         return;
     }
 
@@ -563,15 +563,16 @@ function renderMyRequestsTable() {
         else if (isRejected) statusHTML = `<div class="status-badge-pill status-rejected-pill">REDDEDİLDİ</div>`;
         else if (isCompleted) statusHTML = `<div class="status-badge-pill status-completed-pill">TESLİM ALINDI</div>`;
         else if (isDraft) statusHTML = `<div class="status-badge-pill" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;">TASLAK</div>`;
-        else statusHTML = `<div class="status-badge-pill status-pending-pill">${req.durum || '-'}</div>`;
+        else statusHTML = `<div class="status-badge-pill status-pending-pill">${escapeHtml(req.durum || '-')}</div>`;
 
         row.innerHTML = `
-            <td>${req.tarih}</td>
+            <td>${escapeHtml(req.tarih)}</td>
             <td>
-                <strong>${req.ürün}</strong><br>
-                <small style="color: #666; font-weight: bold;">Miktar: ${req.adet || 1} Adet</small>
+                <strong>${escapeHtml(req.ürün)}</strong><br>
+                <small style="color: #666; font-weight: bold;">Miktar: ${escapeHtml(req.adet || 1)} Adet</small>
             </td>
             <td style="text-align: center; vertical-align: middle;">${statusHTML}</td>
+            <td style="text-align: center; vertical-align: middle;">${escapeHtml(req.teslimTarihi || '-')}</td>
             <td style="text-align: center; vertical-align: middle;">
                 ${isCompleted ?
                 `<div class="status-badge-pill status-completed-pill" style="min-width: 120px; justify-content: center; margin: 0 auto;">Teslim Alındı</div>` :
@@ -629,86 +630,225 @@ window.renderPersonnelInventoryTable = function () {
             : 'background: var(--color-info-light); color: var(--color-info); border: 1px solid rgba(96, 165, 250, 0.2);';
 
         row.innerHTML = `
-            <td>${req.tarih || "-"}</td>
-            <td><strong>${req.ürün || "-"}</strong></td>
-            <td style="font-weight:bold; color: var(--color-text);">${req.sn || "-"}</td>
-            <td>${req.adet || 1} Adet</td>
+            <td>${escapeHtml(req.tarih || "-")}</td>
+            <td><strong>${escapeHtml(req.ürün || "-")}</strong></td>
+            <td style="font-weight:bold; color: var(--color-text);">${escapeHtml(req.sn || "-")}</td>
+            <td>${escapeHtml(req.adet || 1)} Adet</td>
             <td><span class="status-badge-pill" style="min-width: 100px; padding: 6px 12px; font-size: 11px; ${typeBadgeStyle}">${typeText}</span></td>
-            <td style="color: var(--color-text-muted);">${req.not || "-"}</td>
+            <td style="color: var(--color-text-muted);">${escapeHtml(req.not || "-")}</td>
         `;
     });
 };
 
-window.confirmRequest = async function (index) {
-    const request = window.data.requests[index];
-    if (!request) return;
-    let snValue = '-';
-    if (typeof showCustomPrompt === 'function') {
-        snValue = await showCustomPrompt('Seri No / Zimmet Bilgisi', `"${request.ürün}" için seri numarası veya zimmet bilgisi girin (yoksa boş bırakın):`, '') || '-';
-    } else {
-        snValue = window.prompt(`"${request.ürün}" için seri numarası / zimmet bilgisi girin (yoksa boş bırakın):`, '') ?? '-';
-    }
-    snValue = (snValue || '').trim() || '-';
-    request.durum = 'approved';
-    request.sn = snValue;
-    const isDemirbasStatus = request.isDemirbas === true || request.isDemirbas === "true";
+// [WHY]: Admin talep işlemleri dizi indeksiyle çalışıyordu; snapshot sonrası yanlış talep hedefleniyordu. Tablo yenilenmediği için
+//        ikinci tık ikinci onay + ikinci b3 kaydı yazıyordu; SN sorusunda İptal yine onaylıyordu; red/sil tüm DB'yi yazıyordu (ITSM-05).
+// [HOW]: Talepler id ile bulunur; yalnız bekleyen (taslak olmayan) talep onaylanır/reddedilir; talep başına işlem kilidi;
+//        İptal gerçekten iptaldir; onaylayan ve zaman kaydedilir; yalnız ilgili koleksiyonlar yazılır; tablolar yenilenir.
+const _requestActionsInFlight = new Set();
+const _findRequest = ref => (window.data.requests || []).find(r => String(r.id) === String(ref));
+const _isPendingRequest = r => {
+    const d = String(r.durum || '').trim().toUpperCase();
+    return ['', 'BEKLEMEDE', 'BEKLİYOR', 'BEKLIYOR', 'PENDING'].includes(d);
+};
+const _refreshRequestTables = () => {
+    ['renderRequestsTable', 'renderMyRequestsTable', 'renderAdminRequestTable', 'renderPersonnelInventoryTable']
+        .forEach(fn => { if (typeof window[fn] === 'function') window[fn](); });
+};
+const _saveRequestItem = updated => window.saveData('requests',
+    (window.data.requests || []).map(r => String(r.id) === String(updated.id) ? updated : r));
 
-    const exitEntry = {
-        id: Date.now(),
-        shelfNo: "TALEP",
-        productType: request.ürün,
-        description: "Personel Talebi Onaylandı",
-        sn: snValue,
-        sarfAdet: request.adet || 1,
-        note: "Onaylayan: Yönetici",
-        person: request.personel,
-        alanKisi: request.personel,
-        date: getTurkiyeTarihi(),
-        tarih: getTurkiyeTarihi(),
-        isDemirbas: isDemirbasStatus,
-        talepTuru: request.talepTuru || 'Kalıcı Zimmet',
-        oncelik: request.oncelik || 'Orta',
-        ...(request.iadeTarihi ? { iadeTarihi: request.iadeTarihi } : {}),
-        iadeEdildi: false,
-        sourceRepo: 'TALEP'
-    };
+// [WHY]: Talep serbest metin olduğu için onay stoktan hiç düşmüyordu; onaylanan ürün depoda görünmeye devam ediyor,
+//        iadesi de "stok bağlantısı yok" diye depoya dönmüyordu (ITSM-08, Karar K7-a).
+// [HOW]: Onayda SN ile birlikte B1/B2 stok kalemi seçtirilir; adı talep metniyle birebir eşleşen tek kalem ön seçilir.
+//        "Stoktan düşmeden onayla" ancak açıkça seçilirse geçerlidir. İptal → null; aksi halde { sn, source: {repo, productId} | null }.
+const _normText = s => String(s || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
+const _stockLabel = p => `${p.marka || ''} ${p.ürün || p.name || ''}`.replace(/\s+/g, ' ').trim();
+const _stockQty = p => Number(p.adet ?? p.qty ?? 0) || 0;
+const NO_STOCK = '__none__';
 
-    if (!window.data.b3) window.data.b3 = [];
-    window.data.b3.push(exitEntry);
-    // [BUGFIX] Bug 5: Targeted saves for requests and b3 individually
-    await window.saveData('requests', window.data.requests);
-    await window.saveData('b3', window.data.b3);
+window.showRequestApprovalModal = function (request) {
+    return new Promise(resolve => {
+        const want = Number(request.adet) || 1;
+        const target = _normText(request.ürün);
+        const rank = p => {
+            const label = _normText(_stockLabel(p)), name = _normText(p.ürün || p.name);
+            if (label === target || name === target) return 0;
+            if (target && ((label && label.includes(target)) || (name && target.includes(name)))) return 1;
+            return 2;
+        };
+        const candidates = ['b1', 'b2'].flatMap(repo => (window.data[repo] || [])
+            .filter(p => _stockQty(p) > 0 && p.durumu !== 'Pasif' && p.status !== 'Pasif')
+            .map(p => ({ repo, p, rank: rank(p), key: `${repo}|${p.id}` })))
+            .sort((a, b) => a.rank - b.rank || _stockLabel(a.p).localeCompare(_stockLabel(b.p), 'tr'));
+        const exact = candidates.filter(c => c.rank === 0 && _stockQty(c.p) >= want);
+        let selected = exact.length === 1 ? exact[0].key : '';
 
-    if (typeof renderRequestsTable === 'function') renderRequestsTable();
-    if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
-    showAppAlert(`${request.personel} isimli personelin talebi ONAYLANDI.`, "success");
+        const overlay = document.createElement('div');
+        overlay.id = 'requestApprovalModal';
+        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.75); display:flex; align-items:center; justify-content:center; z-index:11000;';
+        // Renkler tema değişkenlerinden (dark-theme.css [data-theme="dark"] ile uyumlu).
+        const field = 'width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border,#bdc3c7); background:var(--color-surface-alt,#f8f9fa); color:var(--color-text,#2c3e50); font-size:14px; margin-bottom:12px;';
+        overlay.innerHTML = `
+          <style>#raSource option:checked { background: linear-gradient(var(--color-primary-light,#dbeafe), var(--color-primary-light,#dbeafe)); color: var(--color-text,#2c3e50); }</style>
+          <div style="background:var(--color-surface,#fff); color:var(--color-text,#2c3e50); border:1px solid var(--color-border-light,transparent); padding:24px; border-radius:12px; width:520px; max-width:94vw; font-family:sans-serif;">
+            <h3 style="margin:0 0 6px; font-size:1.2rem;">Talebi Onayla</h3>
+            <p style="margin:0 0 16px; color:var(--color-text-muted,#7f8c8d); font-size:0.9rem;">${escapeHtml(request.personel || '-')} · <strong>${escapeHtml(request.ürün || '-')}</strong> · ${escapeHtml(want)} adet</p>
+            <label style="font-weight:600; font-size:13px;">Stoktan düşülecek kalem</label>
+            <input id="raFilter" type="text" placeholder="Ürün, marka veya raf ara..." autocomplete="off" style="${field} margin-bottom:6px;">
+            <select id="raSource" size="6" style="${field}"></select>
+            <label style="font-weight:600; font-size:13px;">Seri numarası / zimmet bilgisi</label>
+            <input id="raSn" type="text" placeholder="Yoksa boş bırakın" autocomplete="off" style="${field}">
+            <div id="raError" style="display:none; color:var(--color-danger,#e74c3c); font-size:13px; margin-bottom:10px;"></div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+              <button id="raCancel" type="button" style="padding:10px 18px; border:1px solid var(--color-border,#bdc3c7); background:transparent; color:var(--color-text,#2c3e50); border-radius:8px; cursor:pointer;">Vazgeç</button>
+              <button id="raOk" type="button" style="padding:10px 18px; border:none; background:var(--color-success-dark,#16a34a); color:#fff; font-weight:700; border-radius:8px; cursor:pointer;">Onayla</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+
+        const sel = overlay.querySelector('#raSource');
+        const renderOptions = () => {
+            const q = _normText(overlay.querySelector('#raFilter').value);
+            const visible = candidates.filter(c => !q || _normText(`${_stockLabel(c.p)} ${c.p.raf || ''} ${c.repo}`).includes(q));
+            sel.innerHTML = `<option value="${NO_STOCK}">— Stoktan düşmeden onayla (stok dışı / tedarik edilecek)</option>` +
+                visible.map(c => {
+                    const qty = _stockQty(c.p);
+                    return `<option value="${escapeHtml(c.key)}" ${qty < want ? 'disabled' : ''}>${c.repo.toUpperCase()} · ${escapeHtml(_stockLabel(c.p))} · Raf ${escapeHtml(c.p.raf || '-')} · Stok: ${escapeHtml(qty)}${qty < want ? ' (yetersiz)' : ''}</option>`;
+                }).join('');
+            sel.value = selected;
+        };
+        renderOptions();
+        overlay.querySelector('#raFilter').addEventListener('input', renderOptions);
+        sel.addEventListener('change', () => { selected = sel.value; });
+
+        const close = val => { overlay.remove(); resolve(val); };
+        overlay.querySelector('#raCancel').onclick = () => close(null);
+        overlay.querySelector('#raOk').onclick = () => {
+            if (!selected) {
+                const err = overlay.querySelector('#raError');
+                err.textContent = 'Stoktan düşülecek kalemi seçin veya "Stoktan düşmeden onayla" seçeneğini işaretleyin.';
+                err.style.display = 'block';
+                return;
+            }
+            const sn = overlay.querySelector('#raSn').value.trim() || '-';
+            if (selected === NO_STOCK) return close({ sn, source: null });
+            const [repo, ...rest] = selected.split('|');
+            close({ sn, source: { repo, productId: rest.join('|') } });
+        };
+        setTimeout(() => overlay.querySelector(selected ? '#raSn' : '#raFilter')?.focus(), 0);
+    });
 };
 
-window.rejectRequest = async function (index) {
-    const request = window.data.requests[index];
-    if (!request) return;
-    const onay = await showCustomConfirm("Talebi Reddet", `${request.personel} isimli personelin talebi reddedilecek. Emin misiniz?`);
-    if (onay === true) {
-        request.durum = 'rejected';
-        await window.saveData(window.data);
-        if (typeof renderRequestsTable === 'function') renderRequestsTable();
-        if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
-        showAppAlert(`${request.personel} talebi reddedildi.`, "error");
+window.confirmRequest = async function (requestId) {
+    const lockKey = String(requestId);
+    if (_requestActionsInFlight.has(lockKey)) return;
+    _requestActionsInFlight.add(lockKey);
+    try {
+        const request = _findRequest(requestId);
+        if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        if (!_isPendingRequest(request)) { showAppAlert('Bu talep zaten işlenmiş veya taslak durumda.', 'warning'); _refreshRequestTables(); return; }
+
+        const choice = await window.showRequestApprovalModal(request);
+        if (!choice) return;
+        const snValue = choice.sn || '-';
+
+        // modal açıkken snapshot gelmiş olabilir: güncel nesne ve durum yeniden kontrol edilir
+        const live = _findRequest(requestId);
+        if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
+
+        // Stok önce atomik düşülür; sonraki yazmalardan biri başarısız olursa geri eklenir.
+        const qty = Number(live.adet) || 1;
+        const repo = choice.source?.repo;
+        const product = repo ? (window.data[repo] || []).find(p => String(p.id) === String(choice.source.productId)) : null;
+        if (repo && !product) { showAppAlert('Seçilen stok kalemi bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        let stockChange = null;
+        if (product) {
+            try { stockChange = await window.runStockTransaction(repo, product.id, -qty); }
+            catch (e) { showAppAlert(`Stok düşülemedi: ${e.message}`, 'error'); return; }
+        }
+        const restoreStock = async () => {
+            if (!product) return;
+            try { await window.runStockTransaction(repo, product.id, qty); } catch (e) { console.error('❌ Stok geri alma hatası:', e); }
+        };
+
+        const approver = window.currentUser?.name || 'Yönetici';
+        const now = getTurkiyeSaati();
+        const updated = {
+            ...live, durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now,
+            ...(product ? { stockRepo: repo, stockProductId: product.id } : {})
+        };
+        if (await _saveRequestItem(updated) === false) { await restoreStock(); showAppAlert('Onay kaydedilemedi; stok geri alındı.', 'error'); return; }
+
+        const exitEntry = {
+            id: Date.now(),
+            requestId: live.id,
+            shelfNo: product ? (product.raf || '-') : "TALEP",
+            productType: product ? (product.ürün || product.name || live.ürün) : live.ürün,
+            ...(product ? { productId: product.id } : {}),
+            description: "Personel Talebi Onaylandı",
+            sn: snValue,
+            sarfAdet: live.adet || 1,
+            note: `Onaylayan: ${approver}`,
+            person: live.personel,
+            alanKisi: live.personel,
+            date: getTurkiyeTarihi(),
+            tarih: getTurkiyeTarihi(),
+            isDemirbas: [product?.isDemirbas, live.isDemirbas].some(v => v === true || v === "true"),
+            talepTuru: live.talepTuru || 'Kalıcı Zimmet',
+            oncelik: live.oncelik || 'Orta',
+            ...(live.iadeTarihi ? { iadeTarihi: live.iadeTarihi } : {}),
+            iadeEdildi: false,
+            sourceRepo: product ? repo : 'TALEP',
+            approvedBy: approver
+        };
+        const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
+        if (!alreadyLogged && await window.saveData('b3', [...(window.data.b3 || []), exitEntry]) === false) {
+            // Zimmet kaydı yoksa iade stoğa dönemez: onay ve stok birlikte geri alınır.
+            const reverted = await _saveRequestItem(live);
+            await restoreStock();
+            showAppAlert(reverted === false
+                ? 'Zimmet kaydı yazılamadı; stok geri alındı ancak talep "onaylandı" kaldı. Lütfen talebi kontrol edin.'
+                : 'Zimmet kaydı yazılamadı; onay ve stok geri alındı.', 'error');
+        } else {
+            const stockText = stockChange ? ` ${repo.toUpperCase()} stok: ${stockChange.before} → ${stockChange.after}.` : ' Stoktan düşülmedi.';
+            showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.${stockText}`, "success");
+        }
+        _refreshRequestTables();
+    } finally {
+        _requestActionsInFlight.delete(lockKey);
     }
 };
 
-window.deleteRequest = async function (index) {
-    const request = window.data.requests[index];
-    if (!request) return;
+window.rejectRequest = async function (requestId) {
+    const lockKey = String(requestId);
+    if (_requestActionsInFlight.has(lockKey)) return;
+    _requestActionsInFlight.add(lockKey);
+    try {
+        const request = _findRequest(requestId);
+        if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        if (!_isPendingRequest(request)) { showAppAlert('Bu talep zaten işlenmiş veya taslak durumda.', 'warning'); _refreshRequestTables(); return; }
+        const onay = await showCustomConfirm("Talebi Reddet", `${request.personel} isimli personelin talebi reddedilecek. Emin misiniz?`);
+        if (onay !== true) return;
+        const live = _findRequest(requestId);
+        if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
+        const updated = { ...live, durum: 'rejected', rejectedBy: window.currentUser?.name || 'Yönetici', rejectedAt: getTurkiyeSaati() };
+        if (await _saveRequestItem(updated) === false) { showAppAlert('Red kaydedilemedi.', 'error'); return; }
+        _refreshRequestTables();
+        showAppAlert(`${live.personel} talebi reddedildi.`, "error");
+    } finally {
+        _requestActionsInFlight.delete(lockKey);
+    }
+};
+
+window.deleteRequest = async function (requestId) {
+    const request = _findRequest(requestId);
+    if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     const onay = await showCustomConfirm("Kaydı Sil", "Bu talep kaydını tamamen silmek istediğinize emin misiniz? Bu işlem geri alınamaz.");
-    if (onay === true) {
-        window.data.requests.splice(index, 1);
-        await window.saveData(window.data);
-        if (typeof renderRequestsTable === 'function') renderRequestsTable();
-        if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
-        if (typeof renderAdminRequestTable === 'function') renderAdminRequestTable();
-        showAppAlert("Talep kaydı kalıcı olarak silindi.", "info");
-    }
+    if (onay !== true) return;
+    const remaining = (window.data.requests || []).filter(r => String(r.id) !== String(requestId));
+    if (await window.saveData('requests', remaining) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
+    _refreshRequestTables();
+    showAppAlert("Talep kaydı kalıcı olarak silindi.", "info");
 };
 
 window.withdrawInventoryRequest = async function (index) {
@@ -717,7 +857,8 @@ window.withdrawInventoryRequest = async function (index) {
     const onay = await showCustomConfirm("Talebi Geri Çek", `${req.ürün} talebinizi geri çekmek (taslağa almak) istediğinize emin misiniz?`);
     if (onay === true) {
         req.durum = 'draft';
-        await window.saveData(window.data);
+        // [WHY]: Tam kayıt personel oturumunda b1'de reddedilip hiçbir şeyi kaydetmiyordu (ITSM-03, DATA-03).
+        await window.saveData('requests', window.data.requests);
         if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
         showAppAlert("Talebiniz geri çekildi ve TASLAK moduna alındı.", "info");
     }
@@ -727,6 +868,7 @@ window.editPersonnelInventoryRequest = function (index) {
     const req = window.data.requests[index];
     if (!req) return;
     window.editingReqIndex = index;
+    window.editingReqId = req.id;
     const nameInput = document.getElementById('reqProdName');
     const qtyInput = document.getElementById('reqQty');
     const noteInput = document.getElementById('reqNote');
@@ -750,7 +892,7 @@ window.sendDraftInventoryRequest = async function (index) {
     if (!req) return;
     req.durum = 'Beklemede';
     req.tarih = getTurkiyeTarihi();
-    await window.saveData(window.data);
+    await window.saveData('requests', window.data.requests);
     if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
     showAppAlert("Talebiniz başarıyla onaya gönderildi.", "success");
 };
@@ -800,11 +942,11 @@ window.sendDraftInventoryRequest = async function (index) {
                 div.style.borderBottom = '1px solid var(--color-border-light)';
                 div.style.cursor = 'pointer';
                 if (res.isDemirbasStrict) {
-                    div.innerHTML = `🛡️ <b>${res.item.ürün || res.item.name || "-"}</b> - ${res.item.marka || ""} (Stok: ${res.qty}) <br><small>Raf: ${res.item.raf || "-"} / Sütun: ${res.item.sütun || "-"}</small>`;
+                    div.innerHTML = `🛡️ <b>${escapeHtml(res.item.ürün || res.item.name || "-")}</b> - ${escapeHtml(res.item.marka || "")} (Stok: ${escapeHtml(res.qty)}) <br><small>Raf: ${escapeHtml(res.item.raf || "-")} / Sütun: ${escapeHtml(res.item.sütun || "-")}</small>`;
                     div.style.backgroundColor = 'var(--color-surface)';
                     div.style.color = 'var(--color-text)';
                 } else {
-                    div.innerHTML = `📦 <b>${res.item.ürün || res.item.name || "-"}</b> - ${res.item.marka || ""} (Stok: ${res.qty}) <br><small>Raf: ${res.item.raf || "-"} / Sütun: ${res.item.sütun || "-"}</small>`;
+                    div.innerHTML = `📦 <b>${escapeHtml(res.item.ürün || res.item.name || "-")}</b> - ${escapeHtml(res.item.marka || "")} (Stok: ${escapeHtml(res.qty)}) <br><small>Raf: ${escapeHtml(res.item.raf || "-")} / Sütun: ${escapeHtml(res.item.sütun || "-")}</small>`;
                 }
                 div.onclick = function () {
                     const isAdmin = window.checkIsAdmin() || sessionStorage.getItem('adminVizesi') === 'true';
@@ -849,11 +991,11 @@ window.sendDraftInventoryRequest = async function (index) {
             html += `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid var(--color-border-light); background: var(--color-surface-alt); border-radius: 4px; margin-bottom: 4px;">
                 <div style="flex: 1;">
-                    <strong>${cartItem.item.ürün || cartItem.item.name || "-"}</strong><br>
-                    <small>${cartItem.item.raf || "-"} / ${cartItem.item.sütun || "-"}</small>
+                    <strong>${escapeHtml(cartItem.item.ürün || cartItem.item.name || "-")}</strong><br>
+                    <small>${escapeHtml(cartItem.item.raf || "-")} / ${escapeHtml(cartItem.item.sütun || "-")}</small>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <input type="number" min="1" max="${cartItem.qty}" value="${cartItem.exitQty}" onchange="updateCartQty(${idx}, this.value)" style="width: 60px; padding: 4px; text-align: center;">
+                    <input type="number" min="1" max="${escapeHtml(cartItem.qty)}" value="${escapeHtml(cartItem.exitQty)}" onchange="updateCartQty(${idx}, this.value)" style="width: 60px; padding: 4px; text-align: center;">
                     <button type="button" onclick="removeFromCart(${idx})" style="background: #e74c3c; color: white; border: none; border-radius: 4px; padding: 5px 8px; cursor: pointer;"><i class="fas fa-trash"></i></button>
                 </div>
             </div>`;
@@ -945,8 +1087,8 @@ window.searchForRequest = function () {
             div.className = "search-item-hover";
             div.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div><strong style="color: #0984e3;">${item.ürün}</strong> <span style="font-size: 0.85em; color: #636e72;">${item.marka || ''}</span></div>
-                    <div style="text-align: right;"><span style="display: block; font-size: 0.75em; background: #dfe6e9; padding: 2px 6px; border-radius: 4px;">Raf: ${item.raf}</span><small style="color: ${item.adet > 0 ? '#27ae60' : '#d63031'}">Stok: ${item.adet}</small></div>
+                    <div><strong style="color: #0984e3;">${escapeHtml(item.ürün)}</strong> <span style="font-size: 0.85em; color: #636e72;">${escapeHtml(item.marka || '')}</span></div>
+                    <div style="text-align: right;"><span style="display: block; font-size: 0.75em; background: #dfe6e9; padding: 2px 6px; border-radius: 4px;">Raf: ${escapeHtml(item.raf)}</span><small style="color: ${escapeHtml(item.adet > 0 ? '#27ae60' : '#d63031')}">Stok: ${escapeHtml(item.adet)}</small></div>
                 </div>`;
             div.onmouseover = () => div.style.backgroundColor = "#f8f9fa";
             div.onmouseout = () => div.style.backgroundColor = "white";
@@ -983,7 +1125,7 @@ window.searchForExit = function () {
         div.style.borderBottom = '1px solid #eee';
         div.style.cursor = 'pointer';
         const stock = item.adet !== undefined ? item.adet : (item.qty || 0);
-        div.innerHTML = `<strong>${item.ürün || item.name || '-'}</strong> <small>(${item.marka || item.tür || '-'})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${item.raf || item.shelf || '-'} | Stok: ${stock} | Depo: ${item._repo.toUpperCase()}</span>`;
+        div.innerHTML = `<strong>${escapeHtml(item.ürün || item.name || '-')}</strong> <small>(${escapeHtml(item.marka || item.tür || '-')})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${escapeHtml(item.raf || item.shelf || '-')} | Stok: ${stock} | Depo: ${escapeHtml(item._repo.toUpperCase())}</span>`;
         if (stock > 0) {
             div.onclick = () => window.selectProduct(item.ürün || item.name, item.tür || item.type || item.marka, item.raf || item.shelf, stock, item._repo, item._index);
         } else {
@@ -1009,6 +1151,27 @@ window.onReqTypeChange = function () {
     }
 };
 
+// [WHY]: b3'te iki şema var: çıkış formu rafNo/urunTuru/urunAciklama/adet/not/tarih yazıyor; talep onayı ve admin zimmeti
+//        shelfNo/productType/description/sarfAdet/note/date yazıyor. Tablo yalnız ilkini okuduğu için yeni kayıtlarda
+//        yalnız Alan Kişi / Tarih / SN doluyordu. (Tek kanonik şema Faz 3 işi; burada okuyucu iki şemayı birleştirir.)
+// [HOW]: Alan başına eski → yeni sırayla okunur; ürün türü yeni kayıtta yoksa productId + sourceRepo ile stok kaleminden bulunur.
+window.normalizeB3Row = function (item) {
+    const repo = item.sourceRepo || item.kaynakDepo;
+    const product = item.productId != null && (repo === 'b1' || repo === 'b2')
+        ? (window.data[repo] || []).find(p => String(p.id) === String(item.productId)) : null;
+    const pick = (...vals) => vals.find(v => v !== undefined && v !== null && String(v).trim() !== '');
+    return {
+        raf: pick(item.rafNo, item.shelfNo, product?.raf) ?? '-',
+        tur: pick(item.urunTuru, product?.tür, product?.type) ?? '-',
+        urun: pick(item.urunAciklama, item.productType, product?.ürün) ?? '-',
+        sn: pick(item.sn) ?? '-',
+        adet: pick(item.adet, item.sarfAdet) ?? 0,
+        not: pick(item.not, item.note) ?? '-',
+        alanKisi: pick(item.alanKisi, item.person, item.personel) ?? '-',
+        tarih: pick(item.tarih, item.date) ?? '-',
+    };
+};
+
 // Sekme B3 PDF/Excel & Diğer araçlar
 function renderExitTable() {
     const tbody = document.querySelector('#tableB3 tbody');
@@ -1020,15 +1183,16 @@ function renderExitTable() {
     }
     const rowsHtml = window.data.b3.map((item, index) => {
         const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+        const row = window.normalizeB3Row(item);
         return `<tr class="${isPassive ? 'passive-row' : ''}">
-            <td>${item.rafNo || '-'}</td>
-            <td>${item.urunTuru || '-'}</td>
-            <td>${item.urunAciklama || '-'}</td>
-            <td>${item.sn || '-'}</td>
-            <td>${item.adet || 0}</td>
-            <td>${item.not || '-'}</td>
-            <td>${item.alanKisi || '-'}</td>
-            <td>${item.tarih || '-'}</td>
+            <td>${escapeHtml(row.raf)}</td>
+            <td>${escapeHtml(row.tur)}</td>
+            <td>${escapeHtml(row.urun)}</td>
+            <td>${escapeHtml(row.sn)}</td>
+            <td>${escapeHtml(row.adet)}</td>
+            <td>${escapeHtml(row.not)}</td>
+            <td>${escapeHtml(row.alanKisi)}</td>
+            <td>${escapeHtml(row.tarih)}</td>
             <td>
                 <button class="pdf-btn" onclick="generateZimmetPDF(${index})">PDF</button>
                 <button class="delete-btn" onclick="if(validateAdminAction()) deleteB3Row(${index})">Sil</button>
@@ -1073,8 +1237,8 @@ window.exportPDF = function (depo) {
 
     items.forEach((item, index) => {
         const status = item.durumu ?? item.status ?? "-";
-        html += `<tr><td>${index + 1}</td><td>${item.sütun || '-'}</td><td>${item.raf || '-'}</td><td class="wrap">${item.ürün || '-'}</td><td class="wrap">${item.marka || '-'}</td>
-        <td style="text-align:center; font-weight:600;">${item.adet ?? item.qty ?? 0}</td><td class="${getStatusClass(status)}">${status}</td><td>${item.tür ?? item.type ?? '-'}</td></tr>`;
+        html += `<tr><td>${index + 1}</td><td>${escapeHtml(item.sütun || '-')}</td><td>${escapeHtml(item.raf || '-')}</td><td class="wrap">${escapeHtml(item.ürün || '-')}</td><td class="wrap">${escapeHtml(item.marka || '-')}</td>
+        <td style="text-align:center; font-weight:600;">${escapeHtml(item.adet ?? item.qty ?? 0)}</td><td class="${getStatusClass(status)}">${status}</td><td>${escapeHtml(item.tür ?? item.type ?? '-')}</td></tr>`;
     });
     html += `</tbody></table></div></body></html>`;
 
@@ -1192,7 +1356,10 @@ function showCustomConfirm(title, message, callback) {
         return Promise.resolve(res);
     }
     document.getElementById('alertTitle').innerText = title;
-    document.getElementById('alertMessage').innerHTML = message;
+    // [WHY]: Onay metinleri kayıt verisi (ürün/evrak adı) içeriyor; innerHTML ile XSS'e açıktı (SEC-01).
+    const alertMessageEl = document.getElementById('alertMessage');
+    alertMessageEl.textContent = message;
+    alertMessageEl.style.whiteSpace = 'pre-line';
     overlay.style.display = 'flex';
     return new Promise((resolve) => {
         confirmBtn.onclick = () => {
@@ -1267,35 +1434,9 @@ window.onclick = function (event) {
     if (event.target == modal) closeProductModal();
 };
 
-// PM NOTU: Firebase hazır olduktan sonra listener başlatılır
+// Bağlantı durumu bildirimleri
 window.addEventListener("load", () => {
-    const startFirebase = () => {
-        if (!window.fireDb || !window.fbFunctions) { setTimeout(startFirebase, 100); return; }
-        try {
-            const { collection, onSnapshot } = window.fbFunctions;
-            if (!window.fireDb || typeof window.fireDb !== 'object') { setTimeout(startFirebase, 200); return; }
-            onSnapshot(collection(window.fireDb, "productTypes"), (snapshot) => {
-                const types = [];
-                snapshot.forEach(doc => { types.push({ id: doc.id, ...doc.data() }); });
-                if (!window.data) window.data = {};
-                window.data.productTypes = types;
-                window.isFirebaseLoaded = true;
-                if (typeof window.updateProductTypeDropdowns === 'function') window.updateProductTypeDropdowns();
-                if (typeof window.renderProductTypesTable === 'function') window.renderProductTypesTable();
-                if (typeof window.renderExitCharts === 'function') window.renderExitCharts();
-                if (!window._initialRenderDone) {
-                    window._initialRenderDone = true;
-                    setTimeout(() => {
-                        const activeEl = document.querySelector('.tab-content.active');
-                        const activeId = activeEl ? activeEl.id : 'b1';
-                        if (typeof switchTab === "function") switchTab(activeId);
-                        if (typeof renderDashboard === "function") renderDashboard();
-                    }, 50);
-                }
-            }, (err) => { if(err.code === "permission-denied") console.warn("⏳ [Güvenlik] Firebase yetki onayı bekleniyor (productTypes)..."); else console.error("Dinleme hatası:", err); });
-        } catch (e) { console.error("❌ Bağlantı hatası:", e); }
-    };
-    startFirebase();
+    // [WHY]: Kök 'productTypes' dinleyicisi kaldırıldı (kurallar reddediyordu); ürün türleri ${COLLECTION_ROOT}/productTypes/items'tan gelir (ADM-02).
     window.addEventListener('online', () => { if (typeof showAppAlert === 'function') showAppAlert("Bağlantı sağlandı.", "info"); });
     window.addEventListener('offline', () => { if (typeof showAppAlert === 'function') showAppAlert("İnternet bağlantısı koptu.", "warning"); });
 });
@@ -1305,11 +1446,11 @@ function renderRequestAction(request) {
     const checkIsAdmin = checkAdmin();
     if (request.status === 'pending') {
         return checkIsAdmin
-            ? `<button class="btn-deliver" onclick="updateRequestStatus(${request.id}, 'delivered')">Teslim Et</button>`
+            ? `<button class="btn-deliver" onclick="updateRequestStatus(${jsArg(request.id)}, 'delivered')">Teslim Et</button>`
             : `<span class="status-waiting">Bekleniyor...</span>`;
     } else if (request.status === 'delivered') {
         return !checkIsAdmin
-            ? `<button class="btn-confirm" onclick="confirmReceipt(${request.id})">Teslim Aldım</button>`
+            ? `<button class="btn-confirm" onclick="confirmReceipt(${jsArg(request.id)})">Teslim Aldım</button>`
             : `<span class="status-delivered">Onay Bekleniyor</span>`;
     } else {
         return `<span class="status-completed">Tamamlandı</span>`;
@@ -1439,13 +1580,13 @@ function toggleAllRequests(source) {
 async function deleteSelectedRequests() {
     const checkboxes = document.querySelectorAll('.req-checkbox:checked');
     if (checkboxes.length === 0) { showAppAlert("Lütfen silinecek kayıtları seçiniz.", "error"); return; }
-    const indicesToDelete = Array.from(checkboxes).map(cb => parseInt(cb.value)).sort((a, b) => b - a);
-    const onay = await showCustomConfirm("Toplu Silme", `${indicesToDelete.length} adet kaydı kalıcı olarak silmek istediğinize emin misiniz?`);
+    const idsToDelete = new Set(Array.from(checkboxes).map(cb => String(cb.value)));
+    const onay = await showCustomConfirm("Toplu Silme", `${idsToDelete.size} adet kaydı kalıcı olarak silmek istediğinize emin misiniz?`);
     if (onay) {
-        indicesToDelete.forEach(index => { window.data.requests.splice(index, 1); });
-        await window.saveData(window.data);
+        const remaining = (window.data.requests || []).filter(r => !idsToDelete.has(String(r.id)));
+        if (await window.saveData('requests', remaining) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
         renderRequestsTable();
-        showAppAlert(`${indicesToDelete.length} kayıt başarıyla silindi.`, "success");
+        showAppAlert(`${idsToDelete.size} kayıt başarıyla silindi.`, "success");
         const headerCheck = document.querySelector('.select-all-header input');
         if (headerCheck) headerCheck.checked = false;
     }

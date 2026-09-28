@@ -80,8 +80,18 @@ export const UIComponents = {
         const checkEl = document.getElementById('isDemirbas');
         if (checkEl) checkEl.checked = isDemirbas;
 
-        div.innerHTML = `<strong>Seçilen:</strong> ${name} (Stok: ${qty})`;
+        div.textContent = '';
+        div.insertAdjacentHTML('beforeend', `<strong>Seçilen:</strong> ${escapeHtml(name)} (Stok: ${escapeHtml(qty)})`);
         div.classList.remove('hidden');
+
+        // [WHY]: Raf No alanı salt okunur ama seçimde hiç doldurulmuyordu; personel rafı elle de giremiyordu.
+        // [HOW]: Seçilen ürünün rafı yazılır, adet stokla sınırlanır, arama sonuçları kapatılır.
+        const shelfEl = document.getElementById('exitShelfNo');
+        if (shelfEl) shelfEl.value = shelf || '-';
+        const qtyEl = document.getElementById('exitQty');
+        if (qtyEl && Number(qty) > 0) qtyEl.max = String(qty);
+        const list = document.getElementById('productList');
+        if (list) list.innerHTML = '';
     },
 
     // =========================================================================
@@ -181,7 +191,18 @@ export const UIComponents = {
             setVal('prodName',   item.ürün || item.name);
             setVal('prodBrand',  item.marka);
             setVal('prodQty',    item.adet ?? item.qty ?? 0);
-            setVal('prodStatus', item.durumu || 'Kullanıma Hazır');
+            // [WHY]: 'Pasif', 'Tükendi', B2 'Aktif' gibi değerler listede yok; select "" okuyup kayıtta durumu siliyordu (DATA-04).
+            const statusSel = document.getElementById('prodStatus');
+            const currentStatus = item.durumu || item.status || 'Kullanıma Hazır';
+            if (statusSel) {
+                statusSel.querySelectorAll('option[data-temp]').forEach(o => o.remove());
+                if (![...statusSel.options].some(o => o.value === currentStatus)) {
+                    const opt = new Option(currentStatus, currentStatus);
+                    opt.dataset.temp = 'true';
+                    statusSel.add(opt);
+                }
+            }
+            setVal('prodStatus', currentStatus);
             setVal('prodDesc',   item.açıklama);
 
             if (typeSelect) {
@@ -213,11 +234,12 @@ export const UIComponents = {
 
             form.dataset.editIndex = indexOrId;
             form.dataset.editRepo  = activeTab;
+            form.dataset.editId    = item.id ?? '';
 
         } else {
             if (title) title.innerText = 'Yeni Ürün Ekle';
             if (form)  form.reset();
-            if (form)  { delete form.dataset.editIndex; delete form.dataset.editRepo; }
+            if (form)  { delete form.dataset.editIndex; delete form.dataset.editRepo; delete form.dataset.editId; }
         }
 
         modal.style.display = 'block';
@@ -421,6 +443,9 @@ export const UIComponents = {
             selectedDiv.innerHTML = '';
             selectedDiv.classList.add('hidden');
         }
+        const shelfEl = document.getElementById('exitShelfNo');
+        if (shelfEl) shelfEl.value = '';
+        document.getElementById('exitQty')?.removeAttribute('max');
         const rowRepo = window.currentExitRepo;
         const rowItem = (rowRepo === 'b1' || rowRepo === 'b2') && index !== undefined && index !== null && index !== ''
             ? (window.data[rowRepo] || [])[index] : null;
@@ -471,6 +496,7 @@ export const UIComponents = {
             const form = document.getElementById('requestForm');
             if (form) form.reset();
             window.editingReqIndex = null;
+            window.editingReqId = null;
             if (title) title.innerText = 'Envanter Talep Et';
 
             // ITSM alanlarını sıfırla
