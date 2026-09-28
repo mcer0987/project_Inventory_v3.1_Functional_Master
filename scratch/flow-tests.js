@@ -1114,6 +1114,67 @@ const SCENARIOS = {
         });
     },
 
+    // Faz 3 · H2 — EBYS-14 (no fake attachments), TODO-04 (malformed tasks), VIP-07 (kill switch shows the real state;
+    // the switch itself is never toggled — rule 7.5).
+    async h2Leftovers(page, browser) {
+        const out = await page.evaluate(async () => {
+            const ft = window.__ft, o = {};
+            window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+            const realUpload = window.uploadFiles, realConfirm = window.showCustomConfirm, realAlert = window.showAppAlert;
+            window.showAppAlert = () => {};
+            const fail = () => { const e = new Error('1 dosya yüklenemedi: a.pdf (storage/unauthorized)'); e.name = 'UploadError'; e.uploaded = []; e.failed = ['a.pdf']; throw e; };
+            window.uploadFiles = async () => fail();
+            const fill = name => {
+                window.openNewPurchaseModal();
+                document.getElementById('purName').value = name;
+                const fi = document.getElementById('purchaseFile');
+                const dt = new DataTransfer(); dt.items.add(new File(['x'], 'a.pdf', { type: 'application/pdf' })); fi.files = dt.files;
+            };
+            // "Hayır" -> nothing saved
+            window.showCustomConfirm = async () => false;
+            fill('EBYS14 iptal ' + ft.MARKER); await window.savePurchaseRequest(new Event('submit'));
+            await ft.sleep(1200);
+            o.cancelNothingSaved = (await ft.readMarked('purchaseOrders')).filter(d => String(d.urun).startsWith('EBYS14 iptal')).length === 0;
+            // "Evet" -> saved without fake attachments
+            window.showCustomConfirm = async () => true;
+            fill('EBYS14 devam ' + ft.MARKER); await window.savePurchaseRequest(new Event('submit'));
+            await ft.waitFor(async () => (await ft.readMarked('purchaseOrders')).some(d => String(d.urun).startsWith('EBYS14 devam')));
+            const doc = (await ft.readMarked('purchaseOrders')).find(d => String(d.urun).startsWith('EBYS14 devam'));
+            o.continueNoFakeFiles = { saved: !!doc, files: (doc && doc.files || []).length, noSimulated: !JSON.stringify(doc || {}).includes('simulated') };
+            window.closePurchaseModal();
+            Object.assign(window, { uploadFiles: realUpload, showCustomConfirm: realConfirm, showAppAlert: realAlert });
+
+            // TODO-04: malformed tasks render without errors
+            const origTasks = window.data.tasks;
+            window.data.tasks = [{ id: 't1' }, { id: 't2', title: null, priority: 5, status: null, checklist: 'x', interactions: { a: 1 }, assigneeId: 7 }];
+            try { window.renderMyTasksTab && window.renderMyTasksTab(); window.checkPendingTasks && window.checkPendingTasks(); o.malformedTasks = 'ok'; }
+            catch (e) { o.malformedTasks = 'ERR ' + e.message; }
+            window.data.tasks = origTasks;
+            return o;
+        });
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        out.killSwitch = await admin.evaluate(async () => {
+            const btn = document.getElementById('vipKillSwitchBtn');
+            const serverSaysMaintenance = window.data.config && window.data.config.maintenance === true;
+            const shown = btn.dataset.maintenance;
+            window.renderKillSwitchButton(true); const onText = btn.textContent.trim();
+            window.renderKillSwitchButton(serverSaysMaintenance);
+            let wrote = false; const realConfirm = window.showCustomConfirm, realAdmin = window.isDbAdmin;
+            window.isDbAdmin = () => true; window.showCustomConfirm = async () => false; // cancel -> no write
+            await window.vipToggleKillSwitch();
+            window.isDbAdmin = realAdmin; window.showCustomConfirm = realConfirm;
+            wrote = (window.data.config && window.data.config.maintenance === true) !== serverSaysMaintenance;
+            return { renderedFromSnapshot: shown === String(!!serverSaysMaintenance) || (!window.data.config && shown === undefined), onText, cancelWritesNothing: !wrote };
+        });
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
+    },
+
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
     async systemConfigScope(page) {
         return page.evaluate(async () => {

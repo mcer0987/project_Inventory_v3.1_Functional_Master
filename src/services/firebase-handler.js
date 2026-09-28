@@ -368,6 +368,8 @@ window.startRealtimeSync = function () {
             const data = docSnap.data();
             window.data.config = data;
             console.log("⚙️ Hash updated.");
+            // VIP-07: kill switch butonu her zaman sunucudaki gerçek durumu gösterir (admin.html'de tanımlı).
+            if (typeof window.renderKillSwitchButton === 'function') window.renderKillSwitchButton(data.maintenance === true);
 
             // Launchpad bayrağı artık dinlenmez (VIP-10 / K9-a); eski istemcilerdeki kopyası temizlenir.
             localStorage.removeItem('launchpadDisabledGlobal');

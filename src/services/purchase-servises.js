@@ -76,6 +76,20 @@ async function _savePurchase(item, undo) {
 }
 const _findPurchase = id => (window.data.purchaseOrders || []).find(x => String(x.id) === String(id));
 
+// EBYS-14: yükleme hatasında "eklersiz (yalnız yüklenenlerle) devam et / iptal" sorusu. null = iptal.
+async function _uploadOrAsk(files) {
+    try {
+        return await window.uploadFiles(files);
+    } catch (err) {
+        if (err.name !== 'UploadError') throw err;
+        const rest = err.uploaded.length ? ` Yüklenebilen ${err.uploaded.length} dosya eklenecek.` : ' Hiçbir dosya eklenmeyecek.';
+        const ok = typeof showCustomConfirm === 'function'
+            ? await showCustomConfirm('Dosya Yüklenemedi', `${err.message}.${rest} Talep eksik eklerle kaydedilsin mi? (Hayır: hiçbir şey kaydedilmez)`)
+            : window.confirm(err.message + '. Eklersiz devam edilsin mi?');
+        return ok === true ? err.uploaded : null;
+    }
+}
+
 // [BUGFIX] Bug 4: Full modal state reset before opening for a new request.
 // [WHY]: openPurchaseDetail() mutates form fields, disables inputs, changes purSaveBtn.onclick,
 //        and stores dataset.editId. Without a reset, clicking "New Request" re-opens a filled form
@@ -189,7 +203,8 @@ window.savePurchaseRequest = async function (e) {
     try {
         if (fileInput?.files?.length) {
             console.log(`📂 ${fileInput.files.length} adet dosya yükleniyor...`);
-            uploadedFiles = await window.uploadFiles(fileInput.files);
+            uploadedFiles = await _uploadOrAsk(fileInput.files);
+            if (uploadedFiles === null) { if (typeof showAppAlert === 'function') showAppAlert('Talep kaydedilmedi.', 'info'); return false; }
             console.log("✅ Dosya yükleme tamamlandı.");
         }
 
@@ -988,54 +1003,33 @@ window.viewRequest = function (id) {
     document.getElementById("purchaseModal").style.display = "block";
 };
 
+// [WHY]: Yükleme başarısız olunca (Storage/CORS/plan) her dosya için sahte bir 'data:…simulated_…' eki üretilip talebe
+//        gerçek ek gibi yazılıyordu (EBYS-14); ek indirilemiyor ama kayıtta var görünüyordu.
+// [HOW]: Her dosya ayrı yüklenir; yalnız gerçekten yüklenenler döner. En az biri başarısızsa UploadError fırlatılır
+//        (err.uploaded = başarılı olanlar, err.failed = başarısız dosya adları); çağıran kullanıcıya sorar.
 window.uploadFiles = async function (files) {
-
     const storage = getStorage();
-    const urls = [];
-
-    try {
-        for (const file of files) {
-
-            const fileRef = ref(
-                storage,
-                "purchaseFiles/" + Date.now() + "_" + file.name
-            );
-
+    const uploaded = [], failed = [];
+    let lastError = null;
+    for (const file of files) {
+        try {
+            const fileRef = ref(storage, "purchaseFiles/" + Date.now() + "_" + file.name);
             await uploadBytes(fileRef, file);
-
-            const url = await getDownloadURL(fileRef);
-
-            urls.push({
-                name: file.name,
-                url: url
-            });
+            uploaded.push({ name: file.name, url: await getDownloadURL(fileRef) });
+        } catch (error) {
+            console.error('❌ Dosya yüklenemedi:', file.name, error);
+            failed.push(file.name);
+            lastError = error;
         }
-
-        return urls;
-
-    } catch (error) {
-        console.warn('⚠️ Firebase Storage CORS hatası - Simülasyon modu aktif:', error.message);
-
-        // CORS hatası için geçici simülasyon - Test amaçlı
-        for (const file of files) {
-            // Simüle edilmiş dosya URL'i (gerçek dosya yüklenmez)
-            const simulatedUrl = `data:application/pdf;base64,simulated_${Date.now()}_${file.name}`;
-
-            urls.push({
-                name: file.name,
-                url: simulatedUrl,
-                simulated: true, // Simüle edilmiş olduğunu işaretle
-                error: error.message
-            });
-        }
-
-        // Kullanıcıya bilgilendirme
-        if (typeof showAppAlert === 'function') {
-            showAppAlert('⚠️ Dosya yükleme CORS hatası nedeniyle simülasyon modunda çalışıyor. Test için devam edilebilir.', 'warning');
-        }
-
-        return urls;
     }
+    if (failed.length) {
+        const err = new Error(`${failed.length} dosya yüklenemedi: ${failed.join(', ')}${lastError ? ' (' + (lastError.code || lastError.message) + ')' : ''}`);
+        err.name = 'UploadError';
+        err.uploaded = uploaded;
+        err.failed = failed;
+        throw err;
+    }
+    return uploaded;
 }
 
 // [WHY]: archiveOldRequests onaylanan/reddedilen talepleri purchaseOrders'dan siliyor, dinlenmeyen ve kaydedilmeyen 'archive'
@@ -1354,8 +1348,9 @@ window.updatePurchaseRequest = async function (e, id) {
     // Yeni dosya yükleme
     const fileInput = document.getElementById('purchaseFile');
     if (fileInput?.files?.length) {
-        try {
-            const newFiles = await window.uploadFiles(fileInput.files);
+        const newFiles = await _uploadOrAsk(fileInput.files);
+        if (newFiles === null) { undo(); if (typeof showAppAlert === 'function') showAppAlert('Değişiklikler kaydedilmedi.', 'info'); return; }
+        {
             const mapped = newFiles.map(f => ({
                 name: f.name, url: f.url,
                 uploadedAt: new Date().toLocaleString('tr-TR'),
@@ -1363,8 +1358,6 @@ window.updatePurchaseRequest = async function (e, id) {
             }));
             if (!item.files) item.files = [];
             item.files.push(...mapped);
-        } catch (err) {
-            console.error('Dosya yükleme hatası:', err);
         }
     }
 

@@ -776,48 +776,61 @@
     // Global Kill Switch
     // [WHY]: Kill Switch (Sistemi Kapatma) komutu localStorage'da tutuluyordu, DevTools ile bypass edilebiliyordu.
     // [HOW]: ArtÄ±k Firestore Ã¼zerindeki 'system_config/admin_settings' dÃ¶kÃ¼manÄ±na asenkron yazÄ±yor. Sadece Firebase Auth ile doÄŸrulanmÄ±ÅŸ adminler bu veriyi deÄŸiÅŸtirebilir.
+    // [WHY]: Buton durumu yalnız tıklanınca güncelleniyordu; sayfa yenilenince bakım açıkken bile "GLOBAL KILL SWITCH"
+    //        görünüyor, bir sonraki tıklama körlemesine ters yöne çeviriyordu (VIP-07). Uyarı metni kuralların kullanıcıları
+    //        engellediğini söylüyordu; oysa bakım modu yalnız istemci tarafında (RULE-05, Faz 4.2).
+    // [HOW]: Buton tek fonksiyondan çizilir ve admin_settings snapshot'ından (firebase-handler) beslenir; geçiş öncesi onay
+    //        istenir ve yeni durum sunucudan okunan son değerin tersi olarak yazılır.
+    window.renderKillSwitchButton = function (isMaintenance) {
+        const btn = document.getElementById('vipKillSwitchBtn');
+        if (!btn) return;
+        btn.dataset.maintenance = isMaintenance ? 'true' : 'false';
+        if (isMaintenance) {
+            btn.innerHTML = '<i class="fas fa-play me-2"></i>SİSTEMİ GERİ AÇ (bakım modu açık)';
+            btn.style.background = 'rgba(0, 255, 136, 0.1)';
+            btn.style.color = 'var(--vip-matrix)';
+            btn.style.borderColor = 'var(--vip-matrix)';
+        } else {
+            btn.innerHTML = '<i class="fas fa-power-off me-2"></i>GLOBAL KILL SWITCH';
+            btn.style.background = 'rgba(255,45,85,0.1)';
+            btn.style.color = 'var(--vip-danger)';
+            btn.style.borderColor = 'var(--vip-danger)';
+        }
+    };
+
     window.vipToggleKillSwitch = async function() {
-        if (!window.userAuth) {
-            alert("Oturum yetkiniz yok!");
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            alert("Bu işlem için yönetici (Firebase admin) oturumu gerekir.");
             return;
         }
-        
+
         try {
-            const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
-            const db = window.fireDb;
+            const { getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
             const settingsRef = window.systemConfigRef("admin_settings");
-            
+
             const snap = await getDoc(settingsRef);
-            let isMaintenance = false;
-            
-            if (snap.exists()) {
-                isMaintenance = snap.data().maintenance === true;
-            }
-            
-            isMaintenance = !isMaintenance;
-            
-            // Backend kilitli Firestore'a yaz (EÄŸer yetkisiz biri yaparsa Firebase otomatik reddeder)
-            await setDoc(settingsRef, { maintenance: isMaintenance }, { merge: true });
-            
-            const btn = document.getElementById('vipKillSwitchBtn');
-            if (isMaintenance) {
-                btn.innerHTML = '<i class="fas fa-play me-2"></i>SÄ°STEMÄ° GERÄ° AÃ‡';
-                btn.style.background = 'rgba(0, 255, 136, 0.1)';
-                btn.style.color = 'var(--vip-matrix)';
-                btn.style.borderColor = 'var(--vip-matrix)';
-                _appendLog('error', ['ğŸš¨ GLOBAL KILL SWITCH AKTÄ°F: Sistem bakÄ±m moduna alÄ±ndÄ±.']);
-                alert("Sistem kilitlendi! Normal kullanÄ±cÄ±lar Firestore Rule Ã¼zerinden engellenecek.");
+            const current = snap.exists() && snap.data().maintenance === true;
+            const next = !current;
+
+            const question = next
+                ? 'Bakım modu AÇILACAK: yönetici dışındaki açık oturumlar bakım ekranına alınır. Not: bu istemci tarafı bir kilittir; Firestore erişimini engellemez. Devam edilsin mi?'
+                : 'Bakım modu KAPATILACAK ve sistem kullanıcılara yeniden açılacak. Devam edilsin mi?';
+            const ok = typeof showCustomConfirm === 'function' ? await showCustomConfirm('Global Kill Switch', question) : confirm(question);
+            if (ok !== true) { window.renderKillSwitchButton(current); return; }
+
+            await setDoc(settingsRef, { maintenance: next }, { merge: true });
+            window.renderKillSwitchButton(next);
+
+            if (next) {
+                _appendLog('error', ['🚨 GLOBAL KILL SWITCH AKTİF: Sistem bakım moduna alındı.']);
+                alert("Bakım modu açıldı. Yönetici dışındaki açık oturumlar bakım ekranına alınacak (istemci tarafı).");
             } else {
-                btn.innerHTML = '<i class="fas fa-power-off me-2"></i>GLOBAL KILL SWITCH';
-                btn.style.background = 'rgba(255,45,85,0.1)';
-                btn.style.color = 'var(--vip-danger)';
-                btn.style.borderColor = 'var(--vip-danger)';
-                _appendLog('success', ['âœ… GLOBAL KILL SWITCH KAPALI: Sistem normale dÃ¶ndÃ¼.']);
-                alert("Sistem normale dÃ¶ndÃ¼!");
+                _appendLog('success', ['✅ GLOBAL KILL SWITCH KAPALI: Sistem normale döndü.']);
+                alert("Sistem normale döndü!");
             }
         } catch (error) {
-            _appendLog('error', ['âŒ Kill Switch BaÅŸarÄ±sÄ±z: ' + error.message]);
-            alert("Ä°ÅŸlem reddedildi: " + error.message);
+            _appendLog('error', ['❌ Kill Switch başarısız: ' + error.message]);
+            alert("İşlem reddedildi: " + error.message);
         }
     };
 
