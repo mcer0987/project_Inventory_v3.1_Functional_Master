@@ -80,8 +80,18 @@ export const UIComponents = {
         const checkEl = document.getElementById('isDemirbas');
         if (checkEl) checkEl.checked = isDemirbas;
 
-        div.innerHTML = `<strong>Seçilen:</strong> ${name} (Stok: ${qty})`;
+        div.textContent = '';
+        div.insertAdjacentHTML('beforeend', `<strong>Seçilen:</strong> ${escapeHtml(name)} (Stok: ${escapeHtml(qty)})`);
         div.classList.remove('hidden');
+
+        // [WHY]: Raf No alanı salt okunur ama seçimde hiç doldurulmuyordu; personel rafı elle de giremiyordu.
+        // [HOW]: Seçilen ürünün rafı yazılır, adet stokla sınırlanır, arama sonuçları kapatılır.
+        const shelfEl = document.getElementById('exitShelfNo');
+        if (shelfEl) shelfEl.value = shelf || '-';
+        const qtyEl = document.getElementById('exitQty');
+        if (qtyEl && Number(qty) > 0) qtyEl.max = String(qty);
+        const list = document.getElementById('productList');
+        if (list) list.innerHTML = '';
     },
 
     // =========================================================================
@@ -433,6 +443,9 @@ export const UIComponents = {
             selectedDiv.innerHTML = '';
             selectedDiv.classList.add('hidden');
         }
+        const shelfEl = document.getElementById('exitShelfNo');
+        if (shelfEl) shelfEl.value = '';
+        document.getElementById('exitQty')?.removeAttribute('max');
         const rowRepo = window.currentExitRepo;
         const rowItem = (rowRepo === 'b1' || rowRepo === 'b2') && index !== undefined && index !== null && index !== ''
             ? (window.data[rowRepo] || [])[index] : null;
