@@ -410,11 +410,13 @@ const SCENARIOS = {
             out.selectionKept = document.getElementById('purType').value === 'Zeta' && opts().includes('Beta');
             out.formValidNow = form.checkValidity();
 
+            out.requesterShown = document.getElementById('purUser').value;
+            document.getElementById('purUser').value = 'Muhammed CER'; // EBYS-06: form alanı kaydı belirlememeli
             form.requestSubmit();
             out.saved = await ft.waitFor(async () => (await ft.readMarked('purchaseOrders')).length === 1);
             await ft.waitFor(async () => document.getElementById('purchaseModal').style.display === 'none'); // save flow finished (form reset done)
             const [po] = await ft.readMarked('purchaseOrders');
-            out.savedFields = po && { tur: po.tur, birim: po.birim };
+            out.savedFields = po && { tur: po.tur, birim: po.birim, talepEden: po.talepEden, createdByName: po.createdByName, createdBy: po.createdBy };
 
             // a type deleted after the request was made stays visible in edit mode
             await ft.waitFor(async () => (window.data.purchaseOrders || []).some(x => x.id === po.id));
@@ -482,6 +484,179 @@ const SCENARIOS = {
             window.renderExitTable(); window.renderMyRequestsTable();
             return out;
         });
+    },
+
+    // Tur 3 · EBYS-09 (approver validation, template edits kept) + EBYS-13 (stop = suspend, admin only, owner cannot act).
+    // Real purchaseOrders (marked); personnel/templates are in-memory; isDbAdmin is stubbed for the admin-only stop.
+    async ebysStartStop(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            const orig = { personel: window.data.personel, tpls: window.data.workflowTemplates, isDbAdmin: window.isDbAdmin, confirm: window.showCustomConfirm, alert: window.showAppAlert };
+            window.data.personel = [...(orig.personel || []), { name: 'Onay Kişi FT' }, { name: 'İkinci Onay FT' }];
+            const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
+            window.setActiveUser({ name: 'Talep Eden FT ' + ft.MARKER, code: '00001' });
+            const base = Date.now();
+            const mk = n => ({ id: base + n, urun: 'EBYS ' + n + ' ' + ft.MARKER, durum: 'Taslak', akis: [], workflow: { started: false, currentStep: 0, steps: [] } });
+            await window.saveData('purchaseOrders', [...(window.data.purchaseOrders || []), mk(1), mk(2)]);
+            await ft.waitFor(async () => (window.data.purchaseOrders || []).filter(x => String(x.urun).includes(ft.MARKER)).length === 2);
+            const db = async n => (await ft.readMarked('purchaseOrders')).find(x => x.id === base + n);
+            const stepInputs = () => [...document.querySelectorAll('#manualStepsContainer input.workflow-select-ghost')];
+            const type = (i, v) => { const el = stepInputs()[i]; el.value = v; el.dispatchEvent(new Event('input')); };
+
+            window.startWorkflow(base + 1);
+            await window.confirmStartWorkflow();
+            out.emptyRefused = { msg: alerts.at(-1)?.[1], started: (await db(1)).workflow.started };
+            type(0, 'Yok Böyle Biri');
+            await window.confirmStartWorkflow();
+            out.unknownRefused = { msg: alerts.at(-1)?.[1], started: (await db(1)).workflow.started };
+            type(0, '  onay kişi ft ');
+            await window.confirmStartWorkflow();
+            await ft.waitFor(async () => (await db(1)).workflow.started === true);
+            const w1 = (await db(1)).workflow;
+            out.typedAccepted = { started: w1.started, user: w1.steps[0].user, state: w1.currentState };
+
+            window.data.workflowTemplates = [{ id: 'tplFT', name: 'FT', steps: [{ user: 'Onay Kişi FT', tip: 'Paraf' }, { user: 'Onay Kişi FT', tip: 'Olur (Islak)' }] }];
+            window.startWorkflow(base + 2);
+            window.toggleWorkflowMethod('tplFT');
+            type(1, 'İkinci Onay FT');
+            await window.confirmStartWorkflow();
+            await ft.waitFor(async () => (await db(2)).workflow.started === true);
+            out.templateUsesScreen = (await db(2)).workflow.steps.map(s => s.user + '/' + s.tip);
+
+            // stop: non-admin refused
+            window.isDbAdmin = () => false; window.showCustomConfirm = async () => true;
+            await window.stopWorkflow(base + 2);
+            out.nonAdminStopRefused = { msg: alerts.at(-1)?.[1], stillStarted: (await db(2)).workflow.started };
+
+            // stop: admin suspends
+            window.isDbAdmin = () => true;
+            await ft.waitFor(async () => window.data.purchaseOrders.find(x => x.id === base + 1)?.workflow?.started === true);
+            await window.stopWorkflow(base + 1);
+            await ft.waitFor(async () => (await db(1)).durum === 'Durduruldu');
+            const s1 = await db(1);
+            out.stopped = { durum: s1.durum, state: s1.workflow.currentState, started: s1.workflow.started, akis: s1.akis.at(-1)?.islem, msg: alerts.at(-1)?.[1] };
+
+            // owner cannot approve a suspended workflow
+            window.isDbAdmin = () => false;
+            window.setActiveUser({ name: 'Onay Kişi FT' });
+            await ft.waitFor(async () => window.data.purchaseOrders.find(x => x.id === base + 1)?.durum === 'Durduruldu');
+            await window.approveStep(base + 1);
+            await ft.sleep(800);
+            const a1 = await db(1);
+            out.ownerBlockedWhileSuspended = { step: a1.workflow.currentStep, stepStatus: a1.workflow.steps[0].status, msg: alerts.at(-1)?.[1] };
+
+            // restart keeps the history
+            window.setActiveUser({ name: 'Talep Eden FT ' + ft.MARKER, code: '00001' });
+            const histBefore = (a1.workflow.history || []).length;
+            window.startWorkflow(base + 1);
+            type(0, 'Onay Kişi FT');
+            await window.confirmStartWorkflow();
+            await ft.waitFor(async () => (await db(1)).workflow.started === true);
+            const r1 = (await db(1)).workflow;
+            out.restart = { started: r1.started, state: r1.currentState, historyGrew: (r1.history || []).length > histBefore };
+
+            window.closeStartWorkflowModal();
+            Object.assign(window.data, { personel: orig.personel, workflowTemplates: orig.tpls });
+            window.isDbAdmin = orig.isDbAdmin; window.showCustomConfirm = orig.confirm; window.showAppAlert = orig.alert;
+            return out;
+        });
+    },
+
+    // Tur 3 · VIP-01/02 cleaner, VIP-04/06/03 panel + force logout, ADM-04 locations, VIP-10 launchpad (admin page)
+    // and the force-logout receiver (index page). In-memory data only: the cleaner's batch delete runs under the
+    // anonymous session and is rejected by the rules; the chosen ids are read from its audit log line. No VIP
+    // command is written (rule 7.5).
+    async tur3AdminPanel(page, browser) {
+        const result = {};
+        result.forceLogoutReceiver = await page.evaluate(() => {
+            const o = {}; let calls = 0; const realLogout = window.logout; window.logout = () => { calls++; };
+            window.setActiveUser({ name: 'Hedef FT', code: '12345' });
+            const now = Date.now(), cmd = { targetId: '12345', issuedAt: now, nonce: 'ft_' + now };
+            o.first = window.handleForceLogoutCommand(cmd); o.second = window.handleForceLogoutCommand(cmd); o.logoutCalls = calls;
+            o.stale = window.handleForceLogoutCommand({ targetId: '12345', issuedAt: now - 11 * 60000, nonce: 'ft_old_' + now });
+            o.otherUser = window.handleForceLogoutCommand({ targetId: '99999', issuedAt: now, nonce: 'ft_o_' + now });
+            const realIs = window.isDbAdmin; window.isDbAdmin = () => true;
+            o.adminImmune = window.handleForceLogoutCommand({ targetId: '12345', issuedAt: now, nonce: 'ft_a_' + now });
+            window.isDbAdmin = realIs; window.logout = realLogout;
+            o.legacyIgnored = window.handleForceLogoutCommand(undefined);
+            Object.keys(localStorage).filter(k => k.startsWith('force_logout_done_ft_')).forEach(k => localStorage.removeItem(k));
+            return o;
+        });
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = [], audit = [];
+        admin.on('pageerror', e => errs.push(e.message));
+        admin.on('console', m => { if (m.text().includes('[vipCleanDuplicates]')) audit.push(m.text()); });
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        Object.assign(result, await admin.evaluate(async () => {
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const o = {}, alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
+            const orig = { b1: window.data.b1, b2: window.data.b2, b3: window.data.b3, loc: window.data.locations, units: window.data.units, isDbAdmin: window.isDbAdmin, save: window.saveData };
+
+            // VIP-01/02
+            window.isDbAdmin = () => true;
+            window.data.b1 = [{ id: 'a', ürün: 'X', raf: 'R1', adet: 1, sn: 'N/A' }, { id: 'b', ürün: 'Y', raf: 'R2', adet: 1, sn: 'n/a' },
+                { id: 'c', ürün: 'Z', raf: 'R3', adet: 1, sn: 'SN1' }, { id: 'd', ürün: 'Z2', raf: 'R4', adet: 2, sn: ' sn1 ' },
+                { id: 'e', ürün: 'X', raf: 'R1', adet: 1, sn: 'N/A' }, { id: 'f2', ürün: 'W', raf: 'R9', adet: 1, sn: '--' }];
+            window.data.b2 = [{ id: 'f', ürün: 'K', raf: 'R5', adet: 3 }, { id: 'g', ürün: 'K', raf: 'R5', adet: 3 }];
+            window.data.b3 = [{ id: 1, sn: 'SN9', alanKisi: 'P' }, { id: 2, sn: 'SN9', alanKisi: 'P' }];
+            window.showCustomConfirm = async () => false;
+            await window.vipCleanDuplicates(); o.cleanerCancelWrites = alerts.length;
+            window.showCustomConfirm = async (t, msg) => {
+                o.cleanerPreview = { table: msg.includes('<table'), counts: (msg.match(/B1: <b>(\d+)<\/b> · B2: <b>(\d+)/) || []).slice(1), b3Excluded: msg.includes('B3 hareket defteri') };
+                window.data.b1 = window.data.b1.filter(x => x.id !== 'e');
+                window.data.b2 = [...window.data.b2, { id: 'i', ürün: 'K', raf: 'R5', adet: 3 }];
+                return true;
+            };
+            await Promise.all([window.vipCleanDuplicates(), window.vipCleanDuplicates()]);
+            o.cleanerResult = alerts.at(-1);
+            o.cleanerRuns = alerts.length;
+
+            // VIP-04/06/03
+            let chain = 0; const upd = window.updateActionButtonsState;
+            window.updateActionButtonsState = function () { chain++; return upd.apply(this, arguments); };
+            window.showAdminTab('systemControlTab'); await sleep(1200);
+            o.vipChainRan = chain > 0;
+            document.querySelector('.radar-dot').click(); await sleep(300);
+            o.panel = { open: document.getElementById('userActivityPanel').classList.contains('panel-open'),
+                name: document.getElementById('uapUserName').textContent, session: document.getElementById('uapStatSession').textContent,
+                demoNote: !!document.querySelector('#uapActivityList .uap-demo-note'),
+                radarBadge: [...document.querySelectorAll('.vip-card[data-id="widget-godeye"] .badge')].map(b => b.textContent) };
+            await window.vipForceLogout(); o.demoTargetRefused = alerts.at(-1)?.[1];
+            window.setActiveUser({ name: 'Admin', code: '9999' }); _currentTargetUser = { id: '9999', name: 'Başka', demo: false };
+            await window.vipForceLogout(); o.selfTargetRefused = alerts.at(-1)?.[1];
+            window.vipCloseUserPanel();
+            o.launchpad = { button: !!document.getElementById('vipToggleLaunchpadBtn'), toggle: typeof window.toggleLaunchpadGlobal, flag: localStorage.getItem('launchpadDisabledGlobal') };
+            const before = (document.body.innerText.match(/\[God-Eye\][^\n]*az önce/g) || []).length;
+            await sleep(16000);
+            o.fakeGodEyeLogsIn16s = (document.body.innerText.match(/\[God-Eye\][^\n]*az önce/g) || []).length - before;
+
+            // ADM-04
+            const saves = [];
+            window.saveData = async (c, items) => { saves.push(JSON.parse(JSON.stringify(items))); window.data[c] = items; return true; };
+            window.data.units = [{ id: 'u1', name: 'BT' }];
+            window.data.locations = [{ id: 'loc_1', code: 'M-1', unit: 'BT', persons: [{ name: 'A' }, { name: 'B' }, { name: 'C' }], createdAt: 1, extra: 'keep' },
+                { id: 'loc_2', code: 'M-2', unit: 'Eski Birim', persons: [], createdAt: 2 }];
+            window.openLocationModal('loc_1');
+            o.locPrefill = { code: document.getElementById('loc_code').value, badges: document.querySelectorAll('#loc_selectedPersons .badge').length };
+            window.removePersonFromLocation('B');
+            o.locBadgesAfterRemove = [...document.querySelectorAll('#loc_selectedPersons .badge')].map(b => b.textContent.trim());
+            document.getElementById('loc_code').value = 'M-1X';
+            await window.saveLocation(new Event('submit'));
+            const l1 = saves.at(-1).find(l => l.id === 'loc_1');
+            o.locSaved = { count: saves.at(-1).length, code: l1.code, persons: l1.persons.map(p => p.name), extraKept: l1.extra === 'keep', createdAtKept: l1.createdAt === 1 };
+            window.openLocationModal('loc_2'); o.locLegacyUnitKept = document.getElementById('loc_unit').value; window.closeLocationModal();
+
+            Object.assign(window.data, { b1: orig.b1, b2: orig.b2, b3: orig.b3, locations: orig.loc, units: orig.units });
+            window.isDbAdmin = orig.isDbAdmin; window.saveData = orig.save;
+            return o;
+        }));
+        result.cleanerAudit = audit;
+        result.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return result;
     },
 
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
