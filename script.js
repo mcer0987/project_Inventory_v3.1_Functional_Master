@@ -686,20 +686,22 @@ window.showRequestApprovalModal = function (request) {
         const overlay = document.createElement('div');
         overlay.id = 'requestApprovalModal';
         overlay.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.75); display:flex; align-items:center; justify-content:center; z-index:11000;';
-        const field = 'width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-size:14px; margin-bottom:12px;';
+        // Renkler tema değişkenlerinden (dark-theme.css [data-theme="dark"] ile uyumlu).
+        const field = 'width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border,#bdc3c7); background:var(--color-surface-alt,#f8f9fa); color:var(--color-text,#2c3e50); font-size:14px; margin-bottom:12px;';
         overlay.innerHTML = `
-          <div style="background:#fff; color:#1e293b; padding:24px; border-radius:12px; width:520px; max-width:94vw; font-family:sans-serif;">
+          <style>#raSource option:checked { background: linear-gradient(var(--color-primary-light,#dbeafe), var(--color-primary-light,#dbeafe)); color: var(--color-text,#2c3e50); }</style>
+          <div style="background:var(--color-surface,#fff); color:var(--color-text,#2c3e50); border:1px solid var(--color-border-light,transparent); padding:24px; border-radius:12px; width:520px; max-width:94vw; font-family:sans-serif;">
             <h3 style="margin:0 0 6px; font-size:1.2rem;">Talebi Onayla</h3>
-            <p style="margin:0 0 16px; color:#64748b; font-size:0.9rem;">${escapeHtml(request.personel || '-')} · <strong>${escapeHtml(request.ürün || '-')}</strong> · ${escapeHtml(want)} adet</p>
+            <p style="margin:0 0 16px; color:var(--color-text-muted,#7f8c8d); font-size:0.9rem;">${escapeHtml(request.personel || '-')} · <strong>${escapeHtml(request.ürün || '-')}</strong> · ${escapeHtml(want)} adet</p>
             <label style="font-weight:600; font-size:13px;">Stoktan düşülecek kalem</label>
             <input id="raFilter" type="text" placeholder="Ürün, marka veya raf ara..." autocomplete="off" style="${field} margin-bottom:6px;">
             <select id="raSource" size="6" style="${field}"></select>
             <label style="font-weight:600; font-size:13px;">Seri numarası / zimmet bilgisi</label>
             <input id="raSn" type="text" placeholder="Yoksa boş bırakın" autocomplete="off" style="${field}">
-            <div id="raError" style="display:none; color:#dc2626; font-size:13px; margin-bottom:10px;"></div>
+            <div id="raError" style="display:none; color:var(--color-danger,#e74c3c); font-size:13px; margin-bottom:10px;"></div>
             <div style="display:flex; justify-content:flex-end; gap:10px;">
-              <button id="raCancel" type="button" style="padding:10px 18px; border:1px solid #cbd5e1; background:#fff; border-radius:8px; cursor:pointer;">Vazgeç</button>
-              <button id="raOk" type="button" style="padding:10px 18px; border:none; background:#16a34a; color:#fff; font-weight:700; border-radius:8px; cursor:pointer;">Onayla</button>
+              <button id="raCancel" type="button" style="padding:10px 18px; border:1px solid var(--color-border,#bdc3c7); background:transparent; color:var(--color-text,#2c3e50); border-radius:8px; cursor:pointer;">Vazgeç</button>
+              <button id="raOk" type="button" style="padding:10px 18px; border:none; background:var(--color-success-dark,#16a34a); color:#fff; font-weight:700; border-radius:8px; cursor:pointer;">Onayla</button>
             </div>
           </div>`;
         document.body.appendChild(overlay);

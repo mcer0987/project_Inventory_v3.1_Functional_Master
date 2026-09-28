@@ -120,25 +120,43 @@ function _ensureUnitModal() {
     const modal = document.createElement('div');
     modal.id = 'unitModal';
     modal.style.cssText = 'display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10500; align-items:flex-start; justify-content:center; overflow-y:auto;';
+    // Renkler tema değişkenlerinden (style.css / dark-theme.css [data-theme="dark"]); sabit renk yok.
     modal.innerHTML = `
-        <div style="background:#fff; color:#1e293b; width:500px; max-width:94vw; margin:50px auto; padding:20px; border-radius:8px;">
+        <style>
+            #unitModal .um-box { background:var(--color-surface,#fff); color:var(--color-text,#2c3e50); border:1px solid var(--color-border-light,transparent);
+                width:500px; max-width:94vw; margin:50px auto; padding:20px; border-radius:8px; box-sizing:border-box; }
+            #unitModal hr { border:none; border-top:1px solid var(--color-border,#bdc3c7); }
+            #unitModal .um-input { width:100%; box-sizing:border-box; padding:8px; border-radius:6px; border:1px solid var(--color-border,#bdc3c7);
+                background:var(--color-surface-alt,#f8f9fa); color:var(--color-text,#2c3e50); }
+            #unitModal .um-input::placeholder, #unitModal .um-muted { color:var(--color-text-muted,#7f8c8d); }
+            #unitModal .um-results { display:none; border:1px solid var(--color-border,#bdc3c7); border-top:none; max-height:180px; overflow-y:auto; background:var(--color-surface,#fff); }
+            #unitModal .unit-personnel-option { padding:8px 10px; border-bottom:1px solid var(--color-border-light,#eef0f2); cursor:pointer; }
+            #unitModal .unit-personnel-option:hover { background:var(--color-surface-alt,#f8f9fa); }
+            #unitModal .unit-personnel-option.is-added { cursor:default; color:var(--color-text-muted,#7f8c8d); }
+            #unitModal .unit-personnel-option.is-added:hover { background:none; }
+            #unitModal .um-list { list-style:none; padding:0; margin:10px 0 0; max-height:150px; overflow-y:auto; }
+            #unitModal .um-list li.um-chip { padding:5px 10px; background:var(--color-surface-alt,#f8f9fa); border-bottom:1px solid var(--color-border-light,#eef0f2);
+                display:flex; justify-content:space-between; align-items:center; }
+            #unitModal .um-remove { background:none; border:none; color:var(--color-danger,#e74c3c); cursor:pointer; font-size:16px; }
+            #unitModal .um-cancel { padding:8px 15px; border:1px solid var(--color-border,#bdc3c7); background:transparent; color:var(--color-text,#2c3e50); border-radius:4px; cursor:pointer; }
+            #unitModal .um-save { background:var(--color-success-dark,#27ae60); color:#fff; padding:8px 15px; border:none; border-radius:4px; cursor:pointer; }
+        </style>
+        <div class="um-box">
             <h3 id="unitModalTitle" style="margin-top:0;">Yeni Birim Tanımla</h3>
             <hr>
             <label for="unitNameInput">Birim Adı:</label>
-            <input type="text" id="unitNameInput" placeholder="Örn: Bilgi İşlem" autocomplete="off"
-                style="width:100%; box-sizing:border-box; padding:8px; margin:4px 0 15px;">
+            <input type="text" id="unitNameInput" class="um-input" placeholder="Örn: Bilgi İşlem" autocomplete="off" style="margin:4px 0 15px;">
             <label for="unitPersonnelSearch">Personel Ekle (Ara/Seç):</label>
-            <input type="text" id="unitPersonnelSearch" placeholder="Personel adı yazın (en az 2 harf)..." autocomplete="off"
-                oninput="window.searchPersonnelForUnit(this.value)"
-                style="width:100%; box-sizing:border-box; padding:8px; margin-top:4px;">
-            <div id="unitPersonnelResults" style="display:none; border:1px solid #ddd; border-top:none; max-height:180px; overflow-y:auto; background:#fff;"></div>
+            <input type="text" id="unitPersonnelSearch" class="um-input" placeholder="Personel adı yazın (en az 2 harf)..." autocomplete="off"
+                oninput="window.searchPersonnelForUnit(this.value)" style="margin-top:4px;">
+            <div id="unitPersonnelResults" class="um-results"></div>
             <div style="margin-top:20px;">
                 <label><b>Atanan Personeller:</b></label>
-                <ul id="unitSelectedPersonnel" style="list-style:none; padding:0; margin:10px 0 0; max-height:150px; overflow-y:auto;"></ul>
+                <ul id="unitSelectedPersonnel" class="um-list"></ul>
             </div>
             <div style="margin-top:20px; text-align:right;">
-                <button type="button" onclick="window.closeUnitModal()" style="padding:8px 15px; border:1px solid #cbd5e1; background:#fff; border-radius:4px; cursor:pointer;">Vazgeç</button>
-                <button type="button" id="unitSaveBtn" onclick="window.saveUnitData()" style="background:#27ae60; color:#fff; padding:8px 15px; border:none; border-radius:4px; cursor:pointer;">Kaydet</button>
+                <button type="button" class="um-cancel" onclick="window.closeUnitModal()">Vazgeç</button>
+                <button type="button" id="unitSaveBtn" class="um-save" onclick="window.saveUnitData()">Kaydet</button>
             </div>
         </div>`;
     document.body.appendChild(modal);
@@ -180,12 +198,10 @@ window.searchPersonnelForUnit = function (query) {
     resultArea.innerHTML = matches.length
         ? matches.map(n => {
             const already = chosen.has(n.toLocaleLowerCase('tr-TR'));
-            return `<div class="unit-personnel-option" ${already ? '' : `onclick="window.addPersonnelToTempList(${jsArg(n)})"`}
-                style="padding:8px 10px; border-bottom:1px solid #f1f5f9; cursor:${already ? 'default' : 'pointer'}; color:${already ? '#94a3b8' : 'inherit'};"
-                ${already ? '' : `onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background=''"`}>
+            return `<div class="unit-personnel-option${already ? ' is-added' : ''}" ${already ? '' : `onclick="window.addPersonnelToTempList(${jsArg(n)})"`}>
                 ${escapeHtml(n)}${already ? ' (eklendi)' : ''}</div>`;
         }).join('')
-        : '<div style="padding:8px 10px; color:#94a3b8;">Eşleşen personel bulunamadı.</div>';
+        : '<div class="um-muted" style="padding:8px 10px;">Eşleşen personel bulunamadı.</div>';
     resultArea.style.display = 'block';
 };
 
@@ -210,10 +226,10 @@ window.renderSelectedPersonnel = function () {
     const list = document.getElementById('unitSelectedPersonnel');
     if (!list) return;
     list.innerHTML = unitEditor.personnel.map((name, index) => `
-        <li style="padding:5px 10px; background:#f9f9f9; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center;">
+        <li class="um-chip">
             ${escapeHtml(name)}
-            <button type="button" onclick="window.removePersonnelFromTempList(${index})" title="Çıkar" style="background:none; border:none; color:red; cursor:pointer; font-size:16px;">&times;</button>
-        </li>`).join('') || '<li><small style="color:#94a3b8;">Henüz personel atanmadı.</small></li>';
+            <button type="button" class="um-remove" onclick="window.removePersonnelFromTempList(${index})" title="Çıkar">&times;</button>
+        </li>`).join('') || '<li><small class="um-muted">Henüz personel atanmadı.</small></li>';
 };
 
 // --- VERİ KAYDETME ---
