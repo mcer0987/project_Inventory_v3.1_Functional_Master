@@ -724,22 +724,19 @@
                 _dupAlert('🔍 B1/B2 depolarında tekerrür eden kayıt bulunamadı. (B3 hareket defteri taranmaz.)', 'info');
                 return;
             }
-            const esc = window.escapeHtml;
-            const perCol = _DUP_COLLECTIONS.map(c => `${c.toUpperCase()}: <b>${preview.filter(d => d.colName === c).length}</b>`).join(' · ');
-            const rows = preview.slice(0, _DUP_PREVIEW_ROWS).map(d => `<tr>
-                <td>${esc(d.colName.toUpperCase())}</td><td>${esc(d.item.ürün || d.item.name || '-')}</td>
-                <td>${esc(d.item.raf || '-')}</td><td>${esc(d.item.seriNo || d.item.sn || '-')}</td>
-                <td>${esc(d.item.adet ?? '-')}</td><td>${esc(d.reason)}</td></tr>`).join('');
-            const more = preview.length > _DUP_PREVIEW_ROWS ? `<div style="margin-top:6px;">… ve ${preview.length - _DUP_PREVIEW_ROWS} kayıt daha.</div>` : '';
-            const message = `<div style="text-align:left;">
-                <div>Silinecek kayıt: <b>${preview.length}</b> (${perCol}). Her grubun ilk kaydı tutulur. B3 hareket defteri kapsam dışıdır.</div>
-                <div style="max-height:260px; overflow:auto; margin-top:8px;">
-                  <table style="width:100%; font-size:12px; border-collapse:collapse;">
-                    <thead><tr><th>Depo</th><th>Ürün</th><th>Raf</th><th>SN</th><th>Adet</th><th>Neden</th></tr></thead>
-                    <tbody>${rows}</tbody>
-                  </table>${more}
-                </div>
-                <div style="margin-top:8px;">Bu kayıtlar kalıcı olarak silinecek. Devam edilsin mi?</div></div>`;
+            // Onay kutusu (script.js showCustomConfirm) metni textContent + pre-line ile basar: önizleme düz metin satırlarıdır.
+            const perCol = _DUP_COLLECTIONS.map(c => `${c.toUpperCase()}: ${preview.filter(d => d.colName === c).length}`).join(' · ');
+            const rows = preview.slice(0, _DUP_PREVIEW_ROWS).map((d, i) =>
+                `${i + 1}. ${d.colName.toUpperCase()} · ${d.item.ürün || d.item.name || '-'} · Raf ${d.item.raf || '-'} · SN ${d.item.seriNo || d.item.sn || '-'} · Adet ${d.item.adet ?? '-'} — ${d.reason}`);
+            const more = preview.length > _DUP_PREVIEW_ROWS ? [`… ve ${preview.length - _DUP_PREVIEW_ROWS} kayıt daha.`] : [];
+            const message = [
+                `Silinecek kayıt: ${preview.length} (${perCol}). Her grubun ilk kaydı tutulur; B3 hareket defteri kapsam dışıdır.`,
+                '',
+                ...rows,
+                ...more,
+                '',
+                'Bu kayıtlar kalıcı olarak silinecek. Devam edilsin mi?'
+            ].join('\n');
             const ok = typeof showCustomConfirm === 'function'
                 ? await showCustomConfirm('Tekerrür Temizliği Onayı', message)
                 : confirm(`${preview.length} tekerrür kaydı silinsin mi?`);
