@@ -1273,17 +1273,20 @@ function _purWorkflowHTML(item) {
 
     if (allLogs.length === 0) return '';
 
+    // [WHY]: Tüm renkler sabit hex'ti (#f8fafc, #94a3b8, #1e293b, vb.); koyu temada modal koyu zemine döndüğünde
+    //        özellikle "islem" metni (#1e293b, açık zemin için tasarlanmış neredeyse siyah bir ton) okunamıyordu.
+    // [HOW]: Aynı görsel değerleri karşılayan tema değişkenleriyle birebir değiştirildi (fonksiyon/mantık aynı kaldı).
     // [BUGFIX] Bug 4: Fixed hidden row count - show first 3 logs, hide rest (total - 3)
     const visibleCount = 3;
     const rows = allLogs.map((a, idx) => `
-        <div class="${idx >= visibleCount ? 'pur-log-hidden' : ''}" style="display:${idx >= visibleCount ? 'none' : 'flex'};flex-direction:column;padding:8px 0;border-bottom:1px solid #f8fafc;font-size:12px;">
+        <div class="${idx >= visibleCount ? 'pur-log-hidden' : ''}" style="display:${idx >= visibleCount ? 'none' : 'flex'};flex-direction:column;padding:8px 0;border-bottom:1px solid var(--color-border-light);font-size:12px;">
             <div style="display:flex;gap:10px;">
-                <span style="color:#94a3b8;min-width:130px;flex-shrink:0;">${escapeHtml(a.tarih || '')}</span>
-                <span style="color:#64748b;min-width:90px;flex-shrink:0;font-weight:600;">${escapeHtml(a.yapan || '')}</span>
-                <span style="color:#1e293b;">${escapeHtml(a.islem || '')}</span>
-                ${a.type === 'ebys' ? '<span style="background:#e0e7ff;color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:8px;">EBYS</span>' : ''}
+                <span style="color:var(--color-text-hint);min-width:130px;flex-shrink:0;">${escapeHtml(a.tarih || '')}</span>
+                <span style="color:var(--color-text-muted);min-width:90px;flex-shrink:0;font-weight:600;">${escapeHtml(a.yapan || '')}</span>
+                <span style="color:var(--color-text);">${escapeHtml(a.islem || '')}</span>
+                ${a.type === 'ebys' ? '<span style="background:var(--color-info-light);color:var(--color-info);padding:2px 6px;border-radius:4px;font-size:10px;margin-left:8px;">EBYS</span>' : ''}
             </div>
-            ${a.not ? `<div style="margin-top:4px;padding:6px 10px;background:#f8fafc;border-radius:6px;color:#475569;font-style:italic;font-size:11px;">
+            ${a.not ? `<div style="margin-top:4px;padding:6px 10px;background:var(--color-surface-alt);border-radius:6px;color:var(--color-text-muted);font-style:italic;font-size:11px;">
                 💬 ${escapeHtml(a.not)}
             </div>` : ''}
         </div>`).join('');
@@ -1297,10 +1300,10 @@ function _purWorkflowHTML(item) {
 
     return `
         <hr style="margin:14px 0 10px;">
-        <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">
+        <div style="font-size:12px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">
             <i class="fas fa-history me-1"></i> Süreç Geçmişi (${allLogs.length} kayıt)
         </div>
-        <div style="max-height: 220px; overflow-y: auto; padding-right: 4px; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <div style="max-height: 220px; overflow-y: auto; padding-right: 4px; border: 1px solid var(--color-border-light); border-radius: 8px;">
             ${rows}
         </div>
         ${toggleBtn}`;
