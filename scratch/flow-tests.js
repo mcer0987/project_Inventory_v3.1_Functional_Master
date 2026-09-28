@@ -62,7 +62,7 @@ const SCENARIOS = {
             // Edit by id: same document, updated qty, count unchanged
             await ft.waitFor(async () => (window.data.requests || []).some(r => String(r.id) === String(doc.id)));
             const idx = window.data.requests.findIndex(r => String(r.id) === String(doc.id));
-            window.editPersonnelInventoryRequest(idx);
+            window.editPersonnelInventoryRequest(doc.id);
             ft.set('reqQty', '5');
             await window.saveRequest(new Event('submit'));
             out.edited = await ft.waitFor(async () => { const d = await ft.readMarked('requests'); return d.length === 1 && d[0].adet === 5; });
@@ -95,10 +95,10 @@ const SCENARIOS = {
             const durum = async () => (await ft.readMarked('requests'))[0].durum;
             await ft.waitFor(async () => idx() !== -1);
 
-            await window.withdrawInventoryRequest(idx());
+            await window.withdrawInventoryRequest(id);
             out.withdraw = await ft.waitFor(async () => (await durum()) === 'draft') ? 'draft ✔' : await durum();
 
-            await window.sendDraftInventoryRequest(idx());
+            await window.sendDraftInventoryRequest(id);
             out.sendDraft = await ft.waitFor(async () => (await durum()) === 'Beklemede') ? 'Beklemede ✔' : await durum();
 
             // simulate admin approval on the request only (staff may write requests)
@@ -107,7 +107,7 @@ const SCENARIOS = {
             await ft.waitFor(async () => (await durum()) === 'approved');
 
             const b3Before = (await ft.readAll('b3')).length;
-            await window.receiveProduct(idx());
+            await window.receiveProduct(id);
             out.receive = await ft.waitFor(async () => (await durum()) === 'completed') ? 'completed ✔' : await durum();
             out.teslimTarihi = !!(await ft.readMarked('requests'))[0].teslimTarihi;
             out.b3Untouched = (await ft.readAll('b3')).length === b3Before;
@@ -869,6 +869,90 @@ const SCENARIOS = {
             await ft.sleep(500);
             out.remove = { bulkDeleted: br.deleted, taskGone: !(await srv('tasks', tid)), bulkGone: (await Promise.all(extra.map(x => srv('requests', x)))).every(x => !x) };
             out.unknownCol = await window.upsertItem('archive', { id: 1 });
+            return out;
+        });
+    },
+
+    // Faz 3 · H2 — DATA-06: every product/b3 action targets the id, even after the array shifts under it
+    // (a record prepended between selection and action, as a snapshot from another device would do).
+    // b1/b2/b3 are admin-only: the write API functions are recorded stubs; nothing is written.
+    async idBasedProductOps(page) {
+        return page.evaluate(async () => {
+            const out = {}, ops = [];
+            const orig = { b1: window.data.b1, b2: window.data.b2, b3: window.data.b3, admin: window.checkIsAdmin, val: window.validateAdminAction,
+                confirm: window.showCustomConfirm, alert: window.showAppAlert, tx: window.runStockTransaction,
+                api: ['applyItemOps', 'upsertItem', 'appendItem', 'updateItem', 'updateItems', 'removeItem', 'bulkRemove'].map(k => [k, window[k]]) };
+            ['applyItemOps', 'upsertItem', 'appendItem', 'updateItem', 'updateItems', 'removeItem', 'bulkRemove'].forEach(k => {
+                window[k] = async (...args) => { ops.push([k, JSON.parse(JSON.stringify(args))]); return { written: 1, deleted: 0, ids: ['stub'] }; };
+            });
+            window.checkIsAdmin = () => true; window.validateAdminAction = () => true;
+            window.showCustomConfirm = async () => true;
+            const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
+            const tx = []; window.runStockTransaction = async (c, id, d) => { tx.push([c, id, d]); return { before: 5, after: 5 + d }; };
+            const P = (id, name, extra) => ({ id, ürün: name, raf: 'R', sütun: 'S', adet: 5, durumu: 'Kullanıma Hazır', tür: 'Laptop', ...extra });
+            const shift = () => window.data.b1.unshift(P('b1_new_' + Math.random(), 'SONRADAN EKLENEN'));
+            const last = () => ops.at(-1);
+
+            window.data.b1 = [P('b1_A', 'A'), P('b1_B', 'B', { limit: 3 }), P('b1_C', 'C')];
+            window.data.b2 = [];
+            window.switchTab && window.switchTab('b1');
+            window.renderTable('b1');
+            const row = () => document.querySelector('tr[data-depo="b1"][data-id="b1_B"]');
+            out.rowRendered = !!row();
+
+            // FAB delete after the array shifted
+            window.clearRowSelection(); row().click();
+            shift();
+            document.querySelector('.fab-btn-del')?.click(); await new Promise(r => setTimeout(r, 50));
+            out.fabDelete = last();
+
+            // FAB watch
+            window.renderTable('b1'); window.clearRowSelection(); row().click(); shift();
+            document.querySelector('.fab-btn-watch')?.click(); await new Promise(r => setTimeout(r, 50));
+            out.fabWatch = last();
+
+            // edit: only the form fields go to that one document
+            window.openProductModal('edit', 'b1_B', 'b1'); shift();
+            document.getElementById('prodName').value = 'B (düz.)';
+            await window.saveProduct(new Event('submit'));
+            out.edit = { op: last()[0], col: last()[1][0], id: last()[1][1], name: last()[1][2].ürün, keepsLimitUntouched: !('limit' in last()[1][2]) };
+
+            // bulk "pasife al" via checkboxes (data-id)
+            window.renderTable('b1');
+            document.querySelectorAll('#tableB1 .row-select').forEach(cb => { cb.checked = ['b1_A', 'b1_C'].includes(cb.dataset.id); });
+            shift();
+            await window.bulkDelete('b1');
+            out.bulkPassive = last()[0] === 'updateItems' ? last()[1][1].map(x => x.id + ':' + x.fields.durumu) : last();
+
+            // exit: selection -> shift -> submit -> stock + b3 entry for B
+            window.openExitModal('b1', 'b1_B'); shift();
+            document.getElementById('exitQty').value = '2';
+            await window.saveExit(new Event('submit'));
+            out.exit = { tx: tx.at(-1), b3: last()[0] === 'appendItem' ? { col: last()[1][0], productId: last()[1][1].productId, adet: last()[1][1].adet } : last() };
+
+            // internal transfer: one atomic op list (set target + delete source)
+            window.openTransferModal('b1', 'b1_B'); shift();
+            const t = document.getElementById('transTarget');
+            const internal = [...t.options].find(o => { try { return JSON.parse(o.value).type === 'internal'; } catch (e) { return false; } });
+            if (internal) { t.value = internal.value; window.handleTransferTargetChange(t); }
+            await window.confirmTransfer();
+            out.transfer = last()[0] === 'applyItemOps' ? last()[1][0].map(o => `${o.op}:${o.col}:${o.id || o.item.id}`) : { last: last(), hadInternal: !!internal };
+
+            // multi-select bulk delete -> bulkRemove by ids
+            await window._bulkDeleteSelected('b1', ['b1_A', 'b1_C']);
+            out.bulkRemove = last();
+
+            // b3 row delete by id
+            window.data.b3 = [{ id: 11, urunAciklama: 'X' }, { id: 22, urunAciklama: 'Y' }];
+            await window.deleteB3Row(22);
+            out.b3Delete = last();
+
+            Object.assign(window.data, { b1: orig.b1, b2: orig.b2, b3: orig.b3 });
+            orig.api.forEach(([k, f]) => { window[k] = f; });
+            Object.assign(window, { checkIsAdmin: orig.admin, validateAdminAction: orig.val, showCustomConfirm: orig.confirm, showAppAlert: orig.alert, runStockTransaction: orig.tx });
+            window.clearRowSelection(); window.closeProductModal?.(); window.closeExitModal?.(); window.closeTransferModal?.();
+            window.renderTable('b1');
+            out.alerts = alerts.filter(a => a[0] === 'error');
             return out;
         });
     },

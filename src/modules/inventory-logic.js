@@ -17,76 +17,61 @@ window.AppModules.Inventory = window.AppModules.Inventory || {};
 // ─────────────────────────────────────────────────────────────────────────────
 // Core Inventory Functions (InventoryLogic)
 // ─────────────────────────────────────────────────────────────────────────────
+// [WHY]: Tüm ürün işlemleri dizi indeksiyle hedefleniyordu; window.data[depo] her snapshot'ta yeniden kurulduğu için
+//        başka bir cihazdaki tek bir ekleme/silme, işlemi yanlış ürüne yönlendirebiliyordu (DATA-06, KN-5). Silme ve takip
+//        tüm veritabanını yazıyordu (DATA-01).
+// [HOW]: İşlemler depo + ürün id'si alır (render'lar data-id taşır), kayıt id ile çözülür; yazmalar tek-doküman API'siyle.
+const _find = (col, id) => (id == null || id === '') ? null : (window.data[col] || []).find(x => x && String(x.id) === String(id)) || null;
+const _alert = (msg, type) => { if (typeof window.showAppAlert === 'function') window.showAppAlert(msg, type); };
+const _missing = () => _alert('Kayıt bulunamadı; liste güncellenmiş olabilir. Sayfayı yenileyip tekrar deneyin.', 'error');
 
-export const addExit = async function () {
+// Seçili ürünü (#selectedProduct, selectProduct ile doldurulur) id ile çözüp stoktan düşer ve b3'e çıkış kaydı ekler.
+// b3 kaydı yazılamazsa stok geri alınır (tam atomik işlem Faz 3.4 · H3).
+async function _performExit(requestedQty) {
     const selectedDiv = document.getElementById('selectedProduct');
     const selected = selectedDiv ? selectedDiv.dataset : null;
+    if (!selected || !selected.name || !selected.repo) { _alert('Lütfen listeden bir ürün seçin!', 'warning'); return; }
 
-    if (!selected || !selected.name) {
-        if (typeof window.showAppAlert === 'function') window.showAppAlert("Lütfen listeden bir ürün seçin!", "warning");
+    const repo = selected.repo;
+    const product = _find(repo, selected.id);
+    if (!product) { _missing(); return; }
+
+    try {
+        await window.runStockTransaction(repo, product.id, -requestedQty);
+    } catch (transactionError) {
+        _alert(transactionError.message, 'error');
         return;
     }
 
-    // [WHY]: currentExitRepo B3 sekmesinden 'b3' olarak geliyordu; stok yerine çıkış log'u düşülüyordu (INV-02).
-    // [HOW]: Depo ve indeks aynı kaynaktan, seçilen üründen okunur (openExitModal satır ürününü ön-seçer).
-    const repo = selected.repo;
-    const index = selected.index;
-
-    if (repo && index !== "" && index !== undefined) {
-        const repoData = window.data[repo];
-        if (repoData && repoData[index]) {
-            const product = repoData[index];
-            const docId = product.id;
-
-            try {
-                await window.runStockTransaction(repo, docId, -1);
-            } catch (error) {
-                if (typeof window.showAppAlert === 'function') window.showAppAlert(error.message, "error");
-                return;
-            }
-        }
-    }
-
-    const isDemirbasFlag = selected.isDemirbas === "true";
-    const saati = (typeof window.getTurkiyeSaati === 'function')
-        ? window.getTurkiyeSaati()
-        : new Date().toLocaleString('tr-TR');
-
-    const exitEntry = {
-        id:           Date.now(),
-        rafNo:        selected.shelf || "-",
-        urunAciklama: selected.name  || "-",
-        urunTuru:     selected.type  || "-",
-        sn:           document.getElementById('exitSn')?.value   || "-",
-        adet:         1,
-        not:          document.getElementById('exitNote')?.value || "-",
-        alanKisi:     document.getElementById('exitPerson')?.value || "-",
+    const saati = typeof window.getTurkiyeSaati === 'function' ? window.getTurkiyeSaati() : new Date().toLocaleString('tr-TR');
+    const b3Entry = {
+        rafNo:        product.raf || selected.shelf || '-',
+        urunTuru:     selected.type || '-',
+        urunAciklama: product.ürün || product.name || selected.name || '-',
+        sn:           document.getElementById('exitSn')?.value     || '-',
+        adet:         requestedQty,
+        not:          document.getElementById('exitNote')?.value   || '-',
+        alanKisi:     document.getElementById('exitPerson')?.value || '-',
         tarih:        saati,
-        isDemirbas:   isDemirbasFlag,
-        kaynakDepo:   repo
+        isDemirbas:   selected.isDemirbas === 'true',
+        kaynakDepo:   repo,
+        productId:    product.id
     };
 
-    console.log("🚀 Firebase b3'e gönderilen veri paketi:", exitEntry);
-
-    if (!window.data.b3) window.data.b3 = [];
-    window.data.b3.unshift(exitEntry);
-
-    try {
-        await window.saveData('b3', window.data.b3);
-        if (typeof window.showAppAlert === 'function') window.showAppAlert('Stok güncellendi ve çıkış kaydedildi.', 'success');
-        if (typeof window.closeExitModal === 'function') window.closeExitModal();
-
-        setTimeout(() => {
-            try {
-                if (typeof window.renderTable === 'function') window.renderTable(repo);
-                if (typeof window.renderExitTable === 'function') window.renderExitTable();
-            } catch (err) {
-                console.warn(err);
-            }
-        }, 100);
-    } catch (err) {
-        console.error(err);
+    if (await window.appendItem('b3', b3Entry) === false) {
+        try { await window.runStockTransaction(repo, product.id, requestedQty); } catch (e) { console.error('❌ Stok geri alınamadı:', e); }
+        _alert('Çıkış kaydı yazılamadı; stok geri alındı.', 'error');
+        return;
     }
+
+    _alert('Stok güncellendi ve çıkış kaydedildi.', 'success');
+    if (typeof window.closeExitModal === 'function') window.closeExitModal();
+    if (typeof window.renderTable === 'function') window.renderTable(repo);
+    if (typeof window.renderExitTable === 'function') window.renderExitTable();
+}
+
+export const addExit = async function () {
+    return _performExit(1);
 };
 
 export const saveExit = async function (event) {
@@ -94,107 +79,18 @@ export const saveExit = async function (event) {
         event.preventDefault();
         event.stopPropagation();
     }
-
-    const selectedDiv = document.getElementById('selectedProduct');
-    if (!selectedDiv) {
-        if (typeof window.showAppAlert === 'function') window.showAppAlert('Ürün seçim alanı bulunamadı.', 'error');
-        return;
-    }
-
-    const isDemirbas = selectedDiv.dataset.isDemirbas === 'true';
-    const selected = selectedDiv.dataset;
-
-    const repo  = selected.repo;
-    const index = selected.index;
-
-    const qtyInput = document.getElementById('exitQty');
-    const requestedQty = parseInt(qtyInput?.value) || 1;
-
-    if (!selected.name || repo === undefined || index === undefined) {
-        if (typeof window.showAppAlert === 'function') window.showAppAlert('Lütfen listeden bir ürün seçin!', 'warning');
-        return;
-    }
-
-    if (window.data[repo] && window.data[repo][index]) {
-        const product = window.data[repo][index];
-        const docId = product.id;
-
-        if (!docId) {
-            if (typeof window.showAppAlert === 'function') window.showAppAlert('Ürün kaydında geçerli bir ID bulunamadı. Lütfen sistemi yenileyin.', 'error');
-            console.error('❌ [saveExit] Ürün id alanı eksik:', product);
-            return;
-        }
-
-        try {
-            await window.runStockTransaction(repo, docId, -requestedQty);
-            console.log(`✅ [saveExit] Atomik transaction başarılı. Repo: ${repo}, ID: ${docId}, Delta: -${requestedQty}`);
-        } catch (transactionError) {
-            if (typeof window.showAppAlert === 'function') window.showAppAlert(transactionError.message, 'error');
-            console.error('❌ [saveExit] Transaction başarısız, log kaydı iptal:', transactionError);
-            return;
-        }
-    } else {
-        console.error('Ürün verisine ulaşılamadı. Repo:', repo, 'Index:', index);
-        if (typeof window.showAppAlert === 'function') window.showAppAlert('Ürün verisi bellekte bulunamadı. Sayfayı yenileyip tekrar deneyin.', 'error');
-        return;
-    }
-
-    const saati = (typeof window.getTurkiyeSaati === 'function')
-        ? window.getTurkiyeSaati()
-        : new Date().toLocaleString('tr-TR');
-
-    const b3Entry = {
-        id:           Date.now(),
-        rafNo:        selected.shelf || '-',
-        urunTuru:     selected.type  || '-',
-        urunAciklama: selected.name  || '-',
-        sn:           document.getElementById('exitSn')?.value     || '-',
-        adet:         requestedQty,
-        not:          document.getElementById('exitNote')?.value   || '-',
-        alanKisi:     document.getElementById('exitPerson')?.value || '-',
-        tarih:        saati,
-        isDemirbas:   isDemirbas,
-        kaynakDepo:   repo
-    };
-
-    console.log('🚀 Firebase b3\'e gönderilen veri paketi:', b3Entry);
-
-    if (!window.data.b3) window.data.b3 = [];
-    window.data.b3.unshift(b3Entry);
-
-    try {
-        await window.saveData('b3', window.data.b3);
-
-        if (typeof window.showAppAlert === 'function') window.showAppAlert('Stok güncellendi ve çıkış kaydedildi.', 'success');
-        if (typeof window.closeExitModal === 'function') window.closeExitModal();
-
-        setTimeout(() => {
-            try {
-                if (typeof window.renderTable === 'function') window.renderTable(repo);
-                if (typeof window.renderExitTable === 'function') window.renderExitTable();
-            } catch (renderErr) {
-                console.warn('Tablolar yenilenirken küçük hata:', renderErr);
-            }
-        }, 100);
-
-    } catch (err) {
-        console.error('Kayıt hatası:', err);
-        if (typeof window.showAppAlert === 'function') window.showAppAlert('Kayıt sırasında bir hata oluştu!', 'error');
-    }
+    const requestedQty = parseInt(document.getElementById('exitQty')?.value) || 1;
+    return _performExit(requestedQty);
 };
 
-export const updateStock = async function (depo, index, delta) {
+export const updateStock = async function (depo, id, delta) {
     if (typeof window.checkIsAdmin === 'function' && !window.checkIsAdmin()) {
         if (typeof window.showAppAlert === 'function') window.showAppAlert("Bu işlem için yetkiniz yok!", "error");
         return;
     }
 
-    if (!window.data[depo] || !window.data[depo][index]) {
-        console.error("Hata: Ürün bulunamadı!", { depo, index });
-        return;
-    }
-
-    const item = window.data[depo][index];
+    const item = _find(depo, id);
+    if (!item) { _missing(); return; }
     const docId = item.id;
 
     try {
@@ -207,17 +103,14 @@ export const updateStock = async function (depo, index, delta) {
     }
 };
 
-export const deleteItem = async function (depo, index) {
+export const deleteItem = async function (depo, id) {
     if (!window.checkIsAdmin || !window.checkIsAdmin()) {
         if (typeof window.showAppAlert === 'function') window.showAppAlert('Silme yetkiniz bulunmamaktadır.', 'error');
         return;
     }
 
-    const item = window.data[depo] && window.data[depo][index];
-    if (!item) {
-        if (typeof window.showAppAlert === 'function') window.showAppAlert('Silinecek kayıt bulunamadı.', 'error');
-        return;
-    }
+    const item = _find(depo, id);
+    if (!item) { _missing(); return; }
     const itemName = item.ürün || item.name || 'Bu kaydı';
 
     if (typeof window.showCustomConfirm !== 'function') {
@@ -232,8 +125,7 @@ export const deleteItem = async function (depo, index) {
 
     const scrollPosition = window.scrollY;
 
-    window.data[depo].splice(index, 1);
-    await window.saveData(window.data);
+    if (await window.removeItem(depo, item.id) === false) { _alert('Kayıt silinemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error'); return; }
 
     const currentLimit = ((window.currentPage || 1) * (window.pageSize || 25));
     if (typeof window.renderTable === 'function') window.renderTable(depo, false, currentLimit);
@@ -264,19 +156,16 @@ export const bulkDelete = async function (depo) {
 
     if (!onay) return;
 
-    let changed = false;
-
-    checkboxes.forEach(cb => {
-        const realIndex = cb.getAttribute('data-index');
-        if (realIndex !== null && window.data[depo] && window.data[depo][realIndex]) {
-            window.data[depo][realIndex].durumu = 'Pasif';
-            window.data[depo][realIndex].status = 'Pasif';
-            changed = true;
-        }
-    });
+    // Id ile çözülür; yalnız durum alanları güncellenir (diğer alanlara ve eşzamanlı düzenlemelere dokunulmaz).
+    const targets = [...checkboxes].map(cb => _find(depo, cb.getAttribute('data-id'))).filter(Boolean);
+    if (targets.length < checkboxes.length) { _missing(); return; }
+    const changed = targets.length > 0;
 
     if (changed) {
-        await window.saveData(window.data);
+        if (await window.updateItems(depo, targets.map(t => ({ id: t.id, fields: { durumu: 'Pasif', status: 'Pasif' } }))) === false) {
+            _alert('Pasife alma kaydedilemedi.', 'error');
+            return;
+        }
         if (typeof window.renderTable === 'function') window.renderTable(depo);
         if (typeof window.showAppAlert === 'function') window.showAppAlert(`${checkboxes.length} ürün başarıyla pasife alındı.`, 'success');
 
@@ -294,10 +183,9 @@ export const saveProduct = async function (e) {
     const form = document.getElementById('productForm');
     if (!form) return;
 
-    const editIndex = form.dataset.editIndex;
     const editId = form.dataset.editId;
     const editRepo = form.dataset.editRepo || (document.querySelector('.tab-content.active')?.id || 'b1');
-    const isEdit = editIndex !== undefined && editIndex !== null && editIndex !== '';
+    const isEdit = editId !== undefined && editId !== null && editId !== '';
 
     const formFields = {
         sütun:      document.getElementById('prodColumn')?.value || '',
@@ -312,30 +200,27 @@ export const saveProduct = async function (e) {
         lastUpdate: new Date().getTime()
     };
 
-    const items = [...(window.data[editRepo] || [])];
-
+    // Düzenleme: yalnız formun alanları o dokümana yazılır (limit/takip gibi diğer alanlar ve eşzamanlı değişiklikler korunur).
+    // Yeni kayıt: tek doküman eklenir. (H2: koleksiyonun tamamı gönderilmez.)
+    let ok;
     if (isEdit) {
-        const idx = editId !== undefined && editId !== ''
-            ? items.findIndex(x => String(x.id) === String(editId))
-            : parseInt(editIndex, 10);
-        const existing = items[idx];
+        const existing = _find(editRepo, editId);
         if (!existing) {
             if (typeof window.showAppAlert === 'function') window.showAppAlert('Düzenlenen ürün bulunamadı; liste güncellenmiş olabilir.', 'error');
             return;
         }
-        const merged = { ...existing, ...formFields, id: existing.id };
+        const fields = { ...formFields };
         if (editRepo === 'b2') {
-            merged.status = formFields.durumu;
-            if (existing.durumu === undefined) delete merged.durumu;
+            fields.status = formFields.durumu;
+            if (existing.durumu === undefined) delete fields.durumu;
         }
-        items[idx] = merged;
+        ok = await window.updateItem(editRepo, existing.id, fields);
     } else {
-        const created = { id: `${editRepo}_${Date.now()}`, ...formFields };
+        const created = { id: `${editRepo}_${window.makeId()}`, ...formFields };
         if (editRepo === 'b2') created.status = formFields.durumu;
-        items.push(created);
+        ok = await window.appendItem(editRepo, created);
     }
 
-    const ok = await window.saveData(editRepo, items);
     if (ok === false) {
         if (typeof window.showAppAlert === 'function') window.showAppAlert('Kayıt başarısız oldu. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
         return;
@@ -350,33 +235,17 @@ export const saveProduct = async function (e) {
     if (typeof window.closeProductModal === 'function') window.closeProductModal();
 };
 
-export const toggleWatch = async function (depo, index) {
-    console.group('🔍 Takip İşlemi Başladı');
+export const toggleWatch = async function (depo, id) {
+    const item = _find(depo, id);
+    if (!item) { _missing(); return; }
 
-    const item = window.data[depo] && window.data[depo][index];
-    if (!item) {
-        console.error('❌ Hata: Belirtilen indexte ürün bulunamadı!', { depo, index });
-        console.groupEnd();
+    // Yalnız isWatched alanı yazılır (tek doküman).
+    if (await window.updateItem(depo, item.id, { isWatched: !item.isWatched }) === false) {
+        _alert('Takip durumu kaydedilemedi.', 'error');
         return;
     }
-
-    const oldState = !!item.isWatched;
-    const newState = !oldState;
-
-    window.data[depo][index].isWatched = newState;
-
-    try {
-        await window.saveData(window.data);
-        if (typeof window.renderTable === 'function') window.renderTable(depo);
-        if (typeof window.renderCustomWatchDashboard === 'function') {
-            window.renderCustomWatchDashboard();
-        }
-    } catch (error) {
-        window.data[depo][index].isWatched = oldState;
-        if (typeof window.renderTable === 'function') window.renderTable(depo);
-    }
-
-    console.groupEnd();
+    if (typeof window.renderTable === 'function') window.renderTable(depo);
+    if (typeof window.renderCustomWatchDashboard === 'function') window.renderCustomWatchDashboard();
 };
 
 // [WHY]: ESM geçişinde saveRequest kayboldu; "Envanter Talep Et" formu var olmayan bir fonksiyonu çağırıp sayfayı yeniliyordu (ITSM-01).
@@ -411,15 +280,13 @@ export const saveRequest = async function (event) {
         iadeTarihi: talepTuru === 'Geçici Zimmet' ? iadeTarihi : '',
     };
 
-    const requests = [...(window.data.requests || [])];
     const editId = window.editingReqId;
+    let saved;
     if (editId !== null && editId !== undefined) {
-        const idx = requests.findIndex(r => String(r.id) === String(editId));
-        if (idx === -1) { alert('Düzenlenen talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-        requests[idx] = { ...requests[idx], ...formFields };
+        if (!_find('requests', editId)) { alert('Düzenlenen talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        saved = await window.updateItem('requests', editId, formFields);
     } else {
-        requests.unshift({
-            id: Date.now(),
+        saved = await window.appendItem('requests', {
             ...formFields,
             personel: user.name,
             personelKodu: user.code || '',
@@ -428,7 +295,7 @@ export const saveRequest = async function (event) {
         });
     }
 
-    if (await window.saveData('requests', requests) === false) {
+    if (saved === false) {
         alert('Talep kaydedilemedi. Bağlantınızı kontrol edip tekrar deneyin.', 'error');
         return;
     }
@@ -441,19 +308,20 @@ export const saveRequest = async function (event) {
     alert(editId != null ? 'Talebiniz güncellendi.' : 'Talebiniz iletildi.', 'success');
 };
 
-export const receiveProduct = async function (index) {
-    if (!window.data || !window.data.requests) return;
-    const req = window.data.requests[index];
-    if (!req) return;
+export const receiveProduct = async function (id) {
+    const req = _find('requests', id);
+    if (!req) { _missing(); return; }
 
     // [WHY]: Tam kayıt personel oturumunda reddediliyor, "Teslim Aldım" hiç kaydolmuyordu (ITSM-03, DATA-03).
-    // [HOW]: Yalnız talep durumu yazılır. Zimmet (b3) kaydını admin onay adımı (confirmRequest) yazar; personel b3'e yazamaz.
-    req.durum = 'completed';
-    req.teslimTarihi = typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
+    // [HOW]: Yalnız talebin durum alanları yazılır (tek doküman). Zimmet (b3) kaydını admin onay adımı (confirmRequest) yazar.
+    const fields = {
+        durum: 'completed',
+        teslimTarihi: typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR')
+    };
 
     try {
-        await window.saveData('requests', window.data.requests);
-        if (typeof window.sendArchiveEmail === 'function') window.sendArchiveEmail(req);
+        if (await window.updateItem('requests', req.id, fields) === false) { _alert('Teslim alındı bilgisi kaydedilemedi.', 'error'); return; }
+        if (typeof window.sendArchiveEmail === 'function') window.sendArchiveEmail({ ...req, ...fields });
         if (typeof window.renderMyRequestsTable === 'function') window.renderMyRequestsTable();
         if (typeof window.showAppAlert === 'function') {
             window.showAppAlert("Ürünü teslim aldığınızı onayladınız. Talep Sonlandırıldı.", "info");
@@ -463,25 +331,24 @@ export const receiveProduct = async function (index) {
     }
 };
 
-export const deleteB3Row = async function (index) {
+export const deleteB3Row = async function (id) {
     if (!window.checkIsAdmin || !window.checkIsAdmin()) {
         if (typeof window.showAppAlert === 'function') window.showAppAlert('Bu işlem için yönetici yetkisi gereklidir!', 'error');
         return;
     }
 
     try {
-        if (window.data.b3 && window.data.b3[index]) {
-            window.data.b3.splice(index, 1);
-            await window.saveData(window.data);
+        const row = _find('b3', id);
+        if (!row) { _missing(); return; }
+        const ok = typeof window.showCustomConfirm === 'function'
+            ? await window.showCustomConfirm('Çıkış Kaydını Sil', `"${row.urunAciklama || row.productType || 'Bu kayıt'}" çıkış kaydı silinecek. Stok değişmez. Onaylıyor musunuz?`)
+            : confirm('Çıkış kaydı silinsin mi?');
+        if (ok !== true) return;
+        if (await window.removeItem('b3', row.id) === false) { _alert('Kayıt silinemedi.', 'error'); return; }
 
-            if (typeof window.renderExitTable === 'function') {
-                window.renderExitTable();
-            } else {
-                if (typeof window.renderTable === 'function') window.renderTable('b3');
-            }
-
-            if (typeof window.showAppAlert === 'function') window.showAppAlert('Kayıt başarıyla silindi.', 'success');
-        }
+        if (typeof window.renderExitTable === 'function') window.renderExitTable();
+        else if (typeof window.renderTable === 'function') window.renderTable('b3');
+        _alert('Kayıt başarıyla silindi.', 'success');
     } catch (error) {
         console.error('Silme hatası:', error);
         if (typeof window.showAppAlert === 'function') window.showAppAlert('Kayıt silinirken bir hata oluştu!', 'error');
@@ -491,44 +358,39 @@ export const deleteB3Row = async function (index) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Legacy compatibility support for other functions
 // ─────────────────────────────────────────────────────────────────────────────
-export const toggleStatus = function (depo, index) {
-    const item = window.data[depo] && window.data[depo][index];
-    if (!item) return;
+export const toggleStatus = async function (depo, id) {
+    const item = _find(depo, id);
+    if (!item) { _missing(); return; }
 
-    if (depo === 'b1') {
-        item.durumu = (item.durumu === 'Pasif' ? 'Aktif' : 'Pasif');
-    } else {
-        item.status = (item.status === 'Pasif' ? 'Aktif' : 'Pasif');
+    const field = depo === 'b1' ? 'durumu' : 'status';
+    if (await window.updateItem(depo, item.id, { [field]: item[field] === 'Pasif' ? 'Aktif' : 'Pasif' }) === false) {
+        _alert('Durum kaydedilemedi.', 'error');
+        return;
     }
-
-    if (typeof window.saveData === 'function') window.saveData(window.data);
     if (typeof window.renderTable === 'function') window.renderTable(depo);
 };
 
-export const _bulkDeleteSelected = async function (depo, indices) {
+// Toplu silme: seçili satırların id'leri (FAB). Onaylı ve bilinçli toplu işlem → bulkRemove (tek atomik batch).
+export const _bulkDeleteSelected = async function (depo, ids) {
     if (!window.checkIsAdmin || !window.checkIsAdmin()) {
         if (typeof window.showAppAlert === 'function') window.showAppAlert('Bu işlem için yetkiniz yok!', 'error');
         return;
     }
 
+    const targets = (ids || []).map(id => _find(depo, id)).filter(Boolean);
+    if (targets.length === 0 || targets.length < (ids || []).length) { _missing(); return; }
+
     const onay = (typeof window.showCustomConfirm === 'function')
-        ? await window.showCustomConfirm('Toplu Silme', `${indices.length} kayıt kalıcı olarak silinecek. Onaylıyor musunuz?`)
-        : confirm(`${indices.length} kayıt silinecek. Devam edilsin mi?`);
+        ? await window.showCustomConfirm('Toplu Silme', `${targets.length} kayıt kalıcı olarak silinecek. Onaylıyor musunuz?`)
+        : confirm(`${targets.length} kayıt silinecek. Devam edilsin mi?`);
 
-    if (!onay) return;
+    if (onay !== true) return;
 
-    indices.sort((a, b) => b - a).forEach(idx => {
-        if (window.data[depo] && window.data[depo][idx]) {
-            window.data[depo].splice(idx, 1);
-        }
-    });
-
-    // Kullanıcı onaylı toplu silme: saveData v2 toplu silme kilidi bilinçli olarak açılır (Faz 3.1).
-    await window.saveData(window.data, { allowBulkDelete: true });
+    if (await window.bulkRemove(depo, targets.map(t => t.id)) === false) { _alert('Toplu silme kaydedilemedi; hiçbir kayıt silinmedi.', 'error'); return; }
 
     if (typeof window.clearRowSelection === 'function') window.clearRowSelection();
     if (typeof window.renderTable === 'function') window.renderTable(depo);
-    if (typeof window.showAppAlert === 'function') window.showAppAlert(`${indices.length} kayıt başarıyla silindi.`, 'success');
+    _alert(`${targets.length} kayıt başarıyla silindi.`, 'success');
 };
 
 export const toggleSelectAll = function (depo) {

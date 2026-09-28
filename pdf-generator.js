@@ -1,8 +1,10 @@
-window.generateZimmetPDF = function(index) {
+// Argüman b3 kaydının id'sidir (DATA-06: indeks snapshot'ta kayar).
+window.generateZimmetPDF = function(id) {
     const { jsPDF } = window.jspdf; 
     const doc = new jsPDF(); 
 
-    const item = data.b3[index];
+    const item = (window.data.b3 || []).find(x => x && String(x.id) === String(id));
+    if (!item) { if (typeof showAppAlert === 'function') showAppAlert('Kayıt bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     const activeUser = window.getActiveUser() || { name: 'Sistem Yöneticisi' };
 
     // Logo (Placeholder - gerçek logo için doc.addImage(base64, 'PNG', x, y, w, h))

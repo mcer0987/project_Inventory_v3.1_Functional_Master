@@ -255,8 +255,8 @@ window.closeRequestModal = window.closeRequestModal || function () {
 window.handleTypeChange = window.handleTypeChange || function (selectElement) {
     if (window.AppModules?.UI?.handleTypeChange) window.AppModules.UI.handleTypeChange(selectElement);
 };
-window.selectProduct = window.selectProduct || function (name, type, shelf, qty, repo, index) {
-    if (window.AppModules?.UI?.selectProduct) window.AppModules.UI.selectProduct(name, type, shelf, qty, repo, index);
+window.selectProduct = window.selectProduct || function (name, type, shelf, qty, repo, index, id) {
+    if (window.AppModules?.UI?.selectProduct) window.AppModules.UI.selectProduct(name, type, shelf, qty, repo, index, id);
 };
 window.openModal = window.openModal || function (modalId) {
     if (window.AppModules?.UI?.openModal) window.AppModules.UI.openModal(modalId);
@@ -548,7 +548,7 @@ function renderMyRequestsTable() {
     }
 
     myReqs.forEach((req) => {
-        const realIndex = window.data.requests.findIndex(r => r === req);
+        const rid = jsArg(req.id); // DATA-06: işlemler talep id'siyle
         const row = tbody.insertRow();
         const rawDurum = (req.durum || '').trim().toUpperCase();
         const isApproved = rawDurum === 'APPROVED' || rawDurum === 'ONAYLANDI';
@@ -577,15 +577,15 @@ function renderMyRequestsTable() {
                 ${isCompleted ?
                 `<div class="status-badge-pill status-completed-pill" style="min-width: 120px; justify-content: center; margin: 0 auto;">Teslim Alındı</div>` :
                 isApproved ?
-                    `<button class="save-btn" onclick="receiveProduct(${realIndex})" style="background-color: var(--color-primary); cursor: pointer; min-width: 120px;">Teslim Aldım</button>` :
+                    `<button class="save-btn" onclick="receiveProduct(${rid})" style="background-color: var(--color-primary); cursor: pointer; min-width: 120px;">Teslim Aldım</button>` :
                     isDraft ?
                         `<div class="d-flex gap-1" style="justify-content: center;">
-                        <button class="edit-btn" onclick="window.editPersonnelInventoryRequest(${realIndex})" style="padding: 5px 10px; font-size: 11px;">Düzenle</button>
-                        <button class="save-btn" onclick="window.sendDraftInventoryRequest(${realIndex})" style="padding: 5px 10px; font-size: 11px; background: #10b981;">Gönder</button>
+                        <button class="edit-btn" onclick="window.editPersonnelInventoryRequest(${rid})" style="padding: 5px 10px; font-size: 11px;">Düzenle</button>
+                        <button class="save-btn" onclick="window.sendDraftInventoryRequest(${rid})" style="padding: 5px 10px; font-size: 11px; background: #10b981;">Gönder</button>
                      </div>` :
                         isRejected ?
                             `<div class="status-badge-pill status-rejected-pill" style="min-width: 120px; justify-content: center; margin: 0 auto;">Talep Reddedildi</div>` :
-                            `<button class="delete-btn" onclick="window.withdrawInventoryRequest(${realIndex})" style="background-color: #fca5a5; color: #7f1d1d; min-width: 120px; font-size: 11px;">Talebi Geri Çek</button>`
+                            `<button class="delete-btn" onclick="window.withdrawInventoryRequest(${rid})" style="background-color: #fca5a5; color: #7f1d1d; min-width: 120px; font-size: 11px;">Talebi Geri Çek</button>`
             }
             </td>
         `;
@@ -851,23 +851,35 @@ window.deleteRequest = async function (requestId) {
     showAppAlert("Talep kaydı kalıcı olarak silindi.", "info");
 };
 
-window.withdrawInventoryRequest = async function (index) {
-    const req = window.data.requests[index];
+// [WHY]: Personelin talep işlemleri dizi indeksiyle çalışıyordu; snapshot sonrası başka bir talebi hedefleyebiliyordu (DATA-06)
+//        ve koleksiyonun tamamını yazıyordu. Durum kontrolü yoktu (onaylanmış talep "geri çekilip" taslağa dönebiliyordu).
+// [HOW]: Talep id ile bulunur; yalnız kendi talebi ve uygun durumdaysa; yalnız değişen alanlar yazılır (updateItem).
+const _myRequest = id => {
+    const req = (window.data.requests || []).find(r => String(r.id) === String(id));
+    const me = (window.getActiveUser()?.name || '').trim().toLowerCase();
+    if (!req || (req.personel || '').trim().toLowerCase() !== me) {
+        showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error');
+        return null;
+    }
+    return req;
+};
+
+window.withdrawInventoryRequest = async function (id) {
+    const req = _myRequest(id);
     if (!req) return;
+    if (!_isPendingRequest(req)) { showAppAlert('Yalnız onay bekleyen bir talep geri çekilebilir.', 'warning'); renderMyRequestsTable(); return; }
     const onay = await showCustomConfirm("Talebi Geri Çek", `${req.ürün} talebinizi geri çekmek (taslağa almak) istediğinize emin misiniz?`);
     if (onay === true) {
-        req.durum = 'draft';
-        // [WHY]: Tam kayıt personel oturumunda b1'de reddedilip hiçbir şeyi kaydetmiyordu (ITSM-03, DATA-03).
-        await window.saveData('requests', window.data.requests);
+        if (await window.updateItem('requests', req.id, { durum: 'draft' }) === false) { showAppAlert('Talep geri çekilemedi.', 'error'); return; }
         if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
         showAppAlert("Talebiniz geri çekildi ve TASLAK moduna alındı.", "info");
     }
 };
 
-window.editPersonnelInventoryRequest = function (index) {
-    const req = window.data.requests[index];
+window.editPersonnelInventoryRequest = function (id) {
+    const req = _myRequest(id);
     if (!req) return;
-    window.editingReqIndex = index;
+    window.editingReqIndex = null;
     window.editingReqId = req.id;
     const nameInput = document.getElementById('reqProdName');
     const qtyInput = document.getElementById('reqQty');
@@ -887,12 +899,12 @@ window.editPersonnelInventoryRequest = function (index) {
     if (typeof window.onReqTypeChange === 'function') window.onReqTypeChange();
 };
 
-window.sendDraftInventoryRequest = async function (index) {
-    const req = window.data.requests[index];
+window.sendDraftInventoryRequest = async function (id) {
+    const req = _myRequest(id);
     if (!req) return;
-    req.durum = 'Beklemede';
-    req.tarih = getTurkiyeTarihi();
-    await window.saveData('requests', window.data.requests);
+    const d = String(req.durum || '').trim().toUpperCase();
+    if (d !== 'DRAFT' && d !== 'TASLAK') { showAppAlert('Bu talep taslak değil.', 'warning'); renderMyRequestsTable(); return; }
+    if (await window.updateItem('requests', req.id, { durum: 'Beklemede', tarih: getTurkiyeTarihi() }) === false) { showAppAlert('Talep gönderilemedi.', 'error'); return; }
     if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
     showAppAlert("Talebiniz başarıyla onaya gönderildi.", "success");
 };
@@ -1127,7 +1139,7 @@ window.searchForExit = function () {
         const stock = item.adet !== undefined ? item.adet : (item.qty || 0);
         div.innerHTML = `<strong>${escapeHtml(item.ürün || item.name || '-')}</strong> <small>(${escapeHtml(item.marka || item.tür || '-')})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${escapeHtml(item.raf || item.shelf || '-')} | Stok: ${stock} | Depo: ${escapeHtml(item._repo.toUpperCase())}</span>`;
         if (stock > 0) {
-            div.onclick = () => window.selectProduct(item.ürün || item.name, item.tür || item.type || item.marka, item.raf || item.shelf, stock, item._repo, item._index);
+            div.onclick = () => window.selectProduct(item.ürün || item.name, item.tür || item.type || item.marka, item.raf || item.shelf, stock, item._repo, item._index, item.id);
         } else {
             div.style.opacity = '0.5'; div.style.pointerEvents = 'none'; div.innerHTML += ' <b style="color:red;">(STOK YOK)</b>';
         }
@@ -1194,8 +1206,8 @@ function renderExitTable() {
             <td>${escapeHtml(row.alanKisi)}</td>
             <td>${escapeHtml(row.tarih)}</td>
             <td>
-                <button class="pdf-btn" onclick="generateZimmetPDF(${index})">PDF</button>
-                <button class="delete-btn" onclick="if(validateAdminAction()) deleteB3Row(${index})">Sil</button>
+                <button class="pdf-btn" onclick="generateZimmetPDF(${jsArg(item.id)})">PDF</button>
+                <button class="delete-btn" onclick="if(validateAdminAction()) deleteB3Row(${jsArg(item.id)})">Sil</button>
             </td>
         </tr>`;
     }).join('');
