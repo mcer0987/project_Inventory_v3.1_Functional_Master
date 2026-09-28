@@ -430,6 +430,60 @@ const SCENARIOS = {
         });
     },
 
+    // Tur 2.5 revizyon · B3 table reads both schemas, exit form fills Raf No, "Taleplerim" shows delivery date,
+    // unit/approval dialogs follow the dark theme. In-memory data only (nothing is saved).
+    async tur25Revisions(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, out = {};
+            const orig = { b1: window.data.b1, b3: window.data.b3, requests: window.data.requests };
+            const prod = { id: 'b1_rev', ürün: 'Rev Laptop', tür: 'Laptop', raf: 'R-7', adet: 4 };
+            window.data.b1 = [...(orig.b1 || []), prod];
+            window.data.b3 = [
+                { id: 1, rafNo: 'R-1', urunTuru: 'Kablo', urunAciklama: 'HDMI', sn: 'S1', adet: 3, not: 'eski', alanKisi: 'A', tarih: '01.01.2026' },
+                { id: 2, shelfNo: 'R-7', productType: 'Rev Laptop', productId: 'b1_rev', sourceRepo: 'b1', sn: 'S2', sarfAdet: 1, note: 'yeni', alanKisi: 'B', date: '02.01.2026', talepTuru: 'Kalıcı Zimmet' },
+            ];
+            window.renderExitTable();
+            const cells = n => [...document.querySelectorAll('#tableB3 tbody tr')][n].querySelectorAll('td');
+            const txt = n => [...cells(n)].slice(0, 8).map(td => td.textContent.trim());
+            out.b3Legacy = txt(0);
+            out.b3New = txt(1);
+
+            window.openExitModal();
+            window.selectProduct(prod.ürün, prod.tür, prod.raf, prod.adet, 'b1', window.data.b1.length - 1);
+            out.exitShelf = { shelf: document.getElementById('exitShelfNo').value, qtyMax: document.getElementById('exitQty').max };
+            window.openExitModal();
+            out.exitShelfResetOnOpen = document.getElementById('exitShelfNo').value === '' && !document.getElementById('exitQty').hasAttribute('max');
+            window.closeExitModal?.();
+
+            window.setActiveUser({ name: 'Rev User ' + ft.MARKER });
+            window.data.requests = [
+                { id: 11, ürün: 'Mouse', adet: 1, personel: 'Rev User ' + ft.MARKER, durum: 'completed', tarih: '01.01.2026', teslimTarihi: '05.01.2026' },
+                { id: 12, ürün: 'Klavye', adet: 1, personel: 'Rev User ' + ft.MARKER, durum: 'Beklemede', tarih: '03.01.2026' },
+            ];
+            window.renderMyRequestsTable();
+            out.myRequests = {
+                header: [...document.querySelectorAll('#tableMyRequests thead th')].map(th => th.textContent.trim()),
+                rows: [...document.querySelectorAll('#tableMyRequests tbody tr')].map(tr => [...tr.querySelectorAll('td')].map(td => td.textContent.trim().replace(/\s+/g, ' ')).slice(0, 4)),
+            };
+
+            document.documentElement.setAttribute('data-theme', 'dark');
+            window.openUnitModal();
+            const bg = sel => getComputedStyle(document.querySelector(sel)).backgroundColor;
+            out.darkUnit = { box: bg('#unitModal .um-box'), input: bg('#unitNameInput'), text: getComputedStyle(document.querySelector('#unitModal .um-box')).color };
+            window.closeUnitModal();
+            window.data.requests = [{ id: 13, ürün: 'Rev Laptop', adet: 1, personel: 'X', durum: 'Beklemede' }];
+            const p = window.showRequestApprovalModal(window.data.requests[0]);
+            await ft.sleep(50);
+            out.darkApproval = { box: bg('#requestApprovalModal > div'), select: bg('#raSource') };
+            document.getElementById('raCancel').click(); await p;
+            document.documentElement.removeAttribute('data-theme');
+
+            Object.assign(window.data, orig);
+            window.renderExitTable(); window.renderMyRequestsTable();
+            return out;
+        });
+    },
+
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
     async systemConfigScope(page) {
         return page.evaluate(async () => {
