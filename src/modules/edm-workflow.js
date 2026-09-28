@@ -104,131 +104,163 @@ window.initEBYSModal = function () {
     }
 };
 
-window.addNewUnit = async function () {
-    const input = document.getElementById('newUnitName');
-    const name = input.value.trim();
-    if (!name) return;
+// [WHY]: Birim yönetimi bozuktu (EBYS-15): modal modül-yerel durumu, saveUnitData ise hiç atanmayan window.* durumunu okuyordu
+//        (düzenleme ikinci birim oluşturuyor, personel kaydolmuyordu); personel araması sonuç çizmiyordu; deleteUnit(index)
+//        id ile çağrılıyordu (yanlış birim ya da hiçbiri silinir); admin.html'de #unitModal yoktu (buton TypeError). addNewUnit
+//        birimleri düz metin olarak yazıyordu (ölü kod, kaldırıldı).
+// [HOW]: Tek durum nesnesi (unitEditor); modal işaretlemesi yalnız burada, yoksa enjekte edilir (iki sayfada aynı);
+//        arama sonuçları çizilir ve tıklanarak seçilir; kaydet/sil id ile, yalnız 'units' yazılır ve sonuç kontrol edilir.
+const unitEditor = { id: null, personnel: [], saving: false };
+const _unitName = u => (u && typeof u === 'object') ? (u.name || u.birimAdi || '') : String(u || '');
+const _personName = p => (p && (p.name || p.adSoyad || p.ad)) || '';
+const _unitAlert = (msg, type) => { if (typeof showAppAlert === 'function') showAppAlert(msg, type); else alert(msg); };
 
-    if (!window.data.units) window.data.units = [];
-    window.data.units.push(name);
-
-    // [BUGFIX] Bug 5: Targeted save for units
-    await window.saveData('units', window.data.units);
-    input.value = "";
-    window.renderUnitManagement();
-    if (typeof showAppAlert === 'function') showAppAlert("Birim başarıyla eklendi.", "success");
-};
-
-window.deleteUnit = async function (index) {
-    if (confirm("Bu birimi silmek istediğinize emin misiniz?")) {
-        window.data.units.splice(index, 1);
-        // [BUGFIX] Bug 5: Targeted save for units
-        await window.saveData('units', window.data.units);
-        window.renderUnitManagement();
-    }
-};
-
-// ebys-workflow.js
-let currentEditingUnitId = null;
-let tempSelectedPersonnel = [];
+function _ensureUnitModal() {
+    if (document.getElementById('unitModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'unitModal';
+    modal.style.cssText = 'display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10500; align-items:flex-start; justify-content:center; overflow-y:auto;';
+    modal.innerHTML = `
+        <div style="background:#fff; color:#1e293b; width:500px; max-width:94vw; margin:50px auto; padding:20px; border-radius:8px;">
+            <h3 id="unitModalTitle" style="margin-top:0;">Yeni Birim Tanımla</h3>
+            <hr>
+            <label for="unitNameInput">Birim Adı:</label>
+            <input type="text" id="unitNameInput" placeholder="Örn: Bilgi İşlem" autocomplete="off"
+                style="width:100%; box-sizing:border-box; padding:8px; margin:4px 0 15px;">
+            <label for="unitPersonnelSearch">Personel Ekle (Ara/Seç):</label>
+            <input type="text" id="unitPersonnelSearch" placeholder="Personel adı yazın (en az 2 harf)..." autocomplete="off"
+                oninput="window.searchPersonnelForUnit(this.value)"
+                style="width:100%; box-sizing:border-box; padding:8px; margin-top:4px;">
+            <div id="unitPersonnelResults" style="display:none; border:1px solid #ddd; border-top:none; max-height:180px; overflow-y:auto; background:#fff;"></div>
+            <div style="margin-top:20px;">
+                <label><b>Atanan Personeller:</b></label>
+                <ul id="unitSelectedPersonnel" style="list-style:none; padding:0; margin:10px 0 0; max-height:150px; overflow-y:auto;"></ul>
+            </div>
+            <div style="margin-top:20px; text-align:right;">
+                <button type="button" onclick="window.closeUnitModal()" style="padding:8px 15px; border:1px solid #cbd5e1; background:#fff; border-radius:4px; cursor:pointer;">Vazgeç</button>
+                <button type="button" id="unitSaveBtn" onclick="window.saveUnitData()" style="background:#27ae60; color:#fff; padding:8px 15px; border:none; border-radius:4px; cursor:pointer;">Kaydet</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
 
 // --- MODAL KONTROLLERİ ---
 window.openUnitModal = function (unitId = null) {
-    const modal = document.getElementById('unitModal');
-    currentEditingUnitId = unitId;
-    tempSelectedPersonnel = [];
-    document.getElementById('unitModal').style.display = 'block';
+    _ensureUnitModal();
+    const unit = unitId != null ? (window.data.units || []).find(u => u && typeof u === 'object' && String(u.id) === String(unitId)) : null;
+    if (unitId != null && !unit) { _unitAlert('Birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
 
-    if (unitId) {
-        // Düzenleme Modu
-        const unit = window.data.units.find(u => u.id === unitId);
-        document.getElementById('unitModalTitle').innerText = "Birimi Düzenle";
-        document.getElementById('modalUnitName').value = unit.name;
-        tempSelectedPersonnel = [...(unit.personnel || [])];
-    } else {
-        // Yeni Kayıt
-        document.getElementById('unitModalTitle').innerText = "Yeni Birim Tanımla";
-        document.getElementById('modalUnitName').value = "";
-    }
+    unitEditor.id = unit ? String(unit.id) : null;
+    unitEditor.personnel = unit ? [...(unit.personnel || [])] : [];
+    document.getElementById('unitModalTitle').innerText = unit ? 'Birimi Düzenle' : 'Yeni Birim Tanımla';
+    document.getElementById('unitNameInput').value = unit ? _unitName(unit) : '';
+    document.getElementById('unitPersonnelSearch').value = '';
+    document.getElementById('unitPersonnelResults').style.display = 'none';
     window.renderSelectedPersonnel();
+    document.getElementById('unitModal').style.display = 'flex';
+    document.getElementById('unitNameInput').focus();
 };
 
 window.closeUnitModal = function () {
-    document.getElementById('unitModal').style.display = 'none';
+    const modal = document.getElementById('unitModal');
+    if (modal) modal.style.display = 'none';
 };
 
 // --- PERSONEL ARAMA VE SEÇME ---
 window.searchPersonnelForUnit = function (query) {
-    const resultArea = document.getElementById('searchResultList');
-    if (!query || query.length < 2) {
-        resultArea.style.display = 'none';
-        return;
-    }
+    const resultArea = document.getElementById('unitPersonnelResults');
+    if (!resultArea) return;
+    const term = String(query || '').toLocaleLowerCase('tr-TR').trim();
+    if (term.length < 2) { resultArea.style.display = 'none'; resultArea.innerHTML = ''; return; }
 
-    // window.data.personel veya staff'ın dizi olduğundan emin oluyoruz
-    const allPersonnel = window.data?.personel || window.data?.staff || [];
-    const searchTerm = query.toLocaleLowerCase('tr-TR').trim();
+    const chosen = new Set(unitEditor.personnel.map(n => n.toLocaleLowerCase('tr-TR')));
+    const names = [...new Set([...(window.data?.personel || []), ...(window.data?.staff || [])].map(_personName).filter(Boolean))];
+    const matches = names.filter(n => n.toLocaleLowerCase('tr-TR').includes(term)).slice(0, 10);
 
-    const filtered = allPersonnel.filter(p => {
-        if (!p) return false;
-        // Sadece string olan alanlarda arama yap (Güvenli yöntem)
-        const namePart = (p.adSoyad || p.ad || p.name || "").toLocaleLowerCase('tr-TR');
-        return namePart.includes(searchTerm);
-    });
-    // ... geri kalan render kodun aynı kalabilir
+    resultArea.innerHTML = matches.length
+        ? matches.map(n => {
+            const already = chosen.has(n.toLocaleLowerCase('tr-TR'));
+            return `<div class="unit-personnel-option" ${already ? '' : `onclick="window.addPersonnelToTempList(${jsArg(n)})"`}
+                style="padding:8px 10px; border-bottom:1px solid #f1f5f9; cursor:${already ? 'default' : 'pointer'}; color:${already ? '#94a3b8' : 'inherit'};"
+                ${already ? '' : `onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background=''"`}>
+                ${escapeHtml(n)}${already ? ' (eklendi)' : ''}</div>`;
+        }).join('')
+        : '<div style="padding:8px 10px; color:#94a3b8;">Eşleşen personel bulunamadı.</div>';
+    resultArea.style.display = 'block';
 };
 
 window.addPersonnelToTempList = function (name) {
-    if (!tempSelectedPersonnel.includes(name)) {
-        tempSelectedPersonnel.push(name);
+    const n = String(name || '').trim();
+    if (n && !unitEditor.personnel.some(x => x.toLocaleLowerCase('tr-TR') === n.toLocaleLowerCase('tr-TR'))) {
+        unitEditor.personnel.push(n);
         window.renderSelectedPersonnel();
     }
-    document.getElementById('personnelSearch').value = "";
-    document.getElementById('searchResultList').style.display = 'none';
+    const search = document.getElementById('unitPersonnelSearch');
+    if (search) { search.value = ''; search.focus(); }
+    const results = document.getElementById('unitPersonnelResults');
+    if (results) results.style.display = 'none';
 };
 
 window.removePersonnelFromTempList = function (index) {
-    tempSelectedPersonnel.splice(index, 1);
+    unitEditor.personnel.splice(index, 1);
     window.renderSelectedPersonnel();
 };
 
 window.renderSelectedPersonnel = function () {
-    const list = document.getElementById('selectedPersonnelList');
-    list.innerHTML = tempSelectedPersonnel.map((name, index) => `
-        <li class="list-group-item d-flex justify-content-between align-items-center" style="padding:5px 10px; background:#f9f9f9; border-bottom:1px solid #ddd; display:flex; justify-content:space-between;">
-            ${name}
-            <button onclick="window.removePersonnelFromTempList(${index})" style="background:none; border:none; color:red; cursor:pointer;">&times;</button>
-        </li>
-    `).join('') || '<small class="text-muted">Henüz personel atanmadı.</small>';
+    const list = document.getElementById('unitSelectedPersonnel');
+    if (!list) return;
+    list.innerHTML = unitEditor.personnel.map((name, index) => `
+        <li style="padding:5px 10px; background:#f9f9f9; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center;">
+            ${escapeHtml(name)}
+            <button type="button" onclick="window.removePersonnelFromTempList(${index})" title="Çıkar" style="background:none; border:none; color:red; cursor:pointer; font-size:16px;">&times;</button>
+        </li>`).join('') || '<li><small style="color:#94a3b8;">Henüz personel atanmadı.</small></li>';
 };
 
 // --- VERİ KAYDETME ---
 window.saveUnitData = async function () {
-    const nameEl = document.getElementById('modalUnitName');
-    const name = nameEl ? nameEl.value.trim() : "";
+    if (unitEditor.saving) return;
+    const name = (document.getElementById('unitNameInput')?.value || '').trim();
+    if (!name) { _unitAlert('Birim adı boş olamaz!', 'warning'); return; }
 
-    if (!name) { alert("Birim adı boş olamaz!"); return; }
-    if (!window.data) { window.data = {}; } // window.data undefined ise hata vermesini önler
-    if (!window.data.units) window.data.units = [];
-
-    const newUnit = {
-        id: window.currentEditingUnitId || Date.now().toString(),
-        name: name,
-        personnel: window.tempSelectedPersonnel,
-        updatedAt: new Date().toLocaleString('tr-TR')
-    };
-
-    if (window.currentEditingUnitId) {
-        const index = window.data.units.findIndex(u => u.id === window.currentEditingUnitId);
-        if (index > -1) window.data.units[index] = newUnit;
-    } else {
-        window.data.units.push(newUnit);
+    const units = (window.data.units || []).filter(u => u && typeof u === 'object');
+    const lower = name.toLocaleLowerCase('tr-TR');
+    if (units.some(u => String(u.id) !== unitEditor.id && _unitName(u).trim().toLocaleLowerCase('tr-TR') === lower)) {
+        _unitAlert(`"${name}" adında bir birim zaten var.`, 'warning');
+        return;
     }
 
-    // [BUGFIX] Bug 5: Targeted save for units
-    await window.saveData('units', window.data.units);
-    window.closeUnitModal();
-    if (typeof window.renderUnitManagement === "function") window.renderUnitManagement();
+    const stamp = new Date().toLocaleString('tr-TR');
+    let next;
+    if (unitEditor.id) {
+        if (!units.some(u => String(u.id) === unitEditor.id)) { _unitAlert('Düzenlenen birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        next = units.map(u => String(u.id) === unitEditor.id ? { ...u, name, personnel: [...unitEditor.personnel], updatedAt: stamp } : u);
+    } else {
+        next = [...units, { id: Date.now().toString(), name, personnel: [...unitEditor.personnel], updatedAt: stamp }];
+    }
+
+    unitEditor.saving = true;
+    try {
+        if (await window.saveData('units', next) === false) { _unitAlert('Birim kaydedilemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error'); return; }
+        const wasEdit = !!unitEditor.id;
+        window.closeUnitModal();
+        window.renderUnitManagement();
+        _unitAlert(wasEdit ? 'Birim güncellendi.' : 'Birim eklendi.', 'success');
+    } finally {
+        unitEditor.saving = false;
+    }
+};
+
+window.deleteUnit = async function (unitId) {
+    const unit = (window.data.units || []).find(u => u && typeof u === 'object' && String(u.id) === String(unitId));
+    if (!unit) { _unitAlert('Birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+    const ok = typeof showCustomConfirm === 'function'
+        ? await showCustomConfirm('Birimi Sil', `"${_unitName(unit)}" birimi silinecek. Emin misiniz?`)
+        : window.confirm('Bu birimi silmek istediğinize emin misiniz?');
+    if (ok !== true) return;
+    const next = (window.data.units || []).filter(u => !(u && typeof u === 'object' && String(u.id) === String(unitId)));
+    if (await window.saveData('units', next) === false) { _unitAlert('Birim silinemedi.', 'error'); return; }
+    window.renderUnitManagement();
+    _unitAlert('Birim silindi.', 'info');
 };
 
 // "İlgili Birim" ve "Ürün Türü" kısımları da boş geliyorsa, onları da şu fonksiyonla besle
@@ -1416,7 +1448,6 @@ window.renderMyApprovals = function () {
 
 // edm-workflow.js'nin EN ALTINA ekle
 window.initEBYSModal = initEBYSModal;
-window.addNewUnit = addNewUnit;
 
 // --- İŞ AKIŞI ŞABLONLARI (WORKFLOW TEMPLATES) ---
 window.openTemplateModal = function (id = null) {

@@ -309,6 +309,79 @@ const SCENARIOS = {
         });
     },
 
+    // Tur 2.5 · EBYS-15 — unit modal on both pages: search/select personnel, add, edit by id (no duplicate), delete by id.
+    // 'units' is admin-only: saveData('units') is a recorded stub; window.data.units is restored afterwards.
+    async unitManagement(page, browser) {
+        const probe = async p => p.evaluate(async () => {
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const out = {}, saves = [];
+            const origUnits = window.data.units;
+            window.data.personel = [...(window.data.personel || []), { name: 'Zeynep Flowtest' }, { name: 'Zehra Flowtest' }];
+            window.data.units = [{ id: 'u1', name: 'Mevcut Birim', personnel: ['Zeynep Flowtest'] }, { id: 'u2', name: 'Diğer Birim', personnel: [] }];
+            const realSave = window.saveData;
+            window.saveData = async (col, items) => { if (col !== 'units') return realSave(col, items); saves.push(JSON.parse(JSON.stringify(items))); window.data.units = items; return true; };
+            window.showCustomConfirm = async () => true;
+            const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
+            const $ = id => document.getElementById(id);
+            const visible = el => !!el && getComputedStyle(el).display !== 'none';
+            const type = v => { $('unitPersonnelSearch').value = v; $('unitPersonnelSearch').dispatchEvent(new Event('input')); };
+
+            // the page's own "Yeni Birim Ekle" button opens the modal
+            const btn = [...document.querySelectorAll('button[onclick*="openUnitModal()"]')][0];
+            let err = null; try { btn.click(); } catch (e) { err = e.message; }
+            out.addButton = { found: !!btn, error: err, modalVisible: visible($('unitModal')), count: document.querySelectorAll('#unitModal').length };
+
+            $('unitNameInput').value = 'Yeni Birim FT';
+            type('zeh');
+            const opts = [...document.querySelectorAll('#unitPersonnelResults .unit-personnel-option')];
+            out.search = { resultsVisible: visible($('unitPersonnelResults')), names: opts.map(o => o.textContent.trim()) };
+            opts.find(o => o.textContent.includes('Zehra'))?.click();
+            out.selected = [...document.querySelectorAll('#unitSelectedPersonnel li')].map(li => li.textContent.replace('×', '').trim());
+            type('zehra');
+            out.alreadyMarked = document.querySelector('#unitPersonnelResults .unit-personnel-option')?.textContent.includes('(eklendi)');
+            type('qqqq');
+            out.noMatchMessage = $('unitPersonnelResults').textContent.trim();
+            await window.saveUnitData();
+            const added = saves.at(-1);
+            out.add = { units: added.length, newUnit: added.find(u => u.name === 'Yeni Birim FT')?.personnel, modalClosed: !visible($('unitModal')) };
+
+            // duplicate name is refused
+            window.openUnitModal(); $('unitNameInput').value = '  mevcut birim ';
+            const before = saves.length; await window.saveUnitData();
+            out.duplicateRefused = saves.length === before && alerts.at(-1)?.[0] === 'warning';
+            window.closeUnitModal();
+
+            // edit by id keeps the id and the count, updates personnel
+            window.openUnitModal('u1');
+            out.editPrefill = { name: $('unitNameInput').value, personnel: [...document.querySelectorAll('#unitSelectedPersonnel li')].length };
+            $('unitNameInput').value = 'Mevcut Birim (düz.)';
+            type('zeh'); document.querySelector('#unitPersonnelResults .unit-personnel-option[onclick]')?.click();
+            await window.saveUnitData();
+            const edited = saves.at(-1);
+            out.edit = { units: edited.length, u1: edited.find(u => u.id === 'u1') && { name: edited.find(u => u.id === 'u1').name, personnel: edited.find(u => u.id === 'u1').personnel } };
+
+            // delete by id removes exactly that unit
+            await window.deleteUnit('u2');
+            out.deleteById = saves.at(-1).map(u => u.id).sort().join(',');
+            out.rendered = (document.getElementById('unitListArea') || document.getElementById('adminDefUnitTableBody'))?.textContent.includes('Mevcut Birim (düz.)');
+
+            window.saveData = realSave; window.data.units = origUnits;
+            window.data.personel = window.data.personel.filter(p => !String(p.name).includes('Flowtest'));
+            await sleep(10);
+            return out;
+        });
+        const result = { index: await probe(page) };
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        result.admin = await probe(admin);
+        result.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return result;
+    },
+
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
     async systemConfigScope(page) {
         return page.evaluate(async () => {
