@@ -67,3 +67,17 @@ Tam suite: **20/20**, `pageerror` 0 · smoke: `p3-h2` index/admin `pageerror` 0,
 - TODO modülü görevleri bellekte değiştirip sonra kaydediyor; başarısız kayıtta bellekteki değişiklik kalır (Faz 5, TODO refaktörü).
 - `_purFilesHTML` ek listesi renkleri dark temada sabit (G4 yalnız geçmiş listesini kapsadı).
 - K11: Storage'ın mevcut planda çalışıp çalışmadığı hâlâ açık.
+
+## Saha notları sonrası düzeltmeler (29.09.2026)
+Sahibinin H2 elle doğrulamasından sonra aldığı dört not ve sonuçları:
+
+| Not | Değerlendirme | Hash |
+|---|---|---|
+| Personel kendini akışa onaylayıcı olarak ekleyince "🛡️ Kendi satın alma taleplerinizi onaylayamazsınız!" uyarısı | Uyarı bilinçli bir kural (EBYS-04); asıl hata akışın başlayabilmesiydi: sıra talep sahibine gelince onay reddediliyor, akış o adımda **kalıcı olarak takılıyordu**. Kural artık başlatmada uygulanıyor: `confirmStartWorkflow` talep sahibini (büyük/küçük harf ve boşluk duyarsız) herhangi bir adımda onaylayıcı olarak kabul etmiyor ve adımı belirten uyarı veriyor; akışı kimin başlattığı fark etmez. Onay anındaki eski kontrol ikinci savunma olarak duruyor | `a09ac95` |
+| Başka personelin talebi görüntülenemiyor | Beklenen: personel ekranı yalnız kendi taleplerini listeler. EBYS-12 sahip-veya-yönetici kontrolü arayüzü atlayan çağrılara karşı ikinci savunma; ayrıca elle test gerekmez (§ elle doğrulama 6. adım bu yüzden düşer) | — |
+| Kill switch'i fonksiyonel test etmeli mi? | Hayır; onay kutusunun gelmesi ve butonun açılışta doğru durumu göstermesi yeterli. Bakım modu yalnız istemci tarafı (Firestore erişimini engellemez); gerçek engel Faz 4.2 (RULE-05). Acil durumda Firebase Console'dan yönetilebilir | — |
+| "Takip" butonu tepki vermiyor | Kayıt yapılıyordu (`applyItemOps: b2 1↑`), ama tablo görünümü takip durumunu hiç göstermiyor ve FAB etiketi değişmiyordu. Artık bildirim ("takibe alındı / takipten çıkarıldı"), tabloda ürün adının yanında göz simgesi ve FAB yenilemesi var | `09e1e2b` |
+
+**Maskeleme çifti (`09e1e2b`):** FAB'ı yenilemek eski bir hatayı açığa çıkardı (INV-05): tablo yeniden çizilince seçili satırlar DOM'dan gidiyor ama `_selectedRows` seti kalıyordu; `updateFloatingBar` boş listenin `items[0].depo`'sunu okuyup hata veriyordu. Görünür seçim yoksa set temizleniyor ve FAB gizleniyor.
+
+**Doğrulama:** tarayıcı probu (takip bildirimi + satır simgesi; talep sahibini onaylayıcı yapan başlatma reddedildi, yazma 0; başka onaylayıcıyla başlatma kabul edildi) · `ebysStartStop`, `ebysApprovalGuard`, `idBasedProductOps`, `ebysH2` geçti, `pageerror` 0 · smoke temiz.
