@@ -1350,6 +1350,13 @@
                         </div>
                     </div>
 
+                    <!-- 3.9: servis / dış birim sevkinde yalnız seçilen adet çıkar; demirbaşta cihaz başına kimlik ve önceki servis kayıtları -->
+                    <div id="transDispatchOptions" style="display: none; margin-top: 10px;">
+                        <label>Sevk edilecek adet: <input type="number" id="transQty" min="1" value="1" oninput="window.syncTransferDevices && window.syncTransferDevices()" style="width: 90px; padding: 6px;"></label>
+                        <div id="transDeviceIds" hidden></div>
+                    </div>
+                    <div id="transServiceHistory"></div>
+
                     <div class="form-group" style="margin-top: 10px;">
                         <label>Sevk Notu / Açıklama:</label>
                         <input type="text" id="transNote" placeholder="Örn: Arızalı olduğu için servise gitti." required

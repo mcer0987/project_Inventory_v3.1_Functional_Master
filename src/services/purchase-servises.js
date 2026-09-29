@@ -18,6 +18,10 @@ window.purchaseState = {
 window.data = window.data || {};
 window.data.purchaseOrders = window.data.purchaseOrders || [];
 window.data.serviceRecords = window.data.serviceRecords || [];
+// 3.9b: servis kaydı depoya dönüşte silinmez, kapanır (kapandi: true) — panel ve sayaçlar yalnız açık kayıtları sayar.
+const _openServices = () => (window.data.serviceRecords || []).filter(r => r && r.kapandi !== true);
+const _findService = id => (window.data.serviceRecords || []).find(r => r && String(r.id) === String(id));
+const _deviceIdOf = r => [r.sn, r.envanterNo].find(v => v && v !== '-' && !String(v).includes(',')) || '';
 
 
 console.log("🚀");
@@ -319,7 +323,7 @@ window.renderPurchaseStats = function () {
     // Filtrelemeleri güvenli yapalım
     const pending = orders.filter(x => x.durum === "Onay Bekliyor").length;
     const completed = orders.filter(x => x.durum === "Onaylandı").length;
-    const inService = services.length; // Servistekiler gerçek servis tablosundan gelmeli
+    const inService = services.filter(r => r && r.kapandi !== true).length; // kapanmış (depoya dönmüş) kayıtlar sayılmaz
 
     const elPending = document.getElementById("totalPendingPurchase");
     const elCompleted = document.getElementById("totalCompletedAction");
@@ -673,8 +677,7 @@ window.renderServicesModule = function () {
 
     // 2. Servis & Dış Sevk Tablosu (Sağdaki)
     if (sBody) {
-        const sData = window.data.serviceRecords || [];
-        console.log("🛠️ Servis Tablosu Çiziliyor, Veri Adedi:", sData.length);
+        const sData = _openServices();
 
         const _statusStyle = (durum) => {
             const map = {
@@ -694,7 +697,7 @@ window.renderServicesModule = function () {
             <tr>
                 <td>
                     <div class="fw-bold text-dark">${escapeHtml(item.urunAciklama || 'İsimsiz Ürün')}</div>
-                    <small class="text-muted">${escapeHtml(item.marka || '')}${escapeHtml(item.sn ? ' — SN: ' + item.sn : '')}</small>
+                    <small class="text-muted">${escapeHtml(item.marka || '')}${escapeHtml(item.sn && item.sn !== '-' ? ' — SN: ' + item.sn : '')}${escapeHtml(item.envanterNo && item.envanterNo !== '-' ? ' — Env: ' + item.envanterNo : '')}${item.adet > 1 ? ` — ${escapeHtml(item.adet)} adet` : ''}</small>
                     ${item.sevkTarihi ? `<div style="font-size:10px;color:#aaa;margin-top:2px;">📅 ${escapeHtml(item.sevkTarihi)}</div>` : ''}
                 </td>
                 <td>
@@ -719,6 +722,7 @@ window.renderServicesModule = function () {
                             title="Depoya Geri Al">
                         <i class="fas fa-warehouse"></i>
                     </button>
+                    ${_deviceIdOf(item) ? `<button onclick="window.DeviceIds.showHistory(${jsArg(_deviceIdOf(item))})" class="btn btn-sm btn-outline-info" title="Cihaz geçmişi (servisler dahil)" style="margin-left:3px;"><i class="fas fa-history"></i></button>` : ''}
                 </td>
             </tr>
         `;
@@ -729,19 +733,22 @@ window.renderServicesModule = function () {
     const pCount = document.getElementById('totalPendingPurchase');
     const sCount = document.getElementById('totalInService');
     if (pCount) pCount.innerText = (window.data.purchaseOrders || []).length;
-    if (sCount) sCount.innerText = (window.data.serviceRecords || []).length;
+    if (sCount) sCount.innerText = _openServices().length;
 };
 
 // 3. Servisten Geri Al
 // [WHY]: Servis kaydı silme ve ürünü depoya geri yazma ayrı iki kayıttı; personel oturumunda b1/b2 yazması reddedilirken
 //        servis kaydı silinebildiği için ürün iki yerden de kayboluyordu (EBYS-21). Ürün dizi sonuna yeni kayıt olarak
 //        ekleniyor (aynı id'li kayıt yeniden oluşunca birleşme belirsizdi) ve durumu koşulsuz "Kullanıma Hazır" yapılıyordu.
-// [HOW]: Tek transaction (runStockOps): ürün kaydı artık yoksa orijinal verisiyle yeniden oluşturulur, hâlâ varsa (ör. sevk
-//        sonrası aynı id ile yeniden girilmiş) adedi eklenir; servis kaydı AYNI transaction'da silinir — ya ikisi ya hiçbiri.
+//        (3.9b) Kayıt dönüşte silindiği için aynı cihaz yeniden servise gittiğinde önceki servisler görünmüyordu.
+// [HOW]: Tek transaction (runStockOps): ürün kaydı artık yoksa orijinal verisiyle yeniden oluşturulur, hâlâ varsa adedi eklenir
+//        (sevk artık yalnız seçilen adedi taşır; kayıttaki adet, eski kayıtlarda orijinal satırın adedi); servis kaydı AYNI
+//        transaction'da silinmeden kapatılır (kapandi, "Depoya Döndü", dönüş tarihi/deposu, geçmişe satır) — ya ikisi ya hiçbiri.
 //        Yalnız yönetici. Servisten dönen ürünün durumu yeniden oluşturmada "Kullanıma Hazır" (onarıldı) olur.
 window.receiveFromService = async function (serviceId) {
-    const record = (window.data.serviceRecords || []).find(r => String(r.id) === String(serviceId));
+    const record = _findService(serviceId);
     if (!record) { if (typeof showAppAlert === 'function') showAppAlert('Servis kaydı bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+    if (record.kapandi === true) { if (typeof showAppAlert === 'function') showAppAlert('Bu servis kaydı zaten kapanmış (cihaz depoya dönmüş).', 'info'); return; }
     const targetRepo = ['b1', 'b2'].includes(record.kaynakDepo) ? record.kaynakDepo : 'b1';
 
     const base = record.originalData ? { ...record.originalData } : {
@@ -750,25 +757,32 @@ window.receiveFromService = async function (serviceId) {
         adet: record.adet || 1,
         sn: record.sn || "-"
     };
-    const qty = parseInt(base.adet ?? base.qty ?? 1, 10) || 1;
-    const productId = base.id != null && base.id !== '' ? String(base.id) : `${targetRepo}_${window.makeId()}`;
+    const qty = parseInt(record.adet ?? base.adet ?? base.qty ?? 1, 10) || 1;
+    const productId = base.id != null && base.id !== '' ? String(base.id)
+        : (record.productId != null && record.productId !== '' ? String(record.productId) : `${targetRepo}_${window.makeId()}`);
     const statusField = targetRepo === 'b2' ? 'status' : 'durumu';
     const recovered = {
         ...base, id: productId, adet: qty,
         [statusField]: 'Kullanıma Hazır',
         açıklama: "Servisten Döndü: " + (record.not || ""),
     };
+    delete recovered.sn; delete recovered.envanterNo;   // cihaz kimliği stok satırına değil hareket kayıtlarına aittir
 
     const ok = typeof showCustomConfirm === 'function'
-        ? await showCustomConfirm('Depoya Geri Al', `"${recovered.ürün || '-'}" (${qty} adet) ${targetRepo.toUpperCase()} deposuna geri alınacak ve servis kaydı kapanacak. Onaylıyor musunuz?`)
+        ? await showCustomConfirm('Depoya Geri Al', `"${recovered.ürün || '-'}" (${qty} adet) ${targetRepo.toUpperCase()} deposuna geri alınacak; servis kaydı kapanır ve cihaz geçmişinde kalır. Onaylıyor musunuz?`)
         : window.confirm('Ürün depoya geri alınsın mı?');
     if (ok !== true) return;
 
+    const now = typeof getTurkiyeSaati === 'function' ? getTurkiyeSaati() : new Date().toLocaleString('tr-TR');
+    const yapan = window.currentUser?.name || window.getActiveUser?.()?.name || 'Admin';
     let res;
     try {
         res = await window.runStockOps({
             stock: [{ col: targetRepo, id: productId, delta: qty, createIfMissing: recovered }],
-            writes: [{ op: 'delete', col: 'serviceRecords', id: record.id }]
+            writes: [{ op: 'update', col: 'serviceRecords', id: record.id, fields: {
+                kapandi: true, durum: 'Depoya Döndü', donusTarihi: now, donusDepo: targetRepo,
+                gecmis: [...(Array.isArray(record.gecmis) ? record.gecmis : []), { ts: Date.now(), tarih: now, durum: 'Depoya Döndü', not: `${targetRepo.toUpperCase()} deposuna geri alındı`, yapan }],
+            } }]
         }, { forbiddenMessage: 'Servisten depoya geri alma yalnızca sistem yöneticisi tarafından yapılabilir.' });
     } catch (e) {
         if (typeof showAppAlert === 'function') showAppAlert(`Ürün depoya geri alınamadı; servis kaydı yerinde bırakıldı. ${e.message || ''}`, 'error');
@@ -785,7 +799,7 @@ window.receiveFromService = async function (serviceId) {
 // SERVİS KAYDI GÖRÜNTÜLE (Salt Okunur Modal)
 // ─────────────────────────────────────────────────────────────
 window.viewServiceItem = function (serviceId) {
-    const record = (window.data.serviceRecords || []).find(r => r.id === serviceId);
+    const record = _findService(serviceId);
     if (!record) return;
 
     // Modal yoksa oluştur
@@ -840,6 +854,8 @@ window.viewServiceItem = function (serviceId) {
             ${_f('Demirbaş', dem ? '✅ Evet' : '❌ Hayır')}
             ${_f('Marka', record.marka || '-')}
             ${_f('Seri No', record.sn || '-')}
+            ${_f('Envanter No', record.envanterNo || '-')}
+            ${_f('Adet', record.adet ?? orig.adet ?? '-')}
         </div>
 
         <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:12px;">
@@ -857,6 +873,14 @@ window.viewServiceItem = function (serviceId) {
             <p style="margin:6px 0 0;color:#333;font-size:13px;">${escapeHtml(record.not)}</p>
         </div>` : ''}
 
+        ${Array.isArray(record.gecmis) && record.gecmis.length ? `
+        <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:12px;">
+            <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Durum Geçmişi</label>
+            ${record.gecmis.map(g => `<div style="margin-top:6px;color:#333;font-size:12px;">• ${escapeHtml(g.tarih || '-')} — <b>${escapeHtml(g.durum || '-')}</b>${g.not ? ' · ' + escapeHtml(g.not) : ''}${g.yapan ? ' · ' + escapeHtml(g.yapan) : ''}</div>`).join('')}
+        </div>` : ''}
+
+        ${_deviceIdOf(record) ? `<button type="button" onclick="window.DeviceIds.showHistory(${jsArg(_deviceIdOf(record))})" style="margin-bottom:12px;padding:8px 14px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">🕘 Cihaz geçmişi (servisler dahil)</button>` : ''}
+
         ${orig.açıklama ? `
         <div style="background:#f8f9fa;border-radius:8px;padding:12px;">
             <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Orijinal Açıklama</label>
@@ -871,7 +895,7 @@ window.viewServiceItem = function (serviceId) {
 // SERVİS DURUM GÜNCELLE
 // ─────────────────────────────────────────────────────────────
 window.updateServiceStatus = function (serviceId) {
-    const record = (window.data.serviceRecords || []).find(r => r.id === serviceId);
+    const record = _findService(serviceId);
     if (!record) return;
 
     // Modal yoksa oluştur
@@ -924,24 +948,25 @@ window.updateServiceStatus = function (serviceId) {
         const newStatus = document.getElementById('svcStatusSelect').value;
         const note = document.getElementById('svcStatusNote').value.trim();
 
-        const idx = (window.data.serviceRecords || []).findIndex(r => r.id === serviceId);
-        if (idx === -1) return;
-
-        window.data.serviceRecords[idx].durum = newStatus;
-        if (note) {
-            const prev = window.data.serviceRecords[idx].not || '';
-            window.data.serviceRecords[idx].not = prev ? prev + ' | ' + note : note;
+        // [WHY] (3.9b): Durum bellekte değiştirilip TÜM servis koleksiyonu yazılıyordu (DATA-01); notlar tek alana ekleniyor,
+        //        ne zaman hangi duruma geçtiği kaybolup gidiyordu.
+        // [HOW]: Yalnız bu kayıt güncellenir; her değişiklik tarihli bir geçmiş satırı (gecmis) olarak eklenir.
+        const current = _findService(serviceId);
+        if (!current) { if (typeof showAppAlert === 'function') showAppAlert('Servis kaydı bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        const now = typeof getTurkiyeSaati === 'function' ? getTurkiyeSaati() : new Date().toLocaleString('tr-TR');
+        const yapan = window.currentUser?.name || window.getActiveUser?.()?.name || '-';
+        const fields = {
+            durum: newStatus,
+            gecmis: [...(Array.isArray(current.gecmis) ? current.gecmis : []), { ts: Date.now(), tarih: now, durum: newStatus, not: note, yapan }],
+            ...(note ? { not: current.not ? current.not + ' | ' + note : note } : {}),
+        };
+        if (!(await window.writeOk(window.updateItem('serviceRecords', current.id, fields)))) {
+            if (typeof showAppAlert === 'function') showAppAlert('Durum kaydedilemedi.', 'error');
+            return;
         }
-
-        try {
-            // [BUGFIX] Bug 5: Targeted save only for serviceRecords
-            await window.saveData('serviceRecords', window.data.serviceRecords);
-            document.getElementById('serviceStatusModal').style.display = 'none';
-            if (typeof renderServicesModule === 'function') renderServicesModule();
-            if (typeof showAppAlert === 'function') showAppAlert('Durum güncellendi.', 'success');
-        } catch (e) {
-            if (typeof showAppAlert === 'function') showAppAlert('Kayıt hatası!', 'error');
-        }
+        document.getElementById('serviceStatusModal').style.display = 'none';
+        if (typeof renderServicesModule === 'function') renderServicesModule();
+        if (typeof showAppAlert === 'function') showAppAlert('Durum güncellendi.', 'success');
     };
 
     modal.style.display = 'flex';

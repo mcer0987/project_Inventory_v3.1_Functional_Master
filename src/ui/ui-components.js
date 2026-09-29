@@ -300,6 +300,17 @@ export const UIComponents = {
         if (noteEl)  noteEl.value         = '';
         if (intelEl) intelEl.style.display = 'none';
 
+        // 3.9: sevk adedi (demirbaşta varsayılan 1, sarfta tüm stok — eskiden satırın tamamı giderdi) ve önceki servis kayıtları
+        const dispatchEl = document.getElementById('transDispatchOptions');
+        const qtyEl = document.getElementById('transQty');
+        const stockQty = parseInt(item.adet ?? item.qty ?? 0, 10) || 0;
+        if (dispatchEl) dispatchEl.style.display = 'none';
+        if (qtyEl) { qtyEl.max = String(Math.max(stockQty, 1)); qtyEl.value = window.Schema.isDemirbas(item) ? '1' : String(Math.max(stockQty, 1)); }
+        if (window.DeviceIds) {
+            window.DeviceIds.hide(document.getElementById('transDeviceIds'));
+            window.DeviceIds.renderServiceHint(document.getElementById('transServiceHistory'), { productId: item.id });
+        }
+
         modal.style.display = 'block';
     },
 
@@ -324,6 +335,29 @@ export const UIComponents = {
         } else {
             internalDiv.style.display = 'none';
         }
+        const dispatchEl = document.getElementById('transDispatchOptions');
+        if (dispatchEl) dispatchEl.style.display = (targetData.type === 'external' || targetData.type === 'service') ? 'block' : 'none';
+        this.syncTransferDevices();
+    },
+
+    // Servis/dış sevkte demirbaş: adet kadar cihaz kimliği; girilen kimliklerin önceki servis kayıtları listelenir (3.9a/c).
+    syncTransferDevices() {
+        const box = document.getElementById('transDeviceIds');
+        const hint = document.getElementById('transServiceHistory');
+        const item = (window.data[document.getElementById('transSourceRepo')?.value] || [])
+            .find(x => x && String(x.id) === String(document.getElementById('transIndex')?.value));
+        let target = {};
+        try { target = JSON.parse(document.getElementById('transTarget')?.value || '{}'); } catch (e) { target = {}; }
+        const dispatch = target.type === 'external' || target.type === 'service';
+        if (!box || !window.DeviceIds) return;
+        if (item && dispatch && window.Schema.isDemirbas(item)) {
+            window.DeviceIds.render(box, Number(document.getElementById('transQty')?.value) || 1, {
+                onInput: ids => window.DeviceIds.renderServiceHint(hint, { productId: item.id, ids }),
+            });
+        } else {
+            window.DeviceIds.hide(box);
+        }
+        if (item) window.DeviceIds.renderServiceHint(hint, { productId: item.id, ids: window.DeviceIds.read(box) });
     },
 
     // =========================================================================
@@ -372,23 +406,51 @@ export const UIComponents = {
             ];
             message = 'Ürün Sevk/Transfer talebi sağlandı'; messageType = 'success';
         } else if (targetData.type === 'external' || targetData.type === 'service') {
-            const serviceEntry = {
-                originalData:  { ...originalItem },
+            // [WHY] (3.9): Sevk satırın TAMAMINI depodan siliyordu (37 adetlik satırdan 1 cihaz sevk edilince 37'si gidiyordu),
+            //        seri no sorulmuyordu ve servis kaydı dönüşte silindiği için cihazın servis geçmişi kalmıyordu.
+            // [HOW]: Yalnız seçilen adet düşülür; demirbaşta adet kadar kimlik zorunlu ve cihaz başına bir servis kaydı (adet 1).
+            //        Stok düşümü + servis kayıtları TEK transaction (runStockOps). Kayıt tarihli durum geçmişi (gecmis) taşır.
+            const qty = Number(document.getElementById('transQty')?.value);
+            const stockQty = parseInt(originalItem.adet ?? originalItem.qty ?? 0, 10) || 0;
+            if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Sevk adedi en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+            if (qty > stockQty) { showAppAlert(`Stokta ${stockQty} adet var; ${qty} adet sevk edilemez.`, 'warning'); return; }
+            const demirbas = window.Schema.isDemirbas(originalItem);
+            const chk = window.AssignmentService.checkDeviceIds({ demirbas, qty, ids: window.DeviceIds.read(document.getElementById('transDeviceIds')) });
+            if (!chk.ok) { showAppAlert(chk.errors[0], 'warning'); return; }
+            const now = typeof getTurkiyeSaati === 'function' ? getTurkiyeSaati() : new Date().toLocaleString('tr-TR');
+            const yapan = window.currentUser?.name || window.getActiveUser?.()?.name || 'Admin';
+            const units = demirbas ? chk.ids.map(d => ({ adet: 1, sn: d.sn, envanterNo: d.envanterNo })) : [{ adet: qty, sn: '-', envanterNo: '-' }];
+            const writes = units.map(u => ({ op: 'set', col: 'serviceRecords', item: {
+                id: window.makeId(),
+                originalData:  { ...originalItem, adet: u.adet },
+                productId:     originalItem.id,
                 urunAciklama:  originalItem.ürün || originalItem.name,
                 marka:         originalItem.marka || '',
-                sn:            originalItem.sn || '-',
+                sn:            u.sn,
+                envanterNo:    u.envanterNo,
+                adet:          u.adet,
                 kaynakDepo:    sourceRepo,
                 hedef:         targetData.name,
-                sevkTarihi:    typeof getTurkiyeSaati === 'function' ? getTurkiyeSaati() : new Date().toISOString(),
+                hedefTip:      targetData.type,
+                sevkTarihi:    now,
                 durum:         'Serviste / Yolda',
                 not:           sevkNotu,
-                isDemirbas:    originalItem.isDemirbas
-            };
-            ops = [
-                { op: 'set', col: 'serviceRecords', item: serviceEntry },
-                { op: 'delete', col: sourceRepo, id: originalItem.id }
-            ];
-            message = `${targetData.name} birimine sevk edildi. Servis paneline işlendi.`; messageType = 'info';
+                isDemirbas:    demirbas,
+                kapandi:       false,
+                gecmis:        [{ ts: Date.now(), tarih: now, durum: 'Serviste / Yolda', not: sevkNotu, yapan }],
+            } }));
+            try {
+                await window.runStockOps({ stock: [{ col: sourceRepo, id: originalItem.id, delta: -qty }], writes },
+                    { forbiddenMessage: 'Sevk işlemi yalnızca sistem yöneticisi tarafından yapılabilir.' });
+            } catch (e) {
+                if (typeof showAppAlert === 'function') showAppAlert(`Sevk kaydedilemedi; ürün yerinde bırakıldı. ${e.message || ''}`, 'error');
+                return;
+            }
+            if (typeof showAppAlert === 'function') showAppAlert(`${qty} adet ${targetData.name} birimine sevk edildi (${units.length} servis kaydı). Servis paneline işlendi.`, 'info');
+            UIComponents.closeTransferModal();
+            if (typeof window.renderTable === 'function') window.renderTable(sourceRepo);
+            if (typeof window.renderPurchaseModule === 'function') window.renderPurchaseModule();
+            return;
         } else {
             if (typeof showAppAlert === 'function') showAppAlert('Geçersiz hedef.', 'error');
             return;
@@ -811,6 +873,7 @@ window.openTransferModal        = UIComponents.openTransferModal.bind(UIComponen
 window.handleTransferTargetChange = UIComponents.handleTransferTargetChange.bind(UIComponents);
 window.confirmTransfer          = UIComponents.confirmTransfer.bind(UIComponents);
 window.closeTransferModal       = UIComponents.closeTransferModal.bind(UIComponents);
+window.syncTransferDevices      = UIComponents.syncTransferDevices.bind(UIComponents);
 window.openExitModal            = UIComponents.openExitModal.bind(UIComponents);
 window.closeExitModal           = UIComponents.closeExitModal.bind(UIComponents);
 window.openRequestModal         = UIComponents.openRequestModal.bind(UIComponents);

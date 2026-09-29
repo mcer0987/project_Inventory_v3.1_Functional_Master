@@ -266,9 +266,10 @@ window.inventoryManagementModule = {
                     <i class="fas fa-undo"></i> Zimmetten Düş
                   </button>`;
 
-      // [G] SN varsa Cihaz Geçmişi butonu
-      const historyBtn = (a.sn && a.sn !== '-')
-        ? `<button onclick="window.inventoryManagementModule.showDeviceHistory(${jsArg(String(a.sn))})"
+      // [G] Seri No veya Envanter No varsa Cihaz Geçmişi butonu (3.9c: servis/sevk dahil birleşik geçmiş)
+      const deviceId = [a.sn, a.envanterNo].find(v => v && v !== '-' && !String(v).includes(','));
+      const historyBtn = deviceId
+        ? `<button onclick="window.inventoryManagementModule.showDeviceHistory(${jsArg(String(deviceId))})"
                     title="Bu cihazın tüm zimmet geçmişini gör"
                     style="padding:5px 10px; background:#eff6ff; color:#1d4ed8; border:1px solid #93c5fd; border-radius:8px; cursor:pointer; font-size:11px; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:4px; transition:0.2s;"
                     onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
@@ -814,134 +815,10 @@ window.inventoryManagementModule = {
   // 12. [G] CİHAZ GEÇMİŞİ MODALI
   // ──────────────────────────────────────────
 
-  /**
-   * [G] SN numarasına göre o cihazın tüm zimmet/iade geçmişini gösterir.
-   * B3, requests ve assignments koleksiyonlarını tarar.
-   */
-  showDeviceHistory: function (sn) {
-    if (!sn || sn === '-') {
-      if (typeof showAppAlert === 'function') showAppAlert('Bu cihaz için seri no kaydı bulunamadı.', 'warning');
-      return;
-    }
-
-    const snNorm = sn.trim().toUpperCase();
-
-    // Tüm kaynakları tara
-    const events = [];
-
-    // 1. assignments koleksiyonu (en güvenilir)
-    (window.data?.assignments || []).forEach(a => {
-      if ((a.sn || '').trim().toUpperCase() === snNorm) {
-        events.push({
-          tarih: a.tarih || '-',
-          tip: a.iadeEdildi ? '✅ İade Edildi' : '📌 Zimmetlendi',
-          personel: a.personel || '-',
-          ürün: a.ürün || '-',
-          not: a.not || '-',
-          kaynak: 'assignments',
-          ts: window.Schema.idToTs(a.id)
-        });
-      }
-    });
-
-    // 2. B3 çıkış logları
-    (window.data?.b3 || []).forEach(b => {
-      const n = window.Schema.normalizeB3(b);
-      if (n.sn.trim().toUpperCase() === snNorm) {
-        events.push({
-          tarih: n.tarih,
-          tip: n.tip === 'cikis' ? '📤 Çıkış' : (n.iadeEdildi ? '✅ İade Edildi' : '📌 Zimmetlendi'),
-          personel: n.alanKisi,
-          ürün: n.urunAciklama,
-          not: n.not,
-          kaynak: 'b3',
-          ts: n.ts
-        });
-      }
-    });
-
-    // 3. Talepler (onaylananlar)
-    (window.data?.requests || []).forEach(r => {
-      if ((r.sn || '').trim().toUpperCase() === snNorm) {
-        events.push({
-          tarih: r.tarih || '-',
-          tip: r.iadeEdildi ? '✅ İade Edildi' : '📋 Talep Onayı',
-          personel: r.personel || '-',
-          ürün: r.ürün || '-',
-          not: r.not || '-',
-          kaynak: 'talep',
-          ts: window.Schema.idToTs(r.id)
-        });
-      }
-    });
-
-    // Tarihe göre eskiden yeniye sırala
-    events.sort((a, b) => a.ts - b.ts);
-
-    // Mevcut modal varsa temizle
-    let modal = document.getElementById('deviceHistoryModal');
-    if (!modal) {
-      modal = document.createElement('div');
-      modal.id = 'deviceHistoryModal';
-      modal.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.7); backdrop-filter:blur(8px); z-index:10600; display:flex; align-items:center; justify-content:center;';
-      document.body.appendChild(modal);
-    }
-
-    const eventRows = events.length === 0
-      ? `<tr><td colspan="5" style="text-align:center; padding:32px; color:var(--color-text-muted);"><i class="fas fa-search fa-2x" style="display:block; margin-bottom:12px; opacity:0.3;"></i>Bu seri numarasiyla eslesen kayit bulunamadi.</td></tr>`
-      : events.map((ev, i) => `
-          <tr style="border-bottom:1px solid var(--color-border);">
-            <td style="padding:10px 14px; font-size:12px; color:var(--color-text-muted); white-space:nowrap;">${i + 1}. ${escapeHtml(ev.tarih)}</td>
-            <td style="padding:10px 14px;"><span style="font-size:12px; font-weight:700;">${escapeHtml(ev.tip)}</span></td>
-            <td style="padding:10px 14px; font-weight:600; color:var(--color-text);">${escapeHtml(ev.personel)}</td>
-            <td style="padding:10px 14px; color:var(--color-text-muted); font-size:12px;">${escapeHtml(ev.ürün)}</td>
-            <td style="padding:10px 14px; color:var(--color-text-muted); font-size:11px;">${escapeHtml(ev.not)}</td>
-          </tr>
-        `).join('');
-
-    modal.innerHTML = `
-      <div style="background:var(--color-surface,#fff); border:1px solid var(--color-border); border-radius:20px; width:780px; max-width:96vw; max-height:88vh; overflow-y:auto; box-shadow:0 24px 64px rgba(0,0,0,0.4);">
-        <div style="padding:20px 24px; border-bottom:1px solid var(--color-border); display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; background:var(--color-surface,#fff); z-index:1; border-radius:20px 20px 0 0;">
-          <div>
-            <h4 style="margin:0; font-weight:800; font-size:1.15rem; color:var(--color-text);">
-              <i class="fas fa-history" style="color:var(--color-primary); margin-right:8px;"></i>Cihaz Zimmet Gecmisi
-            </h4>
-            <div style="margin-top:4px; display:flex; align-items:center; gap:8px;">
-              <span style="font-size:13px; color:var(--color-text-muted);">Seri No:</span>
-              <code style="background:var(--color-surface-alt,#f3f4f6); padding:3px 10px; border-radius:6px; font-size:13px; font-weight:700; color:var(--color-primary); letter-spacing:0.5px;">${escapeHtml(sn)}</code>
-              <span style="background:#dbeafe; color:#1e40af; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700;">${events.length} Kayit</span>
-            </div>
-          </div>
-          <button onclick="document.getElementById('deviceHistoryModal').remove()"
-            style="background:none; border:none; font-size:22px; cursor:pointer; color:var(--color-text-muted); width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center;">&times;</button>
-        </div>
-        <div style="padding:20px 24px;">
-          ${ events.length > 0 ? `
-          <div style="margin-bottom:16px; padding:12px 16px; background:#f0fdf4; border:1px solid #86efac; border-radius:10px; display:flex; align-items:center; gap:8px;">
-            <i class="fas fa-info-circle" style="color:#16a34a;"></i>
-            <span style="font-size:13px; color:#166534;">Bu cihaz <b>${events.length}</b> kez islem gormustür. Kronolojik sirayla listelenmektedir.</span>
-          </div>` : '' }
-          <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; font-size:13px;">
-              <thead>
-                <tr style="background:var(--color-surface-alt,#f8fafc); border-bottom:2px solid var(--color-border);">
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Tarih</th>
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Durum</th>
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Personel</th>
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Urun</th>
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Not</th>
-                </tr>
-              </thead>
-              <tbody>${eventRows}</tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `;
-
-    modal.addEventListener('click', function (e) {
-      if (e.target === modal) modal.remove();
-    }, { once: true });
+  // [HOW] (3.9c): Birleşik cihaz geçmişi (zimmet, iade, çıkış, servis/sevk ve dönüşler) iki sayfada ortak pencereden gösterilir;
+  //        kimlik Seri No veya Envanter No olabilir.
+  showDeviceHistory: function (identity) {
+    window.DeviceIds.showHistory(identity);
   },
 
   // 13. HIZLI EKLEME KISA YOLLARI [E][F]

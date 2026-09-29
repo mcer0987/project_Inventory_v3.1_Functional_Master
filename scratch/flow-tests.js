@@ -1386,7 +1386,7 @@ const SCENARIOS = {
             await pr2;
             o.closeWithoutReturn = { calls: calls.map(c => c[0]), writes: calls.at(-1)?.[1].map(w => `${w.op}:${w.col}`) };
 
-            // 3) receiveFromService: one runStockOps with createIfMissing + delete serviceRecord
+            // 3) receiveFromService: one runStockOps with createIfMissing + the service record closed (3.9b: not deleted)
             window.data.serviceRecords = [{ id: 9001, kaynakDepo: 'b1', originalData: { id: 'p9', ürün: 'Yazıcı', adet: 1, durumu: 'Servis Sürecinde' }, not: 'fixed' }];
             calls.length = 0;
             await window.receiveFromService(9001);
@@ -1891,6 +1891,142 @@ const SCENARIOS = {
             } finally {
                 Object.assign(window, { runStockOps: orig.ops, isDbAdmin: orig.adm });
                 Object.assign(window.data, { b1: orig.b1, b3: orig.b3, personel: orig.per });
+            }
+            return o;
+        });
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
+    },
+
+    // H4 · 3.9b-d servis geçmişi: sevk yalnız seçilen adedi düşer, demirbaşta cihaz başına kimlikli servis kaydı; önceki
+    // servisler sevk ekranında görünür; dönüşte kayıt silinmez kapanır; durum geçmişi tek doküman güncellemesi; birleşik geçmiş.
+    async h4ServiceHistory(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, o = {};
+            const orig = { b1: window.data.b1, b2: window.data.b2, b3: window.data.b3, svc: window.data.serviceRecords, pt: window.data.productTypes, ops: window.runStockOps, upd: window.updateItem, adm: window.isDbAdmin, alert: window.showAppAlert, conf: window.showCustomConfirm, chk: window.checkIsAdmin };
+            const alerts = [], calls = [];
+            window.showAppAlert = (m, t) => alerts.push([t, m]);
+            window.showCustomConfirm = async () => true;
+            window.isDbAdmin = () => true; window.checkIsAdmin = () => true;
+            window.runStockOps = async arg => { calls.push(JSON.parse(JSON.stringify(arg))); return { stock: arg.stock.map(s => ({ col: s.col, id: s.id, name: s.id, before: 37, after: 37 + s.delta, created: false })) }; };
+            const upd = []; window.updateItem = async (col, id, fields) => { upd.push({ col, id, fields: JSON.parse(JSON.stringify(fields)) }); return { written: 1 }; };
+            window.data.productTypes = [{ name: 'Laptop', isDemirbas: true }, { name: 'Toner', isDemirbas: false }];
+            window.data.b2 = [{ id: 'ls', ürün: 'Laptop S', tür: 'Laptop', raf: 'Zemin', sütun: 'Saha-1', adet: 37, status: 'Kullanıma Hazır' }];
+            window.data.b1 = [{ id: 'tn', ürün: 'Toner T', tür: 'Toner', raf: 'R-2', adet: 4, durumu: 'Kullanıma Hazır' }];
+            window.data.b3 = [{ id: 500, sema: 2, tip: 'zimmet', kaynakDepo: 'b2', productId: 'ls', urunAciklama: 'Laptop S', adet: 1, sn: 'LS-1', envanterNo: '-', alanKisi: 'Eski Sahip', tarih: '01.08.2026', ts: Date.UTC(2026, 7, 1), talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeEdildi: true, iadeEdildiTarihi: '05.08.2026', iadeDepo: 'b2', isDemirbas: true }];
+            window.data.serviceRecords = [
+                { id: 1789000000000, productId: 'ls', urunAciklama: 'Laptop S', sn: 'LS-1', envanterNo: '-', adet: 1, kaynakDepo: 'b2', hedef: 'Teknik Servis', hedefTip: 'service', sevkTarihi: '10.08.2026 10:00', durum: 'Depoya Döndü', kapandi: true, donusTarihi: '20.08.2026 09:00', donusDepo: 'b2',
+                  gecmis: [{ ts: 1789000000000, tarih: '10.08.2026 10:00', durum: 'Serviste / Yolda', not: 'ekran arızası' }, { ts: 1789500000000, tarih: '15.08.2026 12:00', durum: 'Parça Bekleniyor', not: 'panel siparişte' }, { ts: 1789900000000, tarih: '20.08.2026 09:00', durum: 'Depoya Döndü', not: 'B2 deposuna geri alındı' }] },
+                { id: 1790000000000, productId: 'ls', urunAciklama: 'Laptop S', sn: 'LS-2', envanterNo: '-', adet: 1, kaynakDepo: 'b2', hedef: 'Teknik Servis', sevkTarihi: '25.09.2026', durum: 'Serviste / Yolda', kapandi: false, gecmis: [{ ts: 1790000000000, tarih: '25.09.2026', durum: 'Serviste / Yolda', not: '-' }] },
+            ];
+            const target = name => [...document.getElementById('transTarget').options].find(op => op.textContent === name);
+            const choose = name => { const sel = document.getElementById('transTarget'); sel.value = target(name).value; window.handleTransferTargetChange(sel); };
+            const devRows = () => document.querySelectorAll('#transDeviceIds .dev-ids-row');
+            try {
+                // sevk ekranı: demirbaşta varsayılan adet 1, ürünün önceki servis kayıtları (kapanmış olan dahil) listelenir
+                window.openTransferModal('b2', 'ls');
+                o.open = { qty: document.getElementById('transQty').value, dispatchHidden: document.getElementById('transDispatchOptions').style.display === 'none',
+                           hint: document.getElementById('transServiceHistory').textContent.replace(/\s+/g, ' ').trim().slice(0, 160) };
+                choose('Teknik Servis');
+                o.serviceTarget = { dispatchShown: document.getElementById('transDispatchOptions').style.display === 'block', rows: devRows().length };
+                document.getElementById('transNote').value = 'klavye arızası';
+                let before = calls.length;
+                await window.confirmTransfer();
+                o.noIdRefused = calls.length === before ? alerts.at(-1)[1] : 'yazıldı!';
+                devRows()[0].querySelector('.dev-sn').value = 'LS-2';                 // hâlâ serviste
+                await window.confirmTransfer();
+                o.inServiceRefused = calls.length === before ? alerts.at(-1)[1] : 'yazıldı!';
+                devRows()[0].querySelector('.dev-sn').value = 'ls-1';                 // daha önce servise gitmiş, dönmüş
+                document.getElementById('transDeviceIds').dispatchEvent(new Event('input'));
+                o.hintForId = document.getElementById('transServiceHistory').querySelectorAll('[data-history]').length;
+                await window.confirmTransfer();
+                const c = calls.at(-1);
+                o.dispatch = { calls: calls.length - before, stock: c.stock.map(s => `${s.col}/${s.id}:${s.delta}`), ops: c.writes.map(w => `${w.op}:${w.col}`),
+                               rec: (r => `${r.sn}|${r.adet}|${r.kapandi}|${r.productId}|${r.hedefTip}|${r.gecmis.length}|${r.originalData.adet}`)(c.writes[0].item), rowNotDeleted: !c.writes.some(w => w.op === 'delete') };
+                // adet 3, 2 kimlik → reddedilir; stoktan fazla → reddedilir
+                window.openTransferModal('b2', 'ls'); choose('Teknik Servis');
+                document.getElementById('transQty').value = '3'; window.syncTransferDevices();
+                devRows()[0].querySelector('.dev-sn').value = 'N-1'; devRows()[1].querySelector('.dev-sn').value = 'N-2';
+                document.getElementById('transNote').value = 'x';
+                before = calls.length; await window.confirmTransfer();
+                o.partialIdsRefused = calls.length === before ? alerts.at(-1)[1] : 'yazıldı!';
+                document.getElementById('transQty').value = '99';
+                await window.confirmTransfer();
+                o.overStockRefused = calls.length === before ? alerts.at(-1)[1] : 'yazıldı!';
+                // sarf: varsayılan adet tüm stok, kimlik istenmez, tek kayıt
+                window.openTransferModal('b1', 'tn'); choose('Kavacık Kampüs');
+                o.sarf = { defaultQty: document.getElementById('transQty').value, deviceBoxHidden: document.getElementById('transDeviceIds').hidden };
+                document.getElementById('transQty').value = '2'; document.getElementById('transNote').value = 'kampüse';
+                await window.confirmTransfer();
+                o.sarf.write = (x => `${x.stock[0].delta}|${x.writes.length}|${x.writes[0].item.adet}|${x.writes[0].item.sn}|${x.writes[0].item.hedefTip}`)(calls.at(-1));
+                window.closeTransferModal();
+
+                // dönüş: kayıt silinmez, kapanır; kayıttaki adet eklenir
+                before = calls.length;
+                await window.receiveFromService(1790000000000);
+                const r = calls.at(-1);
+                o.receive = { calls: calls.length - before, stock: r.stock.map(s => `${s.col}/${s.id}:+${s.delta}`), ops: r.writes.map(w => `${w.op}:${w.col}`),
+                              fields: (f => `${f.kapandi}|${f.durum}|${f.donusDepo}|${f.gecmis.length}`)(r.writes[0].fields) };
+                window.data.serviceRecords[0].kapandi = true;   // zaten kapalı kayda ikinci dönüş reddedilir
+                before = calls.length; await window.receiveFromService(1789000000000);
+                o.closedAgain = calls.length === before ? alerts.at(-1)[1] : 'yazıldı!';
+
+                // durum güncelleme: tek doküman, geçmişe satır
+                window.updateServiceStatus(1790000000000);
+                document.getElementById('svcStatusSelect').value = 'Parça Bekleniyor';
+                document.getElementById('svcStatusNote').value = 'anakart';
+                await document.getElementById('svcStatusSaveBtn').onclick();
+                o.statusUpdate = upd.map(u => `${u.col}|${u.id}|${u.fields.durum}|${u.fields.gecmis.length}|${u.fields.gecmis.at(-1).not}`);
+
+                // servis paneli yalnız açık kayıtları gösterir
+                window.renderServicesModule?.();
+                const body = document.getElementById('serviceTableBody');
+                o.panel = body ? { rows: body.querySelectorAll('tr').length, text: body.textContent.includes('LS-2'), closedHidden: !body.textContent.includes('LS-1') } : 'no panel on page';
+
+                // birleşik cihaz geçmişi: zimmet + iade + önceki servis (sevk, durum, dönüş)
+                const h = window.AssignmentService.getDeviceHistory(' ls-1 ');
+                o.history = h.map(e => e.tur.replace(/^\S+\s/, '') + ' ' + e.tarih);
+                window.DeviceIds.showHistory('LS-1');
+                o.historyModalRows = document.querySelectorAll('#deviceHistoryModal tbody tr').length;
+                document.getElementById('deviceHistoryModal')?.remove();
+            } finally {
+                Object.assign(window, { runStockOps: orig.ops, updateItem: orig.upd, isDbAdmin: orig.adm, showAppAlert: orig.alert, showCustomConfirm: orig.conf, checkIsAdmin: orig.chk });
+                Object.assign(window.data, { b1: orig.b1, b2: orig.b2, b3: orig.b3, serviceRecords: orig.svc, productTypes: orig.pt });
+                window.renderServicesModule?.();
+            }
+            return o;
+        });
+    },
+
+    // H4 · 3.9b servis paneli (admin.html): yalnız açık kayıtlar ve sayaç; kimlikli kayıtta "cihaz geçmişi" düğmesi; kayıt
+    // görüntülemede durum geçmişi. Veri bellekte değiştirilir, geri alınır; yazma yok.
+    async h4ServicePanel(page, browser) {
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        const out = await admin.evaluate(async () => {
+            const orig = window.data.serviceRecords, o = {};
+            window.data.serviceRecords = [
+                { id: 11, urunAciklama: 'Kapalı Cihaz', sn: 'K-1', hedef: 'Teknik Servis', durum: 'Depoya Döndü', kapandi: true, gecmis: [{ tarih: '01.09.2026', durum: 'Serviste / Yolda' }, { tarih: '03.09.2026', durum: 'Depoya Döndü' }] },
+                { id: 12, urunAciklama: 'Açık Cihaz', sn: 'A-1', envanterNo: 'ENV-A1', adet: 1, hedef: 'Teknik Servis', durum: 'Parça Bekleniyor', kapandi: false, gecmis: [{ tarih: '20.09.2026', durum: 'Serviste / Yolda', not: 'ekran' }, { tarih: '22.09.2026', durum: 'Parça Bekleniyor', not: 'panel', yapan: 'Admin' }] },
+                { id: 13, urunAciklama: 'Eski Kayıt', hedef: 'Haliç Kampüs', durum: 'Dış Birimde' },   // eski kayıt: kapandi alanı yok → açık
+            ];
+            try {
+                window.renderServicesModule();
+                const body = document.getElementById('serviceTableBody');
+                o.rows = [...body.querySelectorAll('tr')].map(tr => tr.querySelector('td')?.textContent.replace(/\s+/g, ' ').trim());
+                o.historyButtons = body.querySelectorAll('button[title^="Cihaz geçmişi"]').length;
+                o.count = document.getElementById('totalInService')?.textContent;
+                window.viewServiceItem(12);
+                const view = document.getElementById('serviceViewContent')?.textContent.replace(/\s+/g, ' ') || '';
+                o.view = { timeline: view.includes('Durum Geçmişi') && view.includes('Parça Bekleniyor') && view.includes('panel'), envNo: view.includes('ENV-A1'), historyButton: view.includes('Cihaz geçmişi') };
+                document.getElementById('serviceViewModal').style.display = 'none';
+            } finally {
+                window.data.serviceRecords = orig;
+                window.renderServicesModule();
             }
             return o;
         });

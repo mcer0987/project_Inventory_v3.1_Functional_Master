@@ -89,6 +89,60 @@
         },
     };
 
+    // ─── 3.9c · Önceki servis kayıtları (sevk ekranı) ve cihaz geçmişi penceresi (iki sayfada ortak) ───
+    DeviceIds.renderServiceHint = function (container, { productId, ids = [] } = {}) {
+        if (!container) return;
+        const recs = window.AssignmentService.serviceRecordsFor({ productId, ids });
+        if (!recs.length) { container.innerHTML = ''; return; }
+        const idText = r => [r.sn && r.sn !== '-' ? `SN ${r.sn}` : '', r.envanterNo && r.envanterNo !== '-' ? `Env ${r.envanterNo}` : ''].filter(Boolean).join(' · ');
+        const firstId = r => (r.sn && r.sn !== '-' ? r.sn : (r.envanterNo && r.envanterNo !== '-' ? r.envanterNo : ''));
+        container.innerHTML = `<div class="dev-ids" style="border-style:solid;">
+            <div class="dev-ids-head">🗂️ Önceki servis / sevk kayıtları (${recs.length})</div>
+            ${recs.slice(0, 6).map(r => `<div class="dev-ids-hint" style="color:var(--color-text, #1f2937);">• ${esc(r.sevkTarihi || '-')} → ${esc(r.hedef || '-')} · <b>${esc(r.durum || '-')}</b>${r.kapandi ? ` (dönüş ${esc(r.donusTarihi || '-')})` : ''}${idText(r) ? ` · ${esc(idText(r))}` : ''}
+                ${firstId(r) ? ` <a href="#" data-history="${esc(firstId(r))}" style="color:var(--color-primary, #3498db);">geçmiş</a>` : ''}</div>`).join('')}
+            ${recs.length > 6 ? `<div class="dev-ids-hint">… ve ${recs.length - 6} kayıt daha.</div>` : ''}
+        </div>`;
+        container.querySelectorAll('[data-history]').forEach(a => { a.onclick = e => { e.preventDefault(); DeviceIds.showHistory(a.dataset.history); }; });
+    };
+
+    DeviceIds.showHistory = function (identity) {
+        if (!identity || identity === '-') {
+            if (typeof window.showAppAlert === 'function') window.showAppAlert('Bu cihaz için Seri No / Envanter No kaydı yok.', 'warning');
+            return;
+        }
+        injectStyle();
+        const events = window.AssignmentService.getDeviceHistory(identity);
+        document.getElementById('deviceHistoryModal')?.remove();
+        const modal = document.createElement('div');
+        modal.id = 'deviceHistoryModal';
+        modal.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.7); z-index:12000; display:flex; align-items:center; justify-content:center;';
+        const th = 'padding:10px 12px; text-align:left; font-weight:700; color:var(--color-text-muted, #64748b); text-transform:uppercase; font-size:11px;';
+        const td = 'padding:9px 12px; font-size:12px; color:var(--color-text, #1f2937); border-bottom:1px solid var(--color-border, #e5e7eb);';
+        const services = events.filter(e => /sevk/.test(e.tur)).length;
+        modal.innerHTML = `
+          <div style="background:var(--color-surface, #fff); color:var(--color-text, #1f2937); border:1px solid var(--color-border, #e5e7eb); border-radius:16px; width:860px; max-width:96vw; max-height:88vh; overflow-y:auto; box-shadow:0 24px 64px rgba(0,0,0,0.4);">
+            <div style="padding:18px 22px; border-bottom:1px solid var(--color-border, #e5e7eb); display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; background:var(--color-surface, #fff);">
+              <div>
+                <h4 style="margin:0; font-weight:800; font-size:1.1rem;">🕘 Cihaz Geçmişi</h4>
+                <div style="margin-top:4px; font-size:13px; color:var(--color-text-muted, #64748b);">Seri No / Envanter No: <code style="font-weight:700; color:var(--color-primary, #3498db);">${esc(identity)}</code>
+                  · ${events.length} kayıt · ${services} servis/sevk</div>
+              </div>
+              <button type="button" data-close style="background:none; border:none; font-size:22px; cursor:pointer; color:var(--color-text-muted, #64748b);">&times;</button>
+            </div>
+            <div style="padding:16px 22px;">
+              <table style="width:100%; border-collapse:collapse;">
+                <thead><tr><th style="${th}">#</th><th style="${th}">Tarih</th><th style="${th}">Hareket</th><th style="${th}">Kişi</th><th style="${th}">Yer / Hedef</th><th style="${th}">Ürün</th><th style="${th}">Not</th></tr></thead>
+                <tbody>${events.length ? events.map((e, i) => `<tr><td style="${td}">${i + 1}</td><td style="${td} white-space:nowrap;">${esc(e.tarih)}</td><td style="${td} font-weight:700;">${esc(e.tur)}</td><td style="${td}">${esc(e.kisi)}</td><td style="${td}">${esc(e.yer)}</td><td style="${td}">${esc(e.urun)}</td><td style="${td}">${esc(e.not)}</td></tr>`).join('')
+                    : `<tr><td colspan="7" style="${td} text-align:center; padding:28px;">Bu kimlikle eşleşen kayıt bulunamadı.</td></tr>`}</tbody>
+              </table>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
+        const close = () => modal.remove();
+        modal.querySelector('[data-close]').onclick = close;
+        modal.addEventListener('click', e => { if (e.target === modal) close(); });
+    };
+
     window.DeviceIds = DeviceIds;
     window.AppModules = window.AppModules || {};
     window.AppModules.DeviceIds = DeviceIds;
