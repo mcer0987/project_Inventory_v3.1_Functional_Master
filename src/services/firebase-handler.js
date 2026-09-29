@@ -357,6 +357,12 @@ window.startRealtimeSync = function () {
                     // [HOW]: Set disabled to false and update placeholder text.
                     loginInput.disabled = false;
                     loginInput.placeholder = "Erişim Kodu Giriniz";
+                    // Giriş modalı görünürken koda otomatik odaklan (input senkron bitene kadar disabled olduğu için odak ancak
+                    // burada verilebilir). Kullanıcı başka bir alana odaklandıysa odak çalınmaz.
+                    const active = document.activeElement;
+                    if (loginInput.offsetParent !== null && (!active || active === document.body)) {
+                        try { loginInput.focus({ preventScroll: true }); } catch (e) { loginInput.focus(); }
+                    }
                 }
             }
         }, (err) => reportListenerError(colName, err)));
