@@ -64,31 +64,29 @@ window.inventoryManagementModule = {
     });
 
     // --- KAYNAK 2: b3 (doğrudan/toplu envanter çıkışları) ---
+    // Kanonik görünümden (3.6): yalnız zimmet hareketleri (tip 'zimmet'; eski kayıtlarda talepTuru/oncelik/requestId izi).
+    // "Envanter Çıkışı Yap" ile yazılan çıkışlar zimmet sayılmaz.
     const b3 = window.data?.b3 || [];
     b3.forEach((item, idx) => {
-      const person = item.alanKisi || item.personel || item.person || null;
-      if (!person) return; // Kişisiz b3 kayıtları zimmet sayılmaz
-
-      // [CRITICAL FIX]: Sadece Zimmet / Talep onay modülü üzerinden gelen (talepTuru veya oncelik içeren) b3 kayıtları zimmet sayılır.
-      // Standart "Envanter Çıkışı Yap" ile b3'e kaydedilen normal sarfiyat/çıkış verileri Kişi Envanterine / Zimmet Modülüne GİRMEMELİDİR.
-      if (!item.talepTuru && !item.oncelik) return;
+      const n = window.Schema.normalizeB3(item);
+      if (n.alanKisi === '-' || n.tip !== 'zimmet') return;
 
       assignments.push({
         _source: 'b3',
         _index: idx,
         _id: item.id || idx,
-        personel: person,
-        ürün: item.productType || item.ürünTürü || '-',
-        adet: item.sarfAdet || item.adet || 1,
-        tarih: item.date || item.tarih || '-',
-        not: item.note || item.not || '-',
-        sn: item.sn || '-',
-        durum: item.iadeEdildi ? 'İade Edildi' : 'Zimmetli',
-        talepTuru: item.talepTuru || 'Kalıcı Zimmet',
-        oncelik: item.oncelik || 'Orta',
-        iadeTarihi: item.iadeTarihi || null,
-        iadeEdildi: item.iadeEdildi || false,
-        depo: item.sourceRepo || null,
+        personel: n.alanKisi,
+        ürün: n.urunAciklama,
+        adet: n.adet || 1,
+        tarih: n.tarih,
+        not: n.not,
+        sn: n.sn,
+        durum: n.iadeEdildi ? 'İade Edildi' : 'Zimmetli',
+        talepTuru: n.talepTuru,
+        oncelik: n.oncelik,
+        iadeTarihi: n.iadeTarihi,
+        iadeEdildi: n.iadeEdildi,
+        depo: n.stokDisi ? null : n.kaynakDepo,
         rawRef: item
       });
     });
@@ -490,7 +488,7 @@ window.inventoryManagementModule = {
     if (select) {
       const personeller = window.data?.personel || [];
       select.innerHTML = '<option value="">-- Personel Seçiniz --</option>' +
-        personeller.map(p => `<option value="${escapeHtml(p.name || p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
+        personeller.map(p => `<option value="${escapeHtml(p.id ?? p.name ?? p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
     }
 
     // Formu sıfırla
@@ -617,7 +615,13 @@ window.inventoryManagementModule = {
   saveAssignment: async function () {
     if (this._savingAssignment) return;
     const alert = (m, t) => { if (typeof showAppAlert === 'function') showAppAlert(m, t); };
-    const personnelName = document.getElementById('assignPersonnel')?.value?.trim();
+    // Personel id ile seçilir (3.7): zimmet kaydı personelId taşır, Kişi Envanterim addan bağımsız eşleşir.
+    const personSel = document.getElementById('assignPersonnel')?.value?.trim();
+    const personList = window.data?.personel || [];
+    const person = personSel ? (personList.find(p => String(p.id) === personSel)
+      || personList.find(p => window.Schema.normName(p.name || p.adSoyad) === window.Schema.normName(personSel))) : null;
+    const personnelName = person ? String(person.name || person.adSoyad || '').trim() : personSel;
+    const personelId = person?.id ?? null;
     const talepTuru = document.getElementById('assignType')?.value || 'Kalıcı Zimmet';
     const oncelik = document.getElementById('assignPriority')?.value || 'Orta';
     const iadeTarihi = document.getElementById('assignReturnDate')?.value || null;
@@ -660,20 +664,16 @@ window.inventoryManagementModule = {
         const id = window.makeId();
         const common = {
           sn: it.sn, talepTuru, oncelik, isDemirbas: true, iadeEdildi: false,
-          productId: it.product.id, sourceRepo: it.warehouse,
+          productId: it.product.id, sourceRepo: it.warehouse, personelId,
           ...(iadeTarihi ? { iadeTarihi } : {}),
         };
         stock.push({ col: it.warehouse, id: it.product.id, delta: -it.qty });
-        writes.push({ op: 'set', col: 'b3', item: {
-          id, ...common,
-          shelfNo: it.product.raf || '-',
-          productType: it.product.ürün || it.product.name || '-',
-          description: it.product.açıklama || '-',
-          sarfAdet: it.qty,
-          note: not || `Admin Zimmeti (${talepTuru})`,
-          alanKisi: personnelName,
-          date: now,
-        } });
+        // Kanonik b3 zimmet kaydı (3.6) — talep onayı ve çıkışlarla aynı kurucu; tür/raf/depo yazma anında kopyalanır.
+        writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+          id, tip: 'zimmet', product: it.product, col: it.warehouse, adet: it.qty, sn: it.sn,
+          not: not || `Admin Zimmeti (${talepTuru})`, alanKisi: personnelName, personelId,
+          tarih: now, talepTuru, oncelik, iadeTarihi, onaylayan: window.currentUser?.name || 'Admin',
+        }) });
         writes.push({ op: 'set', col: 'assignments', item: {
           id, ...common,
           ürün: it.product.ürün || it.product.name || '-',
@@ -725,8 +725,9 @@ window.inventoryManagementModule = {
     if (!item) { alert('Kayıt bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     if (item.iadeEdildi) { alert('Bu zimmet zaten iade edilmiş.', 'info'); return; }
 
-    const qty = Number(item.sarfAdet || item.adet || 1);
-    const stockLinked = item.sourceRepo === 'b1' || item.sourceRepo === 'b2';
+    const view = window.Schema.normalizeB3(item);
+    const qty = view.adet || 1;
+    const stockLinked = view.kaynakDepo === 'b1' || view.kaynakDepo === 'b2';
     let target = null;
     if (stockLinked) {
       const choice = await window.showWarehousePromptModal({ allowNoReturn: true });
@@ -744,7 +745,7 @@ window.inventoryManagementModule = {
       const list = window.data[target] || [];
       product = item.productId != null ? list.find(p => String(p.id) === String(item.productId)) : null;
       if (!product) {
-        const name = String(item.productType || item.ürünTürü || '').trim().toLocaleLowerCase('tr-TR');
+        const name = String(view.urunAciklama === '-' ? '' : view.urunAciklama).trim().toLocaleLowerCase('tr-TR');
         const byName = list.filter(p => String(p.ürün || p.name || '').trim().toLocaleLowerCase('tr-TR') === name);
         if (byName.length === 1) product = byName[0];
       }
@@ -857,22 +858,23 @@ window.inventoryManagementModule = {
           ürün: a.ürün || '-',
           not: a.not || '-',
           kaynak: 'assignments',
-          ts: a.id || 0
+          ts: window.Schema.idToTs(a.id)
         });
       }
     });
 
     // 2. B3 çıkış logları
     (window.data?.b3 || []).forEach(b => {
-      if ((b.sn || '').trim().toUpperCase() === snNorm) {
+      const n = window.Schema.normalizeB3(b);
+      if (n.sn.trim().toUpperCase() === snNorm) {
         events.push({
-          tarih: b.date || b.tarih || '-',
-          tip: b.iadeEdildi ? '✅ İade Edildi' : '📌 Zimmetlendi',
-          personel: b.alanKisi || b.person || b.personel || '-',
-          ürün: b.productType || b.ürün || '-',
-          not: b.note || b.not || '-',
+          tarih: n.tarih,
+          tip: n.tip === 'cikis' ? '📤 Çıkış' : (n.iadeEdildi ? '✅ İade Edildi' : '📌 Zimmetlendi'),
+          personel: n.alanKisi,
+          ürün: n.urunAciklama,
+          not: n.not,
           kaynak: 'b3',
-          ts: b.id || 0
+          ts: n.ts
         });
       }
     });
@@ -887,7 +889,7 @@ window.inventoryManagementModule = {
           ürün: r.ürün || '-',
           not: r.not || '-',
           kaynak: 'talep',
-          ts: r.id || 0
+          ts: window.Schema.idToTs(r.id)
         });
       }
     });
@@ -982,10 +984,10 @@ window.inventoryManagementModule = {
           const personeller = window.data?.personel || [];
           const current = select.value;
           select.innerHTML = '<option value="">-- Personel Seciniz --</option>' +
-            personeller.map(p => `<option value="${escapeHtml(p.name || p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
+            personeller.map(p => `<option value="${escapeHtml(p.id ?? p.name ?? p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
           if (personeller.length > 0) {
             const last = personeller[personeller.length - 1];
-            select.value = last.name || last.adSoyad || current;
+            select.value = String(last.id ?? last.name ?? last.adSoyad ?? current);
           }
         }, 300);
       }

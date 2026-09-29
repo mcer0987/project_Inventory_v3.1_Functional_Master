@@ -273,7 +273,7 @@ const SCENARIOS = {
             out.approveWithStock = {
                 tx: JSON.stringify(tx) === JSON.stringify([['b1', prod.id, -2]]), stockNow: prod.adet,
                 request: { durum: r1.durum, sn: r1.sn, stockRepo: r1.stockRepo, stockProductId: r1.stockProductId === prod.id },
-                b3: b3[0] && { sourceRepo: b3[0].sourceRepo, productId: b3[0].productId === prod.id, requestId: b3[0].requestId === base + 1, sarfAdet: b3[0].sarfAdet, shelfNo: b3[0].shelfNo, isDemirbas: b3[0].isDemirbas },
+                b3: b3[0] && { kaynakDepo: b3[0].kaynakDepo, productId: b3[0].productId === prod.id, requestId: b3[0].requestId === base + 1, adet: b3[0].adet, rafNo: b3[0].rafNo, isDemirbas: b3[0].isDemirbas, tip: b3[0].tip, contract: window.Schema.validateB3(b3[0]) },
                 message: alerts.at(-1)?.[1],
             };
 
@@ -293,7 +293,7 @@ const SCENARIOS = {
             modal().querySelector('#raOk').click();
             await pending.p;
             await ft.waitFor(async () => (await db(3))?.durum === 'approved');
-            out.noStock = { noTx: tx.length === 0, sourceRepo: b3[0]?.sourceRepo, hasProductId: 'productId' in (b3[0] || {}), message: alerts.at(-1)?.[1] };
+            out.noStock = { noTx: tx.length === 0, kaynakDepo: b3[0]?.kaynakDepo, productId: b3[0]?.productId, shownRaf: b3[0] && window.Schema.normalizeB3(b3[0]).rafNo, contract: b3[0] && window.Schema.validateB3(b3[0]), message: alerts.at(-1)?.[1] };
 
             // 4) b3 write fails: the single transaction fails → no stock change, request stays pending (nothing to restore)
             tx.length = 0; failB3 = true;
@@ -1525,6 +1525,97 @@ const SCENARIOS = {
             }
             return o;
         });
+    },
+
+    // H4 · 3.6 b3 SÖZLEŞME TESTİ (regresyon koruması): b3'e yazan HER yol aynı kanonik alanları üretmeli. Yeni bir özellik
+    // farklı biçimde b3 yazarsa bu senaryo kırılır. Yazmalar kaydedilir (stub), hiçbir şey Firestore'a gitmez.
+    async b3WriteContract(page, browser) {
+        const S_KEYS = () => [...window.Schema.B3_KEYS].sort().join(',');
+        const out = await page.evaluate(async () => {
+            const o = {}, captured = {};
+            const orig = { b1: window.data.b1, req: window.data.requests, ops: window.runStockOps, apply: window.applyItemOps, exit: window.runExitTransaction, adm: window.isDbAdmin, alert: window.showAppAlert, modal: window.showRequestApprovalModal };
+            window.showAppAlert = () => {};
+            window.isDbAdmin = () => true;
+            const b3Of = writes => writes.filter(w => w.col === 'b3').map(w => w.item);
+            window.runStockOps = async arg => { captured.last = b3Of(arg.writes || []); return { stock: (arg.stock || []).map(s => ({ col: s.col, id: s.id, name: s.id, before: 5, after: 5 + s.delta })) }; };
+            window.applyItemOps = async ops => { captured.last = b3Of(ops); return { written: ops.length }; };
+            window.runExitTransaction = async a => { captured.last = [{ ...a.b3Entry, productId: a.productId }]; return { stock: [{ before: 5, after: 4, statusBefore: 'x', statusAfter: 'x' }] }; };
+            window.data.b1 = [{ id: 'k1', ürün: 'Kablo A', tür: 'Kablo', raf: 'R-3', sütun: 'S-1', marka: 'Acme', adet: 5, durumu: 'Kullanıma Hazır' }];
+            const take = () => { const v = captured.last || []; captured.last = null; return v; };
+            try {
+                window.openExitModal('b1', 'k1');
+                document.getElementById('exitQty').value = '1'; document.getElementById('exitSn').value = 'ITSM-1'; document.getElementById('exitNote').value = 'n';
+                await window.saveExit(new Event('submit')); window.closeExitModal?.();
+                o.singleExit = take();
+
+                window.openCartModal();
+                window.addToCart({ item: window.data.b1[0], repo: 'b1', qty: 5 });
+                document.getElementById('cartSn').value = 'ITSM-2'; document.getElementById('cartNote').value = 'n';
+                await window.saveCartExit(new Event('submit')); window.closeModal?.('cartModal');
+                o.cartExit = take();
+
+                window.data.requests = [
+                    { id: 9101, ürün: 'Kablo A', adet: 1, personel: 'Talep Eden', personelId: 'per_1', durum: 'Beklemede', talepTuru: 'Kalıcı Zimmet', oncelik: 'Yüksek', not: 'ITSM 0007' },
+                    { id: 9102, ürün: 'Stokta olmayan ürün', adet: 2, personel: 'Talep Eden', durum: 'Beklemede', talepTuru: 'Geçici Zimmet', iadeTarihi: '2026-12-01' },
+                ];
+                window.showRequestApprovalModal = async r => ({ sn: 'SN-7', source: r.id === 9101 ? { repo: 'b1', productId: 'k1' } : null });
+                await window.confirmRequest(9101); o.approvalWithStock = take();
+                await window.confirmRequest(9102); o.approvalNoStock = take();
+            } finally {
+                Object.assign(window, { runStockOps: orig.ops, applyItemOps: orig.apply, runExitTransaction: orig.exit, isDbAdmin: orig.adm, showAppAlert: orig.alert, showRequestApprovalModal: orig.modal });
+                window.data.b1 = orig.b1; window.data.requests = orig.req;
+            }
+            return o;
+        });
+
+        // admin zimmeti (admin.html)
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        out.adminAssignment = await admin.evaluate(async () => {
+            if (window.COLLECTION_ROOT !== 'inventory_demo') throw new Error('root');
+            const orig = { b1: window.data.b1, per: window.data.personel, ops: window.runStockOps, adm: window.isDbAdmin };
+            let got = [];
+            window.isDbAdmin = () => true; window.showAppAlert = () => {};
+            window.runStockOps = async arg => { got = arg.writes.filter(w => w.col === 'b3').map(w => w.item); return { stock: arg.stock.map(s => ({ col: s.col, name: s.id, before: 3, after: 3 + s.delta })) }; };
+            window.data.b1 = [{ id: 'lp1', ürün: 'Laptop X', tür: 'Laptop', raf: 'R-9', sütun: 'S-2', adet: 3, durumu: 'Kullanıma Hazır', isDemirbas: true }];
+            window.data.personel = [...(orig.per || []), { id: 'per_ct', name: 'Sözleşme Kişi' }];
+            try {
+                const m = window.inventoryManagementModule;
+                m.openAssignModal();
+                document.getElementById('assignPersonnel').value = 'per_ct';
+                const row = document.querySelector('#assignRowsContainer .assign-product-row');
+                const ws = row.querySelector('.assign-warehouse-sel'); ws.value = 'b1'; m.onWarehouseChange(ws);
+                const ps = row.querySelector('.assign-product-sel'); ps.value = 'lp1'; m.onProductChange(ps);
+                row.querySelector('.assign-sn-inp').value = 'SN-LP1';
+                row.querySelector('.assign-qty-inp').value = '1';
+                await m.saveAssignment(); m.closeAssignModal();
+            } finally {
+                Object.assign(window, { runStockOps: orig.ops, isDbAdmin: orig.adm });
+                window.data.b1 = orig.b1; window.data.personel = orig.per;
+            }
+            return got;
+        });
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+
+        // Her yol: kayıt sayısı, sözleşme hataları, anahtar kümesi, kopyalanan alanlar
+        return page.evaluate(out => {
+            const S = window.Schema, keys = [...S.B3_KEYS].sort().join(',');
+            const summary = {};
+            for (const [path, items] of Object.entries(out)) {
+                if (path === 'adminPageErrors') { summary[path] = items; continue; }
+                summary[path] = {
+                    count: items.length,
+                    errors: items.map(i => S.validateB3(i)).flat(),
+                    exactKeys: items.every(i => Object.keys(i).sort().join(',') === keys),
+                    fields: items.map(i => `${i.tip}|${i.kaynakDepo}|${i.rafNo}|${i.urunTuru}|${i.urunAciklama}|${i.adet}|${i.sn}|${i.alanKisi}|${i.personelId}|${i.talepTuru}|${i.onaylayan}`),
+                };
+            }
+            return summary;
+        }, out);
     },
 
 };

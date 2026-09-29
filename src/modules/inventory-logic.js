@@ -38,20 +38,14 @@ async function _performExit(requestedQty) {
     const product = _find(repo, selected.id);
     if (!product) { _missing(); return; }
 
-    const saati = typeof window.getTurkiyeSaati === 'function' ? window.getTurkiyeSaati() : new Date().toLocaleString('tr-TR');
-    const b3Entry = {
-        rafNo:        product.raf || selected.shelf || '-',
-        urunTuru:     selected.type || '-',
-        urunAciklama: product.ürün || product.name || selected.name || '-',
-        sn:           document.getElementById('exitSn')?.value     || '-',
-        adet:         requestedQty,
-        not:          document.getElementById('exitNote')?.value   || '-',
-        alanKisi:     document.getElementById('exitPerson')?.value || '-',
-        tarih:        saati,
-        isDemirbas:   selected.isDemirbas === 'true',
-        kaynakDepo:   repo,
-        productId:    product.id
-    };
+    // Kanonik b3 kaydı (3.6): tür, raf, sütun, marka ve depo yazma anında üründen kopyalanır.
+    const b3Entry = window.Schema.buildB3Entry({
+        tip: 'cikis', product, col: repo, adet: requestedQty,
+        sn:       document.getElementById('exitSn')?.value,
+        not:      document.getElementById('exitNote')?.value,
+        alanKisi: document.getElementById('exitPerson')?.value,
+        personelId: window.getActiveUser?.()?.id,
+    });
 
     let res;
     try {
@@ -343,7 +337,7 @@ export const deleteB3Row = async function (id) {
         const row = _find('b3', id);
         if (!row) { _missing(); return; }
         const ok = typeof window.showCustomConfirm === 'function'
-            ? await window.showCustomConfirm('Çıkış Kaydını Sil', `"${row.urunAciklama || row.productType || 'Bu kayıt'}" çıkış kaydı silinecek. Stok değişmez. Onaylıyor musunuz?`)
+            ? await window.showCustomConfirm('Çıkış Kaydını Sil', `"${window.Schema.normalizeB3(row).urunAciklama}" çıkış kaydı silinecek. Stok değişmez. Onaylıyor musunuz?`)
             : confirm('Çıkış kaydı silinsin mi?');
         if (ok !== true) return;
         if (!(await window.writeOk(window.removeItem('b3', row.id)))) { _alert('Kayıt silinemedi.', 'error'); return; }

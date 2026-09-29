@@ -640,8 +640,10 @@ window.deleteProductType = async function (docId) {
 window.checkExitIsDemirbas = function (exit) {
     if (!exit) return false;
 
-    const typeName = (exit.urunTuru || exit.tür || exit.productType || "").trim();
-    const productName = (exit.urunAciklama || exit.ürün || exit.product || "").trim();
+    // Kanonik görünüm (3.6): eski onay/zimmet kayıtlarında productType ürün ADIDIR; tür olarak okunmamalı.
+    const n = window.Schema.normalizeB3(exit);
+    const typeName = n.urunTuru === '-' ? '' : n.urunTuru;
+    const productName = n.urunAciklama === '-' ? '' : n.urunAciklama;
     const textToSearch = `${typeName} ${productName}`.toLowerCase();
 
     // 1. ÖNCELİK: Kelime Bazlı Heuristic Eşleşme (Süper Güvenli / Ezici Kural)
@@ -720,8 +722,9 @@ window.renderExitCharts = function () {
 
     // 3. VERİLERİ OKU VE AYRIŞTIR (Kritik Bölge)
     exits.forEach(exit => {
-        const urunTuru = exit.urunTuru || exit.tür || exit.productType || "Bilinmeyen Tür";
-        const adet = parseInt(exit.adet || exit.sarfAdet) || 1;
+        const n = window.Schema.normalizeB3(exit);
+        const urunTuru = n.urunTuru !== '-' ? n.urunTuru : "Bilinmeyen Tür";
+        const adet = n.adet || 1;
 
         // En güncel tanıma göre demirbaş kontrolü yapıyoruz.
         const isDemirbas = window.checkExitIsDemirbas(exit);
@@ -746,11 +749,12 @@ window.renderExitCharts = function () {
 
         if (latestExitId && window._lastExitAnimatedId !== latestExitId) {
             const isLatestConsumable = !window.checkExitIsDemirbas(latestExit);
-            const ageMs = Date.now() - parseInt(latestExitId);
+            // makeId (µs) id'leri ms sanılınca yaş negatif çıkıp her çizimde animasyon tetikleniyordu.
+            const ageMs = Date.now() - window.Schema.normalizeB3(latestExit).ts;
 
             // Son 15 saniyede yapılmış bir sarf çıkışı ise animasyonu tetikle
             if (isLatestConsumable && ageMs < 15000) {
-                highlightCategory = (latestExit.urunTuru || latestExit.tür || latestExit.productType || "").trim();
+                highlightCategory = window.Schema.normalizeB3(latestExit).urunTuru;
                 shouldAnimate = true;
                 window._lastExitAnimatedId = latestExitId; // Bir daha oynatma
             }

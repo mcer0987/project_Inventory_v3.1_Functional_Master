@@ -755,28 +755,20 @@ window.confirmRequest = async function (requestId) {
             durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now,
             ...(product ? { stockRepo: repo, stockProductId: product.id } : {})
         } }];
+        // Kanonik b3 zimmet kaydı (3.6): stok kalemi seçildiyse tür/raf/depo üründen kopyalanır; seçilmediyse kaynakDepo
+        // 'stok-disi' (tabloda Raf No "Stok dışı" — eskiden "TALEP" basılıyordu).
         const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
-        if (!alreadyLogged) writes.push({ op: 'set', col: 'b3', item: {
-            requestId: live.id,
-            shelfNo: product ? (product.raf || '-') : "TALEP",
-            productType: product ? (product.ürün || product.name || live.ürün) : live.ürün,
-            ...(product ? { productId: product.id } : {}),
-            description: "Personel Talebi Onaylandı",
-            sn: snValue,
-            sarfAdet: live.adet || 1,
-            note: `Onaylayan: ${approver}`,
-            person: live.personel,
+        if (!alreadyLogged) writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+            tip: 'zimmet', requestId: live.id,
+            ...(product ? { product, col: repo } : { urunAciklama: live.ürün, isDemirbas: live.isDemirbas === true || live.isDemirbas === 'true' }),
+            adet: qty, sn: snValue,
+            not: [live.not, `Onaylayan: ${approver}`].filter(s => s && String(s).trim() && s !== '-').join(' · '),
             alanKisi: live.personel,
-            date: getTurkiyeTarihi(),
+            personelId: live.personelId || window.AssignmentService?.resolvePersonelId(live.personel),
             tarih: getTurkiyeTarihi(),
-            isDemirbas: [product?.isDemirbas, live.isDemirbas].some(v => v === true || v === "true"),
-            talepTuru: live.talepTuru || 'Kalıcı Zimmet',
-            oncelik: live.oncelik || 'Orta',
-            ...(live.iadeTarihi ? { iadeTarihi: live.iadeTarihi } : {}),
-            iadeEdildi: false,
-            sourceRepo: product ? repo : 'TALEP',
-            approvedBy: approver
-        } });
+            talepTuru: live.talepTuru, oncelik: live.oncelik, iadeTarihi: live.iadeTarihi,
+            onaylayan: approver,
+        }) });
 
         let stockChange = null;
         try {
@@ -1029,16 +1021,11 @@ window.sendDraftInventoryRequest = async function (id) {
             const qty = Number(cartItem.exitQty);
             if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Adetler en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
             stock.push({ col: cartItem.repo, id: product.id, delta: -qty });
-            writes.push({ op: 'set', col: 'b3', item: {
-                rafNo: product.raf || "-",
-                sutun: product.sütun || "-",
-                urunTuru: product.tür || product.type || "-",
-                urunAciklama: product.ürün || product.name || "-",
-                sn, adet: qty, not, alanKisi, tarih,
-                isDemirbas: window.checkIsDemirbas ? window.checkIsDemirbas(product) : false,
-                kaynakDepo: cartItem.repo,
-                productId: product.id
-            } });
+            // Kanonik b3 kaydı (3.6) — tekil çıkışla aynı kurucu, aynı alanlar.
+            writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+                tip: 'cikis', product, col: cartItem.repo, adet: qty, sn, not, alanKisi, tarih,
+                personelId: window.getActiveUser?.()?.id,
+            }) });
         }
 
         let res;
@@ -1144,26 +1131,35 @@ window.onReqTypeChange = function () {
     }
 };
 
-// [WHY]: b3'te iki şema var: çıkış formu rafNo/urunTuru/urunAciklama/adet/not/tarih yazıyor; talep onayı ve admin zimmeti
-//        shelfNo/productType/description/sarfAdet/note/date yazıyor. Tablo yalnız ilkini okuduğu için yeni kayıtlarda
-//        yalnız Alan Kişi / Tarih / SN doluyordu. (Tek kanonik şema Faz 3 işi; burada okuyucu iki şemayı birleştirir.)
-// [HOW]: Alan başına eski → yeni sırayla okunur; ürün türü yeni kayıtta yoksa productId + sourceRepo ile stok kaleminden bulunur.
+// [WHY]: b3'te birden çok şema vardı; tablo, Excel ve PDF'ler farklı alt kümelerini okuyordu (Tur 2.5'te yalnız bu okuyucu
+//        yamanmıştı, ürün taşınınca/silinince tür yine boşalıyordu).
+// [HOW] (3.6): Tüm okuyucular Schema.normalizeB3'ten okur. normalizeB3Row eski çağıranlar için aynı anahtarları döner.
 window.normalizeB3Row = function (item) {
-    const repo = item.sourceRepo || item.kaynakDepo;
-    const product = item.productId != null && (repo === 'b1' || repo === 'b2')
-        ? (window.data[repo] || []).find(p => String(p.id) === String(item.productId)) : null;
-    const pick = (...vals) => vals.find(v => v !== undefined && v !== null && String(v).trim() !== '');
-    return {
-        raf: pick(item.rafNo, item.shelfNo, product?.raf) ?? '-',
-        tur: pick(item.urunTuru, product?.tür, product?.type) ?? '-',
-        urun: pick(item.urunAciklama, item.productType, product?.ürün) ?? '-',
-        sn: pick(item.sn) ?? '-',
-        adet: pick(item.adet, item.sarfAdet) ?? 0,
-        not: pick(item.not, item.note) ?? '-',
-        alanKisi: pick(item.alanKisi, item.person, item.personel) ?? '-',
-        tarih: pick(item.tarih, item.date) ?? '-',
-    };
+    const n = window.Schema.normalizeB3(item);
+    return { raf: n.rafNo, tur: n.urunTuru, urun: n.urunAciklama, sn: n.sn, adet: n.adet, not: n.not, alanKisi: n.alanKisi, tarih: n.tarih };
 };
+
+// b3 PDF'i stok tablosu sütunlarıyla (Sütun/Raf/Ürün/Marka/Durum) basılıyordu; çıkış kayıtlarında hepsi "-" çıkıyordu.
+function _exportB3PDF() {
+    const rows = (window.data.b3 || []).map(item => window.Schema.normalizeB3(item));
+    const cell = v => `<td>${escapeHtml(v)}</td>`;
+    const html = `<html><head><title>B3 Çıkış Raporu</title><style>
+        body { font-family: "Roboto", Arial, sans-serif; margin: 0; padding: 20px; color: #222; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th, td { border: 1px solid #cfd6dc; padding: 5px 6px; text-align: left; vertical-align: top; }
+        th { background: #2c3e50; color: white; font-weight: 600; }
+        tr:nth-child(even) { background: #f7f9fb; }
+    </style></head><body><div style="font-size:18px; font-weight:bold; margin-bottom:6px;">B3 ENVANTER ÇIKIŞ KAYITLARI</div>
+    <div style="font-size:12px; margin-bottom:14px;">Rapor Tarihi: ${escapeHtml(getTurkiyeSaati())}</div>
+    <table><thead><tr><th>#</th><th>Raf No</th><th>Ürün Türü</th><th>Ürün Açıklama</th><th>SN</th><th>Envanter No</th><th>Adet</th><th>Not</th><th>Alan Kişi</th><th>Tarih</th><th>Hareket</th></tr></thead><tbody>
+    ${rows.map((n, i) => `<tr>${[i + 1, n.rafNo, n.urunTuru, n.urunAciklama, n.sn, n.envanterNo, n.adet, n.not, n.alanKisi, n.tarih, n.tip === 'zimmet' ? 'Zimmet' : 'Çıkış'].map(cell).join('')}</tr>`).join('')}
+    </tbody></table></body></html>`;
+    const win = window.open('', '', 'width=1400,height=900');
+    if (!win) { showAppAlert('Açılır pencere engellendi; PDF için izin verin.', 'warning'); return; }
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => { win.print(); win.close(); }, 300);
+}
 
 // Sekme B3 PDF/Excel & Diğer araçlar
 function renderExitTable() {
@@ -1176,12 +1172,13 @@ function renderExitTable() {
     }
     const rowsHtml = window.data.b3.map((item, index) => {
         const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
-        const row = window.normalizeB3Row(item);
+        const row = window.Schema.normalizeB3(item);
+        const envNo = row.envanterNo !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted);">Env. No: ${escapeHtml(row.envanterNo)}</div>` : '';
         return `<tr class="${isPassive ? 'passive-row' : ''}">
-            <td>${escapeHtml(row.raf)}</td>
-            <td>${escapeHtml(row.tur)}</td>
-            <td>${escapeHtml(row.urun)}</td>
-            <td>${escapeHtml(row.sn)}</td>
+            <td${row.stokDisi ? ' style="color:var(--color-text-muted); font-style:italic;"' : ''}>${escapeHtml(row.rafNo)}</td>
+            <td>${escapeHtml(row.urunTuru)}</td>
+            <td>${escapeHtml(row.urunAciklama)}</td>
+            <td>${escapeHtml(row.sn)}${envNo}</td>
             <td>${escapeHtml(row.adet)}</td>
             <td>${escapeHtml(row.not)}</td>
             <td>${escapeHtml(row.alanKisi)}</td>
@@ -1197,6 +1194,7 @@ function renderExitTable() {
 
 window.exportPDF = function (depo) {
     if (!validateAdminAction()) return;
+    if (depo === 'b3') return _exportB3PDF();
     const items = window.data[depo] || [];
     function getStatusClass(status) {
         if (!status) return "status-diger";
@@ -1307,14 +1305,18 @@ window.exportToExcel = function (depo) {
     let sheetName = "";
     if (depo === 'b3') {
         excelData = items.map(item => ({
-            "Raf No": item.rafNo || "-",
-            "Ürün Türü": item.urunTuru || "-",
-            "Ürün Açıklama": item.urunAciklama || "-",
-            "SN / BioPro / Itsm": item.sn || "-",
-            "Adet": parseInt(item.adet) || 0,
-            "Not/Gerekçe": item.not || "-",
-            "Alan Kişi": item.alanKisi || "-",
-            "Tarih": item.tarih || "-"
+            ...(n => ({
+                "Raf No": n.rafNo,
+                "Ürün Türü": n.urunTuru,
+                "Ürün Açıklama": n.urunAciklama,
+                "SN / BioPro / Itsm": n.sn,
+                "Envanter No": n.envanterNo,
+                "Adet": n.adet,
+                "Not/Gerekçe": n.not,
+                "Alan Kişi": n.alanKisi,
+                "Tarih": n.tarih,
+                "Hareket": n.tip === 'zimmet' ? 'Zimmet' : 'Çıkış'
+            }))(window.Schema.normalizeB3(item))
         }));
         sheetName = "Envanter Çıkış Raporu";
     } else {

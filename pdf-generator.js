@@ -6,6 +6,9 @@ window.generateZimmetPDF = function(id) {
     const item = (window.data.b3 || []).find(x => x && String(x.id) === String(id));
     if (!item) { if (typeof showAppAlert === 'function') showAppAlert('Kayıt bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     const activeUser = window.getActiveUser() || { name: 'Sistem Yöneticisi' };
+    // Kayıt hangi şemayla yazılmış olursa olsun kanonik görünümden okunur (3.6); çıkış formu kayıtlarında eskiden
+    // raf/tanım/kişi alanları boş ("undefined") basılıyordu.
+    const n = window.Schema.normalizeB3(item);
 
     // Logo (Placeholder - gerçek logo için doc.addImage(base64, 'PNG', x, y, w, h))
     doc.text('MEDIPOL UNV.', 10, 10);  // Logo yerine metin
@@ -15,14 +18,14 @@ window.generateZimmetPDF = function(id) {
 
     // [WHY]: Sabit örnek satırlar (transfer no, kişi, ITSM linki) gerçek zimmet gibi basılıyordu (ZIM-04). Gerçek form Faz 5'te.
     doc.setFontSize(10);
-    doc.text('Teslim Tarihi: ' + (item.tarih || item.date || '-'), 10, 30);
+    doc.text('Teslim Tarihi: ' + n.tarih, 10, 30);
 
     // Tablo
     doc.autoTable({
         startY: 70,
         head: [['Sıra', 'Varlık Kodu', 'Varlık Tanımı', 'Marka', 'Model', 'Seri No', 'Kare Kodu']],
         body: [
-            ['1', item.shelfNo, item.description, item.productType, '-', item.sn, 'QR Code Placeholder']
+            ['1', n.envanterNo, n.urunAciklama, n.marka || '-', n.urunTuru, n.sn, 'QR Code Placeholder']
             // QR için qrcode library ekle: doc.addImage(qrDataUrl, 'PNG', x, y, w, h)
         ],
         headStyles: { fillColor: [41, 128, 185] },
@@ -33,11 +36,11 @@ window.generateZimmetPDF = function(id) {
     const y = doc.autoTable.previous.finalY + 20;
     doc.text('İşbu tutanak ile yukarıda detayları belirtilen varlıkları, kurumsal iş süreçlerinde kullanılmak üzere eksiksiz ve çalışır vaziyette teslim aldım. Kullanım hatasından kaynaklı oluşabilecek zararlardan şahsen sorumlu olduğumu kabul ve taahhüt ederim.', 10, y, { maxWidth: 190 });
     doc.line(10, y + 40, 100, y + 40);  // Teslim Alan İmza
-    doc.text('Teslim Alan: ' + item.person, 10, y + 45);
+    doc.text('Teslim Alan: ' + n.alanKisi, 10, y + 45);
     doc.line(110, y + 40, 200, y + 40);  // Teslim Eden İmza
     doc.text('Teslim Eden: ' + activeUser.name, 110, y + 45);
 
-    doc.save(`Zimmet_${item.person}_${item.date}.pdf`);
+    doc.save(`Zimmet_${n.alanKisi}_${n.tarih}.pdf`);
 }
 
 window.exportPDF=function (depo) {
