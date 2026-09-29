@@ -759,31 +759,23 @@ window.confirmRequest = async function (requestId) {
         const live = _findRequest(requestId);
         if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
 
-        // Stok önce atomik düşülür; sonraki yazmalardan biri başarısız olursa geri eklenir.
+        // [WHY] (H3 · 3.4): Stok önce ayrı bir transaction'la düşülüyor, talep ve b3 sonra ayrı ayrı yazılıyordu; ara adımlardan
+        //        biri başarısız olunca "stok geri al + talebi geri döndür" telafileri de başarısız olabiliyordu.
+        // [HOW]: Stok düşümü + talebin onaylanması + b3 zimmet kaydı TEK transaction (runStockOps); stok kalemi seçilmediyse
+        //        talep + b3 tek atomik batch (applyItemOps). Telafi gerekmez: ya hepsi ya hiçbiri.
         const qty = Number(live.adet) || 1;
         const repo = choice.source?.repo;
         const product = repo ? (window.data[repo] || []).find(p => String(p.id) === String(choice.source.productId)) : null;
         if (repo && !product) { showAppAlert('Seçilen stok kalemi bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-        let stockChange = null;
-        if (product) {
-            try { stockChange = await window.runStockTransaction(repo, product.id, -qty); }
-            catch (e) { showAppAlert(`Stok düşülemedi: ${e.message}`, 'error'); return; }
-        }
-        const restoreStock = async () => {
-            if (!product) return;
-            try { await window.runStockTransaction(repo, product.id, qty); } catch (e) { console.error('❌ Stok geri alma hatası:', e); }
-        };
 
         const approver = window.currentUser?.name || 'Yönetici';
         const now = getTurkiyeSaati();
-        const updated = {
-            ...live, durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now,
+        const writes = [{ op: 'update', col: 'requests', id: live.id, fields: {
+            durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now,
             ...(product ? { stockRepo: repo, stockProductId: product.id } : {})
-        };
-        if (!(await window.writeOk(_saveRequestItem(updated)))) { await restoreStock(); showAppAlert('Onay kaydedilemedi; stok geri alındı.', 'error'); return; }
-
-        const exitEntry = {
-            id: Date.now(),
+        } }];
+        const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
+        if (!alreadyLogged) writes.push({ op: 'set', col: 'b3', item: {
             requestId: live.id,
             shelfNo: product ? (product.raf || '-') : "TALEP",
             productType: product ? (product.ürün || product.name || live.ürün) : live.ürün,
@@ -803,19 +795,24 @@ window.confirmRequest = async function (requestId) {
             iadeEdildi: false,
             sourceRepo: product ? repo : 'TALEP',
             approvedBy: approver
-        };
-        const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
-        if (!alreadyLogged && !(await window.writeOk(window.saveData('b3', [...(window.data.b3 || []), exitEntry])))) {
-            // Zimmet kaydı yoksa iade stoğa dönemez: onay ve stok birlikte geri alınır.
-            const reverted = await window.writeOk(_saveRequestItem(live));
-            await restoreStock();
-            showAppAlert(reverted === false
-                ? 'Zimmet kaydı yazılamadı; stok geri alındı ancak talep "onaylandı" kaldı. Lütfen talebi kontrol edin.'
-                : 'Zimmet kaydı yazılamadı; onay ve stok geri alındı.', 'error');
-        } else {
-            const stockText = stockChange ? ` ${repo.toUpperCase()} stok: ${stockChange.before} → ${stockChange.after}.` : ' Stoktan düşülmedi.';
-            showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.${stockText}`, "success");
+        } });
+
+        let stockChange = null;
+        try {
+            if (product) {
+                const res = await window.runStockOps({ stock: [{ col: repo, id: product.id, delta: -qty }], writes },
+                    { forbiddenMessage: 'Talep onayı (stok düşümü) yalnızca sistem yöneticisi tarafından yapılabilir.' });
+                stockChange = res.stock[0];
+            } else {
+                await window.applyItemOps(writes);
+            }
+        } catch (e) {
+            showAppAlert(`Onay kaydedilemedi; hiçbir değişiklik yapılmadı. ${e.message || ''}`, 'error');
+            _refreshRequestTables();
+            return;
         }
+        const stockText = stockChange ? ` ${repo.toUpperCase()} stok: ${stockChange.before} → ${stockChange.after}.` : ' Stoktan düşülmedi.';
+        showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.${stockText}`, "success");
         _refreshRequestTables();
     } finally {
         _requestActionsInFlight.delete(lockKey);

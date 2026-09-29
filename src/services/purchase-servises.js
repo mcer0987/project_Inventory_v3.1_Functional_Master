@@ -733,38 +733,51 @@ window.renderServicesModule = function () {
 };
 
 // 3. Servisten Geri Al
+// [WHY]: Servis kaydı silme ve ürünü depoya geri yazma ayrı iki kayıttı; personel oturumunda b1/b2 yazması reddedilirken
+//        servis kaydı silinebildiği için ürün iki yerden de kayboluyordu (EBYS-21). Ürün dizi sonuna yeni kayıt olarak
+//        ekleniyor (aynı id'li kayıt yeniden oluşunca birleşme belirsizdi) ve durumu koşulsuz "Kullanıma Hazır" yapılıyordu.
+// [HOW]: Tek transaction (runStockOps): ürün kaydı artık yoksa orijinal verisiyle yeniden oluşturulur, hâlâ varsa (ör. sevk
+//        sonrası aynı id ile yeniden girilmiş) adedi eklenir; servis kaydı AYNI transaction'da silinir — ya ikisi ya hiçbiri.
+//        Yalnız yönetici. Servisten dönen ürünün durumu yeniden oluşturmada "Kullanıma Hazır" (onarıldı) olur.
 window.receiveFromService = async function (serviceId) {
-    const recordIndex = window.data.serviceRecords.findIndex(r => r.id === serviceId);
-    if (recordIndex === -1) return;
+    const record = (window.data.serviceRecords || []).find(r => String(r.id) === String(serviceId));
+    if (!record) { if (typeof showAppAlert === 'function') showAppAlert('Servis kaydı bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+    const targetRepo = ['b1', 'b2'].includes(record.kaynakDepo) ? record.kaynakDepo : 'b1';
 
-    const record = window.data.serviceRecords[recordIndex];
-    const targetRepo = record.kaynakDepo || 'b1';
-
-    // Ürünü orijinal verisiyle geri yükle
-    const recoveredItem = record.originalData ? { ...record.originalData } : {
+    const base = record.originalData ? { ...record.originalData } : {
         ürün: record.urunAciklama || record.urun,
         tür: record.urunTuru || "Servis Çıkışlı",
         adet: record.adet || 1,
         sn: record.sn || "-"
     };
+    const qty = parseInt(base.adet ?? base.qty ?? 1, 10) || 1;
+    const productId = base.id != null && base.id !== '' ? String(base.id) : `${targetRepo}_${window.makeId()}`;
+    const statusField = targetRepo === 'b2' ? 'status' : 'durumu';
+    const recovered = {
+        ...base, id: productId, adet: qty,
+        [statusField]: 'Kullanıma Hazır',
+        açıklama: "Servisten Döndü: " + (record.not || ""),
+    };
 
-    recoveredItem.durumu = "Kullanıma Hazır";
-    recoveredItem.açıklama = "Servisten Döndü: " + (record.not || "");
+    const ok = typeof showCustomConfirm === 'function'
+        ? await showCustomConfirm('Depoya Geri Al', `"${recovered.ürün || '-'}" (${qty} adet) ${targetRepo.toUpperCase()} deposuna geri alınacak ve servis kaydı kapanacak. Onaylıyor musunuz?`)
+        : window.confirm('Ürün depoya geri alınsın mı?');
+    if (ok !== true) return;
 
-    if (!window.data[targetRepo]) window.data[targetRepo] = [];
-    window.data[targetRepo].push(recoveredItem);
-
-    // Servis kaydını sil
-    window.data.serviceRecords.splice(recordIndex, 1);
-
-    // [BUGFIX] Bug 5: Targeted save to prevent batch permission denied across non-admin collections
-    await window.saveData(targetRepo, window.data[targetRepo]);
-    await window.saveData('serviceRecords', window.data.serviceRecords);
-    // Realtime sync otomatik render edecek ama garantiye alalım:
+    let res;
+    try {
+        res = await window.runStockOps({
+            stock: [{ col: targetRepo, id: productId, delta: qty, createIfMissing: recovered }],
+            writes: [{ op: 'delete', col: 'serviceRecords', id: record.id }]
+        }, { forbiddenMessage: 'Servisten depoya geri alma yalnızca sistem yöneticisi tarafından yapılabilir.' });
+    } catch (e) {
+        if (typeof showAppAlert === 'function') showAppAlert(`Ürün depoya geri alınamadı; servis kaydı yerinde bırakıldı. ${e.message || ''}`, 'error');
+        return;
+    }
+    const s0 = res.stock[0];
     if (typeof window.renderPurchaseModule === 'function') window.renderPurchaseModule();
-
-    if (typeof showAppAlert === 'function') showAppAlert("Ürün depoya geri alındı.", "success");
-
+    if (typeof window.renderTable === 'function') window.renderTable(targetRepo);
+    if (typeof showAppAlert === 'function') showAppAlert(s0.created ? `Ürün ${targetRepo.toUpperCase()} deposuna geri alındı.` : `Ürün ${targetRepo.toUpperCase()} deposundaki kaydına eklendi (stok ${s0.before} → ${s0.after}).`, "success");
     renderServicesModule();
 };
 

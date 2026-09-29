@@ -646,32 +646,23 @@ window.inventoryManagementModule = {
       if (it.qty > stock) { alert(`${it.product.ürün || it.product.name} için yeterli stok yok! (Mevcut: ${stock}, İstenen: ${it.qty})`, 'error'); return; }
     }
 
+    // [WHY] (H3 · 3.4): stok her kalem için ayrı transaction'la düşülüyor, b3 ve assignments ayrı ayrı yazılıyordu; b3
+    //        başarısız olunca telafi (stok geri alma) da başarısız olabilir, assignments yazılamazsa zimmet geçmişi eksik kalırdı.
+    // [HOW]: Tüm kalemlerin stok düşümü + b3 kayıtları + assignments kayıtları TEK transaction (runStockOps): ya hepsi ya hiçbiri.
+    //        b3 ve assignments aynı id'yi paylaşır (iade ikisini birlikte bulur); id makeId ile.
     this._savingAssignment = true;
-    const deducted = [];
-    const rollback = async () => {
-      for (const d of deducted.reverse()) {
-        try { await window.runStockTransaction(d.warehouse, d.product.id, d.qty); } catch (e) { console.error('❌ Stok geri alma hatası:', e); }
-      }
-    };
     try {
-      const stockChanges = [];
-      for (const it of items) {
-        const r = await window.runStockTransaction(it.warehouse, it.product.id, -it.qty);
-        deducted.push(it);
-        if (r) stockChanges.push(`${it.warehouse.toUpperCase()} ${it.product.ürün || it.product.name}: ${r.before} → ${r.after}`);
-      }
-
       const now = typeof getTurkiyeTarihi === 'function' ? getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
-      const baseId = Date.now();
-      const b3Entries = [], assignmentEntries = [];
-      items.forEach((it, i) => {
-        const id = baseId + i;
+      const stock = [], writes = [];
+      items.forEach(it => {
+        const id = window.makeId();
         const common = {
           sn: it.sn, talepTuru, oncelik, isDemirbas: true, iadeEdildi: false,
           productId: it.product.id, sourceRepo: it.warehouse,
           ...(iadeTarihi ? { iadeTarihi } : {}),
         };
-        b3Entries.push({
+        stock.push({ col: it.warehouse, id: it.product.id, delta: -it.qty });
+        writes.push({ op: 'set', col: 'b3', item: {
           id, ...common,
           shelfNo: it.product.raf || '-',
           productType: it.product.ürün || it.product.name || '-',
@@ -680,30 +671,22 @@ window.inventoryManagementModule = {
           note: not || `Admin Zimmeti (${talepTuru})`,
           alanKisi: personnelName,
           date: now,
-        });
-        assignmentEntries.push({
+        } });
+        writes.push({ op: 'set', col: 'assignments', item: {
           id, ...common,
           ürün: it.product.ürün || it.product.name || '-',
           personel: personnelName, tarih: now, adet: it.qty, not, tip: 'zimmet',
-        });
+        } });
       });
 
-      if (!(await window.writeOk(window.saveData('b3', [...b3Entries, ...(window.data.b3 || [])])))) {
-        await rollback();
-        alert('Zimmet kaydedilemedi; stok geri alındı.', 'error');
-        return;
-      }
-      if (!(await window.writeOk(window.saveData('assignments', [...assignmentEntries, ...(window.data.assignments || [])])))) {
-        alert('Zimmet oluşturuldu ancak zimmet geçmişi (assignments) yazılamadı.', 'warning');
-      } else {
-        alert(`${personnelName} adına ${items.length} kalem zimmet başarıyla oluşturuldu. Stok: ${stockChanges.join(' · ')}`, 'success');
-      }
+      const res = await window.runStockOps({ stock, writes });
+      const changes = res.stock.map(r => `${r.col.toUpperCase()} ${r.name}: ${r.before} → ${r.after}`).join(' · ');
+      alert(`${personnelName} adına ${items.length} kalem zimmet başarıyla oluşturuldu. Stok: ${changes}`, 'success');
       this.closeAssignModal();
       this.renderTable();
     } catch (err) {
       console.error('Zimmet kayıt hatası:', err);
-      await rollback();
-      alert(`Zimmet kaydedilemedi: ${err.message}`, 'error');
+      alert(`Zimmet kaydedilemedi; hiçbir şey yazılmadı. ${err.message || ''}`, 'error');
     } finally {
       this._savingAssignment = false;
     }
@@ -730,9 +713,7 @@ window.inventoryManagementModule = {
         ? showCustomConfirm('Zimmetten Düş', 'Talep kaynaklı zimmet kapatılacak (stok bağlantısı olmadığı için depo stoğu değişmez). Onaylıyor musunuz?')
         : Promise.resolve(window.confirm('Talep kaynaklı zimmet kapatılsın mı?')));
       if (!ok) return;
-      const updated = { ...req, iadeEdildi: true, iadeEdildiTarihi: today };
-      const saved = await window.writeOk(window.saveData('requests', window.data.requests.map(r => sameId(r) ? updated : r)));
-      if (saved === false) { alert('İade kaydedilemedi.', 'error'); return; }
+      if (!(await window.writeOk(window.updateItem('requests', req.id, { iadeEdildi: true, iadeEdildiTarihi: today })))) { alert('İade kaydedilemedi.', 'error'); return; }
       this.renderTable();
       alert('Zimmet kaydı kapatıldı.', 'success');
       return;
@@ -756,7 +737,7 @@ window.inventoryManagementModule = {
       if (!ok) return;
     }
 
-    let product = null, stockChange = null;
+    let product = null;
     if (target) {
       const list = window.data[target] || [];
       product = item.productId != null ? list.find(p => String(p.id) === String(item.productId)) : null;
@@ -766,30 +747,28 @@ window.inventoryManagementModule = {
         if (byName.length === 1) product = byName[0];
       }
       if (!product) { alert(`${target.toUpperCase()} deposunda bu ürün tek ve kesin olarak bulunamadı; iade yapılmadı.`, 'error'); return; }
-      try {
-        stockChange = await window.runStockTransaction(target, product.id, qty);
-      } catch (e) {
-        alert(`Stok iadesi başarısız: ${e.message}`, 'error');
-        return;
-      }
     }
 
-    const updatedItem = { ...item, iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today };
-    if (!(await window.writeOk(window.saveData('b3', window.data.b3.map(b => sameId(b) ? updatedItem : b))))) {
-      if (target && product) { try { await window.runStockTransaction(target, product.id, -qty); } catch (e) { console.error(e); } }
-      alert('İade kaydedilemedi; stok değişikliği geri alındı.', 'error');
+    // [WHY] (H3 · 3.4): stok iadesi, b3, assignments ve bağlı talep ayrı ayrı yazılıyordu; b3 başarısız olunca stok telafisi de
+    //        başarısız olabilirdi, assignments/talep güncellemesi başarısız olursa zimmet yarı kapalı kalırdı.
+    // [HOW]: Stok +adet (depoya iade varsa) + b3 + assignments + talep güncellemeleri TEK transaction: ya hepsi ya hiçbiri.
+    const closeFields = { iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today };
+    const writes = [{ op: 'update', col: 'b3', id: item.id, fields: closeFields }];
+    if ((window.data.assignments || []).some(sameId)) writes.push({ op: 'update', col: 'assignments', id: item.id, fields: closeFields });
+    if (item.requestId != null && (window.data.requests || []).some(r => String(r.id) === String(item.requestId))) {
+      writes.push({ op: 'update', col: 'requests', id: item.requestId, fields: { iadeEdildi: true, iadeEdildiTarihi: today } });
+    }
+    let stockChange = null;
+    try {
+      if (target) {
+        const res = await window.runStockOps({ stock: [{ col: target, id: product.id, delta: qty }], writes }, { forbiddenMessage: 'İade işlemi yalnızca sistem yöneticisi tarafından yapılabilir.' });
+        stockChange = res.stock[0];
+      } else {
+        await window.applyItemOps(writes);
+      }
+    } catch (e) {
+      alert(`İade kaydedilemedi; hiçbir değişiklik yapılmadı. ${e.message || ''}`, 'error');
       return;
-    }
-
-    const assignments = window.data.assignments || [];
-    if (assignments.some(sameId)) {
-      await window.saveData('assignments', assignments.map(a => sameId(a) ? { ...a, iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today } : a));
-    }
-    if (item.requestId != null) {
-      const reqs = window.data.requests || [];
-      if (reqs.some(r => String(r.id) === String(item.requestId))) {
-        await window.saveData('requests', reqs.map(r => String(r.id) === String(item.requestId) ? { ...r, iadeEdildi: true, iadeEdildiTarihi: today } : r));
-      }
     }
 
     this.renderTable();

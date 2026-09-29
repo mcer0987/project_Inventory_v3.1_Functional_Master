@@ -181,9 +181,9 @@ const SCENARIOS = {
                 mk(1, 'Beklemede', 'Personel A ' + ft.MARKER), mk(2, 'Beklemede', 'Personel B ' + ft.MARKER), mk(3, 'draft', 'Personel C ' + ft.MARKER)]);
             await ft.waitFor(async () => (await ft.readMarked('requests')).length === 3 && (window.data.requests || []).filter(r => String(r.ürün).includes(ft.MARKER)).length === 3);
             const db = async n => (await ft.readMarked('requests')).find(r => r.id === base + n);
-            const realSave = window.saveData, realModal = window.showRequestApprovalModal; let b3Attempts = 0;
-            // b3 is admin-only: count the attempt and report success so the approval is not rolled back.
-            window.saveData = async (col, items) => { if (col === 'b3') { b3Attempts++; return true; } return realSave(col, items); };
+            const realSave = window.saveData, realModal = window.showRequestApprovalModal, realApply = window.applyItemOps; let b3Attempts = 0;
+            // H3: approval = one atomic batch (requests update + b3 set). b3 is admin-only: record the b3 part, write the rest for real.
+            window.applyItemOps = async (ops, o) => { const rest = ops.filter(x => x.col !== 'b3'); b3Attempts += ops.length - rest.length; return rest.length ? realApply(rest, o) : { written: 0 }; };
             window.showCustomConfirm = async () => true;
             window.setActiveUser({ name: 'Yönetici Test' });
 
@@ -219,7 +219,7 @@ const SCENARIOS = {
             await ft.waitFor(async () => window.data.requests.find(r => r.id === base + 2)?.durum === 'rejected');
             await window.deleteRequest(base + 2);
             out.deletedById = await ft.waitFor(async () => !(await db(2)) && !!(await db(1)) && !!(await db(3)));
-            window.saveData = realSave; window.showRequestApprovalModal = realModal;
+            window.saveData = realSave; window.showRequestApprovalModal = realModal; window.applyItemOps = realApply;
             return out;
         });
     },
@@ -240,11 +240,21 @@ const SCENARIOS = {
             await ft.waitFor(async () => (window.data.requests || []).filter(r => String(r.ürün).includes(ft.MARKER)).length === 4);
             const db = async n => (await ft.readMarked('requests')).find(r => r.id === base + n);
 
-            const tx = [], b3 = []; let failB3 = false;
-            const realTx = window.runStockTransaction, realAlert = window.showAppAlert;
-            window.runStockTransaction = async (c, id, d) => { tx.push([c, id, d]); const p = window.data[c].find(x => x.id === id); const before = p.adet; p.adet += d; return { before, after: p.adet }; };
-            const realSave = window.saveData;
-            window.saveData = async (col, items) => { if (col === 'b3') { if (failB3) return false; b3.push(items[items.length - 1]); return true; } return realSave(col, items); };
+            const tx = [], b3 = []; let failB3 = false, stockFails = false, txCalls = 0;
+            const realAlert = window.showAppAlert, realOps = window.runStockOps, realApply = window.applyItemOps, realSave = window.saveData;
+            // Atomic stand-in: b3/stock parts are admin-only → recorded; the requests part is written for real — but only if
+            // nothing fails (all or nothing), exactly like the single Firestore transaction.
+            const atomic = async (stock, writes) => {
+                txCalls++;
+                if (stockFails) throw new window.SaveDataError('insufficient-stock', 'Yetersiz stok!');
+                if (failB3 && writes.some(w => w.col === 'b3')) throw new window.SaveDataError('write-failed', 'b3 yazılamadı');
+                const rest = writes.filter(w => w.col !== 'b3');
+                if (rest.length) await realApply(rest);
+                writes.filter(w => w.col === 'b3').forEach(w => b3.push(w.item));
+                return { stock: stock.map(st => { tx.push([st.col, st.id, st.delta]); const p = window.data[st.col].find(x => x.id === st.id); const before = p.adet; p.adet += st.delta; return { before, after: p.adet }; }) };
+            };
+            window.runStockOps = async ({ stock = [], writes = [] }) => atomic(stock, writes);
+            window.applyItemOps = async (ops) => atomic([], ops);
             const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
             window.setActiveUser({ name: 'Yönetici Test' });
             const modal = () => document.getElementById('requestApprovalModal');
@@ -285,7 +295,7 @@ const SCENARIOS = {
             await ft.waitFor(async () => (await db(3))?.durum === 'approved');
             out.noStock = { noTx: tx.length === 0, sourceRepo: b3[0]?.sourceRepo, hasProductId: 'productId' in (b3[0] || {}), message: alerts.at(-1)?.[1] };
 
-            // 4) b3 write fails: stock is restored and the request goes back to pending
+            // 4) b3 write fails: the single transaction fails → no stock change, request stays pending (nothing to restore)
             tx.length = 0; failB3 = true;
             await ft.waitFor(async () => window.data.requests.some(r => r.id === base + 2 && r.durum === 'Beklemede'));
             pending = await openFor(2);
@@ -293,18 +303,18 @@ const SCENARIOS = {
             modal().querySelector('#raOk').click();
             await pending.p;
             await ft.sleep(1500);
-            out.b3Failure = { tx: JSON.stringify(tx) === JSON.stringify([['b1', prod.id, -1], ['b1', prod.id, 1]]), stockNow: prod.adet, reverted: (await db(2)).durum === 'Beklemede', message: alerts.at(-1)?.[1] };
+            out.b3Failure = { noTx: tx.length === 0, stockNow: prod.adet, stillPending: (await db(2)).durum === 'Beklemede', message: alerts.at(-1)?.[1] };
 
             // 5) stock transaction refuses (e.g. insufficient on server): nothing is approved
-            failB3 = false; tx.length = 0;
-            window.runStockTransaction = async () => { throw new Error('Yetersiz Stok!'); };
+            failB3 = false; tx.length = 0; stockFails = true;
             pending = await openFor(2);
             const s5 = modal().querySelector('#raSource'); s5.value = `b1|${prod.id}`; s5.dispatchEvent(new Event('change'));
             modal().querySelector('#raOk').click();
             await pending.p; await ft.sleep(800);
             out.txFailure = { stillPending: (await db(2)).durum === 'Beklemede', message: alerts.at(-1)?.[1] };
 
-            window.saveData = realSave; window.runStockTransaction = realTx; window.showAppAlert = realAlert;
+            out.oneCallPerApproval = txCalls;
+            window.saveData = realSave; window.runStockOps = realOps; window.applyItemOps = realApply; window.showAppAlert = realAlert;
             window.data.b1 = window.data.b1.filter(p => p !== prod && p !== low);
             return out;
         });
@@ -1295,6 +1305,95 @@ const SCENARIOS = {
             window.data.b1 = orig.b1; window.data.b2 = orig.b2;
             return o;
         });
+    },
+
+    // H3 · zimmet ata / iade / servisten dönüş: exactly one atomic core call each (admin.html, recorded; nothing written).
+    async h3Assignments(page, browser) {
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        const out = await admin.evaluate(async () => {
+            if (window.COLLECTION_ROOT !== 'inventory_demo') throw new Error('root');
+            const o = {}, calls = [], alerts = [];
+            const orig = { b1: window.data.b1, b3: window.data.b3, asg: window.data.assignments, req: window.data.requests, svc: window.data.serviceRecords, per: window.data.personel };
+            window.isDbAdmin = () => true;
+            window.showAppAlert = (m, t) => alerts.push([t, m]);
+            window.showCustomConfirm = async () => true;
+            let fail = false;
+            window.runStockOps = async (arg) => { calls.push(['runStockOps', JSON.parse(JSON.stringify(arg))]); if (fail) throw new window.SaveDataError('write-failed', 'transaction reddedildi'); return { stock: arg.stock.map(s => ({ col: s.col, id: s.id, name: s.id, before: 3, after: 3 + s.delta, created: false })) }; };
+            window.applyItemOps = async (ops) => { calls.push(['applyItemOps', JSON.parse(JSON.stringify(ops))]); return { written: ops.length }; };
+            let legacy = 0; const realRst = window.runStockTransaction; window.runStockTransaction = async (...a) => { legacy++; return realRst(...a); };
+            let fullSaves = 0; const realSave = window.saveData; window.saveData = async (...a) => { fullSaves++; return { written: 0 }; };
+            const P = (id, name, adet) => ({ id, ürün: name, raf: 'R1', adet, durumu: 'Kullanıma Hazır', isDemirbas: true });
+            window.data.b1 = [P('p1', 'Laptop A', 3), P('p2', 'Laptop B', 2)];
+            window.data.personel = [...(orig.per || []), { name: 'Zimmet Kişi' }];
+
+            // 1) saveAssignment: two rows → one runStockOps with 2 stock deltas + 2 b3 + 2 assignments sharing ids
+            const m = window.inventoryManagementModule;
+            m.openAssignModal();
+            const sel = document.getElementById('assignPersonnel'); sel.value = 'Zimmet Kişi';
+            m.addAssignRow();
+            const rows = document.querySelectorAll('#assignRowsContainer .assign-product-row');
+            [['p1', '2'], ['p2', '1']].forEach(([pid, q], i) => {
+                const ws = rows[i].querySelector('.assign-warehouse-sel'); ws.value = 'b1'; m.onWarehouseChange(ws);
+                const ps = rows[i].querySelector('.assign-product-sel'); ps.value = pid; m.onProductChange(ps);
+                rows[i].querySelector('.assign-qty-inp').value = q;
+            });
+            await m.saveAssignment();
+            const a = calls.at(-1)?.[1];
+            const b3 = (a?.writes || []).filter(w => w.col === 'b3'), asg = (a?.writes || []).filter(w => w.col === 'assignments');
+            o.assign = { calls: calls.length, stock: a?.stock.map(s => `${s.col}/${s.id}:${s.delta}`), b3: b3.length, assignments: asg.length,
+                sharedIds: b3.every((w, i) => String(w.item.id) === String(asg[i]?.item.id)), alert: alerts.at(-1)?.[0] };
+            fail = true; calls.length = 0;
+            m.openAssignModal(); document.getElementById('assignPersonnel').value = 'Zimmet Kişi';
+            const r0 = document.querySelector('#assignRowsContainer .assign-product-row');
+            const w0 = r0.querySelector('.assign-warehouse-sel'); w0.value = 'b1'; m.onWarehouseChange(w0);
+            const p0 = r0.querySelector('.assign-product-sel'); p0.value = 'p1'; m.onProductChange(p0);
+            await m.saveAssignment();
+            o.assignFail = { calls: calls.length, alert: alerts.at(-1) };
+            fail = false; m.closeAssignModal();
+
+            // 2) removeAssignment to B1: one runStockOps (+qty) with b3 + assignments + request updates
+            window.data.b3 = [{ id: 7001, productId: 'p1', sourceRepo: 'b1', sarfAdet: 2, alanKisi: 'Zimmet Kişi', talepTuru: 'Kalıcı Zimmet', iadeEdildi: false, requestId: 8001 }];
+            window.data.assignments = [{ id: 7001, productId: 'p1', adet: 2 }];
+            window.data.requests = [{ id: 8001, ürün: 'Laptop A', durum: 'approved' }];
+            calls.length = 0;
+            const pr = m.removeAssignment(7001, 'b3');
+            await new Promise(r => setTimeout(r, 300));
+            document.getElementById('btnReturnB1').click();
+            await pr;
+            const r = calls.at(-1)?.[1];
+            o.returnToB1 = { calls: calls.length, fn: calls.at(-1)?.[0], stock: r?.stock.map(s => `${s.col}/${s.id}:+${s.delta}`), writes: r?.writes.map(w => `${w.op}:${w.col}:${w.id}`), alert: alerts.at(-1)?.[1] };
+            // "Depoya iade etmeden kapat": no stock, one atomic batch
+            window.data.b3[0].iadeEdildi = false; calls.length = 0;
+            const pr2 = m.removeAssignment(7001, 'b3');
+            await new Promise(r => setTimeout(r, 300));
+            document.getElementById('btnReturnNone').click();
+            await pr2;
+            o.closeWithoutReturn = { calls: calls.map(c => c[0]), writes: calls.at(-1)?.[1].map(w => `${w.op}:${w.col}`) };
+
+            // 3) receiveFromService: one runStockOps with createIfMissing + delete serviceRecord
+            window.data.serviceRecords = [{ id: 9001, kaynakDepo: 'b1', originalData: { id: 'p9', ürün: 'Yazıcı', adet: 1, durumu: 'Servis Sürecinde' }, not: 'fixed' }];
+            calls.length = 0;
+            await window.receiveFromService(9001);
+            const sv = calls.at(-1)?.[1];
+            o.service = { calls: calls.length, stock: sv?.stock.map(s => ({ id: s.id, delta: s.delta, createStatus: s.createIfMissing?.durumu })), writes: sv?.writes.map(w => `${w.op}:${w.col}:${w.id}`) };
+            fail = true;
+            await window.receiveFromService(9001);
+            o.serviceFail = alerts.at(-1);
+            fail = false;
+
+            o.noLegacyStockCalls = legacy === 0;
+            o.noFullSaves = fullSaves === 0;
+            window.saveData = realSave; window.runStockTransaction = realRst;
+            Object.assign(window.data, { b1: orig.b1, b3: orig.b3, assignments: orig.asg, requests: orig.req, serviceRecords: orig.svc, personel: orig.per });
+            return o;
+        });
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
     },
 
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
