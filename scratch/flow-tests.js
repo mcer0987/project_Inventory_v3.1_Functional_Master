@@ -1695,6 +1695,71 @@ const SCENARIOS = {
         return out;
     },
 
+    // H4 · 3.6 VIP Şema Göçü: gerçek demo b3'ünde SALT OKUNUR önizleme; yazma yolu stub ile (yedek önce, 400'lük parçalar,
+    // sözleşme dışı kayda dokunulmaz, tekrar çalıştırma 0 kayıt, personel oturumu reddedilir). Firestore'a yazılmaz.
+    async h4SchemaMigration(page, browser) {
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        const out = await admin.evaluate(async () => {
+            if (window.COLLECTION_ROOT !== 'inventory_demo') throw new Error('root');
+            const o = {};
+            // 1) gerçek demo verisinde önizleme (yazma yok)
+            const real = window.planB3Migration();
+            o.demoPreview = { total: real.total, alreadyCanonical: real.alreadyCanonical, convert: real.convert.length, invalid: real.invalid, stats: real.stats,
+                              viewUnchanged: real.convert.every(c => { const before = (window.data.b3 || []).find(b => String(b.id) === String(c.id)); const v = x => { const n = window.Schema.normalizeB3(x); return [n.rafNo, n.urunTuru, n.urunAciklama, n.sn, n.adet, n.not, n.alanKisi, n.tarih].join('|'); }; return v(before) === v(c); }) };
+
+            // 2) yazma yolu (stub)
+            const orig = { b3: window.data.b3, per: window.data.personel, apply: window.applyItemOps, adm: window.isDbAdmin, conf: window.showCustomConfirm, alert: window.showAppAlert, click: HTMLAnchorElement.prototype.click };
+            const events = [], alerts = [];
+            window.showAppAlert = (m, t) => alerts.push([t, m]);
+            window.showCustomConfirm = async (title, msg) => { events.push('confirm'); o.confirmText = msg.split('\n').slice(0, 2); return true; };
+            HTMLAnchorElement.prototype.click = function () { if (this.download) events.push('download:' + this.download.split('-').slice(0, 3).join('-')); };
+            window.applyItemOps = async ops => { events.push(`apply:${ops.length}`); ops.forEach(op => { const i = window.data.b3.findIndex(b => String(b.id) === String(op.item.id)); window.data.b3[i] = op.item; }); return { written: ops.length }; };
+            try {
+                window.isDbAdmin = () => true;
+                window.data.personel = [{ id: 'per_ahmet', name: 'Ahmet Serhat Dursun' }];
+                const canonical = window.Schema.buildB3Entry({ tip: 'cikis', adet: 1, urunAciklama: 'Zaten yeni', alanKisi: 'X' });
+                window.data.b3 = [
+                    { id: 1, shelfNo: 'TALEP', productType: 'Asus', description: 'Personel Talebi Onaylandı', sn: 'T1', sarfAdet: 1, note: 'n', person: 'Ahmet Serhat Dursun', alanKisi: 'Ahmet Serhat Dursun', date: '28.09.2026', talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', sourceRepo: 'TALEP', approvedBy: 'Admin', requestId: 77 },
+                    { id: 2, rafNo: 'R-1', urunTuru: 'Kablo', urunAciklama: 'HDMI', sn: 'S', adet: 2, not: '-', alanKisi: 'A', tarih: '01.01.2026' },
+                    canonical,
+                    { id: 4, rafNo: 'R', urunAciklama: 'Adetsiz eski kayıt', alanKisi: 'B', tarih: '01.01.2026' },   // adet yok → dokunulmaz
+                ];
+                await window.vipMigrateB3Schema();
+                o.run = { events: [...events], alert: alerts.at(-1) };
+                o.after = {
+                    convertedValid: window.data.b3.filter(b => b.sema === 2).map(b => window.Schema.validateB3(b)),
+                    descriptionKept: window.data.b3[0].description === 'Personel Talebi Onaylandı',
+                    personelIdBackfilled: window.data.b3[0].personelId,
+                    invalidUntouched: window.data.b3[3].sema === undefined,
+                    unknownDepotKeepsShelf: window.data.b3[1].rafNo === 'R-1' && window.data.b3[1].kaynakDepo === null && window.Schema.normalizeB3(window.data.b3[1]).rafNo === 'R-1',
+                    rerunConverts: window.planB3Migration().convert.length,
+                    rerunDiff: window.planB3Migration().convert.map(c => { const b = window.data.b3.find(x => String(x.id) === String(c.id)); return { id: c.id, keys: Object.keys({ ...b, ...c }).filter(k => JSON.stringify(b[k] ?? null) !== JSON.stringify(c[k] ?? null)).map(k => k + ':' + JSON.stringify(b[k]) + '→' + JSON.stringify(c[k])) }; }),
+                };
+                // 900 eski kayıt → 400 + 400 + 100
+                events.length = 0;
+                window.data.b3 = Array.from({ length: 900 }, (_, i) => ({ id: 1000 + i, rafNo: 'R', urunTuru: 'T', urunAciklama: 'U', sn: 'S', adet: 1, not: '-', alanKisi: 'A', tarih: 't' }));
+                await window.vipMigrateB3Schema();
+                o.chunks = events.filter(e => e.startsWith('apply'));
+                // personel / anonim oturum reddedilir
+                events.length = 0; window.isDbAdmin = () => false;
+                await window.vipMigrateB3Schema();
+                o.nonAdmin = { events: [...events], alert: alerts.at(-1)?.[1] };
+            } finally {
+                HTMLAnchorElement.prototype.click = orig.click;
+                Object.assign(window, { applyItemOps: orig.apply, isDbAdmin: orig.adm, showCustomConfirm: orig.conf, showAppAlert: orig.alert });
+                window.data.b3 = orig.b3; window.data.personel = orig.per;
+            }
+            return o;
+        });
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
+    },
+
 };
 
 (async () => {

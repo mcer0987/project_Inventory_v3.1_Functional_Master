@@ -773,6 +773,101 @@
         }
     };
 
+    // ─── Şema Göçü (Faz 3.6 · DATA-08) ───────────────────────────────────────────────────────────────────────
+    // [WHY]: b3 geçmişte dört farklı biçimde yazıldı. Okuyucular artık hepsini normalizeB3 ile doğru gösteriyor, ama eski
+    //        kayıtlarda tür/raf bilgisi kayıtta yok (ürün silinirse kaybolur) ve eski alan adları sürüyor.
+    // [HOW]: Önizleme → onay → b3 yedeği (JSON dosyası) indirilir → yalnız dönüşmesi gereken ve sözleşmeyi (validateB3) geçen
+    //        kayıtlar kanonik halleriyle yazılır (400'lük atomik parçalar). Sözleşmeyi geçemeyenlere dokunulmaz, listelenir.
+    //        Karşılığı olmayan alanlar (description vb.) korunur. Zimmet kayıtlarına, ad tek bir personele denk geliyorsa
+    //        personelId eklenir. Tekrar çalıştırmak güvenlidir (dönüştürülecek kayıt kalmaz). Yalnız Firebase admin oturumu.
+    const _MIGRATION_CHUNK = 400;
+    const _stableJson = o => JSON.stringify(Object.keys(o).filter(k => !k.startsWith('_')).sort().map(k => [k, o[k] ?? null]));
+    window.planB3Migration = function (items = window.data?.b3 || []) {
+        const S = window.Schema;
+        const plan = { total: items.length, alreadyCanonical: 0, convert: [], invalid: [], stats: { turFilled: 0, stokDisi: 0, personelId: 0 } };
+        items.forEach(item => {
+            if (!item || item.id == null || item.id === '') { plan.invalid.push({ id: item?.id, errors: ['id yok'] }); return; }
+            const next = S.toCanonicalB3(item);
+            let pidAdded = false;
+            if (next.tip === 'zimmet' && !next.personelId && window.AssignmentService) {
+                const pid = window.AssignmentService.resolvePersonelId(next.alanKisi);
+                if (pid) { next.personelId = pid; pidAdded = true; }
+            }
+            if (_stableJson(next) === _stableJson(item)) { plan.alreadyCanonical++; return; }
+            const errors = S.validateB3(next, { legacy: true });
+            if (errors.length) { plan.invalid.push({ id: item.id, errors }); return; }
+            if (pidAdded) plan.stats.personelId++;
+            if ((item.urunTuru === undefined || item.urunTuru === '-' || item.urunTuru === '') && next.urunTuru !== '-') plan.stats.turFilled++;
+            if (next.kaynakDepo === S.STOK_DISI && item.kaynakDepo !== S.STOK_DISI) plan.stats.stokDisi++;
+            plan.convert.push(next);
+        });
+        return plan;
+    };
+
+    let _migrating = false;
+    window.vipMigrateB3Schema = async function (btn) {
+        if (_migrating) return;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error');
+            return;
+        }
+        _migrating = true;
+        if (btn) btn.disabled = true;
+        try {
+            const plan = window.planB3Migration();
+            if (plan.convert.length === 0) {
+                const bad = plan.invalid.length ? ` Sözleşmeyi geçemeyen ${plan.invalid.length} kayıt var; konsola yazıldı.` : '';
+                _dupAlert(`B3 zaten yeni şemada (${plan.alreadyCanonical}/${plan.total}).${bad}`, plan.invalid.length ? 'warning' : 'info');
+                if (plan.invalid.length) console.warn('[Şema Göçü] dönüştürülemeyen kayıtlar:', plan.invalid);
+                return;
+            }
+            const sample = plan.convert.slice(0, 5).map((c, i) => {
+                const n = window.Schema.normalizeB3(c);
+                return `${i + 1}. #${c.id} · ${n.tip === 'zimmet' ? 'Zimmet' : 'Çıkış'} · ${n.urunAciklama} · Tür ${n.urunTuru} · Raf ${n.rafNo} · ${n.alanKisi}`;
+            });
+            const message = [
+                `Ortam: ${window.COLLECTION_ROOT}. B3 kayıt: ${plan.total} · zaten yeni şemada: ${plan.alreadyCanonical} · dönüştürülecek: ${plan.convert.length} · dokunulmayacak (sözleşme dışı): ${plan.invalid.length}.`,
+                `Kayda kopyalanacak ürün türü: ${plan.stats.turFilled} · "TALEP" → Stok dışı: ${plan.stats.stokDisi} · personelId eklenecek: ${plan.stats.personelId}.`,
+                '', ...sample, plan.convert.length > 5 ? `… ve ${plan.convert.length - 5} kayıt daha.` : '', '',
+                'Önce b3 yedeği (JSON) indirilecek, sonra kayıtlar yeni şemayla yazılacak. Ekranlarda görünen değerler değişmez. Devam edilsin mi?'
+            ].join('\n');
+            const ok = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('Şema Göçü (B3) Onayı', message)
+                : confirm(`${plan.convert.length} b3 kaydı yeni şemaya taşınsın mı?`);
+            if (ok !== true) return;
+
+            // 1. Yedek (yazmadan önce)
+            const snapshot = { version: 1, root: window.COLLECTION_ROOT, collection: 'b3', timestamp: new Date().toISOString(), data: window.data.b3 || [] };
+            const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 1)], { type: 'application/json' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `b3-yedek-${window.COLLECTION_ROOT}-${snapshot.timestamp.replace(/[:.]/g, '-')}.json`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+            // 2. Onaydan sonra güncel veriden yeniden planla; yalnız önizlemede gösterilen kayıtlar yazılır
+            const shown = new Set(plan.convert.map(c => String(c.id)));
+            const toWrite = window.planB3Migration().convert.filter(c => shown.has(String(c.id)));
+            let written = 0;
+            for (let i = 0; i < toWrite.length; i += _MIGRATION_CHUNK) {
+                const chunk = toWrite.slice(i, i + _MIGRATION_CHUNK);
+                await window.applyItemOps(chunk.map(item => ({ op: 'set', col: 'b3', item })));
+                written += chunk.length;
+            }
+            const skipped = plan.convert.length - toWrite.length;
+            const note = skipped ? ` (${skipped} kayıt bu arada değiştiği için atlandı.)` : '';
+            _dupAlert(`🧬 Şema göçü tamamlandı: ${written} b3 kaydı yeni şemaya taşındı.${note}`, 'success');
+            _appendLog('success', [`🧬 ŞEMA GÖÇÜ (B3): ${written} kayıt yazıldı · kök ${window.COLLECTION_ROOT} · yedek indirildi.${note}`]);
+            if (plan.invalid.length) console.warn('[Şema Göçü] dönüştürülemeyen kayıtlar:', plan.invalid);
+        } catch (error) {
+            console.error('Şema göçü hatası:', error);
+            _dupAlert('Şema göçü yarıda kaldı; yazılan parçalar yeni şemada, kalanlar eski şemada (ikisi de doğru görünür). Yedek dosyası indirildi. ' + error.message, 'error');
+        } finally {
+            _migrating = false;
+            if (btn) btn.disabled = false;
+        }
+    };
+
     // Global Kill Switch
     // [WHY]: Kill Switch (Sistemi Kapatma) komutu localStorage'da tutuluyordu, DevTools ile bypass edilebiliyordu.
     // [HOW]: ArtÄ±k Firestore Ã¼zerindeki 'system_config/admin_settings' dÃ¶kÃ¼manÄ±na asenkron yazÄ±yor. Sadece Firebase Auth ile doÄŸrulanmÄ±ÅŸ adminler bu veriyi deÄŸiÅŸtirebilir.

@@ -198,7 +198,8 @@
     }
 
     // Göç için: kaydın kanonik hali. Kanonik karşılığı olan eski alanlar kaldırılır, karşılığı olmayanlar (description vb.)
-    // veri kaybı olmasın diye korunur; stok dışı kayıtta raf '-' saklanır ("Stok dışı" yalnız gösterimdir).
+    // veri kaybı olmasın diye korunur; stok dışı kayıtta raf '-' saklanır ("Stok dışı" yalnız gösterimdir). Deposu kayıtta
+    // yazmayan ve ürünü artık bulunamayan eski kayıtta kaynakDepo null kalır ("stok dışı" sayılmaz — rafı korunur).
     function toCanonicalB3(item) {
         const n = normalizeB3(item);
         const rest = { ...item };
@@ -206,20 +207,21 @@
         const out = { ...rest, sema: B3_SCHEMA_VERSION };
         B3_KEYS.forEach(k => { if (k !== 'sema') out[k] = n[k]; });
         if (n.stokDisi) out.rafNo = '-';
-        if (!out.kaynakDepo) out.kaynakDepo = n.productId != null ? null : STOK_DISI;
         return out;
     }
 
     // Sözleşme: eksik/fazla alan, eski alan, geçersiz tip/depo/adet → hata listesi (boş = geçerli).
-    function validateB3(e) {
+    // { legacy: true } (yalnız göç): deposu bilinmeyen eski kayıtta kaynakDepo null olabilir. Yeni yazmalar bunu kullanmaz.
+    function validateB3(e, opts = {}) {
         const errors = [];
         if (!e || typeof e !== 'object') return ['kayıt yok'];
         B3_KEYS.forEach(k => { if (!Object.prototype.hasOwnProperty.call(e, k) || e[k] === undefined) errors.push(`eksik alan: ${k}`); });
         B3_LEGACY_KEYS.forEach(k => { if (Object.prototype.hasOwnProperty.call(e, k)) errors.push(`eski alan: ${k}`); });
         if (e.sema !== B3_SCHEMA_VERSION) errors.push('sema != 2');
         if (![B3_TIP.CIKIS, B3_TIP.ZIMMET].includes(e.tip)) errors.push(`geçersiz tip: ${e.tip}`);
-        if (!['b1', 'b2', STOK_DISI].includes(e.kaynakDepo)) errors.push(`geçersiz kaynakDepo: ${e.kaynakDepo}`);
-        if ((e.kaynakDepo === STOK_DISI) !== (e.productId === null)) errors.push('productId / kaynakDepo uyumsuz');
+        const unknownDepot = opts.legacy === true && e.kaynakDepo === null;
+        if (!unknownDepot && !['b1', 'b2', STOK_DISI].includes(e.kaynakDepo)) errors.push(`geçersiz kaynakDepo: ${e.kaynakDepo}`);
+        if (!unknownDepot && (e.kaynakDepo === STOK_DISI) !== (e.productId === null)) errors.push('productId / kaynakDepo uyumsuz');
         if (!Number.isInteger(e.adet) || e.adet < 1) errors.push(`geçersiz adet: ${e.adet}`);
         if (e.tip === B3_TIP.ZIMMET && (isBlank(e.talepTuru) || isBlank(e.oncelik))) errors.push('zimmet: talepTuru/oncelik yok');
         if (typeof e.isDemirbas !== 'boolean') errors.push('isDemirbas boolean değil');
