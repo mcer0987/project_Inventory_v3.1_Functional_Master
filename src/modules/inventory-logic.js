@@ -39,17 +39,27 @@ async function _performExit(requestedQty) {
     if (!product) { _missing(); return; }
 
     // Kanonik b3 kaydı (3.6): tür, raf, sütun, marka ve depo yazma anında üründen kopyalanır.
-    const b3Entry = window.Schema.buildB3Entry({
-        tip: 'cikis', product, col: repo, adet: requestedQty,
-        sn:       document.getElementById('exitSn')?.value,
+    // Demirbaş (3.9a): adet kadar cihaz kimliği zorunlu (Seri No veya Envanter No); her cihaz ayrı b3 kaydı (adet 1),
+    // hepsi stok düşümüyle aynı transaction'da. Sarf malzeme: tek kayıt, serbest "SN / BioPro / Itsm" alanı.
+    const common = {
+        tip: 'cikis', product, col: repo,
         not:      document.getElementById('exitNote')?.value,
         alanKisi: document.getElementById('exitPerson')?.value,
         personelId: window.getActiveUser?.()?.id,
-    });
+    };
+    let entries;
+    if (window.Schema.isDemirbas(product)) {
+        const chk = window.AssignmentService.checkDeviceIds({ demirbas: true, qty: requestedQty, ids: window.DeviceIds.read(document.getElementById('exitDeviceIds')) });
+        if (!chk.ok) { _alert(chk.errors[0], 'warning'); return; }
+        entries = chk.ids.map(d => window.Schema.buildB3Entry({ ...common, adet: 1, sn: d.sn, envanterNo: d.envanterNo }));
+    } else {
+        entries = [window.Schema.buildB3Entry({ ...common, adet: requestedQty, sn: document.getElementById('exitSn')?.value })];
+    }
 
     let res;
     try {
-        res = await window.runExitTransaction({ repo, productId: product.id, qty: requestedQty, b3Entry });
+        res = await window.runExitTransaction({ repo, productId: product.id, qty: requestedQty, b3Entry: entries[0],
+            extraWrites: entries.slice(1).map(item => ({ op: 'set', col: 'b3', item })) });
     } catch (e) {
         _alert(e.message || 'Çıkış kaydedilemedi.', 'error');   // hiçbir şey yazılmadı
         return;

@@ -285,6 +285,7 @@ window.inventoryManagementModule = {
               <td style="padding:12px 16px;">
                 <div style="font-weight:600; color:var(--color-text);">${escapeHtml(a.ürün)}</div>
                 ${a.sn && a.sn !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted); font-family:monospace;">SN: <b>${escapeHtml(a.sn)}</b></div>` : ''}
+                ${a.envanterNo && a.envanterNo !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted); font-family:monospace;">Env. No: <b>${escapeHtml(a.envanterNo)}</b></div>` : ''}
               </td>
               <td style="padding:12px 16px; text-align:center; font-weight:700; color:var(--color-text);">${escapeHtml(a.adet)}</td>
               <td style="padding:12px 16px;">
@@ -489,8 +490,8 @@ window.inventoryManagementModule = {
 
     const row = document.createElement('div');
     row.className = 'assign-product-row';
-    // [B] SN alanı eklendi: grid 5 kolonlu
-    row.style.cssText = 'display:grid; grid-template-columns:1fr 1fr 1fr 80px 36px; gap:8px; margin-bottom:12px; align-items:center; background:var(--color-surface-alt,#f8fafc); border:1px solid var(--color-border); border-radius:10px; padding:10px;';
+    // 3.9a: tek serbest SN kutusu yerine ürün ve adet seçilince adet kadar cihaz kimliği satırı (Seri No / Envanter No)
+    row.style.cssText = 'display:grid; grid-template-columns:1fr 1fr 80px 36px; gap:8px; margin-bottom:12px; align-items:center; background:var(--color-surface-alt,#f8fafc); border:1px solid var(--color-border); border-radius:10px; padding:10px;';
     row.innerHTML = `
           <select class="assign-warehouse-sel" onchange="window.inventoryManagementModule.onWarehouseChange(this)"
             style="padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px;">
@@ -502,17 +503,24 @@ window.inventoryManagementModule = {
             style="padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px;">
             <option value="">-- Önce Depo Seç --</option>
           </select>
-          <input type="text" class="assign-sn-inp" placeholder="Seri No / SN"
-            style="padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px; font-family:monospace;">
-          <input type="number" class="assign-qty-inp" value="1" min="1"
+          <input type="number" class="assign-qty-inp" value="1" min="1" oninput="window.inventoryManagementModule._syncAssignDevices(this.closest('.assign-product-row'))"
             style="padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px; text-align:center;"
             placeholder="Adet">
           <button onclick="window.inventoryManagementModule.removeAssignRow(this)"
             style="padding:8px; background:#fee2e2; color:#c0392b; border:none; border-radius:8px; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center;">
             <i class="fas fa-times"></i>
           </button>
+          <div class="assign-dev-ids" hidden></div>
         `;
     container.appendChild(row);
+  },
+
+  _syncAssignDevices: function (row) {
+    if (!row) return;
+    const box = row.querySelector('.assign-dev-ids');
+    const productId = row.querySelector('.assign-product-sel')?.value;
+    if (!productId) { window.DeviceIds.hide(box); return; }
+    window.DeviceIds.render(box, Number(row.querySelector('.assign-qty-inp')?.value) || 1);
   },
 
   removeAssignRow: function (btn) {
@@ -558,8 +566,9 @@ window.inventoryManagementModule = {
     const row = select.closest('.assign-product-row');
     const qtyInp = row.querySelector('.assign-qty-inp');
     const opt = select.options[select.selectedIndex];
-    if (!opt || !opt.dataset.max) return;
+    if (!opt || !opt.dataset.max) { this._syncAssignDevices(row); return; }
     qtyInp.max = parseInt(opt.dataset.max) || 999;
+    this._syncAssignDevices(row);
   },
 
   // ──────────────────────────────────────────
@@ -596,14 +605,25 @@ window.inventoryManagementModule = {
       if (!Number.isInteger(qty) || qty < 1) { alert('Adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
       const product = (window.data?.[warehouse] || []).find(p => String(p.id) === String(productId));
       if (!product) { alert('Seçilen ürün bulunamadı; liste güncellenmiş olabilir. Satırı yeniden seçin.', 'error'); return; }
-      const sn = row.querySelector('.assign-sn-inp')?.value?.trim() || '-';
+      const ids = window.DeviceIds.read(row.querySelector('.assign-dev-ids'));
       const key = `${warehouse}|${product.id}`;
       const prev = merged.get(key);
-      if (prev) { prev.qty += qty; if (sn !== '-') prev.sn = prev.sn === '-' ? sn : `${prev.sn}, ${sn}`; }
-      else merged.set(key, { warehouse, product, qty, sn });
+      if (prev) { prev.qty += qty; prev.ids.push(...ids); }
+      else merged.set(key, { warehouse, product, qty, ids });
     }
     const items = [...merged.values()];
     if (items.length === 0) { alert('Lütfen en az bir ürün ekleyiniz!', 'warning'); return; }
+    // 3.9a: her cihaz için Seri No veya Envanter No; aktif zimmette/serviste olan kimlik verilemez; iki satırda aynı cihaz olamaz
+    const allIds = [];
+    for (const it of items) {
+      it.demirbas = window.Schema.isDemirbas(it.product);
+      const chk = window.AssignmentService.checkDeviceIds({ demirbas: it.demirbas, qty: it.qty, ids: it.ids, label: `"${it.product.ürün || it.product.name}": ` });
+      if (!chk.ok) { alert(chk.errors[0], 'warning'); return; }
+      it.ids = chk.ids;
+      if (it.demirbas) allIds.push(...chk.ids);
+    }
+    const dupCheck = window.Schema.validateDeviceIds({ demirbas: true, qty: allIds.length, ids: allIds });
+    if (!dupCheck.ok) { alert(dupCheck.errors[0], 'warning'); return; }
     for (const it of items) {
       const stock = Number(it.product.adet ?? it.product.qty ?? 0);
       if (it.qty > stock) { alert(`${it.product.ürün || it.product.name} için yeterli stok yok! (Mevcut: ${stock}, İstenen: ${it.qty})`, 'error'); return; }
@@ -618,24 +638,25 @@ window.inventoryManagementModule = {
       const now = typeof getTurkiyeTarihi === 'function' ? getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
       const stock = [], writes = [];
       items.forEach(it => {
-        const id = window.makeId();
-        const common = {
-          sn: it.sn, talepTuru, oncelik, isDemirbas: true, iadeEdildi: false,
-          productId: it.product.id, sourceRepo: it.warehouse, personelId,
-          ...(iadeTarihi ? { iadeTarihi } : {}),
-        };
         stock.push({ col: it.warehouse, id: it.product.id, delta: -it.qty });
-        // Kanonik b3 zimmet kaydı (3.6) — talep onayı ve çıkışlarla aynı kurucu; tür/raf/depo yazma anında kopyalanır.
-        writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
-          id, tip: 'zimmet', product: it.product, col: it.warehouse, adet: it.qty, sn: it.sn,
-          not: not || `Admin Zimmeti (${talepTuru})`, alanKisi: personnelName, personelId,
-          tarih: now, talepTuru, oncelik, iadeTarihi, onaylayan: window.currentUser?.name || 'Admin',
-        }) });
-        writes.push({ op: 'set', col: 'assignments', item: {
-          id, ...common,
-          ürün: it.product.ürün || it.product.name || '-',
-          personel: personnelName, tarih: now, adet: it.qty, not, tip: 'zimmet',
-        } });
+        // Demirbaş: cihaz başına bir kayıt (adet 1, kendi kimliği). Sarf (eski/elle tanımlı ürün): kalem başına tek kayıt.
+        const units = it.demirbas ? it.ids.map(d => ({ adet: 1, ...d })) : [{ adet: it.qty, sn: it.ids[0]?.sn || '-', envanterNo: it.ids[0]?.envanterNo || '-' }];
+        units.forEach(u => {
+          const id = window.makeId();
+          // Kanonik b3 zimmet kaydı (3.6) — talep onayı ve çıkışlarla aynı kurucu; tür/raf/depo yazma anında kopyalanır.
+          writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+            id, tip: 'zimmet', product: it.product, col: it.warehouse, adet: u.adet, sn: u.sn, envanterNo: u.envanterNo,
+            not: not || `Admin Zimmeti (${talepTuru})`, alanKisi: personnelName, personelId,
+            tarih: now, talepTuru, oncelik, iadeTarihi, onaylayan: window.currentUser?.name || 'Admin',
+          }) });
+          writes.push({ op: 'set', col: 'assignments', item: {
+            id, sn: u.sn, envanterNo: u.envanterNo, talepTuru, oncelik, isDemirbas: it.demirbas, iadeEdildi: false,
+            productId: it.product.id, sourceRepo: it.warehouse, personelId,
+            ...(iadeTarihi ? { iadeTarihi } : {}),
+            ürün: it.product.ürün || it.product.name || '-',
+            personel: personnelName, tarih: now, adet: u.adet, not, tip: 'zimmet',
+          } });
+        });
       });
 
       const res = await window.runStockOps({ stock, writes });
@@ -715,7 +736,10 @@ window.inventoryManagementModule = {
     const closeFields = { iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today };
     const writes = [{ op: 'update', col: 'b3', id: item.id, fields: closeFields }];
     if ((window.data.assignments || []).some(sameId)) writes.push({ op: 'update', col: 'assignments', id: item.id, fields: closeFields });
-    if (item.requestId != null && (window.data.requests || []).some(r => String(r.id) === String(item.requestId))) {
+    // Talep, ona bağlı cihazların (3.9a: cihaz başına bir b3 kaydı) hepsi iade edilince kapanır.
+    const otherActiveUnits = item.requestId == null ? [] : (window.data.b3 || []).filter(b => String(b.requestId) === String(item.requestId)
+      && String(b.id) !== String(item.id) && !window.Schema.normalizeB3(b).iadeEdildi);
+    if (item.requestId != null && otherActiveUnits.length === 0 && (window.data.requests || []).some(r => String(r.id) === String(item.requestId))) {
       writes.push({ op: 'update', col: 'requests', id: item.requestId, fields: { iadeEdildi: true, iadeEdildiTarihi: today } });
     }
     let stockChange = null;

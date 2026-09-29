@@ -97,7 +97,27 @@
         return !!r && matchesPerson({ personel: r.personel, personelId: r.personelId, personelKodu: r.personelKodu }, user);
     }
 
-    const AssignmentService = { getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId };
+    // 3.9a: şu an kullanımda olan cihaz kimlikleri — iade edilmemiş zimmetler ve kapanmamış servis/sevk kayıtları.
+    // Anahtar Schema.deviceKeys biçiminde ('SN:…' / 'ENV:…'); değer kısa açıklama (hata mesajında gösterilir).
+    function isOpenService(r) { return !!r && r.kapandi !== true; }
+    function activeDeviceUses() {
+        const uses = new Map();
+        getAssignments().filter(a => !a.iadeEdildi).forEach(a => S().deviceKeys(a).forEach(k => {
+            if (!uses.has(k)) uses.set(k, { kind: 'zimmet', id: a._id, text: `${a.personel} üzerinde zimmetli (${a.urun})` });
+        }));
+        ((window.data && window.data.serviceRecords) || []).filter(isOpenService).forEach(r => S().deviceKeys(r).forEach(k => {
+            if (!uses.has(k)) uses.set(k, { kind: 'servis', id: r.id, text: `serviste / sevkte (${r.hedef || '-'})` });
+        }));
+        return uses;
+    }
+    function checkDeviceIds({ demirbas, qty, ids, label }) {
+        return S().validateDeviceIds({ demirbas, qty, ids, label, activeUses: demirbas ? activeDeviceUses() : new Map() });
+    }
+
+    const AssignmentService = {
+        getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId,
+        activeDeviceUses, checkDeviceIds, isOpenService,
+    };
     window.AppModules = window.AppModules || {};
     window.AppModules.Assignments = AssignmentService;
     window.AssignmentService = AssignmentService;

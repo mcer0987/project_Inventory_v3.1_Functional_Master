@@ -225,7 +225,51 @@
         if (!Number.isInteger(e.adet) || e.adet < 1) errors.push(`geçersiz adet: ${e.adet}`);
         if (e.tip === B3_TIP.ZIMMET && (isBlank(e.talepTuru) || isBlank(e.oncelik))) errors.push('zimmet: talepTuru/oncelik yok');
         if (typeof e.isDemirbas !== 'boolean') errors.push('isDemirbas boolean değil');
+        // 3.9a: demirbaş hareketi cihaz başınadır ve kimliklidir (eski kayıtlar göçte bu kurala takılmaz)
+        if (e.isDemirbas === true && opts.legacy !== true) {
+            if (isBlank(e.sn) && isBlank(e.envanterNo)) errors.push('demirbaş: Seri No veya Envanter No yok');
+            if (e.adet !== 1) errors.push('demirbaş: cihaz başına bir kayıt (adet 1) olmalı');
+        }
         return errors;
+    }
+
+    // ─── 3.9a · Cihaz kimliği (Seri No / Envanter No) ───
+    // Karşılaştırma anahtarı: boşluksuz, büyük harf; '-' ve boş yok sayılır. Eski kayıtlarda virgülle birleşmiş SN'ler ayrılır.
+    function normDeviceId(v) {
+        if (isBlank(v)) return '';
+        return String(v).replace(/\s+/g, '').toLocaleUpperCase('en-US');
+    }
+    function deviceKeys(rec) {
+        if (!rec) return [];
+        const keys = [];
+        String(rec.sn ?? '').split(/[,;]/).map(normDeviceId).filter(Boolean).forEach(k => keys.push('SN:' + k));
+        const env = normDeviceId(rec.envanterNo);
+        if (env) keys.push('ENV:' + env);
+        return keys;
+    }
+    const describeKey = k => (k.startsWith('SN:') ? 'Seri No ' : 'Envanter No ') + k.slice(k.indexOf(':') + 1);
+
+    /**
+     * Demirbaş kaleminin cihaz kimliklerini doğrular: adet kadar satır, her satırda Seri No veya Envanter No, liste içinde
+     * tekrar yok, aktif kullanımda (zimmet/servis) olan kimlik yok. Sarf malzemede kimlik isteğe bağlıdır.
+     * @returns {{ok:boolean, errors:string[], ids:{sn:string, envanterNo:string}[]}}
+     */
+    function validateDeviceIds({ demirbas, qty, ids = [], activeUses = new Map(), label = '' }) {
+        const clean = (ids || []).map(d => ({ sn: txt(d && d.sn), envanterNo: txt(d && d.envanterNo) }));
+        const errors = [];
+        if (!demirbas) return { ok: true, errors, ids: clean };
+        if (clean.length !== Number(qty)) errors.push(`${label}${qty} cihaz için ${qty} kimlik satırı gerekli.`);
+        const seen = new Set();
+        clean.forEach((d, i) => {
+            if (d.sn === '-' && d.envanterNo === '-') { errors.push(`${label}${i + 1}. cihaz: Seri No veya Envanter No girin (en az biri zorunlu).`); return; }
+            deviceKeys(d).forEach(k => {
+                if (seen.has(k)) errors.push(`${label}${describeKey(k)} listede iki kez girildi.`);
+                seen.add(k);
+                const use = activeUses.get(k);
+                if (use) errors.push(`${label}${describeKey(k)} şu an ${use.text}; aynı cihaz ikinci kez çıkışa verilemez.`);
+            });
+        });
+        return { ok: errors.length === 0, errors, ids: clean };
     }
 
     // ─── Talepler ───
@@ -269,6 +313,7 @@
         B3_SCHEMA_VERSION, B3_KEYS, B3_LEGACY_KEYS, B3_TIP, STOK_DISI,
         buildB3Entry, normalizeB3, toCanonicalB3, validateB3,
         requestStatus, normalizeRequest,
+        normDeviceId, deviceKeys, validateDeviceIds,
     };
     window.AppModules = window.AppModules || {};
     window.AppModules.Schema = Object.assign(window.AppModules.Schema || {}, Schema);

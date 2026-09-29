@@ -676,8 +676,9 @@ window.showRequestApprovalModal = function (request) {
             <label style="font-weight:600; font-size:13px;">Stoktan düşülecek kalem</label>
             <input id="raFilter" type="text" placeholder="Ürün, marka veya raf ara..." autocomplete="off" style="${field} margin-bottom:6px;">
             <select id="raSource" size="6" style="${field}"></select>
-            <label style="font-weight:600; font-size:13px;">Seri numarası / zimmet bilgisi</label>
+            <label id="raSnLabel" style="font-weight:600; font-size:13px;">Seri numarası / zimmet bilgisi</label>
             <input id="raSn" type="text" placeholder="Yoksa boş bırakın" autocomplete="off" style="${field}">
+            <div id="raDevIds" hidden></div>
             <div id="raError" style="display:none; color:var(--color-danger,#e74c3c); font-size:13px; margin-bottom:10px;"></div>
             <div style="display:flex; justify-content:flex-end; gap:10px;">
               <button id="raCancel" type="button" style="padding:10px 18px; border:1px solid var(--color-border,#bdc3c7); background:transparent; color:var(--color-text,#2c3e50); border-radius:8px; cursor:pointer;">Vazgeç</button>
@@ -697,9 +698,24 @@ window.showRequestApprovalModal = function (request) {
                 }).join('');
             sel.value = selected;
         };
+        // 3.9a: seçilen kalem demirbaşsa (stok dışında: talep edilen ad bir demirbaş türüyse) talep adedi kadar cihaz kimliği
+        const devBox = overlay.querySelector('#raDevIds');
+        const isDemSelection = () => {
+            if (!selected) return false;
+            if (selected === NO_STOCK) return window.Schema.isDemirbas({ ürün: request.ürün, isDemirbas: request.isDemirbas });
+            const c = candidates.find(x => x.key === selected);
+            return !!c && window.Schema.isDemirbas(c.p);
+        };
+        const syncDev = () => {
+            const dem = isDemSelection();
+            overlay.querySelector('#raSn').style.display = dem ? 'none' : '';
+            overlay.querySelector('#raSnLabel').style.display = dem ? 'none' : '';
+            if (dem) window.DeviceIds.render(devBox, want); else window.DeviceIds.hide(devBox);
+        };
         renderOptions();
+        syncDev();
         overlay.querySelector('#raFilter').addEventListener('input', renderOptions);
-        sel.addEventListener('change', () => { selected = sel.value; });
+        sel.addEventListener('change', () => { selected = sel.value; syncDev(); });
 
         const close = val => { overlay.remove(); resolve(val); };
         overlay.querySelector('#raCancel').onclick = () => close(null);
@@ -710,10 +726,22 @@ window.showRequestApprovalModal = function (request) {
                 err.style.display = 'block';
                 return;
             }
-            const sn = overlay.querySelector('#raSn').value.trim() || '-';
-            if (selected === NO_STOCK) return close({ sn, source: null });
+            let sn = overlay.querySelector('#raSn').value.trim() || '-', ids = null;
+            const demirbas = isDemSelection();
+            if (demirbas) {
+                const chk = window.AssignmentService.checkDeviceIds({ demirbas: true, qty: want, ids: window.DeviceIds.read(devBox) });
+                if (!chk.ok) {
+                    const err = overlay.querySelector('#raError');
+                    err.textContent = chk.errors[0];
+                    err.style.display = 'block';
+                    return;
+                }
+                ids = chk.ids;
+                sn = ids.map(d => d.sn !== '-' ? d.sn : d.envanterNo).join(', ');
+            }
+            if (selected === NO_STOCK) return close({ sn, ids, demirbas, source: null });
             const [repo, ...rest] = selected.split('|');
-            close({ sn, source: { repo, productId: rest.join('|') } });
+            close({ sn, ids, demirbas, source: { repo, productId: rest.join('|') } });
         };
         setTimeout(() => overlay.querySelector(selected ? '#raSn' : '#raFilter')?.focus(), 0);
     });
@@ -753,18 +781,22 @@ window.confirmRequest = async function (requestId) {
         } }];
         // Kanonik b3 zimmet kaydı (3.6): stok kalemi seçildiyse tür/raf/depo üründen kopyalanır; seçilmediyse kaynakDepo
         // 'stok-disi' (tabloda Raf No "Stok dışı" — eskiden "TALEP" basılıyordu).
+        // Demirbaş (3.9a): cihaz başına bir b3 zimmet kaydı (adet 1, kendi Seri No / Envanter No'su), hepsi aynı transaction'da.
         const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
-        if (!alreadyLogged) writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
-            tip: 'zimmet', requestId: live.id,
-            ...(product ? { product, col: repo } : { urunAciklama: live.ürün, isDemirbas: live.isDemirbas === true || live.isDemirbas === 'true' }),
-            adet: qty, sn: snValue,
-            not: [live.not, `Onaylayan: ${approver}`].filter(s => s && String(s).trim() && s !== '-').join(' · '),
-            alanKisi: live.personel,
-            personelId: live.personelId || window.AssignmentService?.resolvePersonelId(live.personel),
-            tarih: getTurkiyeTarihi(),
-            talepTuru: live.talepTuru, oncelik: live.oncelik, iadeTarihi: live.iadeTarihi,
-            onaylayan: approver,
-        }) });
+        if (!alreadyLogged) {
+            const base = {
+                tip: 'zimmet', requestId: live.id,
+                ...(product ? { product, col: repo } : { urunAciklama: live.ürün, isDemirbas: choice.demirbas === true }),
+                not: [live.not, `Onaylayan: ${approver}`].filter(s => s && String(s).trim() && s !== '-').join(' · '),
+                alanKisi: live.personel,
+                personelId: live.personelId || window.AssignmentService?.resolvePersonelId(live.personel),
+                tarih: getTurkiyeTarihi(),
+                talepTuru: live.talepTuru, oncelik: live.oncelik, iadeTarihi: live.iadeTarihi,
+                onaylayan: approver,
+            };
+            const units = choice.ids ? choice.ids.map(d => ({ adet: 1, sn: d.sn, envanterNo: d.envanterNo })) : [{ adet: qty, sn: snValue }];
+            units.forEach(u => writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({ ...base, ...u }) }));
+        }
 
         let stockChange = null;
         try {
@@ -984,9 +1016,16 @@ window.sendDraftInventoryRequest = async function (id) {
                     <input type="number" min="1" max="${escapeHtml(cartItem.qty)}" value="${escapeHtml(cartItem.exitQty)}" onchange="updateCartQty(${idx}, this.value)" style="width: 60px; padding: 4px; text-align: center;">
                     <button type="button" onclick="removeFromCart(${idx})" style="background: #e74c3c; color: white; border: none; border-radius: 4px; padding: 5px 8px; cursor: pointer;"><i class="fas fa-trash"></i></button>
                 </div>
-            </div>`;
+            </div>
+            <div id="cartDev_${idx}" hidden></div>`;
         });
         container.innerHTML = html;
+        // 3.9a: demirbaş kalemde adet kadar cihaz kimliği satırı; girilen değerler kalemde saklanır (yeniden çizimde kaybolmaz)
+        cartItems.forEach((cartItem, idx) => {
+            if (!window.Schema.isDemirbas(cartItem.item)) return;
+            window.DeviceIds.render(document.getElementById(`cartDev_${idx}`), cartItem.exitQty,
+                { values: cartItem.ids || [], onInput: v => { cartItem.ids = v; } });
+        });
     };
 
     window.updateCartQty = function (cartIndex, newVal) {
@@ -994,6 +1033,7 @@ window.sendDraftInventoryRequest = async function (id) {
         const cartItem = cartItems[cartIndex];
         if (val > 0 && val <= cartItem.qty) {
             cartItem.exitQty = val;
+            if (window.Schema.isDemirbas(cartItem.item)) renderCartItems();   // kimlik satırı sayısı adede uyar
         } else {
             renderCartItems();
             if (val > cartItem.qty) showAppAlert(`Stokta sadece ${cartItem.qty} adet var!`, "warning");
@@ -1009,19 +1049,37 @@ window.sendDraftInventoryRequest = async function (id) {
         const tarih = getTurkiyeSaati();
         if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
 
-        const stock = [], writes = [];
+        const stock = [], writes = [], allDeviceIds = [];
+        const personelId = window.getActiveUser?.()?.id;
+        const snGiven = sn !== '-' && sn.trim() !== '';
         for (const cartItem of cartItems) {
             const product = (window.data[cartItem.repo] || []).find(x => x && String(x.id) === String(cartItem.item.id));
-            if (!product) { showAppAlert(`"${cartItem.item.ürün || cartItem.item.name || '-'}" artık listede yok; sepetten çıkarın.`, 'error'); return; }
+            const name = cartItem.item.ürün || cartItem.item.name || '-';
+            if (!product) { showAppAlert(`"${name}" artık listede yok; sepetten çıkarın.`, 'error'); return; }
             const qty = Number(cartItem.exitQty);
             if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Adetler en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
             stock.push({ col: cartItem.repo, id: product.id, delta: -qty });
             // Kanonik b3 kaydı (3.6) — tekil çıkışla aynı kurucu, aynı alanlar.
-            writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
-                tip: 'cikis', product, col: cartItem.repo, adet: qty, sn, not, alanKisi, tarih,
-                personelId: window.getActiveUser?.()?.id,
-            }) });
+            // Demirbaş (3.9a): kalem başına adet kadar kimlik, her cihaz ayrı kayıt; ortak SN/ITSM alanı nota "Ref" olarak eklenir.
+            if (window.Schema.isDemirbas(product)) {
+                const box = document.getElementById(`cartDev_${cartItems.indexOf(cartItem)}`);
+                const chk = window.AssignmentService.checkDeviceIds({ demirbas: true, qty, ids: box ? window.DeviceIds.read(box) : (cartItem.ids || []), label: `"${name}": ` });
+                if (!chk.ok) { showAppAlert(chk.errors[0], 'warning'); return; }
+                allDeviceIds.push(...chk.ids);
+                const refNot = snGiven ? `${not === '-' ? '' : not + ' · '}Ref: ${sn}` : not;
+                chk.ids.forEach(d => writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+                    tip: 'cikis', product, col: cartItem.repo, adet: 1, sn: d.sn, envanterNo: d.envanterNo, not: refNot, alanKisi, tarih, personelId,
+                }) }));
+            } else {
+                if (!snGiven) { showAppAlert(`"${name}" (sarf) için "SN / BioPro / Itsm" alanını doldurun.`, 'warning'); return; }
+                writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+                    tip: 'cikis', product, col: cartItem.repo, adet: qty, sn, not, alanKisi, tarih, personelId,
+                }) });
+            }
         }
+        // aynı cihaz iki farklı kalemde girilmiş olmasın
+        const dupCheck = window.Schema.validateDeviceIds({ demirbas: true, qty: allDeviceIds.length, ids: allDeviceIds });
+        if (!dupCheck.ok) { showAppAlert(dupCheck.errors[0], 'warning'); return; }
 
         let res;
         try {
@@ -1030,7 +1088,7 @@ window.sendDraftInventoryRequest = async function (id) {
             showAppAlert(`Toplu çıkış yapılamadı; hiçbir kalem kaydedilmedi. ${e.message || ''}`, 'error');
             return;
         }
-        showAppAlert(`${writes.length} ürün kalemi için toplu çıkış kaydedildi. ${res.stock.map(s => `${s.name}: ${s.before}→${s.after}`).join(' · ')}`, "success");
+        showAppAlert(`${stock.length} ürün kalemi için toplu çıkış kaydedildi. ${res.stock.map(s => `${s.name}: ${s.before}→${s.after}`).join(' · ')}`, "success");
         closeModal('cartModal');
         if (typeof renderExitTable === 'function') renderExitTable();
         ['b1', 'b2'].forEach(r => { if (typeof renderTable === 'function') renderTable(r); });

@@ -80,8 +80,8 @@ export const UIComponents = {
         div.dataset.id    = item ? item.id : '';
         delete div.dataset.index;
 
-        // Demirbaş kontrolü (window.data okuma — read-only)
-        const isDemirbas = item ? (item.isDemirbas === true || item.isDemirbas === 'true') : false;
+        // Demirbaş kontrolü tek kuraldan (Schema.isDemirbas · 3.6); demirbaşta kimlik satırları açılır (3.9a).
+        const isDemirbas = item ? window.Schema.isDemirbas(item) : false;
         div.dataset.isDemirbas = isDemirbas;
 
         const checkEl = document.getElementById('isDemirbas');
@@ -99,6 +99,7 @@ export const UIComponents = {
         if (qtyEl && Number(qty) > 0) qtyEl.max = String(qty);
         const list = document.getElementById('productList');
         if (list) list.innerHTML = '';
+        if (window.DeviceIds) window.DeviceIds.syncExitForm();
     },
 
     // =========================================================================
@@ -470,6 +471,7 @@ export const UIComponents = {
         const shelfEl = document.getElementById('exitShelfNo');
         if (shelfEl) shelfEl.value = '';
         document.getElementById('exitQty')?.removeAttribute('max');
+        if (window.DeviceIds) window.DeviceIds.syncExitForm();   // önceki demirbaş seçiminin kimlik satırları temizlenir
         const rowRepo = window.currentExitRepo;
         const rowItem = (rowRepo === 'b1' || rowRepo === 'b2') && hasRow ? findRow() : null;
         if (rowItem) {

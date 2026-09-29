@@ -265,7 +265,14 @@ const SCENARIOS = {
             const sel = modal().querySelector('#raSource');
             out.preselected = sel.value === `b1|${prod.id}`;
             out.lowStockDisabled = [...sel.options].find(o => o.value === `b1|${low.id}`)?.disabled === true;
-            modal().querySelector('#raSn').value = 'SN-FT1';
+            // 3.9a: demirbaş → talep adedi (2) kadar kimlik satırı; boş bırakınca onay reddedilir
+            out.deviceRows = modal().querySelectorAll('#raDevIds .dev-ids-row').length;
+            out.snFieldHidden = modal().querySelector('#raSn').style.display === 'none';
+            modal().querySelector('#raOk').click();
+            out.missingIdsRefused = !!modal() && modal().querySelector('#raError').textContent;
+            const devRows = modal().querySelectorAll('#raDevIds .dev-ids-row');
+            devRows[0].querySelector('.dev-sn').value = 'SN-FT1';
+            devRows[1].querySelector('.dev-env').value = 'ENV-FT1';
             modal().querySelector('#raOk').click();
             await pending.p;
             await ft.waitFor(async () => (await db(1))?.durum === 'approved');
@@ -274,6 +281,7 @@ const SCENARIOS = {
                 tx: JSON.stringify(tx) === JSON.stringify([['b1', prod.id, -2]]), stockNow: prod.adet,
                 request: { durum: r1.durum, sn: r1.sn, stockRepo: r1.stockRepo, stockProductId: r1.stockProductId === prod.id },
                 b3: b3[0] && { kaynakDepo: b3[0].kaynakDepo, productId: b3[0].productId === prod.id, requestId: b3[0].requestId === base + 1, adet: b3[0].adet, rafNo: b3[0].rafNo, isDemirbas: b3[0].isDemirbas, tip: b3[0].tip, contract: window.Schema.validateB3(b3[0]) },
+                perDevice: b3.map(x => `${x.adet}|${x.sn}|${x.envanterNo}|${window.Schema.validateB3(x).length}`),
                 message: alerts.at(-1)?.[1],
             };
 
@@ -300,6 +308,7 @@ const SCENARIOS = {
             await ft.waitFor(async () => window.data.requests.some(r => r.id === base + 2 && r.durum === 'Beklemede'));
             pending = await openFor(2);
             const s4 = modal().querySelector('#raSource'); s4.value = `b1|${prod.id}`; s4.dispatchEvent(new Event('change'));
+            modal().querySelector('#raDevIds .dev-sn').value = 'SN-FT2';
             modal().querySelector('#raOk').click();
             await pending.p;
             await ft.sleep(1500);
@@ -309,6 +318,7 @@ const SCENARIOS = {
             failB3 = false; tx.length = 0; stockFails = true;
             pending = await openFor(2);
             const s5 = modal().querySelector('#raSource'); s5.value = `b1|${prod.id}`; s5.dispatchEvent(new Event('change'));
+            modal().querySelector('#raDevIds .dev-sn').value = 'SN-FT2';
             modal().querySelector('#raOk').click();
             await pending.p; await ft.sleep(800);
             out.txFailure = { stillPending: (await db(2)).durum === 'Beklemede', message: alerts.at(-1)?.[1] };
@@ -1339,7 +1349,8 @@ const SCENARIOS = {
             [['p1', '2'], ['p2', '1']].forEach(([pid, q], i) => {
                 const ws = rows[i].querySelector('.assign-warehouse-sel'); ws.value = 'b1'; m.onWarehouseChange(ws);
                 const ps = rows[i].querySelector('.assign-product-sel'); ps.value = pid; m.onProductChange(ps);
-                rows[i].querySelector('.assign-qty-inp').value = q;
+                rows[i].querySelector('.assign-qty-inp').value = q; m._syncAssignDevices(rows[i]);
+                rows[i].querySelectorAll('.dev-sn').forEach((inp, k) => { inp.value = `SN-${pid}-${k}`; });
             });
             await m.saveAssignment();
             const a = calls.at(-1)?.[1];
@@ -1351,6 +1362,7 @@ const SCENARIOS = {
             const r0 = document.querySelector('#assignRowsContainer .assign-product-row');
             const w0 = r0.querySelector('.assign-warehouse-sel'); w0.value = 'b1'; m.onWarehouseChange(w0);
             const p0 = r0.querySelector('.assign-product-sel'); p0.value = 'p1'; m.onProductChange(p0);
+            r0.querySelector('.dev-sn').value = 'SN-FAIL';
             await m.saveAssignment();
             o.assignFail = { calls: calls.length, alert: alerts.at(-1) };
             fail = false; m.closeAssignModal();
@@ -1589,8 +1601,8 @@ const SCENARIOS = {
                 const row = document.querySelector('#assignRowsContainer .assign-product-row');
                 const ws = row.querySelector('.assign-warehouse-sel'); ws.value = 'b1'; m.onWarehouseChange(ws);
                 const ps = row.querySelector('.assign-product-sel'); ps.value = 'lp1'; m.onProductChange(ps);
-                row.querySelector('.assign-sn-inp').value = 'SN-LP1';
-                row.querySelector('.assign-qty-inp').value = '1';
+                row.querySelector('.assign-qty-inp').value = '1'; m._syncAssignDevices(row);
+                row.querySelector('.dev-sn').value = 'SN-LP1';
                 await m.saveAssignment(); m.closeAssignModal();
             } finally {
                 Object.assign(window, { runStockOps: orig.ops, isDbAdmin: orig.adm });
@@ -1752,6 +1764,133 @@ const SCENARIOS = {
                 HTMLAnchorElement.prototype.click = orig.click;
                 Object.assign(window, { applyItemOps: orig.apply, isDbAdmin: orig.adm, showCustomConfirm: orig.conf, showAppAlert: orig.alert });
                 window.data.b3 = orig.b3; window.data.personel = orig.per;
+            }
+            return o;
+        });
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
+    },
+
+    // H4 · 3.9a demirbaş cihaz kimliği: tekil çıkış, sepet ve admin zimmetinde adet kadar Seri No / Envanter No (en az biri),
+    // cihaz başına bir kayıt; aktif zimmette/serviste olan kimlik ve liste içi tekrar reddedilir; sarf malzeme etkilenmez.
+    async h4DeviceIds(page, browser) {
+        const out = await page.evaluate(async () => {
+            const o = {};
+            const orig = { b1: window.data.b1, b3: window.data.b3, svc: window.data.serviceRecords, pt: window.data.productTypes, ops: window.runStockOps, exit: window.runExitTransaction, adm: window.isDbAdmin, alert: window.showAppAlert };
+            const alerts = [], calls = [];
+            window.showAppAlert = (m, t) => alerts.push([t, m]);
+            window.isDbAdmin = () => true;
+            window.runExitTransaction = async a => { calls.push({ qty: a.qty, recs: [a.b3Entry, ...(a.extraWrites || []).map(w => w.item)] }); return { stock: [{ before: 5, after: 5 - a.qty, statusBefore: 'x', statusAfter: 'x' }] }; };
+            window.runStockOps = async arg => { calls.push({ stock: arg.stock, recs: arg.writes.filter(w => w.col === 'b3').map(w => w.item) }); return { stock: arg.stock.map(s => ({ name: s.id, before: 5, after: 5 + s.delta })) }; };
+            window.data.productTypes = [{ name: 'Laptop', isDemirbas: true }, { name: 'Kablo', isDemirbas: false }];
+            window.data.b1 = [
+                { id: 'dm1', ürün: 'Laptop D', tür: 'Laptop', raf: 'R-5', adet: 5, durumu: 'Kullanıma Hazır' },
+                { id: 'sf1', ürün: 'Kablo S', tür: 'Kablo', raf: 'R-6', adet: 9, durumu: 'Kullanıma Hazır' },
+            ];
+            window.data.b3 = [{ id: 1, sema: 2, tip: 'zimmet', kaynakDepo: 'b1', productId: 'dm1', urunAciklama: 'Laptop D', adet: 1, sn: 'SN-BUSY', envanterNo: '-', alanKisi: 'Ali Veli', talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeEdildi: false, isDemirbas: true }];
+            window.data.serviceRecords = [{ id: 2, urunAciklama: 'Laptop D', sn: '-', envanterNo: 'ENV-9', hedef: 'Teknik Servis', durum: 'Serviste / Yolda' }];
+            const box = () => document.getElementById('exitDeviceIds');
+            const exitWith = async (qty, ids) => {
+                window.openExitModal('b1', 'dm1');
+                document.getElementById('exitQty').value = String(qty); window.DeviceIds.syncExitForm();
+                const rows = box().querySelectorAll('.dev-ids-row');
+                ids.forEach((d, i) => { if (!rows[i]) return; rows[i].querySelector('.dev-sn').value = d.sn || ''; rows[i].querySelector('.dev-env').value = d.env || ''; });
+                document.getElementById('exitNote').value = 'not';
+                const before = calls.length;
+                await window.saveExit(new Event('submit'));
+                window.closeExitModal?.();
+                return calls.length > before ? calls.at(-1) : alerts.at(-1)?.[1];
+            };
+            try {
+                // form: demirbaşta kimlik satırları açılır, serbest SN alanı gizlenir ve zorunlu değildir
+                window.openExitModal('b1', 'dm1');
+                document.getElementById('exitQty').value = '3'; window.DeviceIds.syncExitForm();
+                o.form = { rows: box().querySelectorAll('.dev-ids-row').length, snHidden: document.getElementById('exitSn').closest('label').style.display === 'none', snRequired: document.getElementById('exitSn').required };
+                window.openExitModal('b1', 'sf1');
+                o.formSarf = { boxHidden: box().hidden, snRequired: document.getElementById('exitSn').required };
+                window.closeExitModal?.();
+
+                o.missingOne = await exitWith(2, [{ sn: 'A-1' }]);
+                const ok = await exitWith(2, [{ sn: 'A-1' }, { env: 'ENV-2' }]);
+                o.single = typeof ok === 'object' ? { qty: ok.qty, recs: ok.recs.map(r => `${r.adet}|${r.sn}|${r.envanterNo}|${window.Schema.validateB3(r).length}`) } : ok;
+                o.busyZimmet = await exitWith(1, [{ sn: ' sn-busy ' }]);
+                o.busyService = await exitWith(1, [{ env: 'env-9' }]);
+                o.duplicate = await exitWith(2, [{ sn: 'X-1' }, { sn: 'x-1' }]);
+                window.data.b3[0].iadeEdildi = true;       // iade edilen cihaz tekrar kullanılabilir
+                o.afterReturn = typeof (await exitWith(1, [{ sn: 'SN-BUSY' }])) === 'object';
+
+                // sarf: tek kayıt, adet korunur, kimlik istenmez
+                window.openExitModal('b1', 'sf1');
+                document.getElementById('exitQty').value = '3'; document.getElementById('exitSn').value = 'ITSM-9'; document.getElementById('exitNote').value = 'n';
+                await window.saveExit(new Event('submit')); window.closeExitModal?.();
+                o.sarf = calls.at(-1).recs.map(r => `${r.adet}|${r.sn}|${r.isDemirbas}`);
+
+                // sepet: demirbaş kalem 2 kimlik, sarf kalem ortak SN alanı
+                window.openCartModal();
+                window.addToCart({ item: window.data.b1[0], repo: 'b1', qty: 5 }); window.updateCartQty(0, '2');
+                window.addToCart({ item: window.data.b1[1], repo: 'b1', qty: 9 });
+                document.getElementById('cartNote').value = 'n';
+                const cartRows = () => document.querySelectorAll('#cartDev_0 .dev-ids-row');
+                o.cartRows = cartRows().length;
+                let before = calls.length;
+                await window.saveCartExit(new Event('submit'));
+                o.cartMissingIds = calls.length === before ? alerts.at(-1)[1] : 'yazıldı!';
+                cartRows()[0].querySelector('.dev-sn').value = 'C-1'; cartRows()[1].querySelector('.dev-sn').value = 'C-2';
+                cartRows()[0].closest('#cartDev_0').dispatchEvent(new Event('input'));
+                before = calls.length;
+                await window.saveCartExit(new Event('submit'));
+                o.cartMissingSarfSn = calls.length === before ? alerts.at(-1)[1] : 'yazıldı!';
+                document.getElementById('cartSn').value = 'ITSM-5';
+                await window.saveCartExit(new Event('submit'));
+                const c = calls.at(-1);
+                o.cart = { stock: c.stock.map(s => `${s.id}:${s.delta}`), recs: c.recs.map(r => `${r.productId}|${r.adet}|${r.sn}|${r.not}|${window.Schema.validateB3(r).length}`) };
+                window.closeModal?.('cartModal');
+            } finally {
+                Object.assign(window, { runStockOps: orig.ops, runExitTransaction: orig.exit, isDbAdmin: orig.adm, showAppAlert: orig.alert });
+                Object.assign(window.data, { b1: orig.b1, b3: orig.b3, serviceRecords: orig.svc, productTypes: orig.pt });
+            }
+            return o;
+        });
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        out.admin = await admin.evaluate(async () => {
+            const o = {}, calls = [], alerts = [];
+            const orig = { b1: window.data.b1, b3: window.data.b3, per: window.data.personel, ops: window.runStockOps, adm: window.isDbAdmin };
+            window.isDbAdmin = () => true; window.showAppAlert = (m, t) => alerts.push(m);
+            window.runStockOps = async arg => { calls.push(arg); return { stock: arg.stock.map(s => ({ col: s.col, name: s.id, before: 3, after: 3 + s.delta })) }; };
+            window.data.b1 = [{ id: 'lp', ürün: 'Laptop Z', tür: 'Laptop', raf: 'R', adet: 4, isDemirbas: true, durumu: 'Kullanıma Hazır' }];
+            window.data.b3 = [{ id: 5, sema: 2, tip: 'zimmet', kaynakDepo: 'b1', productId: 'lp', urunAciklama: 'Laptop Z', adet: 1, sn: 'Z-BUSY', envanterNo: '-', alanKisi: 'Başka Kişi', talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeEdildi: false, isDemirbas: true }];
+            window.data.personel = [{ id: 'per_z', name: 'Zimmet Alan' }];
+            const m = window.inventoryManagementModule;
+            const fill = (rowsSpec) => {
+                m.openAssignModal(); document.getElementById('assignPersonnel').value = 'per_z';
+                rowsSpec.forEach((spec, i) => { if (i > 0) m.addAssignRow(); });
+                const rows = document.querySelectorAll('#assignRowsContainer .assign-product-row');
+                rowsSpec.forEach((spec, i) => {
+                    const ws = rows[i].querySelector('.assign-warehouse-sel'); ws.value = 'b1'; m.onWarehouseChange(ws);
+                    const ps = rows[i].querySelector('.assign-product-sel'); ps.value = 'lp'; m.onProductChange(ps);
+                    rows[i].querySelector('.assign-qty-inp').value = String(spec.length); m._syncAssignDevices(rows[i]);
+                    rows[i].querySelectorAll('.dev-sn').forEach((inp, k) => { inp.value = spec[k] || ''; });
+                });
+            };
+            try {
+                fill([['Z-1', 'Z-2']]); o.rowsRendered = document.querySelectorAll('#assignRowsContainer .dev-ids-row').length;
+                await m.saveAssignment();
+                const c = calls.at(-1);
+                o.ok = { calls: calls.length, stock: c.stock.map(s => s.delta), b3: c.writes.filter(w => w.col === 'b3').map(w => `${w.item.adet}|${w.item.sn}`), asg: c.writes.filter(w => w.col === 'assignments').map(w => `${w.item.adet}|${w.item.sn}`) };
+                calls.length = 0;
+                fill([['Z-3'], ['z-3']]); await m.saveAssignment(); o.dupAcrossRows = calls.length ? 'yazıldı!' : alerts.at(-1);
+                fill([['Z-BUSY']]); await m.saveAssignment(); o.busy = calls.length ? 'yazıldı!' : alerts.at(-1);
+                fill([['']]); await m.saveAssignment(); o.empty = calls.length ? 'yazıldı!' : alerts.at(-1);
+                m.closeAssignModal();
+            } finally {
+                Object.assign(window, { runStockOps: orig.ops, isDbAdmin: orig.adm });
+                Object.assign(window.data, { b1: orig.b1, b3: orig.b3, personel: orig.per });
             }
             return o;
         });
