@@ -1182,6 +1182,52 @@ const SCENARIOS = {
         return out;
     },
 
+    // H3 · 3.5 status logic (pure) + 3.4 transaction plan (pure) + karar 3 / atomic rejection (real Firestore, anonymous).
+    async stockCore(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, o = {};
+            const P = (col, data, d) => { const r = window.computeStockPatch(col, data, d); return { after: r.after, status: r.statusAfter, fields: Object.keys(r.patch).sort().join(','), prev: r.patch.stokOncekiDurum, clearPrev: r.clearPrev }; };
+            o.status = {
+                readyToEmpty:   P('b1', { adet: 1, durumu: 'Kullanıma Hazır' }, -1),
+                mevcutToEmpty:  P('b1', { adet: 2, durumu: 'Mevcut' }, -2),
+                pasifKept:      P('b1', { adet: 1, durumu: 'Pasif' }, -1),
+                hurdaKept:      P('b1', { adet: 3, durumu: 'Hurda' }, -3),
+                servisKept:     P('b1', { adet: 2, durumu: 'Servis Sürecinde' }, -2),
+                sifirKept:      P('b1', { adet: 1, durumu: 'Sıfır' }, -1),
+                restockRestore: P('b1', { adet: 0, durumu: 'Tükendi', stokOncekiDurum: 'Mevcut' }, 4),
+                restockDefault: P('b1', { adet: 0, durumu: 'Tükendi' }, 1),
+                pasifRestockKept: P('b1', { adet: 0, durumu: 'Pasif' }, 2),
+                b2UsesStatus:   P('b2', { adet: 1, status: 'Aktif' }, -1),
+                noStatusB2:     P('b2', { adet: 5 }, -1),
+                decreaseAbove0: P('b1', { adet: 5, durumu: 'Kullanıma Hazır' }, -2),
+            };
+            // plan: merged deltas, insufficient stock, createIfMissing, not-found
+            const plan = (entries, datas) => { try { return window.planStockOps(entries, datas).map(r => `${r.col}/${r.id}:${r.before}->${r.after}${r.created ? ':created' : ''}`); } catch (e) { return `${e.name}:${e.code}`; } };
+            o.plan = {
+                ok: plan([{ col: 'b1', id: 'a', delta: -2 }, { col: 'b2', id: 'b', delta: 3 }], [{ adet: 5, durumu: 'Kullanıma Hazır' }, { adet: 0, status: 'Tükendi' }]),
+                insufficient: plan([{ col: 'b1', id: 'a', delta: -6 }], [{ adet: 5 }]),
+                missing: plan([{ col: 'b1', id: 'a', delta: -1 }], [null]),
+                create: plan([{ col: 'b1', id: 'x', delta: 0, createIfMissing: { ürün: 'Geri Gelen', adet: 2 } }], [null]),
+            };
+            // karar 3: non-admin session is refused before anything is sent
+            const r1 = await window.runStockOps({ stock: [{ col: 'b1', id: 'nope', delta: -1 }] }, { strict: false });
+            let thrown = null; try { await window.runExitTransaction({ repo: 'b1', productId: 'nope', qty: 1, b3Entry: {} }); } catch (e) { thrown = e.code + ' | ' + e.message; }
+            o.staff = { nonStrict: r1, strictMessage: thrown };
+            // atomicity: pretend admin; Firestore rules reject the b1 part → the requests write in the SAME transaction must not exist
+            const b1 = (window.data.b1 || [])[0];
+            const realIsDbAdmin = window.isDbAdmin; window.isDbAdmin = () => true;
+            const reqId = window.makeId();
+            const r2 = await window.runStockOps({
+                stock: b1 ? [{ col: 'b1', id: b1.id, delta: 0 }] : [],
+                writes: [{ op: 'set', col: 'requests', item: { id: reqId, ürün: 'ATOMIC ' + ft.MARKER, durum: 'Beklemede' } }]
+            }, { strict: false });
+            window.isDbAdmin = realIsDbAdmin;
+            await ft.sleep(800);
+            o.atomicReject = { result: r2, requestNotWritten: !(await ft.readMarked('requests')).some(r => r.id === reqId), localUnchanged: !(window.data.requests || []).some(r => r.id === reqId) };
+            return o;
+        });
+    },
+
     // D3 · RULE-04 / VIP-05 — system_config is environment-scoped. No VIP action is triggered (rule 7.5).
     async systemConfigScope(page) {
         return page.evaluate(async () => {

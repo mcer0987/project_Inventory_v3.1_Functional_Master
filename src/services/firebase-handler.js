@@ -18,7 +18,8 @@ import {
     getDoc,
     setDoc,
     writeBatch,
-    runTransaction
+    runTransaction,
+    deleteField
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ============================================================
@@ -843,52 +844,168 @@ window.migrateDataFromOldToNew = async function () {
     console.log("🎉 MIGRATION TAMAMLANDI! Sayfayı yenileyebilirsiniz.");
 };
 
-// ✅ FIREBASE TRANSACTION: Yarış Durumunu (Race Condition) Önleme Mimari Servisi
-// [WHY]: updateStock ve addExit fonksiyonları client-side bellek üzerinden saveData çalıştırdığı için aynı anda iki personel çıkış yaparsa birinin verisi diğerini eziyordu.
-// [HOW]: Firebase'in kendi runTransaction metodunu kullanarak doğrudan sunucudan (Atomik) okuma/yazma yaparak negatif stoklara inilmesini engelliyoruz.
-// [WHY]: Hibrit ESM geçişi — inventory-logic.js bu fonksiyonu import edebilsin.
-// [HOW]: DUAL-EXPOSURE: export const + window bağlaması. Fonksiyon mantığına DOKUNULMADI.
-export const runStockTransaction = window.runStockTransaction = async function (colName, docId, delta) {
-    if (!window.userAuth) throw new Error("Yetkisiz İşlem: Firebase oturumu yok.");
-    if (!docId) throw new Error("Geçersiz Doküman ID.");
+// ─── Stok durum mantığı (Faz 3.5 · DATA-05, INV-07) ───────────────────────────────────────────────
+// [WHY]: Her stok hareketi durumu koşulsuz "Kullanıma Hazır" / "Tükendi" yapıyordu: "Pasif", "Hurda", "Servis Sürecinde"
+//        gibi elle verilmiş durumlar ilk çıkışta siliniyordu; durum hem 'durumu' hem 'status' alanına yazıldığı için B1
+//        kayıtlarına yabancı bir 'status' alanı ekleniyordu.
+// [HOW]: Yalnız stoktan türeyen geçişler yapılır:
+//          - stok 0'a düşerken durum bir "kullanılabilirlik" durumuysa ('', Kullanıma Hazır, Mevcut, Aktif) → "Tükendi";
+//            önceki durum stokOncekiDurum alanında saklanır.
+//          - durum "Tükendi" iken stok 0'ın üstüne çıkarsa → saklanan önceki durum (yoksa "Kullanıma Hazır").
+//          - diğer tüm durumlar (Pasif, Hurda, Servis Sürecinde, Sıfır, Eski Cihaz, Yedek Parça…) HİÇ değiştirilmez.
+//        Durum yalnız kaydın zaten kullandığı alan(lar)a yazılır (B2 'status', B1 'durumu'); lastUpdate güncellenir.
+export const STOCK_AUTO_READY = Object.freeze(['', 'Kullanıma Hazır', 'Mevcut', 'Aktif']);
+export const STOCK_AUTO_EMPTY = Object.freeze(['Tükendi', 'Tükendi / Pasif']);
 
-    // [ENV_GUARD] runStockTransaction — Atomik stok güncelleme her zaman
-    // aktif ortam root'una yönlendirilir. Prod/demo karışımını önler.
-    const docRef = doc(fireDb, COLLECTION_ROOT, colName, "items", String(docId));
+export const computeStockPatch = window.computeStockPatch = function (colName, data, delta) {
+    const qtyField = data.adet !== undefined ? 'adet' : (data.qty !== undefined ? 'qty' : 'adet');
+    const before = parseInt(data[qtyField] ?? 0, 10) || 0;
+    const after = before + delta;
+    const statusFields = ['durumu', 'status'].filter(f => data[f] !== undefined);
+    if (statusFields.length === 0) statusFields.push(colName === 'b2' ? 'status' : 'durumu');
+    const current = String(data[statusFields[0]] ?? '').trim();
 
-    // [WHY]: Çağıranlar sonucu göremediği için "başarılı" mesajı stoğun gerçekten değişip değişmediğini söylemiyordu.
-    // [HOW]: Transaction önceki ve yeni adedi döndürür; stok alanı hiç yoksa 'adet' yazılır (sessiz no-op olmaz).
-    return runTransaction(fireDb, async (transaction) => {
-        const sfDoc = await transaction.get(docRef);
-        if (!sfDoc.exists()) {
-            throw new Error("İlgili stok kaydı veritabanında bulunamadı!");
+    const patch = { [qtyField]: after, lastUpdate: Date.now() };
+    if (qtyField === 'adet' && data.qty !== undefined) patch.qty = after;
+    let status = current, clearPrev = false;
+    if (after === 0 && before > 0 && STOCK_AUTO_READY.includes(current)) {
+        status = 'Tükendi';
+        patch.stokOncekiDurum = current || 'Kullanıma Hazır';
+    } else if (after > 0 && STOCK_AUTO_EMPTY.includes(current)) {
+        status = data.stokOncekiDurum || 'Kullanıma Hazır';
+        clearPrev = data.stokOncekiDurum !== undefined;
+    }
+    if (status !== current) statusFields.forEach(f => { patch[f] = status; });
+    return { patch, clearPrev, before, after, statusBefore: current, statusAfter: status };
+};
+
+// ─── Atomik stok işlemleri (Faz 3.4 · DATA-09, INV-04, EBYS-21) ──────────────────────────────────
+// [WHY]: Çıkış, sepet, zimmet ata/iade, talep onayı ve servisten dönüş stoğu bir transaction'la, hareket kaydını (b3,
+//        assignments, requests, serviceRecords) ayrı bir yazmayla güncelliyordu; ikinci adım başarısız olursa stok düşmüş ama
+//        kayıt yok kalıyordu (telafi de başarısız olabilirdi). Sepet stoğu istemcide hesaplayıp tüm veritabanını yazıyordu
+//        (iki cihaz aynı anda çıkınca biri diğerini eziyordu); servisten dönüşte servis kaydı silinip ürün yazılamayınca ürün
+//        kayboluyordu.
+// [HOW]: runStockOps({stock, writes}) HEPSİNİ tek bir Firestore transaction'ında yapar: stok dokümanları sunucudan okunur,
+//        yeterlilik orada kontrol edilir, stok + durum (computeStockPatch) ve tüm kayıt yazmaları birlikte işlenir — ya hepsi
+//        ya hiçbiri. Eşzamanlı başka bir yazma olursa Firestore transaction'ı yeniden dener; stok asla eksiye düşmez.
+//          stock:  [{ col, id, delta }]                   aynı doküman birden çok kez geçerse deltalar toplanır
+//                  [{ col, id, delta, createIfMissing }]  doküman yoksa createIfMissing yazılır (servisten dönüş)
+//          writes: [{ op:'set', col, item } | { op:'update', col, id, fields } | { op:'delete', col, id }]
+//        Yalnız Firebase admin oturumu (karar 3: stok hareketleri Faz 4 yetki matrisine kadar yöneticide).
+//        Dönüş: { stock: [{col, id, name, before, after, statusBefore, statusAfter, created}], ids: [yazılan kayıt id'leri] }
+export const EXIT_ADMIN_ONLY_MESSAGE = window.EXIT_ADMIN_ONLY_MESSAGE = 'Çıkış işlemi yalnızca sistem yöneticisi tarafından yapılabilir.';
+const STOCK_COLLECTIONS = ['b1', 'b2'];
+
+// Transaction'ın saf hesaplama kısmı (okunan dokümanlar → yazılacak stok değişiklikleri). Sunucu verisiyle transaction
+// içinde çağrılır; saf olduğu için ayrıca test edilebilir. Yetersiz stok veya eksik dokümanda SaveDataError fırlatır.
+export const planStockOps = window.planStockOps = function (entries, datas) {
+    return entries.map((e, i) => {
+        const data = datas[i];
+        if (!data) {
+            if (!e.createIfMissing) throw new SaveDataError('not-found', `Stok kaydı bulunamadı (${e.col}/${e.id}); liste güncellenmiş olabilir.`);
+            const item = _clean({ ..._stripRenderFields(e.createIfMissing), id: e.id, lastUpdate: Date.now() });
+            return { col: e.col, id: e.id, name: item.ürün || item.name || e.id, before: 0, after: parseInt(item.adet ?? item.qty ?? 0, 10) || 0, created: true, full: item };
         }
-
-        const data = sfDoc.data();
-        let currentQty = parseInt(data.adet || data.qty || 0);
-        let newQty = currentQty + delta;
-
-        if (newQty < 0) {
-            throw new Error("Yetersiz Stok! Ürün stoku 0'ın altına düşemez.");
-        }
-
-        let newStatus = newQty > 0 ? 'Kullanıma Hazır' : 'Tükendi / Pasif';
-        if (newQty === 0 && delta < 0) {
-            newStatus = 'Tükendi';
-        }
-
-        // Atomik Güncelleme
-        const updateData = {};
-        if (data.adet !== undefined) updateData.adet = newQty;
-        if (data.qty !== undefined) updateData.qty = newQty;
-        if (data.adet === undefined && data.qty === undefined) updateData.adet = newQty;
-        updateData.durumu = newStatus;
-        updateData.status = newStatus;
-
-        transaction.update(docRef, updateData);
-        return { before: currentQty, after: newQty };
-    }).then(result => {
-        console.log(`✅ [TRANSACTION BAŞARILI] ${colName}/${docId} stoğu güncellendi: ${result.before} → ${result.after}`);
-        return result;
+        const name = data.ürün || data.name || e.id;
+        const r = computeStockPatch(e.col, data, e.delta);
+        if (r.after < 0) throw new SaveDataError('insufficient-stock', `Yetersiz stok: "${name}" (mevcut ${r.before}, istenen ${-e.delta}).`, { col: e.col, id: e.id, before: r.before });
+        return { col: e.col, id: e.id, name, before: r.before, after: r.after, statusBefore: r.statusBefore, statusAfter: r.statusAfter, patch: r.patch, clearPrev: r.clearPrev };
     });
+};
+
+export const runStockOps = window.runStockOps = async function ({ stock = [], writes = [] } = {}, opts = {}) {
+    const strict = opts.strict !== false;
+    const fail = (code, message, details) => {
+        const err = new SaveDataError(code, message, details);
+        console.error(`❌ runStockOps [${code}]: ${message}`, details || '');
+        if (strict) throw err;
+        return false;
+    };
+    if (!window.userAuth) return fail('no-auth', 'Oturum bulunamadı; işlem yapılamadı.');
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) return fail('forbidden', opts.forbiddenMessage || EXIT_ADMIN_ONLY_MESSAGE);
+
+    // Stok girdilerini doküman başına birleştir
+    const stockByKey = new Map();
+    for (const s of stock) {
+        if (!s || !STOCK_COLLECTIONS.includes(s.col) || s.id == null || s.id === '') return fail('invalid-argument', 'Stok işlemi b1/b2 koleksiyonu ve ürün id bekliyor.', s);
+        const delta = Number(s.delta || 0);
+        if (!Number.isInteger(delta)) return fail('invalid-argument', 'Stok değişimi tam sayı olmalı.', s);
+        const key = `${s.col}|${s.id}`;
+        const prev = stockByKey.get(key);
+        if (prev) prev.delta += delta;
+        else stockByKey.set(key, { col: s.col, id: String(s.id), delta, createIfMissing: s.createIfMissing || null });
+    }
+
+    const prepared = [];
+    for (const o of writes) {
+        if (!o || !COLLECTIONS.includes(o.col)) return fail('unknown-collection', `Bilinmeyen koleksiyon: "${o && o.col}"`);
+        if (o.op === 'set') {
+            const item = _stripRenderFields(o.item || {});
+            if (item.id == null || String(item.id).trim() === '') item.id = window.makeId();
+            prepared.push({ op: 'set', col: o.col, id: String(item.id), data: _clean(item) });
+        } else if (o.op === 'update') {
+            const fields = _clean(_stripRenderFields(o.fields || {}));
+            delete fields.id;
+            prepared.push({ op: 'update', col: o.col, id: String(o.id), data: fields });
+        } else if (o.op === 'delete') {
+            prepared.push({ op: 'delete', col: o.col, id: String(o.id) });
+        } else return fail('invalid-argument', `Bilinmeyen işlem: "${o.op}"`);
+    }
+    if (stockByKey.size + prepared.length === 0) return fail('invalid-argument', 'En az bir işlem gerekli.');
+
+    let stockResults;
+    try {
+        stockResults = await runTransaction(fireDb, async (tx) => {
+            const entries = [...stockByKey.values()];
+            const snaps = [];
+            for (const e of entries) snaps.push(await tx.get(_docRef(e.col, e.id)));   // tüm okumalar yazmalardan önce
+            const results = planStockOps(entries, snaps.map(sn => sn.exists() ? sn.data() : null));
+            results.forEach(r => {
+                const ref = _docRef(r.col, r.id);
+                if (r.created) tx.set(ref, r.full);
+                else tx.update(ref, r.clearPrev ? { ...r.patch, stokOncekiDurum: deleteField() } : r.patch);
+            });
+            prepared.forEach(p => {
+                const ref = _docRef(p.col, p.id);
+                if (p.op === 'set') tx.set(ref, p.data);
+                else if (p.op === 'update') tx.update(ref, p.data);
+                else tx.delete(ref);
+            });
+            return results;
+        });
+    } catch (e) {
+        if (e && e.name === 'SaveDataError') return fail(e.code, e.message, e.details);
+        if (e && e.code === 'permission-denied') return fail('forbidden', opts.forbiddenMessage || EXIT_ADMIN_ONLY_MESSAGE, { code: e.code });
+        if (e && e.code === 'not-found') return fail('not-found', 'Güncellenecek kayıt bulunamadı; başka biri silmiş olabilir.', { code: e.code });
+        return fail('write-failed', `İşlem kaydedilemedi: ${e && e.message}`, { code: e && e.code });
+    }
+
+    // Bellek ve mirror'ı hemen güncelle (snapshot beklenmeden doğru çizim)
+    stockResults.forEach(r => {
+        if (r.created) { _applyLocal(r.col, { op: 'set', id: r.id, data: r.full }); return; }
+        _applyLocal(r.col, { op: 'update', id: r.id, data: r.patch });
+        if (r.clearPrev) {
+            [window.data, window._dbMirror].forEach(st => { const it = (st[r.col] || []).find(_sameId(r.id)); if (it) delete it.stokOncekiDurum; });
+        }
+    });
+    prepared.forEach(p => _applyLocal(p.col, p));
+    const out = { stock: stockResults.map(({ patch, full, clearPrev, ...rest }) => rest), ids: prepared.map(p => p.id) };
+    console.log('☁️ runStockOps:', out.stock.map(s => `${s.col}/${s.id} ${s.before}→${s.after}`).join(' · '), '| kayıt:', prepared.map(p => `${p.op}:${p.col}`).join(', '));
+    return out;
+};
+
+// Tekil çıkış: stok -qty + b3 hareket kaydı (+ isteğe bağlı ek yazmalar) tek transaction'da.
+export const runExitTransaction = window.runExitTransaction = function ({ repo, productId, qty, b3Entry, extraWrites = [] }, opts) {
+    return runStockOps({
+        stock: [{ col: repo, id: productId, delta: -Math.abs(Number(qty) || 0) }],
+        writes: [{ op: 'set', col: 'b3', item: { ...b3Entry, productId } }, ...extraWrites]
+    }, opts);
+};
+
+// Tek ürün stok değişimi (FAB ±, telafiler). Aynı çekirdek (runStockOps): sunucuda doğrulama + 3.5 durum mantığı.
+// Hata fırlatır (SaveDataError; message kullanıcıya gösterilebilir). Dönüş: { before, after, statusBefore, statusAfter }.
+export const runStockTransaction = window.runStockTransaction = async function (colName, docId, delta) {
+    if (!docId) throw new SaveDataError('invalid-argument', 'Geçersiz Doküman ID.');
+    const res = await runStockOps({ stock: [{ col: colName, id: docId, delta }] }, { strict: true, forbiddenMessage: 'Stok işlemleri yalnızca sistem yöneticisi tarafından yapılabilir.' });
+    return res.stock[0];
 };
