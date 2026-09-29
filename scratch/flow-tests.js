@@ -450,12 +450,14 @@ const SCENARIOS = {
             out.b3Legacy = txt(0);
             out.b3New = txt(1);
 
+            const realIsAdm = window.isDbAdmin; window.isDbAdmin = () => true; // karar 3: çıkış modalı yalnız yönetici
             window.openExitModal();
             window.selectProduct(prod.ürün, prod.tür, prod.raf, prod.adet, 'b1', window.data.b1.length - 1);
             out.exitShelf = { shelf: document.getElementById('exitShelfNo').value, qtyMax: document.getElementById('exitQty').max };
             window.openExitModal();
             out.exitShelfResetOnOpen = document.getElementById('exitShelfNo').value === '' && !document.getElementById('exitQty').hasAttribute('max');
             window.closeExitModal?.();
+            window.isDbAdmin = realIsAdm;
 
             window.setActiveUser({ name: 'Rev User ' + ft.MARKER });
             window.data.requests = [
@@ -896,6 +898,8 @@ const SCENARIOS = {
             window.showCustomConfirm = async () => true;
             const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
             const tx = []; window.runStockTransaction = async (c, id, d) => { tx.push([c, id, d]); return { before: 5, after: 5 + d }; };
+            const realAdm = window.isDbAdmin, realExit = window.runExitTransaction; window.isDbAdmin = () => true;
+            window.runExitTransaction = async a => { tx.push([a.repo, a.productId, -a.qty]); ops.push(['runExitTransaction', [a.repo, a.b3Entry]]); return { stock: [{ before: 5, after: 5 - a.qty }] }; };
             const P = (id, name, extra) => ({ id, ürün: name, raf: 'R', sütun: 'S', adet: 5, durumu: 'Kullanıma Hazır', tür: 'Laptop', ...extra });
             const shift = () => window.data.b1.unshift(P('b1_new_' + Math.random(), 'SONRADAN EKLENEN'));
             const last = () => ops.at(-1);
@@ -935,7 +939,8 @@ const SCENARIOS = {
             window.openExitModal('b1', 'b1_B'); shift();
             document.getElementById('exitQty').value = '2';
             await window.saveExit(new Event('submit'));
-            out.exit = { tx: tx.at(-1), b3: last()[0] === 'appendItem' ? { col: last()[1][0], productId: last()[1][1].productId, adet: last()[1][1].adet } : last() };
+            out.exit = { tx: tx.at(-1), b3: last()[0] === 'runExitTransaction' ? { col: 'b3', productId: last()[1][1].productId, adet: last()[1][1].adet } : last() };
+            window.isDbAdmin = realAdm; window.runExitTransaction = realExit;
 
             // internal transfer: one atomic op list (set target + delete source)
             window.openTransferModal('b1', 'b1_B'); shift();
@@ -1224,6 +1229,70 @@ const SCENARIOS = {
             window.isDbAdmin = realIsDbAdmin;
             await ft.sleep(800);
             o.atomicReject = { result: r2, requestNotWritten: !(await ft.readMarked('requests')).some(r => r.id === reqId), localUnchanged: !(window.data.requests || []).some(r => r.id === reqId) };
+            return o;
+        });
+    },
+
+    // H3 · single exit + cart (INV-04) go through one transaction; staff refused up front (karar 3). runStockOps recorded.
+    async h3Exits(page) {
+        return page.evaluate(async () => {
+            const o = {};
+            const orig = { b1: window.data.b1, b2: window.data.b2, ops: window.runStockOps, exit: window.runExitTransaction, adm: window.isDbAdmin, alert: window.showAppAlert, save: window.saveData };
+            const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
+            let fullSaves = 0; window.saveData = async (...a) => { fullSaves++; return orig.save(...a); };
+            const P = (id, name, adet, extra) => ({ id, ürün: name, raf: 'R', sütun: 'S', adet, durumu: 'Kullanıma Hazır', tür: 'Kablo', ...extra });
+            window.data.b1 = [P('c1', 'Kablo A', 5), P('c2', 'Kablo B', 1)];
+            window.data.b2 = [P('c3', 'Mouse', 4, { status: 'Aktif' })];
+
+            // staff: exit modal and cart refused with the decision-3 message, nothing opened
+            window.isDbAdmin = () => false;
+            window.openExitModal('b1', 'c1');
+            o.staffExit = { alert: alerts.at(-1)?.[1], modalOpen: getComputedStyle(document.getElementById('exitModal')).display !== 'none' };
+            window.openCartModal();
+            o.staffCart = { alert: alerts.at(-1)?.[1], modalOpen: getComputedStyle(document.getElementById('cartModal')).display !== 'none' };
+
+            // admin: cart with 3 lines → ONE runStockOps with 3 stock deltas + 3 b3 sets; a record prepended meanwhile is ignored
+            window.isDbAdmin = () => true;
+            const calls = [];
+            window.runStockOps = async (arg) => { calls.push(JSON.parse(JSON.stringify(arg))); return { stock: arg.stock.map(s => ({ name: s.id, before: 5, after: 5 + s.delta })) }; };
+            window.openCartModal();
+            window.addToCart({ item: window.data.b1[0], repo: 'b1', qty: 5 }); window.addToCart({ item: window.data.b1[0], repo: 'b1', qty: 5 });
+            window.addToCart({ item: window.data.b1[1], repo: 'b1', qty: 1 });
+            window.addToCart({ item: window.data.b2[0], repo: 'b2', qty: 4 });
+            window.data.b1.unshift(P('new', 'SONRADAN', 9));
+            await window.saveCartExit(new Event('submit'));
+            const c = calls.at(-1);
+            o.cart = {
+                calls: calls.length,
+                stock: c && c.stock.map(s => `${s.col}/${s.id}:${s.delta}`),
+                b3: c && c.writes.map(w => `${w.col}:${w.item.productId}:${w.item.adet}`),
+                noFullSave: fullSaves === 0,
+                alert: alerts.at(-1)?.[0]
+            };
+
+            // cart failure (e.g. insufficient stock on the server): nothing written, clear message
+            window.runStockOps = async () => { throw new window.SaveDataError('insufficient-stock', 'Yetersiz stok: "Kablo B" (mevcut 0, istenen 1).'); };
+            window.openCartModal();
+            window.addToCart({ item: window.data.b1[2], repo: 'b1', qty: 1 });
+            await window.saveCartExit(new Event('submit'));
+            o.cartFail = alerts.at(-1);
+
+            // single exit → runExitTransaction (one call, no separate b3 write, no compensation)
+            const ex = [];
+            window.runExitTransaction = async a => { ex.push({ repo: a.repo, id: a.productId, qty: a.qty, b3: a.b3Entry.productId }); return { stock: [{ before: 5, after: 3, statusBefore: 'Kullanıma Hazır', statusAfter: 'Kullanıma Hazır' }] }; };
+            window.openExitModal('b1', 'c1');
+            document.getElementById('exitQty').value = '2';
+            await window.saveExit(new Event('submit'));
+            o.single = { calls: ex, alert: alerts.at(-1)?.[1] };
+            window.runExitTransaction = async () => { throw new window.SaveDataError('insufficient-stock', 'Yetersiz stok: "Kablo A" (mevcut 1, istenen 2).'); };
+            window.openExitModal('b1', 'c1');
+            document.getElementById('exitQty').value = '2';
+            await window.saveExit(new Event('submit'));
+            o.singleFail = alerts.at(-1);
+            window.closeExitModal?.(); window.closeModal?.('cartModal');
+
+            Object.assign(window, { runStockOps: orig.ops, runExitTransaction: orig.exit, isDbAdmin: orig.adm, showAppAlert: orig.alert, saveData: orig.save });
+            window.data.b1 = orig.b1; window.data.b2 = orig.b2;
             return o;
         });
     },

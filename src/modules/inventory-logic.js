@@ -25,9 +25,11 @@ const _find = (col, id) => (id == null || id === '') ? null : (window.data[col] 
 const _alert = (msg, type) => { if (typeof window.showAppAlert === 'function') window.showAppAlert(msg, type); };
 const _missing = () => _alert('Kayıt bulunamadı; liste güncellenmiş olabilir. Sayfayı yenileyip tekrar deneyin.', 'error');
 
-// Seçili ürünü (#selectedProduct, selectProduct ile doldurulur) id ile çözüp stoktan düşer ve b3'e çıkış kaydı ekler.
-// b3 kaydı yazılamazsa stok geri alınır (tam atomik işlem Faz 3.4 · H3).
+// Seçili ürünü (#selectedProduct, selectProduct ile doldurulur) id ile çözer; stok düşümü ve b3 çıkış kaydı TEK transaction
+// (runExitTransaction · 3.4): ya ikisi birden ya hiçbiri — telafi (stok geri alma) gerekmez. Yalnız yönetici (karar 3).
 async function _performExit(requestedQty) {
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { _alert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
+    if (!Number.isInteger(requestedQty) || requestedQty < 1) { _alert('Adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
     const selectedDiv = document.getElementById('selectedProduct');
     const selected = selectedDiv ? selectedDiv.dataset : null;
     if (!selected || !selected.name || !selected.repo) { _alert('Lütfen listeden bir ürün seçin!', 'warning'); return; }
@@ -35,13 +37,6 @@ async function _performExit(requestedQty) {
     const repo = selected.repo;
     const product = _find(repo, selected.id);
     if (!product) { _missing(); return; }
-
-    try {
-        await window.runStockTransaction(repo, product.id, -requestedQty);
-    } catch (transactionError) {
-        _alert(transactionError.message, 'error');
-        return;
-    }
 
     const saati = typeof window.getTurkiyeSaati === 'function' ? window.getTurkiyeSaati() : new Date().toLocaleString('tr-TR');
     const b3Entry = {
@@ -58,13 +53,15 @@ async function _performExit(requestedQty) {
         productId:    product.id
     };
 
-    if (!(await window.writeOk(window.appendItem('b3', b3Entry)))) {
-        try { await window.runStockTransaction(repo, product.id, requestedQty); } catch (e) { console.error('❌ Stok geri alınamadı:', e); }
-        _alert('Çıkış kaydı yazılamadı; stok geri alındı.', 'error');
+    let res;
+    try {
+        res = await window.runExitTransaction({ repo, productId: product.id, qty: requestedQty, b3Entry });
+    } catch (e) {
+        _alert(e.message || 'Çıkış kaydedilemedi.', 'error');   // hiçbir şey yazılmadı
         return;
     }
-
-    _alert('Stok güncellendi ve çıkış kaydedildi.', 'success');
+    const s = res.stock[0];
+    _alert(`Stok güncellendi ve çıkış kaydedildi. Stok: ${s.before} → ${s.after}${s.statusAfter !== s.statusBefore ? ` (${s.statusAfter})` : ''}`, 'success');
     if (typeof window.closeExitModal === 'function') window.closeExitModal();
     if (typeof window.renderTable === 'function') window.renderTable(repo);
     if (typeof window.renderExitTable === 'function') window.renderExitTable();
@@ -79,7 +76,7 @@ export const saveExit = async function (event) {
         event.preventDefault();
         event.stopPropagation();
     }
-    const requestedQty = parseInt(document.getElementById('exitQty')?.value) || 1;
+    const requestedQty = Number(document.getElementById('exitQty')?.value || 1);
     return _performExit(requestedQty);
 };
 

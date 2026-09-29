@@ -915,7 +915,13 @@ window.sendDraftInventoryRequest = async function (id) {
 // 🔷 Sepet / Toplu Çıkış Sistemi
 (function () {
     let cartItems = [];
+    // [WHY]: Sepet ürünleri dizi indeksiyle tutuyor (DATA-06), stoğu istemcide hesaplayıp tüm veritabanını yazıyordu (INV-04):
+    //        iki cihaz aynı anda çıkınca biri diğerinin düşümünü eziyor, sıfıra inen "Pasif"/"Hurda" ürünün durumu
+    //        "Tükendi" oluyordu; yetersiz kalemler sessizce atlanıp kalanlar "başarılı" kaydediliyordu.
+    // [HOW]: Kalemler ürün id'siyle tutulur; tüm kalemlerin stok düşümü + b3 kayıtları TEK transaction (runStockOps):
+    //        bir kalem bile yetmezse hiçbir şey yazılmaz ve hangi ürün olduğu söylenir. Yalnız yönetici (karar 3).
     window.openCartModal = function () {
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
         cartItems = [];
         document.getElementById('cartSearch').value = "";
         document.getElementById('cartProductList').style.display = 'none';
@@ -980,7 +986,7 @@ window.sendDraftInventoryRequest = async function (id) {
     };
 
     window.addToCart = function (res) {
-        const exists = cartItems.find(c => c.repo === res.repo && c.index === res.index);
+        const exists = cartItems.find(c => c.repo === res.repo && String(c.item.id) === String(res.item.id));
         if (exists) {
             if (exists.exitQty < res.qty) { exists.exitQty++; renderCartItems(); }
             else showAppAlert("Stokta daha fazla yok!", "warning");
@@ -1035,45 +1041,39 @@ window.sendDraftInventoryRequest = async function (id) {
         const alanKisi = document.getElementById('cartPerson').value || "-";
         const not = document.getElementById('cartNote').value || "-";
         const sn = document.getElementById('cartSn').value || "-";
-        let successCount = 0;
         const tarih = getTurkiyeSaati();
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
 
-        cartItems.forEach(cartItem => {
-            const product = window.data[cartItem.repo][cartItem.index];
-            if (product) {
-                let currentQty = parseInt(product.adet || product.qty || 0);
-                if (currentQty >= cartItem.exitQty) {
-                    let newQty = currentQty - cartItem.exitQty;
-                    product.adet = newQty;
-                    product.qty = newQty;
-                    if (newQty <= 0) { product.durumu = "Tükendi"; product.status = "Tükendi"; }
-                    const b3Entry = {
-                        id: window.makeId(), // DATA-12: ondalıklı Date.now()+Math.random() yerine
-                        rafNo: product.raf || "-",
-                        sutun: product.sütun || "-",
-                        urunTuru: product.tür || product.type || "-",
-                        urunAciklama: product.ürün || product.name || "-",
-                        sn: sn,
-                        adet: cartItem.exitQty,
-                        not: not,
-                        alanKisi: alanKisi,
-                        tarih: tarih,
-                        isDemirbas: window.checkIsDemirbas ? window.checkIsDemirbas(product) : false,
-                        kaynakDepo: cartItem.repo
-                    };
-                    if (!window.data.b3) window.data.b3 = [];
-                    window.data.b3.unshift(b3Entry);
-                    successCount++;
-                }
-            }
-        });
-
-        if (successCount > 0) {
-            await window.saveData(window.data);
-            showAppAlert(`${successCount} ürün kalemi için toplu çıkış başarıyla kaydedildi.`, "success");
-            closeModal('cartModal');
-            setTimeout(() => { if (typeof renderExitTable === 'function') renderExitTable(); }, 100);
+        const stock = [], writes = [];
+        for (const cartItem of cartItems) {
+            const product = (window.data[cartItem.repo] || []).find(x => x && String(x.id) === String(cartItem.item.id));
+            if (!product) { showAppAlert(`"${cartItem.item.ürün || cartItem.item.name || '-'}" artık listede yok; sepetten çıkarın.`, 'error'); return; }
+            const qty = Number(cartItem.exitQty);
+            if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Adetler en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+            stock.push({ col: cartItem.repo, id: product.id, delta: -qty });
+            writes.push({ op: 'set', col: 'b3', item: {
+                rafNo: product.raf || "-",
+                sutun: product.sütun || "-",
+                urunTuru: product.tür || product.type || "-",
+                urunAciklama: product.ürün || product.name || "-",
+                sn, adet: qty, not, alanKisi, tarih,
+                isDemirbas: window.checkIsDemirbas ? window.checkIsDemirbas(product) : false,
+                kaynakDepo: cartItem.repo,
+                productId: product.id
+            } });
         }
+
+        let res;
+        try {
+            res = await window.runStockOps({ stock, writes });
+        } catch (e) {
+            showAppAlert(`Toplu çıkış yapılamadı; hiçbir kalem kaydedilmedi. ${e.message || ''}`, 'error');
+            return;
+        }
+        showAppAlert(`${writes.length} ürün kalemi için toplu çıkış kaydedildi. ${res.stock.map(s => `${s.name}: ${s.before}→${s.after}`).join(' · ')}`, "success");
+        closeModal('cartModal');
+        if (typeof renderExitTable === 'function') renderExitTable();
+        ['b1', 'b2'].forEach(r => { if (typeof renderTable === 'function') renderTable(r); });
     };
 })();
 

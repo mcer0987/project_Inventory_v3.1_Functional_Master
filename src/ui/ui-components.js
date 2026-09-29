@@ -426,6 +426,12 @@ export const UIComponents = {
     // =========================================================================
     // Satırdan açılırsa ikinci argüman ürün id'sidir (DATA-06).
     openExitModal(repoName, productId) {
+        // Karar 3: Faz 4 yetki matrisine kadar stok çıkışı yalnız yönetici (Firestore kuralları da personele b1/b2/b3 yazdırmaz);
+        // personel formu doldurup sonra reddedilmek yerine baştan net mesaj görür.
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            if (typeof showAppAlert === 'function') showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE || 'Çıkış işlemi yalnızca sistem yöneticisi tarafından yapılabilir.', 'error');
+            return;
+        }
         window.currentExitRepo  = repoName || (document.querySelector('.tab-content.active')?.id || 'b1');
         window.currentExitIndex = null;
         const hasRow = productId !== undefined && productId !== null && productId !== '';
