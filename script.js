@@ -522,8 +522,9 @@ function renderMyRequestsTable() {
     const currentUser = window.getActiveUser();
     if (!currentUser) return;
 
+    // Sahiplik zimmet servisinden (3.7): personelId → eski talepte kod → Türkçe güvenli ad.
     const myReqs = window.data.requests.filter(r =>
-        (r.personel || "").trim().toLowerCase() === (currentUser.name || "").trim().toLowerCase()
+        window.AssignmentService.isMyRequest(r, currentUser)
     );
 
     if (myReqs.length === 0) {
@@ -583,23 +584,18 @@ window.renderPersonnelInventoryTable = function () {
     const currentUser = window.getActiveUser();
     if (!currentUser) return;
 
-    const completedRequests = (window.data.requests || [])
-        .filter(r => {
-            const rawDurum = (r.durum || '').trim().toUpperCase();
-            const isCompleted = rawDurum === 'COMPLETED' || rawDurum === 'TESLIM ALINDI' || rawDurum === 'TESLİM ALINDI';
-            return (r.personel || "").trim().toLowerCase() === (currentUser.name || "").trim().toLowerCase() && isCompleted;
-        })
-        .map(r => ({
-            tarih: r.tarih || "-",
-            ürün: r.ürün || "-",
-            sn: r.sn || "-",
-            adet: r.adet || 1,
-            isDemirbas: r.isDemirbas,
-            not: r.not || "-",
-            id: r.id || Date.now()
-        }));
-
-    const myInventory = [...completedRequests].sort((a, b) => (b.id || 0) - (a.id || 0));
+    // [WHY]: Yalnız teslim alınmış talepler taranıyordu; admin'in "Zimmet Yap" ile verdiği zimmetler hiç görünmüyor, iade
+    //        edilenler listede kalıyordu (ITSM-04, saha notu 29.09 #1).
+    // [HOW] (3.7): Zimmet servisi — admin Zimmet ekranıyla aynı liste; kullanıcının aktif ve teslim alınmış zimmetleri.
+    const myInventory = window.AssignmentService.getPersonInventory(currentUser).map(a => ({
+        tarih: a.teslimTarihi || a.tarih,
+        ürün: a.urun,
+        sn: a.sn,
+        envanterNo: a.envanterNo,
+        adet: a.adet,
+        isDemirbas: a.isDemirbas,
+        not: a.not,
+    }));
     if (myInventory.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 24px; color: var(--color-text-muted);">Üzerinize kayıtlı envanter bulunmamaktadır.</td></tr>';
         return;
@@ -616,7 +612,7 @@ window.renderPersonnelInventoryTable = function () {
         row.innerHTML = `
             <td>${escapeHtml(req.tarih || "-")}</td>
             <td><strong>${escapeHtml(req.ürün || "-")}</strong></td>
-            <td style="font-weight:bold; color: var(--color-text);">${escapeHtml(req.sn || "-")}</td>
+            <td style="font-weight:bold; color: var(--color-text);">${escapeHtml(req.sn || "-")}${req.envanterNo && req.envanterNo !== '-' ? `<div style="font-weight:normal; font-size:11px; color:var(--color-text-muted);">Env. No: ${escapeHtml(req.envanterNo)}</div>` : ''}</td>
             <td>${escapeHtml(req.adet || 1)} Adet</td>
             <td><span class="status-badge-pill" style="min-width: 100px; padding: 6px 12px; font-size: 11px; ${typeBadgeStyle}">${typeText}</span></td>
             <td style="color: var(--color-text-muted);">${escapeHtml(req.not || "-")}</td>
@@ -829,8 +825,7 @@ window.deleteRequest = async function (requestId) {
 // [HOW]: Talep id ile bulunur; yalnız kendi talebi ve uygun durumdaysa; yalnız değişen alanlar yazılır (updateItem).
 const _myRequest = id => {
     const req = (window.data.requests || []).find(r => String(r.id) === String(id));
-    const me = (window.getActiveUser()?.name || '').trim().toLowerCase();
-    if (!req || (req.personel || '').trim().toLowerCase() !== me) {
+    if (!req || !window.AssignmentService.isMyRequest(req, window.getActiveUser())) {
         showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error');
         return null;
     }

@@ -30,70 +30,27 @@ window.inventoryManagementModule = {
    * requests (completed/approved) ve b3 zimmet kayıtlarını ortak şemaya dönüştürür.
    * @returns {Array} Normalize edilmiş zimmet kayıtları
    */
+  // [HOW] (3.7): Liste zimmet servisinden gelir (personelin Kişi Envanterim ekranıyla aynı kaynak ve kurallar).
   getNormalizedAssignments: function () {
-    const assignments = [];
-
-    // --- KAYNAK 1: requests (onaylanan veya teslim alınan talepler) ---
-    const requests = window.data?.requests || [];
-    // [WHY]: Onay aynı zimmet için b3'e requestId'li ikiz kayıt yazar; talep ayrıca sayılınca KPI çift sayıyordu (ITSM-06).
-    const twinRequestIds = new Set((window.data?.b3 || []).filter(b => b.requestId != null).map(b => String(b.requestId)));
-    requests.forEach((req, idx) => {
-      if (twinRequestIds.has(String(req.id))) return;
-      const rawDurum = (req.durum || '').trim().toUpperCase();
-      const isCompleted = rawDurum === 'COMPLETED' || rawDurum === 'TESLİM ALINDI' || rawDurum === 'TESLIM ALINDI';
-      const isApproved = rawDurum === 'APPROVED' || rawDurum === 'ONAYLANDI';
-      if (!isCompleted && !isApproved) return;
-
-      assignments.push({
-        _source: 'request',
-        _index: idx,
-        _id: req.id || idx,
-        personel: req.personel || '-',
-        ürün: req.ürün || '-',
-        adet: req.adet || 1,
-        tarih: req.tarih || '-',
-        not: req.not || '-',
-        sn: req.sn || '-',
-        durum: req.iadeEdildi ? 'İade Edildi' : (isCompleted ? 'Teslim Alındı' : 'Onaylandı'),
-        talepTuru: req.talepTuru || 'Kalıcı Zimmet',
-        oncelik: req.oncelik || 'Orta',
-        iadeTarihi: req.iadeTarihi || null,
-        iadeEdildi: req.iadeEdildi || false,
-        rawRef: req
-      });
-    });
-
-    // --- KAYNAK 2: b3 (doğrudan/toplu envanter çıkışları) ---
-    // Kanonik görünümden (3.6): yalnız zimmet hareketleri (tip 'zimmet'; eski kayıtlarda talepTuru/oncelik/requestId izi).
-    // "Envanter Çıkışı Yap" ile yazılan çıkışlar zimmet sayılmaz.
-    const b3 = window.data?.b3 || [];
-    b3.forEach((item, idx) => {
-      const n = window.Schema.normalizeB3(item);
-      if (n.alanKisi === '-' || n.tip !== 'zimmet') return;
-
-      assignments.push({
-        _source: 'b3',
-        _index: idx,
-        _id: item.id || idx,
-        personel: n.alanKisi,
-        ürün: n.urunAciklama,
-        adet: n.adet || 1,
-        tarih: n.tarih,
-        not: n.not,
-        sn: n.sn,
-        durum: n.iadeEdildi ? 'İade Edildi' : 'Zimmetli',
-        talepTuru: n.talepTuru,
-        oncelik: n.oncelik,
-        iadeTarihi: n.iadeTarihi,
-        iadeEdildi: n.iadeEdildi,
-        depo: n.stokDisi ? null : n.kaynakDepo,
-        rawRef: item
-      });
-    });
-
-    // En yeniden en eskiye sırala (id büyükse daha yeni)
-    assignments.sort((a, b) => (b._id - a._id) || 0);
-    return assignments;
+    return window.AssignmentService.getAssignments().map(a => ({
+      _source: a._source,
+      _id: a._id,
+      personel: a.personel,
+      personelId: a.personelId,
+      ürün: a.urun,
+      adet: a.adet,
+      tarih: a.tarih,
+      not: a.not,
+      sn: a.sn,
+      envanterNo: a.envanterNo,
+      durum: a.iadeEdildi ? 'İade Edildi' : (a._source === 'request' ? (a.teslimAlindi ? 'Teslim Alındı' : 'Onaylandı') : 'Zimmetli'),
+      talepTuru: a.talepTuru,
+      oncelik: a.oncelik,
+      iadeTarihi: a.iadeTarihi,
+      iadeEdildi: a.iadeEdildi,
+      depo: a.depo,
+      rawRef: a.rawRef
+    }));
   },
 
   // ──────────────────────────────────────────

@@ -1618,6 +1618,83 @@ const SCENARIOS = {
         }, out);
     },
 
+    // H4 · 3.7 zimmet servisi: Kişi Envanterim admin'in doğrudan zimmetini gösterir (saha notu #1), iade/çıkış/teslim
+    // alınmamış olanları göstermez; kişi id ile, yoksa Türkçe güvenli adla eşleşir; admin ekranı aynı kaynaktan okur.
+    async h4AssignmentService(page, browser) {
+        const out = await page.evaluate(async () => {
+            const ft = window.__ft, o = {};
+            const orig = { b3: window.data.b3, req: window.data.requests, per: window.data.personel, user: localStorage.getItem('activeUser') };
+            const Z = (id, extra) => ({ id, sema: 2, tip: 'zimmet', kaynakDepo: 'b1', productId: 'p', rafNo: 'R', sutun: 'S', urunTuru: 'Laptop', urunAciklama: 'Ürün ' + id, marka: '', adet: 1, sn: 'SN' + id, envanterNo: '-', not: '-', alanKisi: 'Muhammed CER', personelId: 'per_mc', tarih: '29.09.2026', ts: Date.now() - id, isDemirbas: true, talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeTarihi: null, iadeEdildi: false, iadeEdildiTarihi: null, iadeDepo: null, onaylayan: 'Admin', requestId: null, ...extra });
+            window.data.personel = [{ id: 'per_mc', name: 'Muhammed CER' }, { id: 'per_x', name: 'Muhammed Cer' }];
+            window.data.b3 = [
+                Z(1), Z(2),                                                                     // saha: 2 kalem doğrudan zimmet
+                Z(3, { personelId: null, alanKisi: '  muhammed   cer ' }),                      // eski kayıt: id yok, ad farklı yazılmış
+                Z(4, { iadeEdildi: true }),                                                     // iade edilmiş → görünmez
+                Z(5, { tip: 'cikis', talepTuru: null, oncelik: null }),                         // envanter çıkışı → zimmet değil
+                Z(6, { requestId: 601 }),                                                       // talep onaylı, teslim alınmamış → görünmez
+                Z(7, { requestId: 701 }),                                                       // talep teslim alınmış → görünür
+                Z(8, { personelId: 'per_x', alanKisi: 'Muhammed Cer' }),                        // aynı adlı başka kişi → görünmez
+                { id: 9, shelfNo: 'R', productType: 'Eski Zimmet', sourceRepo: 'b1', sarfAdet: 1, note: '-', alanKisi: 'MUHAMMED CER', date: '01.09.2026', talepTuru: 'Kalıcı Zimmet' }, // eski şema
+            ];
+            window.data.requests = [
+                { id: 601, ürün: 'Talep A', personel: 'Muhammed CER', personelId: 'per_mc', durum: 'approved' },
+                { id: 701, ürün: 'Talep B', personel: 'Muhammed CER', personelId: 'per_mc', durum: 'completed', teslimTarihi: '30.09.2026' },
+                { id: 801, ürün: 'Eski Talep', personel: 'Başka Ad', personelKodu: '99999', durum: 'completed', sn: 'OLD1' }, // kod ile eşleşir
+                { id: 802, ürün: 'Başkasının', personel: 'Muhammed Cer', personelId: 'per_x', durum: 'completed' },
+            ];
+            window.setActiveUser({ id: 'per_mc', name: 'Muhammed CER', code: '99999' });
+            try {
+                const inv = window.AssignmentService.getPersonInventory(window.getActiveUser());
+                o.personInventory = inv.map(a => a.urun).sort();
+                window.renderPersonnelInventoryTable();
+                o.tableRows = [...document.querySelectorAll('#tablePersonnelInventory tbody tr')].map(tr => tr.querySelectorAll('td')[1]?.textContent.trim()).sort();
+                o.expected = ['Eski Talep', 'Eski Zimmet', 'Ürün 1', 'Ürün 2', 'Ürün 3', 'Ürün 7'];
+                o.ok = JSON.stringify(o.personInventory) === JSON.stringify(o.expected) && JSON.stringify(o.tableRows) === JSON.stringify(o.expected);
+                o.receiptDateUsed = inv.find(a => a.urun === 'Ürün 7')?.teslimTarihi === '30.09.2026';
+                o.otherPerson = window.AssignmentService.getPersonInventory({ id: 'per_x', name: 'Muhammed Cer' }).map(a => a.urun).sort();
+                o.myRequests = {
+                    own: window.AssignmentService.isMyRequest(window.data.requests[1], window.getActiveUser()),
+                    sameNameOtherId: window.AssignmentService.isMyRequest(window.data.requests[3], window.getActiveUser()),
+                };
+                window.data.personel.push({ id: 'per_ay', name: 'Ayşe Yılmaz' });
+                o.resolvePersonelId = { unique: window.AssignmentService.resolvePersonelId('AYŞE  YILMAZ'), sameNameTwoPeople: window.AssignmentService.resolvePersonelId('muhammed cer'), none: window.AssignmentService.resolvePersonelId('Yok Kişi') };
+                o.legacyNameOnlyVisibleToBothSameNames = o.otherPerson.includes('Ürün 3'); // bilinen sınır: id'siz eski kayıt
+
+                // yeni talep: personelId yazılır, erişim kodu kopyalanmaz (gerçek yazma, MARKER ile temizlenir)
+                window.setActiveUser({ id: 'per_ft', name: 'Talep Kişi ' + ft.MARKER, code: '55555' });
+                window.data.requests = orig.req;
+                window.editingReqId = null;
+                ft.set('reqProdName', 'Ürün ' + ft.MARKER); ft.set('reqQty', '1');
+                await window.saveRequest(new Event('submit'));
+                const saved = (await ft.readMarked('requests')).find(r => r.personel === 'Talep Kişi ' + ft.MARKER);
+                o.newRequest = saved ? { personelId: saved.personelId, hasCode: 'personelKodu' in saved } : 'not saved';
+            } finally {
+                window.data.b3 = orig.b3; window.data.requests = orig.req; window.data.personel = orig.per;
+                if (orig.user) localStorage.setItem('activeUser', orig.user); else localStorage.removeItem('activeUser');
+                window.renderPersonnelInventoryTable?.();
+            }
+            return o;
+        });
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        out.admin = await admin.evaluate(() => {
+            const orig = window.data.b3;
+            window.data.b3 = [{ id: 11, sema: 2, tip: 'zimmet', kaynakDepo: 'b1', productId: 'p', urunAciklama: 'Doğrudan', adet: 1, sn: 'A1', alanKisi: 'Muhammed CER', personelId: 'per_mc', talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeEdildi: false }];
+            const list = window.inventoryManagementModule.getNormalizedAssignments();
+            const same = window.AssignmentService.getAssignments().length === list.length;
+            const direct = list.find(a => a._id === 11);
+            window.data.b3 = orig;
+            return { sameSourceAsStaffScreen: same, directShown: direct ? `${direct.personel}|${direct.ürün}|${direct.durum}|${direct._source}` : null };
+        });
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
+    },
+
 };
 
 (async () => {

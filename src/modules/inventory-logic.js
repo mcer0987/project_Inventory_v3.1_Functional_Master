@@ -285,7 +285,8 @@ export const saveRequest = async function (event) {
         saved = await window.writeOk(window.appendItem('requests', {
             ...formFields,
             personel: user.name,
-            personelKodu: user.code || '',
+            // Kişi eşleşmesi id ile (3.7). Erişim kodu artık talebe kopyalanmıyor (herkesin okuyabildiği koleksiyon).
+            personelId: user.id ?? null,
             durum: 'Beklemede',
             tarih: typeof window.getTurkiyeTarihi === 'function' ? window.getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR'),
         }));
