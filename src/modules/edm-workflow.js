@@ -555,6 +555,16 @@ window.confirmStartWorkflow = async function () {
         if (typeof showAppAlert === 'function') showAppAlert(checked.error, 'warning'); else alert(checked.error);
         return;
     }
+    // [WHY]: Talebi açan kişi kendini onay adımına ekleyebiliyordu; akış başlıyor, sıra ona gelince self-approval engeli
+    //        ("Kendi satın alma taleplerinizi onaylayamazsınız") onayı reddediyor ve akış o adımda kalıcı olarak takılıyordu.
+    // [HOW]: Engel akış başlarken uygulanır: talep sahibi onaylayıcı olamaz (akışı kim başlatırsa başlatsın).
+    const requesterName = _normName(req.createdByName || req.talepEden);
+    const selfStep = requesterName ? checked.steps.findIndex(s => _normName(s.user) === requesterName) : -1;
+    if (selfStep !== -1) {
+        const msg = `${selfStep + 1}. adım: "${checked.steps[selfStep].user}" bu talebi açan kişi; kendi talebini onaylayamaz. Başka bir onaylayıcı seçin.`;
+        if (typeof showAppAlert === 'function') showAppAlert(msg, 'warning'); else alert(msg);
+        return;
+    }
     const startKey = 'start_' + String(req.id);
     _beginMutation(startKey, req);
 
