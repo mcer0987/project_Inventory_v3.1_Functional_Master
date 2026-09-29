@@ -1452,6 +1452,81 @@ const SCENARIOS = {
         await admin.browserContext().close();
         return out;
     },
+    // H4 · 3.6 şema sözleşmesi (saf): eski b3 biçimleri, kanonik kurucu, göç dönüşümü, Türkçe ad eşleşmesi, tek demirbaş kuralı.
+    async schemaContract(page) {
+        return page.evaluate(() => {
+            const S = window.Schema, o = {};
+            const orig = { b1: window.data.b1, b2: window.data.b2, pt: window.data.productTypes };
+            window.data.productTypes = [{ name: 'Laptop', isDemirbas: true }, { name: 'Toner', isDemirbas: false }, { name: 'Test Tür', isDemirbas: true }];
+            // "Raf-A 2" satırındaki ürün: b3'te sourceRepo b1 yazıyor ama ürün sonradan B2'ye sevk edilmiş
+            window.data.b1 = [{ id: 'b1_tp', ürün: 'Thinkpad e14 G6 - 32gb', tür: 'Laptop', raf: 'Raf-A 1', sütun: 'B1 -A', adet: 2, durumu: 'Kullanıma Hazır', marka: 'Lenovo' }];
+            window.data.b2 = [{ id: 'b1_asus', ürün: 'B3405CCA', tür: 'Laptop', raf: 'Zemin', sütun: 'Saha-1', adet: 37, status: 'Kullanıma Hazır', marka: 'Asus' }];
+            try {
+                o.names = {
+                    caseInsensitive: S.normName('Muhammed CER') === S.normName('Muhammed Cer'),
+                    dottedI: S.normName('İSMAİL') === S.normName('ismail') && S.normName('ISMAIL') === S.normName('İsmail'),
+                    spaces: S.normName('  Ahmet   Serhat Dursun ') === S.normName('ahmet serhat dursun'),
+                    different: S.normName('Ahmet') !== S.normName('Mehmet'),
+                };
+                o.demirbas = {
+                    byType: S.isDemirbas({ tür: 'Laptop', isDemirbas: false }) === true,       // tür tanımı bayraktan önce
+                    sarfType: S.isDemirbas({ tür: 'Toner', isDemirbas: true }) === false,
+                    flagOnly: S.isDemirbas({ tür: 'Bilinmeyen', isDemirbas: 'true' }) === true,
+                    nameIsType: S.isDemirbas({ ürün: 'laptop' }) === true,
+                    none: S.isDemirbas({ ürün: 'Kalem' }) === false,
+                    legacyAlias: window.checkIsDemirbas({ tür: 'Laptop' }) === true,
+                };
+                // Ekran görüntüsündeki dört satırın eski biçimleri
+                const talep = { id: 1790573686034, shelfNo: 'TALEP', productType: 'Asus B3405CCA-U7255H321TB1D', description: 'Personel Talebi Onaylandı', sn: 'TEST123', sarfAdet: 1, note: 'Onaylayan: Admin', person: 'Ahmet Serhat Dursun', alanKisi: 'Ahmet Serhat Dursun', date: '28.09.2026', tarih: '28.09.2026', isDemirbas: false, talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeEdildi: true, sourceRepo: 'TALEP', approvedBy: 'Admin', requestId: 1790573622073 };
+                const moved = { id: 1790584178571, shelfNo: 'Raf-A 2', productType: 'B3405CCA-U7255H321TB1D', productId: 'b1_asus', sourceRepo: 'b1', sn: 'sn:001', sarfAdet: 1, note: 'Onaylayan: Admin', alanKisi: 'Ahmet Serhat Dursun', date: '28.09.2026', talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', requestId: 1790584106695, isDemirbas: true };
+                const exitForm = { id: 1790600000000, rafNo: 'Raf-A 1', urunTuru: 'Laptop', urunAciklama: 'Thinkpad e14 G6 - 32gb', sn: 'TEST', adet: 1, not: 'TEST', alanKisi: 'Admin', tarih: '29.09.2026 10:10:10', isDemirbas: true, kaynakDepo: 'b1', productId: 'b1_tp' };
+                const adminZimmet = { id: 1790610000000123, sn: 'TEST02', talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', isDemirbas: true, iadeEdildi: false, productId: 'b1_tp', sourceRepo: 'b1', shelfNo: 'Raf-A 1', productType: 'Thinkpad e14 G6 - 32gb', description: '-', sarfAdet: 1, note: 'Admin Zimmeti (Kalıcı Zimmet)', alanKisi: 'Muhammed CER', date: '29.09.2026' };
+                const view = r => { const n = S.normalizeB3(r); return [n.rafNo, n.urunTuru, n.urunAciklama, n.sn, n.adet, n.not, n.alanKisi, n.tarih, n.tip, n.kaynakDepo].join(' | '); };
+                o.legacyRows = { talep: view(talep), moved: view(moved), exitForm: view(exitForm), adminZimmet: view(adminZimmet) };
+                o.legacyChecks = {
+                    talepShowsStokDisi: S.normalizeB3(talep).rafNo === 'Stok dışı' && S.normalizeB3(talep).stokDisi,
+                    movedTypeFoundInB2: S.normalizeB3(moved).urunTuru === 'Laptop',
+                    movedKeepsSourceRepo: S.normalizeB3(moved).kaynakDepo === 'b1',
+                    productTypeIsName: S.normalizeB3(adminZimmet).urunAciklama === 'Thinkpad e14 G6 - 32gb' && S.normalizeB3(adminZimmet).urunTuru === 'Laptop',
+                    exitIsCikis: S.normalizeB3(exitForm).tip === 'cikis',
+                    zimmetIsZimmet: S.normalizeB3(adminZimmet).tip === 'zimmet' && S.normalizeB3(talep).tip === 'zimmet',
+                    tsFromMakeId: S.normalizeB3(adminZimmet).ts === 1790610000000,
+                    tsFromMs: S.normalizeB3(exitForm).ts === 1790600000000,
+                    legacyFlag: S.normalizeB3(talep).legacy === true,
+                };
+                // Göç dönüşümü: dört eski kayıt da sözleşmeyi geçer, eski alanlar kalkar, karşılığı olmayan alan korunur, tür/raf kopyalanır
+                const conv = [talep, moved, exitForm, adminZimmet].map(r => S.toCanonicalB3(r));
+                o.migration = {
+                    allValid: conv.map(c => S.validateB3(c)),
+                    descriptionKept: conv[0].description === 'Personel Talebi Onaylandı',
+                    movedTypeSnapshotted: conv[1].urunTuru === 'Laptop',
+                    talepRafStored: conv[0].rafNo === '-' && conv[0].kaynakDepo === 'stok-disi' && conv[0].productId === null,
+                    idsKept: conv.map(c => c.id).join(',') === [talep, moved, exitForm, adminZimmet].map(r => r.id).join(','),
+                    idempotent: JSON.stringify(S.toCanonicalB3(conv[1])) === JSON.stringify(conv[1]),
+                    viewUnchanged: [talep, moved, exitForm, adminZimmet].every((r, i) => view(r) === view(conv[i])),
+                };
+                // Kanonik kurucu: stoktan ve stok dışı
+                const e1 = S.buildB3Entry({ tip: 'cikis', product: window.data.b1[0], col: 'b1', adet: 1, sn: 'X1', not: 'n', alanKisi: 'Admin' });
+                const e2 = S.buildB3Entry({ tip: 'zimmet', adet: 2, urunAciklama: 'Asus', alanKisi: 'Ali', requestId: 5, talepTuru: 'Geçici Zimmet', iadeTarihi: '2026-10-01', onaylayan: 'Admin' });
+                o.builder = {
+                    stockValid: S.validateB3(e1), stokDisiValid: S.validateB3(e2),
+                    snapshot: [e1.urunTuru, e1.rafNo, e1.sutun, e1.marka, e1.kaynakDepo, e1.productId].join(','),
+                    stokDisi: [e2.kaynakDepo, e2.productId, e2.rafNo, e2.urunTuru, e2.talepTuru, e2.oncelik].join(','),
+                    exactKeys: Object.keys(e1).sort().join(',') === [...S.B3_KEYS].sort().join(','),
+                };
+                o.validatorCatches = {
+                    legacyKey: S.validateB3({ ...e1, shelfNo: 'x' }).some(x => x.includes('shelfNo')),
+                    missingKey: S.validateB3((({ urunTuru, ...r }) => r)(e1)).some(x => x.includes('urunTuru')),
+                    badAdet: S.validateB3({ ...e1, adet: 0 }).length > 0,
+                };
+                o.requestStatus = ['Beklemede', '', 'approved', 'completed', 'Teslim Alındı', 'rejected', 'draft'].map(d => S.requestStatus({ durum: d })).join(',');
+            } finally {
+                Object.assign(window.data, { b1: orig.b1, b2: orig.b2, productTypes: orig.pt });
+            }
+            return o;
+        });
+    },
+
 };
 
 (async () => {

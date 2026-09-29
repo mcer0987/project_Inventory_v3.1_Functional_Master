@@ -577,11 +577,13 @@ window.inventoryManagementModule = {
     }
 
     const products = window.data?.[warehouse] || [];
-    // [B] DEMIRBAŞ FİLTRESİ: Sadece isDemirbas:true olan ürünler zimmetlenebilir
+    // [B] DEMIRBAŞ FİLTRESİ: yalnız demirbaş ürünler zimmetlenebilir. Karar tek kuraldan (Schema.isDemirbas: ürün türü
+    //     tanımı önce) — yalnız kayıttaki bayrağa bakılınca türü demirbaş olan ürünler listelenmiyordu; Pasif/Hurda ürünler
+    //     de öneriliyordu (ZIM-06).
     const fixtures = products.filter(p => {
       const hasStock = (p.adet || 0) > 0;
-      const isDem = p.isDemirbas === true || p.isDemirbas === 'true';
-      return hasStock && isDem;
+      const durum = window.Schema.normalizeStock(p, warehouse).durum;
+      return hasStock && durum !== 'Pasif' && durum !== 'Hurda' && window.Schema.isDemirbas(p);
     });
 
     if (fixtures.length === 0) {

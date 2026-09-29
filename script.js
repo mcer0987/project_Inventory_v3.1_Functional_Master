@@ -325,28 +325,9 @@ window.getActiveProductTypes = function () {
     return (typeof INV_CONFIG !== 'undefined' && INV_CONFIG.defaultTypes) ? INV_CONFIG.defaultTypes : [];
 };
 
+// Tek demirbaş kuralı schema.js'te (3.6): ürün türü tanımı → kayıttaki bayrak → adı bir tür adı mı.
 window.checkIsDemirbas = function (item) {
-    if (!item) return false;
-    const typeName = (item.tür || item.urunTuru || item.productType || "").trim();
-    if (typeName) {
-        const activeTypes = window.getActiveProductTypes();
-        const typeMatch = activeTypes.find(t => t.name.toLowerCase() === typeName.toLowerCase());
-        if (typeMatch) {
-            return typeMatch.isDemirbas === true || typeMatch.isDemirbas === "true";
-        }
-    }
-    if (item.hasOwnProperty('isDemirbas') && item.isDemirbas !== undefined && item.isDemirbas !== null) {
-        return item.isDemirbas === true || item.isDemirbas === "true";
-    }
-    const urunTuru = item.ürün || item.urunAciklama || "";
-    if (urunTuru) {
-        const activeTypes = window.getActiveProductTypes();
-        const typeMatch = activeTypes.find(t => t.name.toLowerCase() === urunTuru.trim().toLowerCase());
-        if (typeMatch) {
-            return typeMatch.isDemirbas === true || typeMatch.isDemirbas === "true";
-        }
-    }
-    return false;
+    return window.Schema.isDemirbas(item);
 };
 
 // sekme geçişi
