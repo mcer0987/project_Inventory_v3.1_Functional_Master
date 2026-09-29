@@ -244,7 +244,12 @@ export const toggleWatch = async function (depo, id) {
         _alert('Takip durumu kaydedilemedi.', 'error');
         return;
     }
+    // [WHY]: Kayıt yazılıyordu ama tablo görünümünde takip hiç gösterilmediği ve FAB etiketi değişmediği için "tepki yok" gibiydi.
+    // [HOW]: Bildirim gösterilir, FAB etiketi yenilenir (Takip ⇄ Bırak), tabloda ürün adının yanında göz simgesi çizilir.
+    const nowWatched = !!_find(depo, item.id)?.isWatched;
+    _alert(nowWatched ? `"${item.ürün || item.name || 'Ürün'}" takibe alındı.` : `"${item.ürün || item.name || 'Ürün'}" takipten çıkarıldı.`, 'success');
     if (typeof window.renderTable === 'function') window.renderTable(depo);
+    if (typeof window.updateFloatingBar === 'function') window.updateFloatingBar();
     if (typeof window.renderCustomWatchDashboard === 'function') window.renderCustomWatchDashboard();
 };
 

@@ -642,6 +642,14 @@ export const UIComponents = {
             name:  el.dataset.name
         }));
         const first = items[0];
+        // INV-05 kalıntısı: tablo yeniden çizilince seçili satırlar DOM'dan gider ama _selectedRows seti kalır;
+        // FAB o durumda var olmayan bir satırı okuyup hata veriyordu. Görünür seçim yoksa seçim temizlenir.
+        if (!first) {
+            window._selectedRows.clear();
+            fab.classList.remove('fab-visible');
+            if (activeUab) activeUab.classList.remove('uab-bulk-visible');
+            return;
+        }
 
         let buttonsHtml = '';
 

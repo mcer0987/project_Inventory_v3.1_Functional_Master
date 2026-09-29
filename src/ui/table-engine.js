@@ -54,7 +54,7 @@ function _buildRowInnerHtml(depo, item, realIndex, qtyDisplay) {
             <td><input type="checkbox" class="row-select" data-index="${realIndex}" data-id="${escapeHtml(item.id ?? '')}"></td>
             <td>${item.sütun || '-'}</td>
             <td>${item.raf || '-'}</td>
-            <td>${item.ürün || '-'}</td>
+            <td>${item.ürün || '-'}${item.isWatched ? ' <i class="fas fa-eye" title="Takipte" style="color:var(--color-info);margin-left:4px;"></i>' : ''}</td>
             <td>${item.marka || '-'}</td>
             <td class="js-qty-cell">${qtyDisplay}</td>
             <td class="js-status-cell">${item.durumu || '-'}</td>
