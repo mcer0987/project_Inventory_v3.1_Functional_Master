@@ -583,6 +583,18 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
         }
         const deletes = [...mirrorById.keys()].filter(k => !keep.has(k));
 
+        // Faz 3.5 · b3 muhafızı: yeni b3 dokümanı tam sözleşmeden geçer; var olan (eski biçimli olabilir) dokümanda yalnız
+        // yeni eklenen alan adları denetlenir (değişikliğe eski alan adı giremez). İhlalde hiçbir koleksiyon yazılmaz.
+        if (colName === 'b3') {
+            const guard = _b3GuardError(writes.map(w => {
+                const prev = mirrorById.get(w.key);
+                if (!prev) return { op: 'set', col: 'b3', id: w.key, data: w.data };
+                const added = Object.fromEntries(Object.entries(w.data).filter(([k]) => !(k in prev)));
+                return { op: 'update', col: 'b3', id: w.key, data: added };
+            }), opts);
+            if (guard) return fail(guard.code, guard.message, guard.details);
+        }
+
         const bulk = deletes.length > 1 && (deletes.length > BULK_DELETE_MAX || deletes.length > mirror.length * BULK_DELETE_RATIO);
         if (bulk && opts.allowBulkDelete !== true) {
             if (typeof window.showAppAlert === 'function') {
@@ -650,6 +662,37 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
 const _stripRenderFields = item => Object.fromEntries(Object.entries(item).filter(([k]) => !k.startsWith('__')));
 const _sameId = id => x => x && String(x.id) === String(id);
 
+// ─── Faz 3.5 · B3 çalışma zamanı muhafızı (denetim bulgusu) ──────────────────────────────────────
+// [WHY]: Kanonik b3 şeması (3.6) yalnız çağıranların Schema.buildB3Entry kullanmasına ve sözleşme testine dayanıyordu;
+//        kurucuyu atlayan bir kod (ya da ajan) eski/eksik biçimde b3 yazabilirdi ve bu ancak ekranda fark edilirdi.
+// [HOW]: b3'e giden her yazma Firestore'a gitmeden burada denetlenir — applyItemOps, runStockOps (çıkış, sepet, onay, zimmet
+//        bu yoldan yazar) ve saveData. 'set' → Schema.validateB3 (tam sözleşme); 'update' → yalnız kanonik alan adları.
+//        İhlalde hiçbir şey yazılmaz: SaveDataError('schema-violation'). Eski kayıtların göçü (VIP Şema Göçü) açık bir
+//        bayrakla ({ b3Legacy: true }) yalnız eski kayıtlara tanınan gevşekliği (deposu bilinmeyen kayıt, kimliksiz eski
+//        demirbaş) kullanır; eksik alan / eski alan adı yine reddedilir.
+function _b3Violation(p, opts = {}) {
+    if (p.col !== 'b3' || p.op === 'delete') return null;
+    const S = window.Schema;
+    if (!S || typeof S.validateB3 !== 'function') return ['şema modülü (schema.js) yüklenmemiş'];
+    if (p.op === 'set') {
+        const errors = S.validateB3(p.data, { legacy: opts.b3Legacy === true });
+        return errors.length ? errors : null;
+    }
+    const bad = Object.keys(p.data || {}).filter(k => !S.B3_KEYS.includes(k));
+    return bad.length ? bad.map(k => (S.B3_LEGACY_KEYS.includes(k) ? `eski alan: ${k}` : `bilinmeyen alan: ${k}`)) : null;
+}
+function _b3GuardError(prepared, opts) {
+    for (const p of prepared) {
+        const errors = _b3Violation(p, opts);
+        if (errors) {
+            return new SaveDataError('schema-violation',
+                `b3 kaydı şema sözleşmesine uymuyor (${p.op} ${p.id}): ${errors.slice(0, 3).join('; ')}${errors.length > 3 ? ` (+${errors.length - 3})` : ''}`,
+                { collection: 'b3', id: p.id, op: p.op, errors });
+        }
+    }
+    return null;
+}
+
 function _applyLocal(colName, op) {
     for (const store of [window.data, window._dbMirror]) {
         const list = Array.isArray(store[colName]) ? store[colName] : (store[colName] = []);
@@ -698,6 +741,8 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
         }
     }
     if (prepared.length > 490) return fail('invalid-argument', `Tek atomik işlemde en fazla 490 doküman yazılabilir (${prepared.length}).`);
+    const guard = _b3GuardError(prepared, opts);   // Faz 3.5: b3 sözleşmesi — ihlalde batch'in hiçbir parçası yazılmaz
+    if (guard) return fail(guard.code, guard.message, guard.details);
 
     try {
         const batch = writeBatch(fireDb);
@@ -958,6 +1003,8 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
         } else return fail('invalid-argument', `Bilinmeyen işlem: "${o.op}"`);
     }
     if (stockByKey.size + prepared.length === 0) return fail('invalid-argument', 'En az bir işlem gerekli.');
+    const guard = _b3GuardError(prepared, opts);   // Faz 3.5: b3 sözleşmesi — ihlalde transaction hiç başlamaz (stok da değişmez)
+    if (guard) return fail(guard.code, guard.message, guard.details);
 
     let stockResults;
     try {

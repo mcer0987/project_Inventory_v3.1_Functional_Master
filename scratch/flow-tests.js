@@ -2035,6 +2035,63 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 3.5 · B3 çalışma zamanı muhafızı: b3'e giden her yazma (applyItemOps, runStockOps, saveData, upsert/append) Firestore'a
+    // gitmeden denetlenir. Test oturumu anonimdir: kurallar b3'e anonim yazmayı reddeder, bu yüzden muhafızdan GEÇEN geçerli bir
+    // kayıt "write-failed/forbidden" ile döner (Firestore'a ulaştı), GEÇEMEYEN "schema-violation" ile döner (hiç gönderilmedi).
+    // Hiçbir veri yazılmaz.
+    async hotfixB3Guard(page) {
+        return page.evaluate(async () => {
+            const S = window.Schema, o = {};
+            const code = async p => { try { await p; return 'ok'; } catch (e) { return e.code || e.message; } };
+            const valid = S.buildB3Entry({ tip: 'cikis', adet: 1, urunAciklama: 'Muhafız testi', alanKisi: 'Test', sn: 'G-1' });
+            const legacy = { id: window.makeId(), shelfNo: 'R-1', productType: 'Eski', sarfAdet: 1, note: '-', alanKisi: 'X', date: '01.01.2026' };
+            const demirbasNoId = S.buildB3Entry({ tip: 'cikis', adet: 2, urunAciklama: 'Laptop', alanKisi: 'Test', isDemirbas: true });
+            const existing = (window.data.b3 || [])[0];
+            const origB3 = window.data.b3, origAdm = window.isDbAdmin;
+            try {
+                o.applyItemOps = {
+                    legacyRejected: await code(window.applyItemOps([{ op: 'set', col: 'b3', item: legacy }])),
+                    missingField: await code(window.applyItemOps([{ op: 'set', col: 'b3', item: (({ urunTuru, ...r }) => r)(valid) }])),
+                    fixedAssetWithoutId: await code(window.appendItem('b3', demirbasNoId)),
+                    viaUpsert: await code(window.upsertItem('b3', legacy)),
+                    validReachesFirestore: await code(window.applyItemOps([{ op: 'set', col: 'b3', item: valid }])),
+                    mixedBatchRejectedWhole: await code(window.applyItemOps([{ op: 'set', col: 'requests', item: { id: window.makeId(), ürün: 'x' } }, { op: 'set', col: 'b3', item: legacy }])),
+                    updateLegacyKey: existing ? await code(window.updateItem('b3', existing.id, { shelfNo: 'Z' })) : 'no demo b3',
+                    updateUnknownKey: existing ? await code(window.updateItem('b3', existing.id, { foo: 1 })) : 'no demo b3',
+                    updateCanonicalReachesFirestore: existing ? await code(window.updateItem('b3', existing.id, { not: 'muhafız' })) : 'no demo b3',
+                    deleteNotGuarded: existing ? await code(window.removeItem('b3', '__yok__' + window.makeId())) : 'no demo b3',
+                };
+                const legacyCanonical = { ...S.toCanonicalB3({ id: window.makeId(), rafNo: 'R', urunTuru: 'T', urunAciklama: 'U', sn: 'S', adet: 1, not: '-', alanKisi: 'A', tarih: 't' }) };
+                o.migrationFlag = {
+                    unknownDepotWithoutFlag: await code(window.applyItemOps([{ op: 'set', col: 'b3', item: legacyCanonical }])),
+                    unknownDepotWithFlag: await code(window.applyItemOps([{ op: 'set', col: 'b3', item: legacyCanonical }], { b3Legacy: true })),
+                    flagStillRejectsOldKeys: await code(window.applyItemOps([{ op: 'set', col: 'b3', item: legacy }], { b3Legacy: true })),
+                };
+                window.isDbAdmin = () => true;   // runStockOps yönetici ister; anonim oturumda transaction kurallarca reddedilir
+                o.runStockOps = {
+                    legacyRejectedBeforeTransaction: await code(window.runStockOps({ writes: [{ op: 'set', col: 'b3', item: legacy }] })),
+                    exitWithBadEntry: await code(window.runExitTransaction({ repo: 'b1', productId: 'yok', qty: 1, b3Entry: legacy })),
+                    validReachesFirestore: await code(window.runStockOps({ writes: [{ op: 'set', col: 'b3', item: valid }] })),
+                };
+                window.isDbAdmin = origAdm;
+                o.saveData = {
+                    newLegacyDoc: await code(window.saveData('b3', [...origB3, legacy])),
+                };
+                window.data.b3 = origB3;
+                o.saveData.newValidDocReachesFirestore = await code(window.saveData('b3', [...origB3, valid]));
+                window.data.b3 = origB3;
+                if (existing) {
+                    o.saveData.existingDocUnknownKey = await code(window.saveData('b3', origB3.map(b => b === existing ? { ...b, foo: 1 } : b)));
+                    window.data.b3 = origB3;
+                }
+                o.b3Unchanged = window.data.b3 === origB3 && !window.data.b3.some(b => b.urunAciklama === 'Muhafız testi' || b.foo === 1);
+            } finally {
+                window.data.b3 = origB3; window.isDbAdmin = origAdm;
+            }
+            return o;
+        });
+    },
+
 };
 
 (async () => {

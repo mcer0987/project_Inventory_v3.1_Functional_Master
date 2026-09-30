@@ -851,7 +851,7 @@
             let written = 0;
             for (let i = 0; i < toWrite.length; i += _MIGRATION_CHUNK) {
                 const chunk = toWrite.slice(i, i + _MIGRATION_CHUNK);
-                await window.applyItemOps(chunk.map(item => ({ op: 'set', col: 'b3', item })));
+                await window.applyItemOps(chunk.map(item => ({ op: 'set', col: 'b3', item })), { b3Legacy: true });   // yalnız göç: eski kayıt gevşekliği (Faz 3.5 muhafızı)
                 written += chunk.length;
             }
             const skipped = plan.convert.length - toWrite.length;
