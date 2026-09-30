@@ -2196,6 +2196,49 @@ const SCENARIOS = {
         });
     },
 
+    // Faz 3.5 · giriş kodu otomatik odağı: etkileşim yoksa odaklanır; veri gelmeden önce kullanıcı sayfayla etkileştiyse
+    // (tuş/tıklama) odak çalınmaz; senkron yeniden başlayınca (personel snapshot'ı tekrar gelir) odak ikinci kez çekilmez.
+    async hotfixLoginFocus(page, browser) {
+        const url = page.url();
+        const probe = async (beforeEnable) => {
+            const p = await (await browser.createBrowserContext()).newPage();
+            await p.goto(url, { waitUntil: 'domcontentloaded' });
+            let early = null;
+            if (beforeEnable) {
+                early = await p.evaluate(() => ({ dataLoaded: window.isFirebaseLoaded === true }));
+                await beforeEnable(p);
+            }
+            // personel snapshot'ı geldi (odak kararı bu anda verilir) ve kutu etkin
+            await p.waitForFunction(() => { const i = document.getElementById('access-val-node'); return window.isFirebaseLoaded === true && i && !i.disabled; }, { timeout: 20000 });
+            await new Promise(r => setTimeout(r, 300));
+            const r = await p.evaluate(() => ({ active: document.activeElement?.id || document.activeElement?.tagName }));
+            return { p, early, ...r };
+        };
+        const out = {};
+        const a = await probe(null);
+        out.noInteraction = a.active;
+        // senkron yeniden başlar → personel snapshot'ı yine gelir → odak tekrar çekilmemeli
+        out.afterResync = await a.p.evaluate(async () => {
+            document.getElementById('access-val-node').blur();
+            window.isFirebaseLoaded = false;   // yeniden senkron: personel snapshot'ı bayrağı tekrar true yapar
+            window.startRealtimeSync();
+            const t = Date.now();
+            while (Date.now() - t < 10000) { await new Promise(r => setTimeout(r, 250)); const i = document.getElementById('access-val-node'); if (window.isFirebaseLoaded === true && i && !i.disabled) break; }
+            await new Promise(r => setTimeout(r, 300));
+            return document.activeElement?.id || document.activeElement?.tagName;
+        });
+        await a.p.browserContext().close();
+
+        const b = await probe(async p => { await p.keyboard.press('Shift'); });
+        out.keyBeforeData = { dataWasLoaded: b.early.dataLoaded, active: b.active };
+        await b.p.browserContext().close();
+
+        const c = await probe(async p => { await p.mouse.click(5, 5); });
+        out.clickBeforeData = { dataWasLoaded: c.early.dataLoaded, active: c.active };
+        await c.p.browserContext().close();
+        return out;
+    },
+
 };
 
 (async () => {

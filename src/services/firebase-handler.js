@@ -277,6 +277,20 @@ export const stopRealtimeSync = window.stopRealtimeSync = function () {
     _syncStopping = false;
 };
 
+// Faz 3.5 · giriş kodu otomatik odağının izolasyonu (denetim bulgusu): odak yalnız kullanıcı sayfayla henüz etkileşmediyse
+// verilir. Etkileşim = giriş kutusu dışında bir yere tıklama/dokunma ya da tuş (kutu disabled iken odak alamadığı için ona
+// tıklamak sayılmaz). Kutuya sayfa başına en fazla bir kez odaklanılır; personel listesinin sonraki her snapshot'ı odağı
+// tekrar çalmaz.
+let _userInteracted = false;
+let _loginAutoFocused = false;
+const _loginFieldIds = ['loginCode', 'access-val-node'];
+function _markUserInteraction(e) {
+    if (e && e.target && _loginFieldIds.includes(e.target.id)) return;
+    _userInteracted = true;
+    ['pointerdown', 'keydown'].forEach(t => document.removeEventListener(t, _markUserInteraction, true));
+}
+['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, _markUserInteraction, true));
+
 window.startRealtimeSync = function () {
     stopRealtimeSync();
     _syncRunning = true;
@@ -365,9 +379,11 @@ window.startRealtimeSync = function () {
                     loginInput.disabled = false;
                     loginInput.placeholder = "Erişim Kodu Giriniz";
                     // Giriş modalı görünürken koda otomatik odaklan (input senkron bitene kadar disabled olduğu için odak ancak
-                    // burada verilebilir). Kullanıcı başka bir alana odaklandıysa odak çalınmaz.
+                    // burada verilebilir). Kullanıcı başka bir alana odaklandıysa ya da sayfayla etkileştiyse odak çalınmaz;
+                    // sayfa başına bir kez (Faz 3.5).
                     const active = document.activeElement;
-                    if (loginInput.offsetParent !== null && (!active || active === document.body)) {
+                    if (!_loginAutoFocused && !_userInteracted && loginInput.offsetParent !== null && (!active || active === document.body)) {
+                        _loginAutoFocused = true;
                         try { loginInput.focus({ preventScroll: true }); } catch (e) { loginInput.focus(); }
                     }
                 }
