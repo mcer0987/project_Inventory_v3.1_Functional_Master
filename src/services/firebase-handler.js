@@ -482,10 +482,15 @@ window.startRealtimeSync = function () {
 //        gönderen çağıran geri kalan her şeyi siler. Bu yüzden TOPLU SİLME KİLİDİ: bir çağrıda bir koleksiyondan 1'den
 //        fazla VE (5'ten fazla VEYA koleksiyonun %20'sinden fazla) kayıt silinecekse, allowBulkDelete verilmedikçe
 //        HİÇBİR yazma yapılmaz. Tek kayıt silme her zaman serbest.
+//        Faz 3.5 (denetim): oran kuralı yalnız 10'dan fazla kayıtlı koleksiyonda uygulanır. 2-4 kayıtlı küçük koleksiyonlarda
+//        (units, productTypes) meşru 2 silme %20'yi aştığı için kilitleniyordu; ≤10 kayıtta yalnız mutlak sınır (5) geçerli.
 //        Başarılı yazmadan sonra mirror güncellenir: snapshot gelene kadar yapılan ikinci kayıt aynı dokümanları
 //        tekrar yazmaz ve silme hesabı yeni eklenenleri "silinmiş" saymaz.
 const BULK_DELETE_MAX = 5;
 const BULK_DELETE_RATIO = 0.2;
+const BULK_DELETE_RATIO_MIN_TOTAL = 10;   // oran kuralı yalnız bundan büyük koleksiyonlarda
+export const isBulkDeleteBlocked = window.isBulkDeleteBlocked = (deletes, total) =>
+    deletes > 1 && (deletes > BULK_DELETE_MAX || (total > BULK_DELETE_RATIO_MIN_TOTAL && deletes > total * BULK_DELETE_RATIO));
 
 export class SaveDataError extends Error {
     constructor(code, message, details) {
@@ -595,13 +600,13 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
             if (guard) return fail(guard.code, guard.message, guard.details);
         }
 
-        const bulk = deletes.length > 1 && (deletes.length > BULK_DELETE_MAX || deletes.length > mirror.length * BULK_DELETE_RATIO);
+        const bulk = isBulkDeleteBlocked(deletes.length, mirror.length);
         if (bulk && opts.allowBulkDelete !== true) {
             if (typeof window.showAppAlert === 'function') {
                 window.showAppAlert(`Güvenlik kilidi: tek işlemde "${colName}" koleksiyonundan ${deletes.length} kayıt silinmek istendi. İşlem durduruldu, hiçbir şey yazılmadı.`, 'error');
             }
             return fail('bulk-delete-blocked',
-                `"${colName}": tek çağrıda ${deletes.length}/${mirror.length} kayıt silinecekti (sınır: ${BULK_DELETE_MAX} kayıt veya %${BULK_DELETE_RATIO * 100}).`,
+                `"${colName}": tek çağrıda ${deletes.length}/${mirror.length} kayıt silinecekti (sınır: ${BULK_DELETE_MAX} kayıt; ${BULK_DELETE_RATIO_MIN_TOTAL} kayıttan büyük koleksiyonda ayrıca %${BULK_DELETE_RATIO * 100}).`,
                 { collection: colName, deletes: deletes.length, total: mirror.length, ids: deletes.slice(0, 20) });
         }
         plans.push({ colName, writes, deletes, unchanged });

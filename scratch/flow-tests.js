@@ -783,8 +783,15 @@ const SCENARIOS = {
             out.singleDelete = { deleted: col(r4)?.deleted };
             await ft.waitFor(async () => (await marked()) === 4 && !window.data.requests.some(r => r.id === base + 5));
 
-            // 5) bulk delete (3 of the collection) is blocked without the flag; nothing is written
-            const toDrop = new Set([base + 1, base + 2, base + 4]);
+            // 5) bulk delete (3 of a collection with more than 10 records = over 20%) is blocked without the flag; nothing is written.
+            //    Faz 3.5: the ratio rule applies only above 10 records, so 8 more marked docs are added first.
+            await window.saveData('requests', [...window.data.requests, ...[11, 12, 13, 14, 15, 16, 17, 18].map(mk)]);
+            await ft.waitFor(async () => (await marked()) === 12 && window.data.requests.filter(r => String(r.ürün).includes(ft.MARKER)).length === 12);
+            out.bulkCollectionSize = window._dbMirror.requests.length;
+            // silinecek adet: koleksiyonun %20'sini aşan en küçük sayı (≤5, yani yalnız oran kuralı kilitler)
+            const dropCount = Math.floor(out.bulkCollectionSize * 0.2) + 1;
+            const toDrop = new Set([base + 1, base + 2, base + 4, base + 11, base + 12].slice(0, dropCount));
+            out.bulkDropCount = dropCount;
             const before = await marked();
             const r5 = await window.saveData('requests', window.data.requests.filter(r => !toDrop.has(r.id)), { strict: false });
             await ft.sleep(1200);
@@ -797,7 +804,7 @@ const SCENARIOS = {
             // 6) the same bulk delete with the explicit flag goes through
             const r6 = await window.saveData('requests', window.data.requests.filter(r => !toDrop.has(r.id)), { allowBulkDelete: true });
             out.bulkAllowed = { deleted: col(r6)?.deleted };
-            await ft.waitFor(async () => (await marked()) === 1);
+            await ft.waitFor(async () => (await marked()) === 12 - dropCount);
             out.markedLeft = await marked();
 
             // 7) unknown collection / no session: false by default, SaveDataError in strict mode
@@ -2088,6 +2095,38 @@ const SCENARIOS = {
             } finally {
                 window.data.b3 = origB3; window.isDbAdmin = origAdm;
             }
+            return o;
+        });
+    },
+
+    // Faz 3.5 · toplu silme kilidi eşiği: ≤10 kayıtlı koleksiyonda yalnız mutlak sınır (5), >10'da ayrıca %20.
+    // Tablo saf fonksiyonla; küçük koleksiyon davranışı 'requests' üzerinde işaretli kayıtlarla gerçek yazmayla.
+    async hotfixBulkLock(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, o = {};
+            const B = window.isBulkDeleteBlocked;
+            const cases = [
+                [1, 2], [2, 2], [2, 4], [4, 4], [5, 6], [5, 10], [6, 8], [6, 10],   // ≤10: yalnız >5 kilitlenir
+                [2, 11], [3, 11], [2, 14], [3, 14], [5, 30], [6, 30], [6, 100], [1, 100],
+            ];
+            o.table = cases.map(([d, t]) => `${d}/${t}:${B(d, t) ? 'KİLİT' : 'serbest'}`);
+            o.expected = ['1/2:serbest', '2/2:serbest', '2/4:serbest', '4/4:serbest', '5/6:serbest', '5/10:serbest', '6/8:KİLİT', '6/10:KİLİT',
+                          '2/11:serbest', '3/11:KİLİT', '2/14:serbest', '3/14:KİLİT', '5/30:serbest', '6/30:KİLİT', '6/100:KİLİT', '1/100:serbest'];
+            o.tableOk = JSON.stringify(o.table) === JSON.stringify(o.expected);
+
+            // gerçek: requests küçükken (≤10) 2 kaydı birden silmek artık serbest (eski kural %50 diye kilitliyordu)
+            const base = window.makeId();
+            const mk = n => ({ id: base + n, ürün: 'Kilit ' + n + ' ' + ft.MARKER, personel: 'Kilit ' + ft.MARKER, durum: 'Beklemede', adet: 1 });
+            await window.saveData('requests', [...window.data.requests, mk(1), mk(2)]);
+            await ft.waitFor(async () => (await ft.readMarked('requests')).length === 2 && window.data.requests.filter(r => String(r.ürün).includes(ft.MARKER)).length === 2);
+            const total = window._dbMirror.requests.length;
+            o.small = { total, oldRuleWouldBlock: 2 > total * 0.2 };
+            let res;
+            try { res = await window.saveData('requests', window.data.requests.filter(r => r.id !== base + 1 && r.id !== base + 2)); }
+            catch (e) { res = e.code; }
+            o.small.result = typeof res === 'object' ? { deleted: res.collections?.requests?.deleted } : res;
+            await ft.waitFor(async () => (await ft.readMarked('requests')).length === 0);
+            o.small.leftOnServer = (await ft.readMarked('requests')).length;
             return o;
         });
     },
