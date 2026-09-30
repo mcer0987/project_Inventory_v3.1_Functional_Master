@@ -12,8 +12,8 @@ const sitemapData = [
         functions: [
             { name: "handleLogin()", desc: "Kullanıcı veya adminin şifre kontrolünü yapıp sisteme sokar." },
             { name: "setupUI() / updateNavbarUI()", desc: "Yetkiye göre butonları gizler veya gösterir." },
-            { name: "addRequest()", desc: "Personelin ürün talep formunu Firebase'e 'Beklemede' olarak yazar." },
-            { name: "updateRequestStatus()", desc: "Adminin talebi 'Teslim Edildi' yapmasını, personelin 'Onaylamasını' sağlar." },
+            { name: "saveRequest()", desc: "Personelin ürün talep formunu Firebase'e 'Beklemede' olarak yazar (tek doküman)." },
+            { name: "confirmRequest() / receiveProduct()", desc: "Admin talebi onaylar (stok kalemi seçilir); personel 'Teslim Aldım' ile kapatır." },
             { name: "renderTable()", desc: "Gelen verileri (B1, B2 vb.) HTML tablolarına basar." }
         ]
     },

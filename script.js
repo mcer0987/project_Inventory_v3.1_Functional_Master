@@ -255,8 +255,8 @@ window.closeRequestModal = window.closeRequestModal || function () {
 window.handleTypeChange = window.handleTypeChange || function (selectElement) {
     if (window.AppModules?.UI?.handleTypeChange) window.AppModules.UI.handleTypeChange(selectElement);
 };
-window.selectProduct = window.selectProduct || function (name, type, shelf, qty, repo, index) {
-    if (window.AppModules?.UI?.selectProduct) window.AppModules.UI.selectProduct(name, type, shelf, qty, repo, index);
+window.selectProduct = window.selectProduct || function (name, type, shelf, qty, repo, index, id) {
+    if (window.AppModules?.UI?.selectProduct) window.AppModules.UI.selectProduct(name, type, shelf, qty, repo, index, id);
 };
 window.openModal = window.openModal || function (modalId) {
     if (window.AppModules?.UI?.openModal) window.AppModules.UI.openModal(modalId);
@@ -325,28 +325,9 @@ window.getActiveProductTypes = function () {
     return (typeof INV_CONFIG !== 'undefined' && INV_CONFIG.defaultTypes) ? INV_CONFIG.defaultTypes : [];
 };
 
+// Tek demirbaş kuralı schema.js'te (3.6): ürün türü tanımı → kayıttaki bayrak → adı bir tür adı mı.
 window.checkIsDemirbas = function (item) {
-    if (!item) return false;
-    const typeName = (item.tür || item.urunTuru || item.productType || "").trim();
-    if (typeName) {
-        const activeTypes = window.getActiveProductTypes();
-        const typeMatch = activeTypes.find(t => t.name.toLowerCase() === typeName.toLowerCase());
-        if (typeMatch) {
-            return typeMatch.isDemirbas === true || typeMatch.isDemirbas === "true";
-        }
-    }
-    if (item.hasOwnProperty('isDemirbas') && item.isDemirbas !== undefined && item.isDemirbas !== null) {
-        return item.isDemirbas === true || item.isDemirbas === "true";
-    }
-    const urunTuru = item.ürün || item.urunAciklama || "";
-    if (urunTuru) {
-        const activeTypes = window.getActiveProductTypes();
-        const typeMatch = activeTypes.find(t => t.name.toLowerCase() === urunTuru.trim().toLowerCase());
-        if (typeMatch) {
-            return typeMatch.isDemirbas === true || typeMatch.isDemirbas === "true";
-        }
-    }
-    return false;
+    return window.Schema.isDemirbas(item);
 };
 
 // sekme geçişi
@@ -423,7 +404,10 @@ window.switchTab = function (tabName) {
 };
 
 // Personel işlemleri (monolith'te bırakıldı)
-window.openPersonelModal = function (mode, index = null) {
+// [WHY]: Düzenleme dizi indeksiyle yapılıyor ve kaydı {name, code} ile değiştiriyordu (id ve diğer alanlar kayboluyordu,
+//        doküman silinip yeniden oluşuyordu); ekleme/düzenleme tüm veritabanını yazıyordu (ITSM-07, DATA-04, DATA-06).
+// [HOW]: Kişi id ile bulunur; düzenleme yalnız adı günceller (updateItem), ekleme tek doküman (appendItem, makeId).
+window.openPersonelModal = function (mode, id = null) {
     const modal = document.getElementById('personelModal');
     const title = document.getElementById('personelModalTitle');
     const nameInput = document.getElementById('personelName');
@@ -432,14 +416,15 @@ window.openPersonelModal = function (mode, index = null) {
     if (!modal) return;
     title.innerText = mode === 'add' ? 'Yeni Personel Ekle' : 'Personel Düzenle';
 
-    if (mode === 'edit' && index !== null) {
-        const p = window.data.personel[index];
+    if (mode === 'edit' && id !== null) {
+        const p = (window.data.personel || []).find(x => String(x.id) === String(id));
+        if (!p) { showAppAlert('Personel bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
         nameInput.value = p.name;
         codeInput.value = p.code;
         codeInput.readOnly = true;
         form.onsubmit = function (e) {
             e.preventDefault();
-            editPersonel(index);
+            editPersonel(p.id);
         };
     } else {
         form.reset();
@@ -453,28 +438,27 @@ window.openPersonelModal = function (mode, index = null) {
     modal.style.display = 'block';
 };
 
-function addPersonel() {
-    const nameInput = document.getElementById('personelName');
-    const codeInput = document.getElementById('personelCode');
-    const personData = { name: nameInput.value, code: codeInput.value };
-    if (window.data.personel.some(p => p.code === personData.code)) {
+async function addPersonel() {
+    const name = document.getElementById('personelName').value.trim();
+    const code = document.getElementById('personelCode').value.trim();
+    if (!name) { showAppAlert('Ad Soyad boş olamaz.', 'warning'); return; }
+    if ((window.data.personel || []).some(p => String(p.code) === code)) {
         showAppAlert("Bu oturum kodu zaten kullanımda!", "warning");
         return;
     }
-    window.data.personel.push(personData);
-    window.saveData(data);
+    if (!(await window.writeOk(window.appendItem('personel', { name, code })))) { showAppAlert('Personel eklenemedi.', 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
+    showAppAlert('Personel eklendi.', 'success');
 }
 
-function editPersonel(index) {
-    const nameInput = document.getElementById('personelName');
-    const codeInput = document.getElementById('personelCode');
-    const personData = { name: nameInput.value, code: codeInput.value };
-    window.data.personel[index] = personData;
-    window.saveData(data);
+async function editPersonel(id) {
+    const name = document.getElementById('personelName').value.trim();
+    if (!name) { showAppAlert('Ad Soyad boş olamaz.', 'warning'); return; }
+    if (!(await window.writeOk(window.updateItem('personel', id, { name })))) { showAppAlert('Personel güncellenemedi.', 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
+    showAppAlert('Personel güncellendi.', 'success');
 }
 
 function closePersonelModal() {
@@ -538,8 +522,9 @@ function renderMyRequestsTable() {
     const currentUser = window.getActiveUser();
     if (!currentUser) return;
 
+    // Sahiplik zimmet servisinden (3.7): personelId → eski talepte kod → Türkçe güvenli ad.
     const myReqs = window.data.requests.filter(r =>
-        (r.personel || "").trim().toLowerCase() === (currentUser.name || "").trim().toLowerCase()
+        window.AssignmentService.isMyRequest(r, currentUser)
     );
 
     if (myReqs.length === 0) {
@@ -548,7 +533,7 @@ function renderMyRequestsTable() {
     }
 
     myReqs.forEach((req) => {
-        const realIndex = window.data.requests.findIndex(r => r === req);
+        const rid = jsArg(req.id); // DATA-06: işlemler talep id'siyle
         const row = tbody.insertRow();
         const rawDurum = (req.durum || '').trim().toUpperCase();
         const isApproved = rawDurum === 'APPROVED' || rawDurum === 'ONAYLANDI';
@@ -577,15 +562,15 @@ function renderMyRequestsTable() {
                 ${isCompleted ?
                 `<div class="status-badge-pill status-completed-pill" style="min-width: 120px; justify-content: center; margin: 0 auto;">Teslim Alındı</div>` :
                 isApproved ?
-                    `<button class="save-btn" onclick="receiveProduct(${realIndex})" style="background-color: var(--color-primary); cursor: pointer; min-width: 120px;">Teslim Aldım</button>` :
+                    `<button class="save-btn" onclick="receiveProduct(${rid})" style="background-color: var(--color-primary); cursor: pointer; min-width: 120px;">Teslim Aldım</button>` :
                     isDraft ?
                         `<div class="d-flex gap-1" style="justify-content: center;">
-                        <button class="edit-btn" onclick="window.editPersonnelInventoryRequest(${realIndex})" style="padding: 5px 10px; font-size: 11px;">Düzenle</button>
-                        <button class="save-btn" onclick="window.sendDraftInventoryRequest(${realIndex})" style="padding: 5px 10px; font-size: 11px; background: #10b981;">Gönder</button>
+                        <button class="edit-btn" onclick="window.editPersonnelInventoryRequest(${rid})" style="padding: 5px 10px; font-size: 11px;">Düzenle</button>
+                        <button class="save-btn" onclick="window.sendDraftInventoryRequest(${rid})" style="padding: 5px 10px; font-size: 11px; background: #10b981;">Gönder</button>
                      </div>` :
                         isRejected ?
                             `<div class="status-badge-pill status-rejected-pill" style="min-width: 120px; justify-content: center; margin: 0 auto;">Talep Reddedildi</div>` :
-                            `<button class="delete-btn" onclick="window.withdrawInventoryRequest(${realIndex})" style="background-color: #fca5a5; color: #7f1d1d; min-width: 120px; font-size: 11px;">Talebi Geri Çek</button>`
+                            `<button class="delete-btn" onclick="window.withdrawInventoryRequest(${rid})" style="background-color: #fca5a5; color: #7f1d1d; min-width: 120px; font-size: 11px;">Talebi Geri Çek</button>`
             }
             </td>
         `;
@@ -599,23 +584,18 @@ window.renderPersonnelInventoryTable = function () {
     const currentUser = window.getActiveUser();
     if (!currentUser) return;
 
-    const completedRequests = (window.data.requests || [])
-        .filter(r => {
-            const rawDurum = (r.durum || '').trim().toUpperCase();
-            const isCompleted = rawDurum === 'COMPLETED' || rawDurum === 'TESLIM ALINDI' || rawDurum === 'TESLİM ALINDI';
-            return (r.personel || "").trim().toLowerCase() === (currentUser.name || "").trim().toLowerCase() && isCompleted;
-        })
-        .map(r => ({
-            tarih: r.tarih || "-",
-            ürün: r.ürün || "-",
-            sn: r.sn || "-",
-            adet: r.adet || 1,
-            isDemirbas: r.isDemirbas,
-            not: r.not || "-",
-            id: r.id || Date.now()
-        }));
-
-    const myInventory = [...completedRequests].sort((a, b) => (b.id || 0) - (a.id || 0));
+    // [WHY]: Yalnız teslim alınmış talepler taranıyordu; admin'in "Zimmet Yap" ile verdiği zimmetler hiç görünmüyor, iade
+    //        edilenler listede kalıyordu (ITSM-04, saha notu 29.09 #1).
+    // [HOW] (3.7): Zimmet servisi — admin Zimmet ekranıyla aynı liste; kullanıcının aktif ve teslim alınmış zimmetleri.
+    const myInventory = window.AssignmentService.getPersonInventory(currentUser).map(a => ({
+        tarih: a.teslimTarihi || a.tarih,
+        ürün: a.urun,
+        sn: a.sn,
+        envanterNo: a.envanterNo,
+        adet: a.adet,
+        isDemirbas: a.isDemirbas,
+        not: a.not,
+    }));
     if (myInventory.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 24px; color: var(--color-text-muted);">Üzerinize kayıtlı envanter bulunmamaktadır.</td></tr>';
         return;
@@ -632,7 +612,7 @@ window.renderPersonnelInventoryTable = function () {
         row.innerHTML = `
             <td>${escapeHtml(req.tarih || "-")}</td>
             <td><strong>${escapeHtml(req.ürün || "-")}</strong></td>
-            <td style="font-weight:bold; color: var(--color-text);">${escapeHtml(req.sn || "-")}</td>
+            <td style="font-weight:bold; color: var(--color-text);">${escapeHtml(req.sn || "-")}${req.envanterNo && req.envanterNo !== '-' ? `<div style="font-weight:normal; font-size:11px; color:var(--color-text-muted);">Env. No: ${escapeHtml(req.envanterNo)}</div>` : ''}</td>
             <td>${escapeHtml(req.adet || 1)} Adet</td>
             <td><span class="status-badge-pill" style="min-width: 100px; padding: 6px 12px; font-size: 11px; ${typeBadgeStyle}">${typeText}</span></td>
             <td style="color: var(--color-text-muted);">${escapeHtml(req.not || "-")}</td>
@@ -696,8 +676,9 @@ window.showRequestApprovalModal = function (request) {
             <label style="font-weight:600; font-size:13px;">Stoktan düşülecek kalem</label>
             <input id="raFilter" type="text" placeholder="Ürün, marka veya raf ara..." autocomplete="off" style="${field} margin-bottom:6px;">
             <select id="raSource" size="6" style="${field}"></select>
-            <label style="font-weight:600; font-size:13px;">Seri numarası / zimmet bilgisi</label>
+            <label id="raSnLabel" style="font-weight:600; font-size:13px;">Seri numarası / zimmet bilgisi</label>
             <input id="raSn" type="text" placeholder="Yoksa boş bırakın" autocomplete="off" style="${field}">
+            <div id="raDevIds" hidden></div>
             <div id="raError" style="display:none; color:var(--color-danger,#e74c3c); font-size:13px; margin-bottom:10px;"></div>
             <div style="display:flex; justify-content:flex-end; gap:10px;">
               <button id="raCancel" type="button" style="padding:10px 18px; border:1px solid var(--color-border,#bdc3c7); background:transparent; color:var(--color-text,#2c3e50); border-radius:8px; cursor:pointer;">Vazgeç</button>
@@ -717,9 +698,24 @@ window.showRequestApprovalModal = function (request) {
                 }).join('');
             sel.value = selected;
         };
+        // 3.9a: seçilen kalem demirbaşsa (stok dışında: talep edilen ad bir demirbaş türüyse) talep adedi kadar cihaz kimliği
+        const devBox = overlay.querySelector('#raDevIds');
+        const isDemSelection = () => {
+            if (!selected) return false;
+            if (selected === NO_STOCK) return window.Schema.isDemirbas({ ürün: request.ürün, isDemirbas: request.isDemirbas });
+            const c = candidates.find(x => x.key === selected);
+            return !!c && window.Schema.isDemirbas(c.p);
+        };
+        const syncDev = () => {
+            const dem = isDemSelection();
+            overlay.querySelector('#raSn').style.display = dem ? 'none' : '';
+            overlay.querySelector('#raSnLabel').style.display = dem ? 'none' : '';
+            if (dem) window.DeviceIds.render(devBox, want); else window.DeviceIds.hide(devBox);
+        };
         renderOptions();
+        syncDev();
         overlay.querySelector('#raFilter').addEventListener('input', renderOptions);
-        sel.addEventListener('change', () => { selected = sel.value; });
+        sel.addEventListener('change', () => { selected = sel.value; syncDev(); });
 
         const close = val => { overlay.remove(); resolve(val); };
         overlay.querySelector('#raCancel').onclick = () => close(null);
@@ -730,10 +726,22 @@ window.showRequestApprovalModal = function (request) {
                 err.style.display = 'block';
                 return;
             }
-            const sn = overlay.querySelector('#raSn').value.trim() || '-';
-            if (selected === NO_STOCK) return close({ sn, source: null });
+            let sn = overlay.querySelector('#raSn').value.trim() || '-', ids = null;
+            const demirbas = isDemSelection();
+            if (demirbas) {
+                const chk = window.AssignmentService.checkDeviceIds({ demirbas: true, qty: want, ids: window.DeviceIds.read(devBox) });
+                if (!chk.ok) {
+                    const err = overlay.querySelector('#raError');
+                    err.textContent = chk.errors[0];
+                    err.style.display = 'block';
+                    return;
+                }
+                ids = chk.ids;
+                sn = ids.map(d => d.sn !== '-' ? d.sn : d.envanterNo).join(', ');
+            }
+            if (selected === NO_STOCK) return close({ sn, ids, demirbas, source: null });
             const [repo, ...rest] = selected.split('|');
-            close({ sn, source: { repo, productId: rest.join('|') } });
+            close({ sn, ids, demirbas, source: { repo, productId: rest.join('|') } });
         };
         setTimeout(() => overlay.querySelector(selected ? '#raSn' : '#raFilter')?.focus(), 0);
     });
@@ -756,63 +764,56 @@ window.confirmRequest = async function (requestId) {
         const live = _findRequest(requestId);
         if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
 
-        // Stok önce atomik düşülür; sonraki yazmalardan biri başarısız olursa geri eklenir.
+        // [WHY] (H3 · 3.4): Stok önce ayrı bir transaction'la düşülüyor, talep ve b3 sonra ayrı ayrı yazılıyordu; ara adımlardan
+        //        biri başarısız olunca "stok geri al + talebi geri döndür" telafileri de başarısız olabiliyordu.
+        // [HOW]: Stok düşümü + talebin onaylanması + b3 zimmet kaydı TEK transaction (runStockOps); stok kalemi seçilmediyse
+        //        talep + b3 tek atomik batch (applyItemOps). Telafi gerekmez: ya hepsi ya hiçbiri.
         const qty = Number(live.adet) || 1;
         const repo = choice.source?.repo;
         const product = repo ? (window.data[repo] || []).find(p => String(p.id) === String(choice.source.productId)) : null;
         if (repo && !product) { showAppAlert('Seçilen stok kalemi bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-        let stockChange = null;
-        if (product) {
-            try { stockChange = await window.runStockTransaction(repo, product.id, -qty); }
-            catch (e) { showAppAlert(`Stok düşülemedi: ${e.message}`, 'error'); return; }
-        }
-        const restoreStock = async () => {
-            if (!product) return;
-            try { await window.runStockTransaction(repo, product.id, qty); } catch (e) { console.error('❌ Stok geri alma hatası:', e); }
-        };
 
         const approver = window.currentUser?.name || 'Yönetici';
         const now = getTurkiyeSaati();
-        const updated = {
-            ...live, durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now,
+        const writes = [{ op: 'update', col: 'requests', id: live.id, fields: {
+            durum: 'approved', sn: snValue, approvedBy: approver, approvedAt: now,
             ...(product ? { stockRepo: repo, stockProductId: product.id } : {})
-        };
-        if (await _saveRequestItem(updated) === false) { await restoreStock(); showAppAlert('Onay kaydedilemedi; stok geri alındı.', 'error'); return; }
-
-        const exitEntry = {
-            id: Date.now(),
-            requestId: live.id,
-            shelfNo: product ? (product.raf || '-') : "TALEP",
-            productType: product ? (product.ürün || product.name || live.ürün) : live.ürün,
-            ...(product ? { productId: product.id } : {}),
-            description: "Personel Talebi Onaylandı",
-            sn: snValue,
-            sarfAdet: live.adet || 1,
-            note: `Onaylayan: ${approver}`,
-            person: live.personel,
-            alanKisi: live.personel,
-            date: getTurkiyeTarihi(),
-            tarih: getTurkiyeTarihi(),
-            isDemirbas: [product?.isDemirbas, live.isDemirbas].some(v => v === true || v === "true"),
-            talepTuru: live.talepTuru || 'Kalıcı Zimmet',
-            oncelik: live.oncelik || 'Orta',
-            ...(live.iadeTarihi ? { iadeTarihi: live.iadeTarihi } : {}),
-            iadeEdildi: false,
-            sourceRepo: product ? repo : 'TALEP',
-            approvedBy: approver
-        };
+        } }];
+        // Kanonik b3 zimmet kaydı (3.6): stok kalemi seçildiyse tür/raf/depo üründen kopyalanır; seçilmediyse kaynakDepo
+        // 'stok-disi' (tabloda Raf No "Stok dışı" — eskiden "TALEP" basılıyordu).
+        // Demirbaş (3.9a): cihaz başına bir b3 zimmet kaydı (adet 1, kendi Seri No / Envanter No'su), hepsi aynı transaction'da.
         const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
-        if (!alreadyLogged && await window.saveData('b3', [...(window.data.b3 || []), exitEntry]) === false) {
-            // Zimmet kaydı yoksa iade stoğa dönemez: onay ve stok birlikte geri alınır.
-            const reverted = await _saveRequestItem(live);
-            await restoreStock();
-            showAppAlert(reverted === false
-                ? 'Zimmet kaydı yazılamadı; stok geri alındı ancak talep "onaylandı" kaldı. Lütfen talebi kontrol edin.'
-                : 'Zimmet kaydı yazılamadı; onay ve stok geri alındı.', 'error');
-        } else {
-            const stockText = stockChange ? ` ${repo.toUpperCase()} stok: ${stockChange.before} → ${stockChange.after}.` : ' Stoktan düşülmedi.';
-            showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.${stockText}`, "success");
+        if (!alreadyLogged) {
+            const base = {
+                tip: 'zimmet', requestId: live.id,
+                ...(product ? { product, col: repo } : { urunAciklama: live.ürün, isDemirbas: choice.demirbas === true }),
+                not: [live.not, `Onaylayan: ${approver}`].filter(s => s && String(s).trim() && s !== '-').join(' · '),
+                alanKisi: live.personel,
+                personelId: live.personelId || window.AssignmentService?.resolvePersonelId(live.personel),
+                tarih: getTurkiyeTarihi(),
+                talepTuru: live.talepTuru, oncelik: live.oncelik, iadeTarihi: live.iadeTarihi,
+                onaylayan: approver,
+            };
+            const units = choice.ids ? choice.ids.map(d => ({ adet: 1, sn: d.sn, envanterNo: d.envanterNo })) : [{ adet: qty, sn: snValue }];
+            units.forEach(u => writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({ ...base, ...u }) }));
         }
+
+        let stockChange = null;
+        try {
+            if (product) {
+                const res = await window.runStockOps({ stock: [{ col: repo, id: product.id, delta: -qty }], writes },
+                    { forbiddenMessage: 'Talep onayı (stok düşümü) yalnızca sistem yöneticisi tarafından yapılabilir.' });
+                stockChange = res.stock[0];
+            } else {
+                await window.applyItemOps(writes);
+            }
+        } catch (e) {
+            showAppAlert(`Onay kaydedilemedi; hiçbir değişiklik yapılmadı. ${e.message || ''}`, 'error');
+            _refreshRequestTables();
+            return;
+        }
+        const stockText = stockChange ? ` ${repo.toUpperCase()} stok: ${stockChange.before} → ${stockChange.after}.` : ' Stoktan düşülmedi.';
+        showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.${stockText}`, "success");
         _refreshRequestTables();
     } finally {
         _requestActionsInFlight.delete(lockKey);
@@ -832,7 +833,7 @@ window.rejectRequest = async function (requestId) {
         const live = _findRequest(requestId);
         if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
         const updated = { ...live, durum: 'rejected', rejectedBy: window.currentUser?.name || 'Yönetici', rejectedAt: getTurkiyeSaati() };
-        if (await _saveRequestItem(updated) === false) { showAppAlert('Red kaydedilemedi.', 'error'); return; }
+        if (!(await window.writeOk(_saveRequestItem(updated)))) { showAppAlert('Red kaydedilemedi.', 'error'); return; }
         _refreshRequestTables();
         showAppAlert(`${live.personel} talebi reddedildi.`, "error");
     } finally {
@@ -846,28 +847,39 @@ window.deleteRequest = async function (requestId) {
     const onay = await showCustomConfirm("Kaydı Sil", "Bu talep kaydını tamamen silmek istediğinize emin misiniz? Bu işlem geri alınamaz.");
     if (onay !== true) return;
     const remaining = (window.data.requests || []).filter(r => String(r.id) !== String(requestId));
-    if (await window.saveData('requests', remaining) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.saveData('requests', remaining)))) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
     _refreshRequestTables();
     showAppAlert("Talep kaydı kalıcı olarak silindi.", "info");
 };
 
-window.withdrawInventoryRequest = async function (index) {
-    const req = window.data.requests[index];
+// [WHY]: Personelin talep işlemleri dizi indeksiyle çalışıyordu; snapshot sonrası başka bir talebi hedefleyebiliyordu (DATA-06)
+//        ve koleksiyonun tamamını yazıyordu. Durum kontrolü yoktu (onaylanmış talep "geri çekilip" taslağa dönebiliyordu).
+// [HOW]: Talep id ile bulunur; yalnız kendi talebi ve uygun durumdaysa; yalnız değişen alanlar yazılır (updateItem).
+const _myRequest = id => {
+    const req = (window.data.requests || []).find(r => String(r.id) === String(id));
+    if (!req || !window.AssignmentService.isMyRequest(req, window.getActiveUser())) {
+        showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error');
+        return null;
+    }
+    return req;
+};
+
+window.withdrawInventoryRequest = async function (id) {
+    const req = _myRequest(id);
     if (!req) return;
+    if (!_isPendingRequest(req)) { showAppAlert('Yalnız onay bekleyen bir talep geri çekilebilir.', 'warning'); renderMyRequestsTable(); return; }
     const onay = await showCustomConfirm("Talebi Geri Çek", `${req.ürün} talebinizi geri çekmek (taslağa almak) istediğinize emin misiniz?`);
     if (onay === true) {
-        req.durum = 'draft';
-        // [WHY]: Tam kayıt personel oturumunda b1'de reddedilip hiçbir şeyi kaydetmiyordu (ITSM-03, DATA-03).
-        await window.saveData('requests', window.data.requests);
+        if (!(await window.writeOk(window.updateItem('requests', req.id, { durum: 'draft' })))) { showAppAlert('Talep geri çekilemedi.', 'error'); return; }
         if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
         showAppAlert("Talebiniz geri çekildi ve TASLAK moduna alındı.", "info");
     }
 };
 
-window.editPersonnelInventoryRequest = function (index) {
-    const req = window.data.requests[index];
+window.editPersonnelInventoryRequest = function (id) {
+    const req = _myRequest(id);
     if (!req) return;
-    window.editingReqIndex = index;
+    window.editingReqIndex = null;
     window.editingReqId = req.id;
     const nameInput = document.getElementById('reqProdName');
     const qtyInput = document.getElementById('reqQty');
@@ -887,12 +899,12 @@ window.editPersonnelInventoryRequest = function (index) {
     if (typeof window.onReqTypeChange === 'function') window.onReqTypeChange();
 };
 
-window.sendDraftInventoryRequest = async function (index) {
-    const req = window.data.requests[index];
+window.sendDraftInventoryRequest = async function (id) {
+    const req = _myRequest(id);
     if (!req) return;
-    req.durum = 'Beklemede';
-    req.tarih = getTurkiyeTarihi();
-    await window.saveData('requests', window.data.requests);
+    const d = String(req.durum || '').trim().toUpperCase();
+    if (d !== 'DRAFT' && d !== 'TASLAK') { showAppAlert('Bu talep taslak değil.', 'warning'); renderMyRequestsTable(); return; }
+    if (!(await window.writeOk(window.updateItem('requests', req.id, { durum: 'Beklemede', tarih: getTurkiyeTarihi() })))) { showAppAlert('Talep gönderilemedi.', 'error'); return; }
     if (typeof renderMyRequestsTable === 'function') renderMyRequestsTable();
     showAppAlert("Talebiniz başarıyla onaya gönderildi.", "success");
 };
@@ -900,7 +912,13 @@ window.sendDraftInventoryRequest = async function (index) {
 // 🔷 Sepet / Toplu Çıkış Sistemi
 (function () {
     let cartItems = [];
+    // [WHY]: Sepet ürünleri dizi indeksiyle tutuyor (DATA-06), stoğu istemcide hesaplayıp tüm veritabanını yazıyordu (INV-04):
+    //        iki cihaz aynı anda çıkınca biri diğerinin düşümünü eziyor, sıfıra inen "Pasif"/"Hurda" ürünün durumu
+    //        "Tükendi" oluyordu; yetersiz kalemler sessizce atlanıp kalanlar "başarılı" kaydediliyordu.
+    // [HOW]: Kalemler ürün id'siyle tutulur; tüm kalemlerin stok düşümü + b3 kayıtları TEK transaction (runStockOps):
+    //        bir kalem bile yetmezse hiçbir şey yazılmaz ve hangi ürün olduğu söylenir. Yalnız yönetici (karar 3).
     window.openCartModal = function () {
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
         cartItems = [];
         document.getElementById('cartSearch').value = "";
         document.getElementById('cartProductList').style.display = 'none';
@@ -965,7 +983,7 @@ window.sendDraftInventoryRequest = async function (index) {
     };
 
     window.addToCart = function (res) {
-        const exists = cartItems.find(c => c.repo === res.repo && c.index === res.index);
+        const exists = cartItems.find(c => c.repo === res.repo && String(c.item.id) === String(res.item.id));
         if (exists) {
             if (exists.exitQty < res.qty) { exists.exitQty++; renderCartItems(); }
             else showAppAlert("Stokta daha fazla yok!", "warning");
@@ -998,9 +1016,16 @@ window.sendDraftInventoryRequest = async function (index) {
                     <input type="number" min="1" max="${escapeHtml(cartItem.qty)}" value="${escapeHtml(cartItem.exitQty)}" onchange="updateCartQty(${idx}, this.value)" style="width: 60px; padding: 4px; text-align: center;">
                     <button type="button" onclick="removeFromCart(${idx})" style="background: #e74c3c; color: white; border: none; border-radius: 4px; padding: 5px 8px; cursor: pointer;"><i class="fas fa-trash"></i></button>
                 </div>
-            </div>`;
+            </div>
+            <div id="cartDev_${idx}" hidden></div>`;
         });
         container.innerHTML = html;
+        // 3.9a: demirbaş kalemde adet kadar cihaz kimliği satırı; girilen değerler kalemde saklanır (yeniden çizimde kaybolmaz)
+        cartItems.forEach((cartItem, idx) => {
+            if (!window.Schema.isDemirbas(cartItem.item)) return;
+            window.DeviceIds.render(document.getElementById(`cartDev_${idx}`), cartItem.exitQty,
+                { values: cartItem.ids || [], onInput: v => { cartItem.ids = v; } });
+        });
     };
 
     window.updateCartQty = function (cartIndex, newVal) {
@@ -1008,6 +1033,7 @@ window.sendDraftInventoryRequest = async function (index) {
         const cartItem = cartItems[cartIndex];
         if (val > 0 && val <= cartItem.qty) {
             cartItem.exitQty = val;
+            if (window.Schema.isDemirbas(cartItem.item)) renderCartItems();   // kimlik satırı sayısı adede uyar
         } else {
             renderCartItems();
             if (val > cartItem.qty) showAppAlert(`Stokta sadece ${cartItem.qty} adet var!`, "warning");
@@ -1020,45 +1046,52 @@ window.sendDraftInventoryRequest = async function (index) {
         const alanKisi = document.getElementById('cartPerson').value || "-";
         const not = document.getElementById('cartNote').value || "-";
         const sn = document.getElementById('cartSn').value || "-";
-        let successCount = 0;
         const tarih = getTurkiyeSaati();
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
 
-        cartItems.forEach(cartItem => {
-            const product = window.data[cartItem.repo][cartItem.index];
-            if (product) {
-                let currentQty = parseInt(product.adet || product.qty || 0);
-                if (currentQty >= cartItem.exitQty) {
-                    let newQty = currentQty - cartItem.exitQty;
-                    product.adet = newQty;
-                    product.qty = newQty;
-                    if (newQty <= 0) { product.durumu = "Tükendi"; product.status = "Tükendi"; }
-                    const b3Entry = {
-                        id: Date.now() + Math.random(),
-                        rafNo: product.raf || "-",
-                        sutun: product.sütun || "-",
-                        urunTuru: product.tür || product.type || "-",
-                        urunAciklama: product.ürün || product.name || "-",
-                        sn: sn,
-                        adet: cartItem.exitQty,
-                        not: not,
-                        alanKisi: alanKisi,
-                        tarih: tarih,
-                        isDemirbas: window.checkIsDemirbas ? window.checkIsDemirbas(product) : false,
-                        kaynakDepo: cartItem.repo
-                    };
-                    if (!window.data.b3) window.data.b3 = [];
-                    window.data.b3.unshift(b3Entry);
-                    successCount++;
-                }
+        const stock = [], writes = [], allDeviceIds = [];
+        const personelId = window.getActiveUser?.()?.id;
+        const snGiven = sn !== '-' && sn.trim() !== '';
+        for (const cartItem of cartItems) {
+            const product = (window.data[cartItem.repo] || []).find(x => x && String(x.id) === String(cartItem.item.id));
+            const name = cartItem.item.ürün || cartItem.item.name || '-';
+            if (!product) { showAppAlert(`"${name}" artık listede yok; sepetten çıkarın.`, 'error'); return; }
+            const qty = Number(cartItem.exitQty);
+            if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Adetler en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+            stock.push({ col: cartItem.repo, id: product.id, delta: -qty });
+            // Kanonik b3 kaydı (3.6) — tekil çıkışla aynı kurucu, aynı alanlar.
+            // Demirbaş (3.9a): kalem başına adet kadar kimlik, her cihaz ayrı kayıt; ortak SN/ITSM alanı nota "Ref" olarak eklenir.
+            if (window.Schema.isDemirbas(product)) {
+                const box = document.getElementById(`cartDev_${cartItems.indexOf(cartItem)}`);
+                const chk = window.AssignmentService.checkDeviceIds({ demirbas: true, qty, ids: box ? window.DeviceIds.read(box) : (cartItem.ids || []), label: `"${name}": ` });
+                if (!chk.ok) { showAppAlert(chk.errors[0], 'warning'); return; }
+                allDeviceIds.push(...chk.ids);
+                const refNot = snGiven ? `${not === '-' ? '' : not + ' · '}Ref: ${sn}` : not;
+                chk.ids.forEach(d => writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+                    tip: 'cikis', product, col: cartItem.repo, adet: 1, sn: d.sn, envanterNo: d.envanterNo, not: refNot, alanKisi, tarih, personelId,
+                }) }));
+            } else {
+                if (!snGiven) { showAppAlert(`"${name}" (sarf) için "SN / BioPro / Itsm" alanını doldurun.`, 'warning'); return; }
+                writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+                    tip: 'cikis', product, col: cartItem.repo, adet: qty, sn, not, alanKisi, tarih, personelId,
+                }) });
             }
-        });
-
-        if (successCount > 0) {
-            await window.saveData(window.data);
-            showAppAlert(`${successCount} ürün kalemi için toplu çıkış başarıyla kaydedildi.`, "success");
-            closeModal('cartModal');
-            setTimeout(() => { if (typeof renderExitTable === 'function') renderExitTable(); }, 100);
         }
+        // aynı cihaz iki farklı kalemde girilmiş olmasın
+        const dupCheck = window.Schema.validateDeviceIds({ demirbas: true, qty: allDeviceIds.length, ids: allDeviceIds });
+        if (!dupCheck.ok) { showAppAlert(dupCheck.errors[0], 'warning'); return; }
+
+        let res;
+        try {
+            res = await window.runStockOps({ stock, writes });
+        } catch (e) {
+            showAppAlert(`Toplu çıkış yapılamadı; hiçbir kalem kaydedilmedi. ${e.message || ''}`, 'error');
+            return;
+        }
+        showAppAlert(`${stock.length} ürün kalemi için toplu çıkış kaydedildi. ${res.stock.map(s => `${s.name}: ${s.before}→${s.after}`).join(' · ')}`, "success");
+        closeModal('cartModal');
+        if (typeof renderExitTable === 'function') renderExitTable();
+        ['b1', 'b2'].forEach(r => { if (typeof renderTable === 'function') renderTable(r); });
     };
 })();
 
@@ -1127,7 +1160,7 @@ window.searchForExit = function () {
         const stock = item.adet !== undefined ? item.adet : (item.qty || 0);
         div.innerHTML = `<strong>${escapeHtml(item.ürün || item.name || '-')}</strong> <small>(${escapeHtml(item.marka || item.tür || '-')})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${escapeHtml(item.raf || item.shelf || '-')} | Stok: ${stock} | Depo: ${escapeHtml(item._repo.toUpperCase())}</span>`;
         if (stock > 0) {
-            div.onclick = () => window.selectProduct(item.ürün || item.name, item.tür || item.type || item.marka, item.raf || item.shelf, stock, item._repo, item._index);
+            div.onclick = () => window.selectProduct(item.ürün || item.name, item.tür || item.type || item.marka, item.raf || item.shelf, stock, item._repo, item._index, item.id);
         } else {
             div.style.opacity = '0.5'; div.style.pointerEvents = 'none'; div.innerHTML += ' <b style="color:red;">(STOK YOK)</b>';
         }
@@ -1151,26 +1184,35 @@ window.onReqTypeChange = function () {
     }
 };
 
-// [WHY]: b3'te iki şema var: çıkış formu rafNo/urunTuru/urunAciklama/adet/not/tarih yazıyor; talep onayı ve admin zimmeti
-//        shelfNo/productType/description/sarfAdet/note/date yazıyor. Tablo yalnız ilkini okuduğu için yeni kayıtlarda
-//        yalnız Alan Kişi / Tarih / SN doluyordu. (Tek kanonik şema Faz 3 işi; burada okuyucu iki şemayı birleştirir.)
-// [HOW]: Alan başına eski → yeni sırayla okunur; ürün türü yeni kayıtta yoksa productId + sourceRepo ile stok kaleminden bulunur.
+// [WHY]: b3'te birden çok şema vardı; tablo, Excel ve PDF'ler farklı alt kümelerini okuyordu (Tur 2.5'te yalnız bu okuyucu
+//        yamanmıştı, ürün taşınınca/silinince tür yine boşalıyordu).
+// [HOW] (3.6): Tüm okuyucular Schema.normalizeB3'ten okur. normalizeB3Row eski çağıranlar için aynı anahtarları döner.
 window.normalizeB3Row = function (item) {
-    const repo = item.sourceRepo || item.kaynakDepo;
-    const product = item.productId != null && (repo === 'b1' || repo === 'b2')
-        ? (window.data[repo] || []).find(p => String(p.id) === String(item.productId)) : null;
-    const pick = (...vals) => vals.find(v => v !== undefined && v !== null && String(v).trim() !== '');
-    return {
-        raf: pick(item.rafNo, item.shelfNo, product?.raf) ?? '-',
-        tur: pick(item.urunTuru, product?.tür, product?.type) ?? '-',
-        urun: pick(item.urunAciklama, item.productType, product?.ürün) ?? '-',
-        sn: pick(item.sn) ?? '-',
-        adet: pick(item.adet, item.sarfAdet) ?? 0,
-        not: pick(item.not, item.note) ?? '-',
-        alanKisi: pick(item.alanKisi, item.person, item.personel) ?? '-',
-        tarih: pick(item.tarih, item.date) ?? '-',
-    };
+    const n = window.Schema.normalizeB3(item);
+    return { raf: n.rafNo, tur: n.urunTuru, urun: n.urunAciklama, sn: n.sn, adet: n.adet, not: n.not, alanKisi: n.alanKisi, tarih: n.tarih };
 };
+
+// b3 PDF'i stok tablosu sütunlarıyla (Sütun/Raf/Ürün/Marka/Durum) basılıyordu; çıkış kayıtlarında hepsi "-" çıkıyordu.
+function _exportB3PDF() {
+    const rows = (window.data.b3 || []).map(item => window.Schema.normalizeB3(item));
+    const cell = v => `<td>${escapeHtml(v)}</td>`;
+    const html = `<html><head><title>B3 Çıkış Raporu</title><style>
+        body { font-family: "Roboto", Arial, sans-serif; margin: 0; padding: 20px; color: #222; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th, td { border: 1px solid #cfd6dc; padding: 5px 6px; text-align: left; vertical-align: top; }
+        th { background: #2c3e50; color: white; font-weight: 600; }
+        tr:nth-child(even) { background: #f7f9fb; }
+    </style></head><body><div style="font-size:18px; font-weight:bold; margin-bottom:6px;">B3 ENVANTER ÇIKIŞ KAYITLARI</div>
+    <div style="font-size:12px; margin-bottom:14px;">Rapor Tarihi: ${escapeHtml(getTurkiyeSaati())}</div>
+    <table><thead><tr><th>#</th><th>Raf No</th><th>Ürün Türü</th><th>Ürün Açıklama</th><th>SN</th><th>Envanter No</th><th>Adet</th><th>Not</th><th>Alan Kişi</th><th>Tarih</th><th>Hareket</th></tr></thead><tbody>
+    ${rows.map((n, i) => `<tr>${[i + 1, n.rafNo, n.urunTuru, n.urunAciklama, n.sn, n.envanterNo, n.adet, n.not, n.alanKisi, n.tarih, n.tip === 'zimmet' ? 'Zimmet' : 'Çıkış'].map(cell).join('')}</tr>`).join('')}
+    </tbody></table></body></html>`;
+    const win = window.open('', '', 'width=1400,height=900');
+    if (!win) { showAppAlert('Açılır pencere engellendi; PDF için izin verin.', 'warning'); return; }
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => { win.print(); win.close(); }, 300);
+}
 
 // Sekme B3 PDF/Excel & Diğer araçlar
 function renderExitTable() {
@@ -1183,19 +1225,20 @@ function renderExitTable() {
     }
     const rowsHtml = window.data.b3.map((item, index) => {
         const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
-        const row = window.normalizeB3Row(item);
+        const row = window.Schema.normalizeB3(item);
+        const envNo = row.envanterNo !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted);">Env. No: ${escapeHtml(row.envanterNo)}</div>` : '';
         return `<tr class="${isPassive ? 'passive-row' : ''}">
-            <td>${escapeHtml(row.raf)}</td>
-            <td>${escapeHtml(row.tur)}</td>
-            <td>${escapeHtml(row.urun)}</td>
-            <td>${escapeHtml(row.sn)}</td>
+            <td${row.stokDisi ? ' style="color:var(--color-text-muted); font-style:italic;"' : ''}>${escapeHtml(row.rafNo)}</td>
+            <td>${escapeHtml(row.urunTuru)}</td>
+            <td>${escapeHtml(row.urunAciklama)}</td>
+            <td>${escapeHtml(row.sn)}${envNo}</td>
             <td>${escapeHtml(row.adet)}</td>
             <td>${escapeHtml(row.not)}</td>
             <td>${escapeHtml(row.alanKisi)}</td>
             <td>${escapeHtml(row.tarih)}</td>
             <td>
-                <button class="pdf-btn" onclick="generateZimmetPDF(${index})">PDF</button>
-                <button class="delete-btn" onclick="if(validateAdminAction()) deleteB3Row(${index})">Sil</button>
+                <button class="pdf-btn" onclick="generateZimmetPDF(${jsArg(item.id)})">PDF</button>
+                <button class="delete-btn" onclick="if(validateAdminAction()) deleteB3Row(${jsArg(item.id)})">Sil</button>
             </td>
         </tr>`;
     }).join('');
@@ -1204,6 +1247,7 @@ function renderExitTable() {
 
 window.exportPDF = function (depo) {
     if (!validateAdminAction()) return;
+    if (depo === 'b3') return _exportB3PDF();
     const items = window.data[depo] || [];
     function getStatusClass(status) {
         if (!status) return "status-diger";
@@ -1300,7 +1344,7 @@ async function importExcel(event) {
             if (typeof renderTable === 'function') renderTable(depo);
             showAppAlert(`${importedData.length} ürün başarıyla depoya eklendi ve kaydedildi!`, "success");
         } catch (err) {
-            showAppAlert("Excel okunurken bir hata oluştu!", "error");
+            showAppAlert(err && err.name === 'SaveDataError' ? `Ürünler kaydedilemedi: ${err.message}` : "Excel okunurken bir hata oluştu!", "error");
         }
     };
     reader.readAsArrayBuffer(file);
@@ -1314,14 +1358,18 @@ window.exportToExcel = function (depo) {
     let sheetName = "";
     if (depo === 'b3') {
         excelData = items.map(item => ({
-            "Raf No": item.rafNo || "-",
-            "Ürün Türü": item.urunTuru || "-",
-            "Ürün Açıklama": item.urunAciklama || "-",
-            "SN / BioPro / Itsm": item.sn || "-",
-            "Adet": parseInt(item.adet) || 0,
-            "Not/Gerekçe": item.not || "-",
-            "Alan Kişi": item.alanKisi || "-",
-            "Tarih": item.tarih || "-"
+            ...(n => ({
+                "Raf No": n.rafNo,
+                "Ürün Türü": n.urunTuru,
+                "Ürün Açıklama": n.urunAciklama,
+                "SN / BioPro / Itsm": n.sn,
+                "Envanter No": n.envanterNo,
+                "Adet": n.adet,
+                "Not/Gerekçe": n.not,
+                "Alan Kişi": n.alanKisi,
+                "Tarih": n.tarih,
+                "Hareket": n.tip === 'zimmet' ? 'Zimmet' : 'Çıkış'
+            }))(window.Schema.normalizeB3(item))
         }));
         sheetName = "Envanter Çıkış Raporu";
     } else {
@@ -1441,21 +1489,9 @@ window.addEventListener("load", () => {
     window.addEventListener('offline', () => { if (typeof showAppAlert === 'function') showAppAlert("İnternet bağlantısı koptu.", "warning"); });
 });
 
-// Request Actions helpers (legacy check)
-function renderRequestAction(request) {
-    const checkIsAdmin = checkAdmin();
-    if (request.status === 'pending') {
-        return checkIsAdmin
-            ? `<button class="btn-deliver" onclick="updateRequestStatus(${jsArg(request.id)}, 'delivered')">Teslim Et</button>`
-            : `<span class="status-waiting">Bekleniyor...</span>`;
-    } else if (request.status === 'delivered') {
-        return !checkIsAdmin
-            ? `<button class="btn-confirm" onclick="confirmReceipt(${jsArg(request.id)})">Teslim Aldım</button>`
-            : `<span class="status-delivered">Onay Bekleniyor</span>`;
-    } else {
-        return `<span class="status-completed">Tamamlandı</span>`;
-    }
-}
+// [WHY]: Eski talep şemasını (status/person/product) kullanan ve tüm veritabanını yazan ölü kod kaldırıldı: addRequest,
+//        submitRequest, updateRequestStatus (sabit "Muhammed Cer"), renderRequestAction (tanımsız confirmReceipt).
+//        Hiçbiri çağrılmıyordu; talep akışı saveRequest / confirmRequest / receiveProduct üzerinden (H2, DATA-10 benzeri gizli risk).
 
 async function createLog(action, detail) {
     const parsed = window.getActiveUser();
@@ -1473,65 +1509,6 @@ function checkCategory(selectElement) {
     const selectedOption = selectElement.options[selectElement.selectedIndex];
     const isDemirbas = selectedOption.getAttribute('data-is-demirbas') === 'true';
     document.getElementById('isDemirbas').value = isDemirbas;
-}
-
-async function updateRequestStatus(requestId, newStatus) {
-    const isAdmin = checkIsAdmin();
-    const request = window.data.requests.find(r => r.id === requestId);
-    if (!request) return;
-    if (newStatus === 'delivered' && isAdmin) {
-        request.status = 'delivered';
-        request.deliveredBy = "Muhammed Cer";
-        showAppAlert("Teslimat yapıldı. Personel onayı bekleniyor.", "success");
-    } else if (newStatus === 'confirmed' && !isAdmin) {
-        request.status = 'confirmed';
-        request.confirmedDate = getTurkiyeSaati();
-        await createLog("ZİMMET ONAYI", `${request.person} ürünü teslim aldı.`);
-    }
-    await window.saveData(window.data);
-    renderTable('requests');
-}
-
-async function addRequest(event) {
-    if (event) event.preventDefault();
-    const activeUser = window.getActiveUser();
-    const productName = document.getElementById('requestProductName').value;
-    const productSn = document.getElementById('requestProductSn')?.value || "-";
-    const newRequest = {
-        id: Date.now(),
-        tarih: getTurkiyeTarihi(),
-        personel: activeUser ? activeUser.name : "Bilinmeyen Personel",
-        ürün: productName,
-        sn: productSn,
-        durum: 'Beklemede'
-    };
-    if (!window.data.requests) window.data.requests = [];
-    window.data.requests.push(newRequest);
-    await window.saveData(window.data);
-    showAppAlert("Talebiniz başarıyla iletildi.", "success");
-    closeModal('request');
-}
-
-async function submitRequest(event) {
-    if (event) event.preventDefault();
-    const product = document.getElementById('reqProduct').value;
-    const note = document.getElementById('reqNote').value;
-    const user = window.getActiveUser();
-    if (!product) { showAppAlert("Lütfen talep edilecek ürünü yazın.", "warning"); return; }
-    const newRequest = {
-        id: Date.now(),
-        date: new Date().toLocaleDateString('tr-TR'),
-        person: user ? user.name : 'Bilinmeyen Personel',
-        product: product,
-        note: note,
-        status: 'pending'
-    };
-    if (!window.data.requests) window.data.requests = [];
-    window.data.requests.push(newRequest);
-    await window.saveData(window.data);
-    if (typeof showSuccessBanner === 'function') showSuccessBanner("Talebiniz başarıyla iletildi!");
-    closeModal('request');
-    document.getElementById('requestForm').reset();
 }
 
 function openTab(tabId) {
@@ -1584,7 +1561,8 @@ async function deleteSelectedRequests() {
     const onay = await showCustomConfirm("Toplu Silme", `${idsToDelete.size} adet kaydı kalıcı olarak silmek istediğinize emin misiniz?`);
     if (onay) {
         const remaining = (window.data.requests || []).filter(r => !idsToDelete.has(String(r.id)));
-        if (await window.saveData('requests', remaining) === false) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
+        // Kullanıcı onaylı toplu silme: saveData v2 toplu silme kilidi bilinçli olarak açılır (Faz 3.1).
+        if (!(await window.writeOk(window.saveData('requests', remaining, { allowBulkDelete: true })))) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
         renderRequestsTable();
         showAppAlert(`${idsToDelete.size} kayıt başarıyla silindi.`, "success");
         const headerCheck = document.querySelector('.select-all-header input');

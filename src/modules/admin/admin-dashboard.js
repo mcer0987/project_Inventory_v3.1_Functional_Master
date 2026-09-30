@@ -191,19 +191,17 @@ if (!window.fireDb) {
 
 let watchChartInstance = null; // Eski grafiği silmek için hafızada tutuyoruz
 
+// [WHY]: Toplu ekleme bellekteki diziye ekleyip tüm veritabanını yazıyordu ve hata olsa da başarı gösterebiliyordu (ADM-07).
+// [HOW]: Yeni kayıtlar tek atomik batch'te eklenir (applyItemOps: ya hepsi ya hiçbiri); id makeId ile.
 window.bulkAddB2Items = async function (itemsArray) {
-    if (!Array.isArray(itemsArray)) {
-        console.error("Hata: Veri bir dizi (array) olmalıdır.");
-        return;
-    }
-
-    if (!window.data.b2) {
-        window.data.b2 = [];
+    if (!Array.isArray(itemsArray) || itemsArray.length === 0) {
+        console.error("Hata: Veri boş olmayan bir dizi (array) olmalıdır.");
+        return false;
     }
 
     // Yeni verileri hazırla
     const formattedItems = itemsArray.map(item => ({
-        id: item.id || 'b2-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+        id: item.id || `b2_${window.makeId()}`,
         sütun: item.sütun || '-',
         raf: item.raf || '-',
         ürün: item.ürün || '-',
@@ -215,17 +213,19 @@ window.bulkAddB2Items = async function (itemsArray) {
         lastUpdate: Date.now()
     }));
 
-    // Mevcut listeye ekle
-    window.data.b2 = [...window.data.b2, ...formattedItems];
-
     try {
-        await window.saveData(window.data);
+        const res = await window.writeOk(window.applyItemOps(formattedItems.map(item => ({ op: 'set', col: 'b2', item, mustBeNew: true }))));
+        if (res === false) {
+            if (typeof showAppAlert === 'function') showAppAlert("Ürünler eklenemedi; hiçbir kayıt yazılmadı.", "error");
+            return false;
+        }
         if (typeof showAppAlert === 'function') {
             showAppAlert(`${formattedItems.length} ürün başarıyla B2 deposuna eklendi.`);
         } else {
             alert(`${formattedItems.length} ürün eklendi.`);
         }
         if (typeof window.renderTable === 'function') window.renderTable('b2');
+        return res;
     } catch (e) {
         console.error("Bulk ekleme hatası:", e);
         if (typeof showAppAlert === 'function') {
@@ -640,8 +640,10 @@ window.deleteProductType = async function (docId) {
 window.checkExitIsDemirbas = function (exit) {
     if (!exit) return false;
 
-    const typeName = (exit.urunTuru || exit.tür || exit.productType || "").trim();
-    const productName = (exit.urunAciklama || exit.ürün || exit.product || "").trim();
+    // Kanonik görünüm (3.6): eski onay/zimmet kayıtlarında productType ürün ADIDIR; tür olarak okunmamalı.
+    const n = window.Schema.normalizeB3(exit);
+    const typeName = n.urunTuru === '-' ? '' : n.urunTuru;
+    const productName = n.urunAciklama === '-' ? '' : n.urunAciklama;
     const textToSearch = `${typeName} ${productName}`.toLowerCase();
 
     // 1. ÖNCELİK: Kelime Bazlı Heuristic Eşleşme (Süper Güvenli / Ezici Kural)
@@ -720,8 +722,9 @@ window.renderExitCharts = function () {
 
     // 3. VERİLERİ OKU VE AYRIŞTIR (Kritik Bölge)
     exits.forEach(exit => {
-        const urunTuru = exit.urunTuru || exit.tür || exit.productType || "Bilinmeyen Tür";
-        const adet = parseInt(exit.adet || exit.sarfAdet) || 1;
+        const n = window.Schema.normalizeB3(exit);
+        const urunTuru = n.urunTuru !== '-' ? n.urunTuru : "Bilinmeyen Tür";
+        const adet = n.adet || 1;
 
         // En güncel tanıma göre demirbaş kontrolü yapıyoruz.
         const isDemirbas = window.checkExitIsDemirbas(exit);
@@ -746,11 +749,12 @@ window.renderExitCharts = function () {
 
         if (latestExitId && window._lastExitAnimatedId !== latestExitId) {
             const isLatestConsumable = !window.checkExitIsDemirbas(latestExit);
-            const ageMs = Date.now() - parseInt(latestExitId);
+            // makeId (µs) id'leri ms sanılınca yaş negatif çıkıp her çizimde animasyon tetikleniyordu.
+            const ageMs = Date.now() - window.Schema.normalizeB3(latestExit).ts;
 
             // Son 15 saniyede yapılmış bir sarf çıkışı ise animasyonu tetikle
             if (isLatestConsumable && ageMs < 15000) {
-                highlightCategory = (latestExit.urunTuru || latestExit.tür || latestExit.productType || "").trim();
+                highlightCategory = window.Schema.normalizeB3(latestExit).urunTuru;
                 shouldAnimate = true;
                 window._lastExitAnimatedId = latestExitId; // Bir daha oynatma
             }
@@ -1083,23 +1087,15 @@ window.deleteCriticalGroup = async function (groupKey) {
         `"${group.displayName}" grubundaki tüm ürünleri (${group.items.length} adet kayıt) depodan TAMAMEN silmek istediğinize emin misiniz?`
     );
 
+    // [WHY]: Onay kutusu açıkken gelen bir snapshot indeksleri kaydırıyordu; silme yanlış ürünleri vurup tüm veritabanını
+    //        yazıyordu (ADM-07, DATA-06). [HOW]: Grup ürünleri id ile silinir, B1+B2 tek atomik batch'te; sonuç kontrol edilir.
     if (onay) {
-        // Sort indices descending to avoid shifting issues during splicing
-        const b1Indices = group.items.filter(i => i.key === 'b1').map(i => i.originalIndex).sort((a, b) => b - a);
-        const b2Indices = group.items.filter(i => i.key === 'b2').map(i => i.originalIndex).sort((a, b) => b - a);
-
-        b1Indices.forEach(idx => {
-            if (window.data.b1) window.data.b1.splice(idx, 1);
-        });
-        b2Indices.forEach(idx => {
-            if (window.data.b2) window.data.b2.splice(idx, 1);
-        });
-
-        // Save to Firebase
-        if (typeof window.saveData === 'function') {
-            await window.saveData(window.data);
-            showAppAlert("Ürün(ler) depodan başarıyla silindi.", "success");
+        const ops = group.items.filter(i => i.id != null && i.id !== '').map(i => ({ op: 'delete', col: i.key, id: i.id }));
+        if (!(await window.writeOk(window.applyItemOps(ops)))) {
+            showAppAlert("Silme kaydedilemedi; hiçbir ürün silinmedi.", "error");
+            return;
         }
+        showAppAlert(`${ops.length} ürün depodan silindi.`, "success");
     }
 };
 
@@ -1431,7 +1427,7 @@ window.syncProductTypesToProducts = async function (oldName, newName) {
             if (next.prodType === oldName) next.prodType = newName;
             return next;
         });
-        if (changed && await window.saveData(depo, items) === false) ok = false;
+        if (changed && !(await window.writeOk(window.saveData(depo, items)))) ok = false;
     }
     console.log(`✔ Tür güncellendi: ${oldName} → ${newName}`);
     return ok;
@@ -1766,7 +1762,7 @@ window.saveLocation = async function (e) {
         ? locations.map(l => String(l.id) === String(id) ? { ...l, ...formFields, id: l.id } : l)
         : [...locations, { id: 'loc_' + now, ...formFields, createdAt: now }];
 
-    if (await window.saveData('locations', next) === false) {
+    if (!(await window.writeOk(window.saveData('locations', next)))) {
         showAppAlert('Mahal kaydedilemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
         return;
     }
@@ -1778,7 +1774,7 @@ window.saveLocation = async function (e) {
 window.deleteLocation = async function (id) {
     if (!confirm("Bu mahali silmek istediğinize emin misiniz?")) return;
     const next = (window.data.locations || []).filter(l => String(l.id) !== String(id));
-    if (await window.saveData('locations', next) === false) { showAppAlert('Mahal silinemedi.', 'error'); return; }
+    if (!(await window.writeOk(window.saveData('locations', next)))) { showAppAlert('Mahal silinemedi.', 'error'); return; }
     window.renderLocationsTable();
     showAppAlert("Mahal silindi.", "info");
 };

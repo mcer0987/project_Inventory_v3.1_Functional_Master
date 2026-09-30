@@ -30,72 +30,27 @@ window.inventoryManagementModule = {
    * requests (completed/approved) ve b3 zimmet kayıtlarını ortak şemaya dönüştürür.
    * @returns {Array} Normalize edilmiş zimmet kayıtları
    */
+  // [HOW] (3.7): Liste zimmet servisinden gelir (personelin Kişi Envanterim ekranıyla aynı kaynak ve kurallar).
   getNormalizedAssignments: function () {
-    const assignments = [];
-
-    // --- KAYNAK 1: requests (onaylanan veya teslim alınan talepler) ---
-    const requests = window.data?.requests || [];
-    // [WHY]: Onay aynı zimmet için b3'e requestId'li ikiz kayıt yazar; talep ayrıca sayılınca KPI çift sayıyordu (ITSM-06).
-    const twinRequestIds = new Set((window.data?.b3 || []).filter(b => b.requestId != null).map(b => String(b.requestId)));
-    requests.forEach((req, idx) => {
-      if (twinRequestIds.has(String(req.id))) return;
-      const rawDurum = (req.durum || '').trim().toUpperCase();
-      const isCompleted = rawDurum === 'COMPLETED' || rawDurum === 'TESLİM ALINDI' || rawDurum === 'TESLIM ALINDI';
-      const isApproved = rawDurum === 'APPROVED' || rawDurum === 'ONAYLANDI';
-      if (!isCompleted && !isApproved) return;
-
-      assignments.push({
-        _source: 'request',
-        _index: idx,
-        _id: req.id || idx,
-        personel: req.personel || '-',
-        ürün: req.ürün || '-',
-        adet: req.adet || 1,
-        tarih: req.tarih || '-',
-        not: req.not || '-',
-        sn: req.sn || '-',
-        durum: req.iadeEdildi ? 'İade Edildi' : (isCompleted ? 'Teslim Alındı' : 'Onaylandı'),
-        talepTuru: req.talepTuru || 'Kalıcı Zimmet',
-        oncelik: req.oncelik || 'Orta',
-        iadeTarihi: req.iadeTarihi || null,
-        iadeEdildi: req.iadeEdildi || false,
-        rawRef: req
-      });
-    });
-
-    // --- KAYNAK 2: b3 (doğrudan/toplu envanter çıkışları) ---
-    const b3 = window.data?.b3 || [];
-    b3.forEach((item, idx) => {
-      const person = item.alanKisi || item.personel || item.person || null;
-      if (!person) return; // Kişisiz b3 kayıtları zimmet sayılmaz
-
-      // [CRITICAL FIX]: Sadece Zimmet / Talep onay modülü üzerinden gelen (talepTuru veya oncelik içeren) b3 kayıtları zimmet sayılır.
-      // Standart "Envanter Çıkışı Yap" ile b3'e kaydedilen normal sarfiyat/çıkış verileri Kişi Envanterine / Zimmet Modülüne GİRMEMELİDİR.
-      if (!item.talepTuru && !item.oncelik) return;
-
-      assignments.push({
-        _source: 'b3',
-        _index: idx,
-        _id: item.id || idx,
-        personel: person,
-        ürün: item.productType || item.ürünTürü || '-',
-        adet: item.sarfAdet || item.adet || 1,
-        tarih: item.date || item.tarih || '-',
-        not: item.note || item.not || '-',
-        sn: item.sn || '-',
-        durum: item.iadeEdildi ? 'İade Edildi' : 'Zimmetli',
-        talepTuru: item.talepTuru || 'Kalıcı Zimmet',
-        oncelik: item.oncelik || 'Orta',
-        iadeTarihi: item.iadeTarihi || null,
-        iadeEdildi: item.iadeEdildi || false,
-        depo: item.sourceRepo || null,
-        rawRef: item
-      });
-    });
-
-    // En yeniden en eskiye sırala (id büyükse daha yeni)
-    assignments.sort((a, b) => (b._id - a._id) || 0);
-    return assignments;
+    return window.AssignmentService.getAssignments().map(a => ({
+      _source: a._source,
+      _id: a._id,
+      personel: a.personel,
+      personelId: a.personelId,
+      ürün: a.urun,
+      adet: a.adet,
+      tarih: a.tarih,
+      not: a.not,
+      sn: a.sn,
+      envanterNo: a.envanterNo,
+      durum: a.iadeEdildi ? 'İade Edildi' : (a._source === 'request' ? (a.teslimAlindi ? 'Teslim Alındı' : 'Onaylandı') : 'Zimmetli'),
+      talepTuru: a.talepTuru,
+      oncelik: a.oncelik,
+      iadeTarihi: a.iadeTarihi,
+      iadeEdildi: a.iadeEdildi,
+      depo: a.depo,
+      rawRef: a.rawRef
+    }));
   },
 
   // ──────────────────────────────────────────
@@ -311,9 +266,10 @@ window.inventoryManagementModule = {
                     <i class="fas fa-undo"></i> Zimmetten Düş
                   </button>`;
 
-      // [G] SN varsa Cihaz Geçmişi butonu
-      const historyBtn = (a.sn && a.sn !== '-')
-        ? `<button onclick="window.inventoryManagementModule.showDeviceHistory(${jsArg(String(a.sn))})"
+      // [G] Seri No veya Envanter No varsa Cihaz Geçmişi butonu (3.9c: servis/sevk dahil birleşik geçmiş)
+      const deviceId = [a.sn, a.envanterNo].find(v => v && v !== '-' && !String(v).includes(','));
+      const historyBtn = deviceId
+        ? `<button onclick="window.inventoryManagementModule.showDeviceHistory(${jsArg(String(deviceId))})"
                     title="Bu cihazın tüm zimmet geçmişini gör"
                     style="padding:5px 10px; background:#eff6ff; color:#1d4ed8; border:1px solid #93c5fd; border-radius:8px; cursor:pointer; font-size:11px; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:4px; transition:0.2s;"
                     onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
@@ -330,6 +286,7 @@ window.inventoryManagementModule = {
               <td style="padding:12px 16px;">
                 <div style="font-weight:600; color:var(--color-text);">${escapeHtml(a.ürün)}</div>
                 ${a.sn && a.sn !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted); font-family:monospace;">SN: <b>${escapeHtml(a.sn)}</b></div>` : ''}
+                ${a.envanterNo && a.envanterNo !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted); font-family:monospace;">Env. No: <b>${escapeHtml(a.envanterNo)}</b></div>` : ''}
               </td>
               <td style="padding:12px 16px; text-align:center; font-weight:700; color:var(--color-text);">${escapeHtml(a.adet)}</td>
               <td style="padding:12px 16px;">
@@ -490,7 +447,7 @@ window.inventoryManagementModule = {
     if (select) {
       const personeller = window.data?.personel || [];
       select.innerHTML = '<option value="">-- Personel Seçiniz --</option>' +
-        personeller.map(p => `<option value="${escapeHtml(p.name || p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
+        personeller.map(p => `<option value="${escapeHtml(p.id ?? p.name ?? p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
     }
 
     // Formu sıfırla
@@ -534,8 +491,8 @@ window.inventoryManagementModule = {
 
     const row = document.createElement('div');
     row.className = 'assign-product-row';
-    // [B] SN alanı eklendi: grid 5 kolonlu
-    row.style.cssText = 'display:grid; grid-template-columns:1fr 1fr 1fr 80px 36px; gap:8px; margin-bottom:12px; align-items:center; background:var(--color-surface-alt,#f8fafc); border:1px solid var(--color-border); border-radius:10px; padding:10px;';
+    // 3.9a: tek serbest SN kutusu yerine ürün ve adet seçilince adet kadar cihaz kimliği satırı (Seri No / Envanter No)
+    row.style.cssText = 'display:grid; grid-template-columns:1fr 1fr 80px 36px; gap:8px; margin-bottom:12px; align-items:center; background:var(--color-surface-alt,#f8fafc); border:1px solid var(--color-border); border-radius:10px; padding:10px;';
     row.innerHTML = `
           <select class="assign-warehouse-sel" onchange="window.inventoryManagementModule.onWarehouseChange(this)"
             style="padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px;">
@@ -547,17 +504,24 @@ window.inventoryManagementModule = {
             style="padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px;">
             <option value="">-- Önce Depo Seç --</option>
           </select>
-          <input type="text" class="assign-sn-inp" placeholder="Seri No / SN"
-            style="padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px; font-family:monospace;">
-          <input type="number" class="assign-qty-inp" value="1" min="1"
+          <input type="number" class="assign-qty-inp" value="1" min="1" oninput="window.inventoryManagementModule._syncAssignDevices(this.closest('.assign-product-row'))"
             style="padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px; text-align:center;"
             placeholder="Adet">
           <button onclick="window.inventoryManagementModule.removeAssignRow(this)"
             style="padding:8px; background:#fee2e2; color:#c0392b; border:none; border-radius:8px; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center;">
             <i class="fas fa-times"></i>
           </button>
+          <div class="assign-dev-ids" hidden></div>
         `;
     container.appendChild(row);
+  },
+
+  _syncAssignDevices: function (row) {
+    if (!row) return;
+    const box = row.querySelector('.assign-dev-ids');
+    const productId = row.querySelector('.assign-product-sel')?.value;
+    if (!productId) { window.DeviceIds.hide(box); return; }
+    window.DeviceIds.render(box, Number(row.querySelector('.assign-qty-inp')?.value) || 1);
   },
 
   removeAssignRow: function (btn) {
@@ -577,11 +541,13 @@ window.inventoryManagementModule = {
     }
 
     const products = window.data?.[warehouse] || [];
-    // [B] DEMIRBAŞ FİLTRESİ: Sadece isDemirbas:true olan ürünler zimmetlenebilir
+    // [B] DEMIRBAŞ FİLTRESİ: yalnız demirbaş ürünler zimmetlenebilir. Karar tek kuraldan (Schema.isDemirbas: ürün türü
+    //     tanımı önce) — yalnız kayıttaki bayrağa bakılınca türü demirbaş olan ürünler listelenmiyordu; Pasif/Hurda ürünler
+    //     de öneriliyordu (ZIM-06).
     const fixtures = products.filter(p => {
       const hasStock = (p.adet || 0) > 0;
-      const isDem = p.isDemirbas === true || p.isDemirbas === 'true';
-      return hasStock && isDem;
+      const durum = window.Schema.normalizeStock(p, warehouse).durum;
+      return hasStock && durum !== 'Pasif' && durum !== 'Hurda' && window.Schema.isDemirbas(p);
     });
 
     if (fixtures.length === 0) {
@@ -601,8 +567,9 @@ window.inventoryManagementModule = {
     const row = select.closest('.assign-product-row');
     const qtyInp = row.querySelector('.assign-qty-inp');
     const opt = select.options[select.selectedIndex];
-    if (!opt || !opt.dataset.max) return;
+    if (!opt || !opt.dataset.max) { this._syncAssignDevices(row); return; }
     qtyInp.max = parseInt(opt.dataset.max) || 999;
+    this._syncAssignDevices(row);
   },
 
   // ──────────────────────────────────────────
@@ -615,7 +582,13 @@ window.inventoryManagementModule = {
   saveAssignment: async function () {
     if (this._savingAssignment) return;
     const alert = (m, t) => { if (typeof showAppAlert === 'function') showAppAlert(m, t); };
-    const personnelName = document.getElementById('assignPersonnel')?.value?.trim();
+    // Personel id ile seçilir (3.7): zimmet kaydı personelId taşır, Kişi Envanterim addan bağımsız eşleşir.
+    const personSel = document.getElementById('assignPersonnel')?.value?.trim();
+    const personList = window.data?.personel || [];
+    const person = personSel ? (personList.find(p => String(p.id) === personSel)
+      || personList.find(p => window.Schema.normName(p.name || p.adSoyad) === window.Schema.normName(personSel))) : null;
+    const personnelName = person ? String(person.name || person.adSoyad || '').trim() : personSel;
+    const personelId = person?.id ?? null;
     const talepTuru = document.getElementById('assignType')?.value || 'Kalıcı Zimmet';
     const oncelik = document.getElementById('assignPriority')?.value || 'Orta';
     const iadeTarihi = document.getElementById('assignReturnDate')?.value || null;
@@ -633,77 +606,68 @@ window.inventoryManagementModule = {
       if (!Number.isInteger(qty) || qty < 1) { alert('Adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
       const product = (window.data?.[warehouse] || []).find(p => String(p.id) === String(productId));
       if (!product) { alert('Seçilen ürün bulunamadı; liste güncellenmiş olabilir. Satırı yeniden seçin.', 'error'); return; }
-      const sn = row.querySelector('.assign-sn-inp')?.value?.trim() || '-';
+      const ids = window.DeviceIds.read(row.querySelector('.assign-dev-ids'));
       const key = `${warehouse}|${product.id}`;
       const prev = merged.get(key);
-      if (prev) { prev.qty += qty; if (sn !== '-') prev.sn = prev.sn === '-' ? sn : `${prev.sn}, ${sn}`; }
-      else merged.set(key, { warehouse, product, qty, sn });
+      if (prev) { prev.qty += qty; prev.ids.push(...ids); }
+      else merged.set(key, { warehouse, product, qty, ids });
     }
     const items = [...merged.values()];
     if (items.length === 0) { alert('Lütfen en az bir ürün ekleyiniz!', 'warning'); return; }
+    // 3.9a: her cihaz için Seri No veya Envanter No; aktif zimmette/serviste olan kimlik verilemez; iki satırda aynı cihaz olamaz
+    const allIds = [];
+    for (const it of items) {
+      it.demirbas = window.Schema.isDemirbas(it.product);
+      const chk = window.AssignmentService.checkDeviceIds({ demirbas: it.demirbas, qty: it.qty, ids: it.ids, label: `"${it.product.ürün || it.product.name}": ` });
+      if (!chk.ok) { alert(chk.errors[0], 'warning'); return; }
+      it.ids = chk.ids;
+      if (it.demirbas) allIds.push(...chk.ids);
+    }
+    const dupCheck = window.Schema.validateDeviceIds({ demirbas: true, qty: allIds.length, ids: allIds });
+    if (!dupCheck.ok) { alert(dupCheck.errors[0], 'warning'); return; }
     for (const it of items) {
       const stock = Number(it.product.adet ?? it.product.qty ?? 0);
       if (it.qty > stock) { alert(`${it.product.ürün || it.product.name} için yeterli stok yok! (Mevcut: ${stock}, İstenen: ${it.qty})`, 'error'); return; }
     }
 
+    // [WHY] (H3 · 3.4): stok her kalem için ayrı transaction'la düşülüyor, b3 ve assignments ayrı ayrı yazılıyordu; b3
+    //        başarısız olunca telafi (stok geri alma) da başarısız olabilir, assignments yazılamazsa zimmet geçmişi eksik kalırdı.
+    // [HOW]: Tüm kalemlerin stok düşümü + b3 kayıtları + assignments kayıtları TEK transaction (runStockOps): ya hepsi ya hiçbiri.
+    //        b3 ve assignments aynı id'yi paylaşır (iade ikisini birlikte bulur); id makeId ile.
     this._savingAssignment = true;
-    const deducted = [];
-    const rollback = async () => {
-      for (const d of deducted.reverse()) {
-        try { await window.runStockTransaction(d.warehouse, d.product.id, d.qty); } catch (e) { console.error('❌ Stok geri alma hatası:', e); }
-      }
-    };
     try {
-      const stockChanges = [];
-      for (const it of items) {
-        const r = await window.runStockTransaction(it.warehouse, it.product.id, -it.qty);
-        deducted.push(it);
-        if (r) stockChanges.push(`${it.warehouse.toUpperCase()} ${it.product.ürün || it.product.name}: ${r.before} → ${r.after}`);
-      }
-
       const now = typeof getTurkiyeTarihi === 'function' ? getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
-      const baseId = Date.now();
-      const b3Entries = [], assignmentEntries = [];
-      items.forEach((it, i) => {
-        const id = baseId + i;
-        const common = {
-          sn: it.sn, talepTuru, oncelik, isDemirbas: true, iadeEdildi: false,
-          productId: it.product.id, sourceRepo: it.warehouse,
-          ...(iadeTarihi ? { iadeTarihi } : {}),
-        };
-        b3Entries.push({
-          id, ...common,
-          shelfNo: it.product.raf || '-',
-          productType: it.product.ürün || it.product.name || '-',
-          description: it.product.açıklama || '-',
-          sarfAdet: it.qty,
-          note: not || `Admin Zimmeti (${talepTuru})`,
-          alanKisi: personnelName,
-          date: now,
-        });
-        assignmentEntries.push({
-          id, ...common,
-          ürün: it.product.ürün || it.product.name || '-',
-          personel: personnelName, tarih: now, adet: it.qty, not, tip: 'zimmet',
+      const stock = [], writes = [];
+      items.forEach(it => {
+        stock.push({ col: it.warehouse, id: it.product.id, delta: -it.qty });
+        // Demirbaş: cihaz başına bir kayıt (adet 1, kendi kimliği). Sarf (eski/elle tanımlı ürün): kalem başına tek kayıt.
+        const units = it.demirbas ? it.ids.map(d => ({ adet: 1, ...d })) : [{ adet: it.qty, sn: it.ids[0]?.sn || '-', envanterNo: it.ids[0]?.envanterNo || '-' }];
+        units.forEach(u => {
+          const id = window.makeId();
+          // Kanonik b3 zimmet kaydı (3.6) — talep onayı ve çıkışlarla aynı kurucu; tür/raf/depo yazma anında kopyalanır.
+          writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+            id, tip: 'zimmet', product: it.product, col: it.warehouse, adet: u.adet, sn: u.sn, envanterNo: u.envanterNo,
+            not: not || `Admin Zimmeti (${talepTuru})`, alanKisi: personnelName, personelId,
+            tarih: now, talepTuru, oncelik, iadeTarihi, onaylayan: window.currentUser?.name || 'Admin',
+          }) });
+          writes.push({ op: 'set', col: 'assignments', item: {
+            id, sn: u.sn, envanterNo: u.envanterNo, talepTuru, oncelik, isDemirbas: it.demirbas, iadeEdildi: false,
+            productId: it.product.id, sourceRepo: it.warehouse, personelId,
+            ...(iadeTarihi ? { iadeTarihi } : {}),
+            ürün: it.product.ürün || it.product.name || '-',
+            personel: personnelName, tarih: now, adet: u.adet, not, tip: 'zimmet',
+          } });
         });
       });
 
-      if (await window.saveData('b3', [...b3Entries, ...(window.data.b3 || [])]) === false) {
-        await rollback();
-        alert('Zimmet kaydedilemedi; stok geri alındı.', 'error');
-        return;
-      }
-      if (await window.saveData('assignments', [...assignmentEntries, ...(window.data.assignments || [])]) === false) {
-        alert('Zimmet oluşturuldu ancak zimmet geçmişi (assignments) yazılamadı.', 'warning');
-      } else {
-        alert(`${personnelName} adına ${items.length} kalem zimmet başarıyla oluşturuldu. Stok: ${stockChanges.join(' · ')}`, 'success');
-      }
+      const res = await window.runStockOps({ stock, writes });
+      const changes = res.stock.map(r => `${r.col.toUpperCase()} ${r.name}: ${r.before} → ${r.after}`).join(' · ');
+      alert(`${personnelName} adına ${items.length} kalem zimmet başarıyla oluşturuldu. Stok: ${changes}`, 'success');
       this.closeAssignModal();
       this.renderTable();
     } catch (err) {
       console.error('Zimmet kayıt hatası:', err);
-      await rollback();
-      alert(`Zimmet kaydedilemedi: ${err.message}`, 'error');
+      alert(`Zimmet kaydedilemedi; hiçbir şey yazılmadı. ${err.message || ''}`, 'error');
     } finally {
       this._savingAssignment = false;
     }
@@ -730,9 +694,7 @@ window.inventoryManagementModule = {
         ? showCustomConfirm('Zimmetten Düş', 'Talep kaynaklı zimmet kapatılacak (stok bağlantısı olmadığı için depo stoğu değişmez). Onaylıyor musunuz?')
         : Promise.resolve(window.confirm('Talep kaynaklı zimmet kapatılsın mı?')));
       if (!ok) return;
-      const updated = { ...req, iadeEdildi: true, iadeEdildiTarihi: today };
-      const saved = await window.saveData('requests', window.data.requests.map(r => sameId(r) ? updated : r));
-      if (saved === false) { alert('İade kaydedilemedi.', 'error'); return; }
+      if (!(await window.writeOk(window.updateItem('requests', req.id, { iadeEdildi: true, iadeEdildiTarihi: today })))) { alert('İade kaydedilemedi.', 'error'); return; }
       this.renderTable();
       alert('Zimmet kaydı kapatıldı.', 'success');
       return;
@@ -742,8 +704,9 @@ window.inventoryManagementModule = {
     if (!item) { alert('Kayıt bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     if (item.iadeEdildi) { alert('Bu zimmet zaten iade edilmiş.', 'info'); return; }
 
-    const qty = Number(item.sarfAdet || item.adet || 1);
-    const stockLinked = item.sourceRepo === 'b1' || item.sourceRepo === 'b2';
+    const view = window.Schema.normalizeB3(item);
+    const qty = view.adet || 1;
+    const stockLinked = view.kaynakDepo === 'b1' || view.kaynakDepo === 'b2';
     let target = null;
     if (stockLinked) {
       const choice = await window.showWarehousePromptModal({ allowNoReturn: true });
@@ -756,40 +719,41 @@ window.inventoryManagementModule = {
       if (!ok) return;
     }
 
-    let product = null, stockChange = null;
+    let product = null;
     if (target) {
       const list = window.data[target] || [];
       product = item.productId != null ? list.find(p => String(p.id) === String(item.productId)) : null;
       if (!product) {
-        const name = String(item.productType || item.ürünTürü || '').trim().toLocaleLowerCase('tr-TR');
+        const name = String(view.urunAciklama === '-' ? '' : view.urunAciklama).trim().toLocaleLowerCase('tr-TR');
         const byName = list.filter(p => String(p.ürün || p.name || '').trim().toLocaleLowerCase('tr-TR') === name);
         if (byName.length === 1) product = byName[0];
       }
       if (!product) { alert(`${target.toUpperCase()} deposunda bu ürün tek ve kesin olarak bulunamadı; iade yapılmadı.`, 'error'); return; }
-      try {
-        stockChange = await window.runStockTransaction(target, product.id, qty);
-      } catch (e) {
-        alert(`Stok iadesi başarısız: ${e.message}`, 'error');
-        return;
-      }
     }
 
-    const updatedItem = { ...item, iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today };
-    if (await window.saveData('b3', window.data.b3.map(b => sameId(b) ? updatedItem : b)) === false) {
-      if (target && product) { try { await window.runStockTransaction(target, product.id, -qty); } catch (e) { console.error(e); } }
-      alert('İade kaydedilemedi; stok değişikliği geri alındı.', 'error');
+    // [WHY] (H3 · 3.4): stok iadesi, b3, assignments ve bağlı talep ayrı ayrı yazılıyordu; b3 başarısız olunca stok telafisi de
+    //        başarısız olabilirdi, assignments/talep güncellemesi başarısız olursa zimmet yarı kapalı kalırdı.
+    // [HOW]: Stok +adet (depoya iade varsa) + b3 + assignments + talep güncellemeleri TEK transaction: ya hepsi ya hiçbiri.
+    const closeFields = { iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today };
+    const writes = [{ op: 'update', col: 'b3', id: item.id, fields: closeFields }];
+    if ((window.data.assignments || []).some(sameId)) writes.push({ op: 'update', col: 'assignments', id: item.id, fields: closeFields });
+    // Talep, ona bağlı cihazların (3.9a: cihaz başına bir b3 kaydı) hepsi iade edilince kapanır.
+    const otherActiveUnits = item.requestId == null ? [] : (window.data.b3 || []).filter(b => String(b.requestId) === String(item.requestId)
+      && String(b.id) !== String(item.id) && !window.Schema.normalizeB3(b).iadeEdildi);
+    if (item.requestId != null && otherActiveUnits.length === 0 && (window.data.requests || []).some(r => String(r.id) === String(item.requestId))) {
+      writes.push({ op: 'update', col: 'requests', id: item.requestId, fields: { iadeEdildi: true, iadeEdildiTarihi: today } });
+    }
+    let stockChange = null;
+    try {
+      if (target) {
+        const res = await window.runStockOps({ stock: [{ col: target, id: product.id, delta: qty }], writes }, { forbiddenMessage: 'İade işlemi yalnızca sistem yöneticisi tarafından yapılabilir.' });
+        stockChange = res.stock[0];
+      } else {
+        await window.applyItemOps(writes);
+      }
+    } catch (e) {
+      alert(`İade kaydedilemedi; hiçbir değişiklik yapılmadı. ${e.message || ''}`, 'error');
       return;
-    }
-
-    const assignments = window.data.assignments || [];
-    if (assignments.some(sameId)) {
-      await window.saveData('assignments', assignments.map(a => sameId(a) ? { ...a, iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today } : a));
-    }
-    if (item.requestId != null) {
-      const reqs = window.data.requests || [];
-      if (reqs.some(r => String(r.id) === String(item.requestId))) {
-        await window.saveData('requests', reqs.map(r => String(r.id) === String(item.requestId) ? { ...r, iadeEdildi: true, iadeEdildiTarihi: today } : r));
-      }
     }
 
     this.renderTable();
@@ -851,133 +815,10 @@ window.inventoryManagementModule = {
   // 12. [G] CİHAZ GEÇMİŞİ MODALI
   // ──────────────────────────────────────────
 
-  /**
-   * [G] SN numarasına göre o cihazın tüm zimmet/iade geçmişini gösterir.
-   * B3, requests ve assignments koleksiyonlarını tarar.
-   */
-  showDeviceHistory: function (sn) {
-    if (!sn || sn === '-') {
-      if (typeof showAppAlert === 'function') showAppAlert('Bu cihaz için seri no kaydı bulunamadı.', 'warning');
-      return;
-    }
-
-    const snNorm = sn.trim().toUpperCase();
-
-    // Tüm kaynakları tara
-    const events = [];
-
-    // 1. assignments koleksiyonu (en güvenilir)
-    (window.data?.assignments || []).forEach(a => {
-      if ((a.sn || '').trim().toUpperCase() === snNorm) {
-        events.push({
-          tarih: a.tarih || '-',
-          tip: a.iadeEdildi ? '✅ İade Edildi' : '📌 Zimmetlendi',
-          personel: a.personel || '-',
-          ürün: a.ürün || '-',
-          not: a.not || '-',
-          kaynak: 'assignments',
-          ts: a.id || 0
-        });
-      }
-    });
-
-    // 2. B3 çıkış logları
-    (window.data?.b3 || []).forEach(b => {
-      if ((b.sn || '').trim().toUpperCase() === snNorm) {
-        events.push({
-          tarih: b.date || b.tarih || '-',
-          tip: b.iadeEdildi ? '✅ İade Edildi' : '📌 Zimmetlendi',
-          personel: b.alanKisi || b.person || b.personel || '-',
-          ürün: b.productType || b.ürün || '-',
-          not: b.note || b.not || '-',
-          kaynak: 'b3',
-          ts: b.id || 0
-        });
-      }
-    });
-
-    // 3. Talepler (onaylananlar)
-    (window.data?.requests || []).forEach(r => {
-      if ((r.sn || '').trim().toUpperCase() === snNorm) {
-        events.push({
-          tarih: r.tarih || '-',
-          tip: r.iadeEdildi ? '✅ İade Edildi' : '📋 Talep Onayı',
-          personel: r.personel || '-',
-          ürün: r.ürün || '-',
-          not: r.not || '-',
-          kaynak: 'talep',
-          ts: r.id || 0
-        });
-      }
-    });
-
-    // Tarihe göre eskiden yeniye sırala
-    events.sort((a, b) => a.ts - b.ts);
-
-    // Mevcut modal varsa temizle
-    let modal = document.getElementById('deviceHistoryModal');
-    if (!modal) {
-      modal = document.createElement('div');
-      modal.id = 'deviceHistoryModal';
-      modal.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.7); backdrop-filter:blur(8px); z-index:10600; display:flex; align-items:center; justify-content:center;';
-      document.body.appendChild(modal);
-    }
-
-    const eventRows = events.length === 0
-      ? `<tr><td colspan="5" style="text-align:center; padding:32px; color:var(--color-text-muted);"><i class="fas fa-search fa-2x" style="display:block; margin-bottom:12px; opacity:0.3;"></i>Bu seri numarasiyla eslesen kayit bulunamadi.</td></tr>`
-      : events.map((ev, i) => `
-          <tr style="border-bottom:1px solid var(--color-border);">
-            <td style="padding:10px 14px; font-size:12px; color:var(--color-text-muted); white-space:nowrap;">${i + 1}. ${escapeHtml(ev.tarih)}</td>
-            <td style="padding:10px 14px;"><span style="font-size:12px; font-weight:700;">${escapeHtml(ev.tip)}</span></td>
-            <td style="padding:10px 14px; font-weight:600; color:var(--color-text);">${escapeHtml(ev.personel)}</td>
-            <td style="padding:10px 14px; color:var(--color-text-muted); font-size:12px;">${escapeHtml(ev.ürün)}</td>
-            <td style="padding:10px 14px; color:var(--color-text-muted); font-size:11px;">${escapeHtml(ev.not)}</td>
-          </tr>
-        `).join('');
-
-    modal.innerHTML = `
-      <div style="background:var(--color-surface,#fff); border:1px solid var(--color-border); border-radius:20px; width:780px; max-width:96vw; max-height:88vh; overflow-y:auto; box-shadow:0 24px 64px rgba(0,0,0,0.4);">
-        <div style="padding:20px 24px; border-bottom:1px solid var(--color-border); display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; background:var(--color-surface,#fff); z-index:1; border-radius:20px 20px 0 0;">
-          <div>
-            <h4 style="margin:0; font-weight:800; font-size:1.15rem; color:var(--color-text);">
-              <i class="fas fa-history" style="color:var(--color-primary); margin-right:8px;"></i>Cihaz Zimmet Gecmisi
-            </h4>
-            <div style="margin-top:4px; display:flex; align-items:center; gap:8px;">
-              <span style="font-size:13px; color:var(--color-text-muted);">Seri No:</span>
-              <code style="background:var(--color-surface-alt,#f3f4f6); padding:3px 10px; border-radius:6px; font-size:13px; font-weight:700; color:var(--color-primary); letter-spacing:0.5px;">${escapeHtml(sn)}</code>
-              <span style="background:#dbeafe; color:#1e40af; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700;">${events.length} Kayit</span>
-            </div>
-          </div>
-          <button onclick="document.getElementById('deviceHistoryModal').remove()"
-            style="background:none; border:none; font-size:22px; cursor:pointer; color:var(--color-text-muted); width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center;">&times;</button>
-        </div>
-        <div style="padding:20px 24px;">
-          ${ events.length > 0 ? `
-          <div style="margin-bottom:16px; padding:12px 16px; background:#f0fdf4; border:1px solid #86efac; border-radius:10px; display:flex; align-items:center; gap:8px;">
-            <i class="fas fa-info-circle" style="color:#16a34a;"></i>
-            <span style="font-size:13px; color:#166534;">Bu cihaz <b>${events.length}</b> kez islem gormustür. Kronolojik sirayla listelenmektedir.</span>
-          </div>` : '' }
-          <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; font-size:13px;">
-              <thead>
-                <tr style="background:var(--color-surface-alt,#f8fafc); border-bottom:2px solid var(--color-border);">
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Tarih</th>
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Durum</th>
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Personel</th>
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Urun</th>
-                  <th style="padding:10px 14px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px;">Not</th>
-                </tr>
-              </thead>
-              <tbody>${eventRows}</tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `;
-
-    modal.addEventListener('click', function (e) {
-      if (e.target === modal) modal.remove();
-    }, { once: true });
+  // [HOW] (3.9c): Birleşik cihaz geçmişi (zimmet, iade, çıkış, servis/sevk ve dönüşler) iki sayfada ortak pencereden gösterilir;
+  //        kimlik Seri No veya Envanter No olabilir.
+  showDeviceHistory: function (identity) {
+    window.DeviceIds.showHistory(identity);
   },
 
   // 13. HIZLI EKLEME KISA YOLLARI [E][F]
@@ -1001,10 +842,10 @@ window.inventoryManagementModule = {
           const personeller = window.data?.personel || [];
           const current = select.value;
           select.innerHTML = '<option value="">-- Personel Seciniz --</option>' +
-            personeller.map(p => `<option value="${escapeHtml(p.name || p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
+            personeller.map(p => `<option value="${escapeHtml(p.id ?? p.name ?? p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
           if (personeller.length > 0) {
             const last = personeller[personeller.length - 1];
-            select.value = last.name || last.adSoyad || current;
+            select.value = String(last.id ?? last.name ?? last.adSoyad ?? current);
           }
         }, 300);
       }

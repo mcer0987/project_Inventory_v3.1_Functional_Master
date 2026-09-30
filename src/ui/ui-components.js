@@ -61,20 +61,27 @@ export const UIComponents = {
     // [HOW]: window.data[repo][index] üzerinden demirbaş durumunu okur,
     //        UI'daki checkbox ile senkronize eder.
     // =========================================================================
-    selectProduct(name, type, shelf, qty, repo, index) {
+    // [WHY]/[HOW] (DATA-06): Seçim artık ürün id'sini taşır; çıkış, gönderim anında indeksle değil id ile çözer.
+    //        Eski çağrılar (id verilmeden, 6. argüman indeks) için ürün seçim anında indeksle bulunup id'si saklanır.
+    selectProduct(name, type, shelf, qty, repo, index, id = null) {
         const div = document.getElementById('selectedProduct');
         if (!div) return;
+
+        const repoItems = (window.data && window.data[repo]) || [];
+        const item = id != null && id !== ''
+            ? repoItems.find(x => x && String(x.id) === String(id)) || null
+            : (repoItems[index] || null);
 
         div.dataset.name  = name;
         div.dataset.type  = type;
         div.dataset.shelf = shelf;
         div.dataset.qty   = qty;
         div.dataset.repo  = repo;
-        div.dataset.index = index;
+        div.dataset.id    = item ? item.id : '';
+        delete div.dataset.index;
 
-        // Demirbaş kontrolü (window.data okuma — read-only)
-        const item       = (window.data && window.data[repo]) ? window.data[repo][index] : null;
-        const isDemirbas = item ? (item.isDemirbas === true || item.isDemirbas === 'true') : false;
+        // Demirbaş kontrolü tek kuraldan (Schema.isDemirbas · 3.6); demirbaşta kimlik satırları açılır (3.9a).
+        const isDemirbas = item ? window.Schema.isDemirbas(item) : false;
         div.dataset.isDemirbas = isDemirbas;
 
         const checkEl = document.getElementById('isDemirbas');
@@ -92,6 +99,7 @@ export const UIComponents = {
         if (qtyEl && Number(qty) > 0) qtyEl.max = String(qty);
         const list = document.getElementById('productList');
         if (list) list.innerHTML = '';
+        if (window.DeviceIds) window.DeviceIds.syncExitForm();
     },
 
     // =========================================================================
@@ -120,7 +128,8 @@ export const UIComponents = {
     // [HOW]: mode='add' → formu sıfırlar. mode='edit' → window.data'dan
     //        item'ı bulur, form alanlarını doldurur.
     // =========================================================================
-    openProductModal(mode, indexOrId = null, depoParam = null, useId = false) {
+    // Düzenleme: indexOrId artık her zaman ürün id'sidir (DATA-06). useId parametresi geriye uyumluluk için duruyor.
+    openProductModal(mode, indexOrId = null, depoParam = null, useId = true) {
         if (!window.checkIsAdmin()) {
             if (typeof showAppAlert === 'function') showAppAlert('Bu işlem için yönetici yetkisi gereklidir!', 'error');
             return;
@@ -137,10 +146,11 @@ export const UIComponents = {
         let item;
 
         if (mode === 'edit') {
-            item = useId
-                ? rawData.find(x => x.id === indexOrId)
-                : rawData[indexOrId];
-            if (!item) return;
+            item = (rawData || []).find(x => x && String(x.id) === String(indexOrId));
+            if (!item) {
+                if (typeof showAppAlert === 'function') showAppAlert('Ürün bulunamadı; liste güncellenmiş olabilir.', 'error');
+                return;
+            }
         }
 
         // Konum dropdown'larını doldur
@@ -232,7 +242,7 @@ export const UIComponents = {
                 checkbox.checked = item.isDemirbas === true || item.isDemirbas === 'true';
             }
 
-            form.dataset.editIndex = indexOrId;
+            delete form.dataset.editIndex;
             form.dataset.editRepo  = activeTab;
             form.dataset.editId    = item.id ?? '';
 
@@ -251,16 +261,17 @@ export const UIComponents = {
     // [HOW]: INV_CONFIG.transferTargets üzerinden hedef seçeneklerini oluşturur,
     //        gizli form alanlarını kaynakla doldurur.
     // =========================================================================
-    openTransferModal(repoName, index) {
+    openTransferModal(repoName, id) {
         if (typeof checkIsAdmin === 'function' && !checkIsAdmin()) {
             if (typeof showAppAlert === 'function') showAppAlert('Ürün Sevk/Transfer yetkisi sadece Admin\'lere tanımlanmıştır!', 'error');
             return;
         }
 
-        const item         = window.data[repoName][index];
+        const item         = (window.data[repoName] || []).find(x => x && String(x.id) === String(id));
         const modal        = document.getElementById('transferModal');
         const targetSelect = document.getElementById('transTarget');
         if (!modal || !targetSelect) return;
+        if (!item) { if (typeof showAppAlert === 'function') showAppAlert('Ürün bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
 
         // Hedef listesini doldur (kendi deposunu hariç tut)
         targetSelect.innerHTML = '<option value="">Hedef Seçiniz...</option>';
@@ -284,10 +295,21 @@ export const UIComponents = {
 
         if (nameEl)  nameEl.innerText     = item.ürün || item.name;
         if (locEl)   locEl.innerText      = `${repoName.toUpperCase()} / ${item.raf || item.shelf}`;
-        if (idxEl)   idxEl.value          = index;
+        if (idxEl)   idxEl.value          = item.id; // #transIndex artık ürün id'sini taşır
         if (srcEl)   srcEl.value          = repoName;
         if (noteEl)  noteEl.value         = '';
         if (intelEl) intelEl.style.display = 'none';
+
+        // 3.9: sevk adedi (demirbaşta varsayılan 1, sarfta tüm stok — eskiden satırın tamamı giderdi) ve önceki servis kayıtları
+        const dispatchEl = document.getElementById('transDispatchOptions');
+        const qtyEl = document.getElementById('transQty');
+        const stockQty = parseInt(item.adet ?? item.qty ?? 0, 10) || 0;
+        if (dispatchEl) dispatchEl.style.display = 'none';
+        if (qtyEl) { qtyEl.max = String(Math.max(stockQty, 1)); qtyEl.value = window.Schema.isDemirbas(item) ? '1' : String(Math.max(stockQty, 1)); }
+        if (window.DeviceIds) {
+            window.DeviceIds.hide(document.getElementById('transDeviceIds'));
+            window.DeviceIds.renderServiceHint(document.getElementById('transServiceHistory'), { productId: item.id });
+        }
 
         modal.style.display = 'block';
     },
@@ -313,6 +335,33 @@ export const UIComponents = {
         } else {
             internalDiv.style.display = 'none';
         }
+        const dispatchEl = document.getElementById('transDispatchOptions');
+        if (dispatchEl) dispatchEl.style.display = (targetData.type === 'external' || targetData.type === 'service') ? 'block' : 'none';
+        this.syncTransferDevices();
+    },
+
+    // Servis/dış sevkte demirbaş: adet kadar cihaz kimliği; girilen kimliklerin önceki servis kayıtları listelenir (3.9a/c).
+    syncTransferDevices() {
+        const box = document.getElementById('transDeviceIds');
+        const hint = document.getElementById('transServiceHistory');
+        const item = (window.data[document.getElementById('transSourceRepo')?.value] || [])
+            .find(x => x && String(x.id) === String(document.getElementById('transIndex')?.value));
+        let target = {};
+        try { target = JSON.parse(document.getElementById('transTarget')?.value || '{}'); } catch (e) { target = {}; }
+        const dispatch = target.type === 'external' || target.type === 'service';
+        if (!box || !window.DeviceIds) return;
+        if (item && dispatch && window.Schema.isDemirbas(item)) {
+            window.DeviceIds.render(box, Number(document.getElementById('transQty')?.value) || 1, {
+                // Faz 3.5: her tuşta değil, yazma durunca (200 ms) — uzun kimlik listelerinde tarama tuş başına tekrarlanmaz
+                onInput: ids => {
+                    clearTimeout(this._serviceHintTimer);
+                    this._serviceHintTimer = setTimeout(() => window.DeviceIds.renderServiceHint(hint, { productId: item.id, ids }), 200);
+                },
+            });
+        } else {
+            window.DeviceIds.hide(box);
+        }
+        if (item) window.DeviceIds.renderServiceHint(hint, { productId: item.id, ids: window.DeviceIds.read(box) });
     },
 
     // =========================================================================
@@ -324,9 +373,13 @@ export const UIComponents = {
     //        Bu, view-layer değil data mutation; ancak script.js'den taşındı
     //        ve inventory-logic.js'e bağlıdır (window.saveData bridge).
     // =========================================================================
+    // [WHY]: Sevk, ürünü dizi indeksiyle buluyor (DATA-06), hedefe ekleme + kaynaktan silmeyi bellekte yapıp tüm
+    //        veritabanını yazıyordu (DATA-01) ve başarı mesajını yazmadan önce gösteriyordu; yazma yarım kalırsa ürün
+    //        ya iki yerde ya da hiçbir yerde kalabilirdi.
+    // [HOW]: Ürün id ile çözülür; "hedefe ekle + kaynaktan sil" tek atomik batch (applyItemOps). Mesaj yazmadan sonra.
     async confirmTransfer() {
         const sourceRepo = document.getElementById('transSourceRepo')?.value;
-        const index      = parseInt(document.getElementById('transIndex')?.value);
+        const productId  = document.getElementById('transIndex')?.value;
         let   targetData;
 
         try {
@@ -338,50 +391,81 @@ export const UIComponents = {
 
         const transNoteInput = document.getElementById('transNote');
         const sevkNotu       = transNoteInput ? transNoteInput.value.trim() : '';
-        const originalItem   = window.data[sourceRepo] && window.data[sourceRepo][index];
+        const originalItem   = (window.data[sourceRepo] || []).find(x => x && String(x.id) === String(productId));
 
         if (!originalItem) {
-            if (typeof showAppAlert === 'function') showAppAlert('Ürün bulunamadı!', 'error');
+            if (typeof showAppAlert === 'function') showAppAlert('Ürün bulunamadı; liste güncellenmiş olabilir.', 'error');
             return;
         }
 
+        let ops, message, messageType;
         if (targetData.type === 'internal') {
             const newItem    = { ...originalItem };
             newItem.sütun    = document.getElementById('transNewCol')?.value;
             newItem.raf      = document.getElementById('transNewShelf')?.value;
             newItem.açıklama = sevkNotu ? sevkNotu : (originalItem.açıklama || '');
-
-            const targetRepoKey = targetData.key;
-            if (!window.data[targetRepoKey]) window.data[targetRepoKey] = [];
-            window.data[targetRepoKey].push(newItem);
-            window.data[sourceRepo].splice(index, 1);
-
-            console.log(`${sourceRepo} → ${targetRepoKey} sevk edildi.`);
-            if (typeof showAppAlert === 'function') showAppAlert('Ürün Sevk/Transfer talebi sağlandı', 'success');
-
+            ops = [
+                { op: 'set', col: targetData.key, item: newItem },
+                { op: 'delete', col: sourceRepo, id: originalItem.id }
+            ];
+            message = 'Ürün Sevk/Transfer talebi sağlandı'; messageType = 'success';
         } else if (targetData.type === 'external' || targetData.type === 'service') {
-            const serviceEntry = {
-                id:            Date.now(),
-                originalData:  { ...originalItem },
+            // [WHY] (3.9): Sevk satırın TAMAMINI depodan siliyordu (37 adetlik satırdan 1 cihaz sevk edilince 37'si gidiyordu),
+            //        seri no sorulmuyordu ve servis kaydı dönüşte silindiği için cihazın servis geçmişi kalmıyordu.
+            // [HOW]: Yalnız seçilen adet düşülür; demirbaşta adet kadar kimlik zorunlu ve cihaz başına bir servis kaydı (adet 1).
+            //        Stok düşümü + servis kayıtları TEK transaction (runStockOps). Kayıt tarihli durum geçmişi (gecmis) taşır.
+            const qty = Number(document.getElementById('transQty')?.value);
+            const stockQty = parseInt(originalItem.adet ?? originalItem.qty ?? 0, 10) || 0;
+            if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Sevk adedi en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+            if (qty > stockQty) { showAppAlert(`Stokta ${stockQty} adet var; ${qty} adet sevk edilemez.`, 'warning'); return; }
+            const demirbas = window.Schema.isDemirbas(originalItem);
+            const chk = window.AssignmentService.checkDeviceIds({ demirbas, qty, ids: window.DeviceIds.read(document.getElementById('transDeviceIds')) });
+            if (!chk.ok) { showAppAlert(chk.errors[0], 'warning'); return; }
+            const now = typeof getTurkiyeSaati === 'function' ? getTurkiyeSaati() : new Date().toLocaleString('tr-TR');
+            const yapan = window.currentUser?.name || window.getActiveUser?.()?.name || 'Admin';
+            const units = demirbas ? chk.ids.map(d => ({ adet: 1, sn: d.sn, envanterNo: d.envanterNo })) : [{ adet: qty, sn: '-', envanterNo: '-' }];
+            const writes = units.map(u => ({ op: 'set', col: 'serviceRecords', item: {
+                id: window.makeId(),
+                originalData:  { ...originalItem, adet: u.adet },
+                productId:     originalItem.id,
                 urunAciklama:  originalItem.ürün || originalItem.name,
                 marka:         originalItem.marka || '',
-                sn:            originalItem.sn || '-',
+                sn:            u.sn,
+                envanterNo:    u.envanterNo,
+                adet:          u.adet,
                 kaynakDepo:    sourceRepo,
                 hedef:         targetData.name,
-                sevkTarihi:    typeof getTurkiyeSaati === 'function' ? getTurkiyeSaati() : new Date().toISOString(),
+                hedefTip:      targetData.type,
+                sevkTarihi:    now,
                 durum:         'Serviste / Yolda',
                 not:           sevkNotu,
-                isDemirbas:    originalItem.isDemirbas
-            };
-
-            if (!window.data.serviceRecords) window.data.serviceRecords = [];
-            window.data.serviceRecords.unshift(serviceEntry);
-            window.data[sourceRepo].splice(index, 1);
-
-            if (typeof showAppAlert === 'function') showAppAlert(`${targetData.name} birimine sevk edildi. Servis paneline işlendi.`, 'info');
+                isDemirbas:    demirbas,
+                kapandi:       false,
+                gecmis:        [{ ts: Date.now(), tarih: now, durum: 'Serviste / Yolda', not: sevkNotu, yapan }],
+            } }));
+            try {
+                await window.runStockOps({ stock: [{ col: sourceRepo, id: originalItem.id, delta: -qty }], writes },
+                    { forbiddenMessage: 'Sevk işlemi yalnızca sistem yöneticisi tarafından yapılabilir.' });
+            } catch (e) {
+                if (typeof showAppAlert === 'function') showAppAlert(`Sevk kaydedilemedi; ürün yerinde bırakıldı. ${e.message || ''}`, 'error');
+                return;
+            }
+            if (typeof showAppAlert === 'function') showAppAlert(`${qty} adet ${targetData.name} birimine sevk edildi (${units.length} servis kaydı). Servis paneline işlendi.`, 'info');
+            UIComponents.closeTransferModal();
+            if (typeof window.renderTable === 'function') window.renderTable(sourceRepo);
+            if (typeof window.renderPurchaseModule === 'function') window.renderPurchaseModule();
+            return;
+        } else {
+            if (typeof showAppAlert === 'function') showAppAlert('Geçersiz hedef.', 'error');
+            return;
         }
 
-        await window.saveData(window.data);
+        if (!(await window.writeOk(window.applyItemOps(ops)))) {
+            if (typeof showAppAlert === 'function') showAppAlert('Sevk kaydedilemedi; ürün yerinde bırakıldı.', 'error');
+            return;
+        }
+        if (typeof showAppAlert === 'function') showAppAlert(message, messageType);
+
         UIComponents.closeTransferModal();
         if (typeof window.renderTable === 'function') window.renderTable(sourceRepo);
 
@@ -407,15 +491,22 @@ export const UIComponents = {
     // [HOW]: İlgili item'ı window.data'dan okur, admin yetkisi ve demirbaş
     //        durumunu kontrol eder. exitForm.onsubmit'i saveExit'e bağlar.
     // =========================================================================
-    openExitModal(repoName, index) {
+    // Satırdan açılırsa ikinci argüman ürün id'sidir (DATA-06).
+    openExitModal(repoName, productId) {
+        // Karar 3: Faz 4 yetki matrisine kadar stok çıkışı yalnız yönetici (Firestore kuralları da personele b1/b2/b3 yazdırmaz);
+        // personel formu doldurup sonra reddedilmek yerine baştan net mesaj görür.
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            if (typeof showAppAlert === 'function') showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE || 'Çıkış işlemi yalnızca sistem yöneticisi tarafından yapılabilir.', 'error');
+            return;
+        }
         window.currentExitRepo  = repoName || (document.querySelector('.tab-content.active')?.id || 'b1');
-        window.currentExitIndex = index;
+        window.currentExitIndex = null;
+        const hasRow = productId !== undefined && productId !== null && productId !== '';
+        const findRow = () => (window.data[window.currentExitRepo] || []).find(x => x && String(x.id) === String(productId)) || null;
 
         // Demirbaş Koruması
-        if (index !== undefined && index !== null && index !== '') {
-            const item = window.data[window.currentExitRepo]
-                ? window.data[window.currentExitRepo][index]
-                : null;
+        if (hasRow) {
+            const item = findRow();
 
             if (item && (item.isDemirbas === true || item.isDemirbas === 'true')) {
                 const isAdmin = (typeof window.checkIsAdmin === 'function' && window.checkIsAdmin()) ||
@@ -446,12 +537,12 @@ export const UIComponents = {
         const shelfEl = document.getElementById('exitShelfNo');
         if (shelfEl) shelfEl.value = '';
         document.getElementById('exitQty')?.removeAttribute('max');
+        if (window.DeviceIds) window.DeviceIds.syncExitForm();   // önceki demirbaş seçiminin kimlik satırları temizlenir
         const rowRepo = window.currentExitRepo;
-        const rowItem = (rowRepo === 'b1' || rowRepo === 'b2') && index !== undefined && index !== null && index !== ''
-            ? (window.data[rowRepo] || [])[index] : null;
+        const rowItem = (rowRepo === 'b1' || rowRepo === 'b2') && hasRow ? findRow() : null;
         if (rowItem) {
             this.selectProduct(rowItem.ürün || rowItem.name, rowItem.tür || rowItem.type || rowItem.marka,
-                rowItem.raf || rowItem.shelf, rowItem.adet ?? rowItem.qty ?? 0, rowRepo, index);
+                rowItem.raf || rowItem.shelf, rowItem.adet ?? rowItem.qty ?? 0, rowRepo, null, rowItem.id);
         }
 
         // Aktif kullanıcı adını forma yaz
@@ -565,8 +656,8 @@ export const UIComponents = {
             const tr = e.target.closest('tr.selectable-row');
             if (!tr) return;
 
-            const { depo, index, id, name } = tr.dataset;
-            const key = `${depo}-${index}`;
+            const { depo, id, name } = tr.dataset;
+            const key = `${depo}|${id}`; // DATA-06: seçim anahtarı ürün id'si (indeks snapshot'ta kayar)
 
             if (tr.classList.contains('selected-row')) {
                 // Toggle off
@@ -576,14 +667,14 @@ export const UIComponents = {
                 // Toggle on
                 tr.classList.add('selected-row');
                 window._selectedRows.add(key);
-                tr._fabData = { depo, index: parseInt(index), id, name };
+                tr._fabData = { depo, id, name };
             }
 
             UIComponents.updateFloatingBar();
 
             // Mobil: tek satır seçiminde Bottom Sheet aç
             if (window.innerWidth <= 768 && tr.classList.contains('selected-row')) {
-                UIComponents.showMobileBottomSheet(tr._fabData || { depo, index: parseInt(index), id, name });
+                UIComponents.showMobileBottomSheet(tr._fabData || { depo, id, name });
             }
         });
     },
@@ -621,43 +712,51 @@ export const UIComponents = {
         const selectedEls = document.querySelectorAll('.selectable-row.selected-row');
         const items = Array.from(selectedEls).map(el => ({
             depo:  el.dataset.depo,
-            index: parseInt(el.dataset.index),
             id:    el.dataset.id,
             name:  el.dataset.name
         }));
         const first = items[0];
+        // INV-05 kalıntısı: tablo yeniden çizilince seçili satırlar DOM'dan gider ama _selectedRows seti kalır;
+        // FAB o durumda var olmayan bir satırı okuyup hata veriyordu. Görünür seçim yoksa seçim temizlenir.
+        if (!first) {
+            window._selectedRows.clear();
+            fab.classList.remove('fab-visible');
+            if (activeUab) activeUab.classList.remove('uab-bulk-visible');
+            return;
+        }
 
         let buttonsHtml = '';
 
         if (count === 1) {
             // TEKİL MOD: Tüm işlemler
-            const item      = (window.data[first.depo] || [])[first.index] || {};
+            const item      = (window.data[first.depo] || []).find(x => x && String(x.id) === String(first.id)) || {};
             const isWatched = item.isWatched;
+            const d = jsArg(first.depo), i = jsArg(first.id);
             buttonsHtml = `
-                <button class="fab-btn fab-btn-inc" onclick="updateStock('${first.depo}', ${first.index}, 1)">
+                <button class="fab-btn fab-btn-inc" onclick="updateStock(${d}, ${i}, 1)">
                     <i class="fas fa-plus"></i> Artır
                 </button>
-                <button class="fab-btn fab-btn-dec" onclick="updateStock('${first.depo}', ${first.index}, -1)">
+                <button class="fab-btn fab-btn-dec" onclick="updateStock(${d}, ${i}, -1)">
                     <i class="fas fa-minus"></i> Azalt
                 </button>
-                <button class="fab-btn fab-btn-edit" onclick="openProductModal('edit', ${first.index}, '${first.depo}'); window.clearRowSelection();">
+                <button class="fab-btn fab-btn-edit" onclick="openProductModal('edit', ${i}, ${d}); window.clearRowSelection();">
                     <i class="fas fa-pen"></i> Düzenle
                 </button>
-                <button class="fab-btn fab-btn-transfer" onclick="openTransferModal('${first.depo}', ${first.index}); window.clearRowSelection();">
+                <button class="fab-btn fab-btn-transfer" onclick="openTransferModal(${d}, ${i}); window.clearRowSelection();">
                     <i class="fas fa-shipping-fast"></i> Sevk
                 </button>
-                <button class="fab-btn fab-btn-watch" onclick="toggleWatch('${first.depo}', ${first.index})">
+                <button class="fab-btn fab-btn-watch" onclick="toggleWatch(${d}, ${i})">
                     <i class="fas ${isWatched ? 'fa-eye-slash' : 'fa-eye'}"></i> ${isWatched ? 'Bırak' : 'Takip'}
                 </button>
-                <button class="fab-btn fab-btn-del" onclick="deleteItem('${first.depo}', ${first.index}); window.clearRowSelection();">
+                <button class="fab-btn fab-btn-del" onclick="deleteItem(${d}, ${i}); window.clearRowSelection();">
                     <i class="fas fa-trash-alt"></i> Sil
                 </button>`;
         } else {
             // ÇOKLU MOD: Sadece toplu işlemler — Contextual Intelligence
-            const depo    = first.depo;
-            const indices = items.map(i => i.index);
+            const depo = first.depo;
+            const ids  = items.map(x => x.id);
             buttonsHtml = `
-                <button class="fab-btn fab-btn-bulk-del" onclick="window._bulkDeleteSelected('${depo}', ${JSON.stringify(indices)})">
+                <button class="fab-btn fab-btn-bulk-del" onclick="window._bulkDeleteSelected(${jsArg(depo)}, ${jsArg(ids)})">
                     <i class="fas fa-trash-alt"></i> Toplu Sil (${count})
                 </button>
                 <button class="fab-btn fab-btn-bulk-transfer" onclick="showAppAlert('Toplu Sevk özelliği yakında!', 'info')">
@@ -678,29 +777,30 @@ export const UIComponents = {
     // =========================================================================
     showMobileBottomSheet(itemData) {
         if (!itemData) return;
-        const item      = (window.data[itemData.depo] || [])[itemData.index] || {};
+        const item      = (window.data[itemData.depo] || []).find(x => x && String(x.id) === String(itemData.id)) || {};
         const isWatched = item.isWatched;
+        const d = jsArg(itemData.depo), i = jsArg(itemData.id);
         const bsName    = _dom.bsName();
         const bsBtns    = _dom.bsBtns();
 
         if (bsName) bsName.textContent = itemData.name || 'Ürün';
         if (bsBtns) bsBtns.innerHTML = `
-            <button class="bs-action-btn bs-btn-inc" onclick="updateStock('${itemData.depo}', ${itemData.index}, 1); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-inc" onclick="updateStock(${d}, ${i}, 1); window.closeMobileBottomSheet();">
                 <i class="fas fa-plus"></i> Artır
             </button>
-            <button class="bs-action-btn bs-btn-dec" onclick="updateStock('${itemData.depo}', ${itemData.index}, -1); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-dec" onclick="updateStock(${d}, ${i}, -1); window.closeMobileBottomSheet();">
                 <i class="fas fa-minus"></i> Azalt
             </button>
-            <button class="bs-action-btn bs-btn-edit" onclick="openProductModal('edit', ${itemData.index}, '${itemData.depo}'); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-edit" onclick="openProductModal('edit', ${i}, ${d}); window.closeMobileBottomSheet();">
                 <i class="fas fa-pen"></i> Düzenle
             </button>
-            <button class="bs-action-btn bs-btn-transfer" onclick="openTransferModal('${itemData.depo}', ${itemData.index}); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-transfer" onclick="openTransferModal(${d}, ${i}); window.closeMobileBottomSheet();">
                 <i class="fas fa-shipping-fast"></i> Sevk
             </button>
-            <button class="bs-action-btn bs-btn-watch" onclick="toggleWatch('${itemData.depo}', ${itemData.index}); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-watch" onclick="toggleWatch(${d}, ${i}); window.closeMobileBottomSheet();">
                 <i class="fas ${isWatched ? 'fa-eye-slash' : 'fa-eye'}"></i> ${isWatched ? 'Takibi Bırak' : 'Takibe Al'}
             </button>
-            <button class="bs-action-btn bs-btn-del" onclick="deleteItem('${itemData.depo}', ${itemData.index}); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-del" onclick="deleteItem(${d}, ${i}); window.closeMobileBottomSheet();">
                 <i class="fas fa-trash-alt"></i> Sil
             </button>`;
 
@@ -742,28 +842,9 @@ export const UIComponents = {
     // [HOW]: Indices yüksekten aşağıya sıralanır (splice index kayması önlenir).
     //        showCustomConfirm onayı beklenir.
     // =========================================================================
-    async _bulkDeleteSelected(depo, indices) {
-        if (typeof checkIsAdmin === 'function' && !checkIsAdmin()) {
-            if (typeof showAppAlert === 'function') showAppAlert('Bu işlem için yetkiniz yok!', 'error');
-            return;
-        }
-        const onay = typeof showCustomConfirm === 'function'
-            ? await showCustomConfirm('Toplu Silme', `${indices.length} kayıt kalıcı olarak silinecek. Onaylıyor musunuz?`)
-            : confirm(`${indices.length} kayıt silinecek. Emin misiniz?`);
-
-        if (!onay) return;
-
-        // Yüksekten düşüğe sırala → splice index kaymasını önle
-        indices.sort((a, b) => b - a).forEach(idx => {
-            if (window.data[depo] && window.data[depo][idx]) {
-                window.data[depo].splice(idx, 1);
-            }
-        });
-
-        await window.saveData(window.data);
-        UIComponents.clearRowSelection();
-        if (typeof window.renderTable === 'function') window.renderTable(depo);
-        if (typeof showAppAlert === 'function') showAppAlert(`${indices.length} kayıt başarıyla silindi.`, 'success');
+    // Tek uygulama inventory-logic'te (id tabanlı, bulkRemove). Bu köprü yalnız ona yönlendirir; iki kopya ayrışmasın.
+    async _bulkDeleteSelected(depo, ids) {
+        return window.AppModules.Inventory._bulkDeleteSelected(depo, ids);
     }
 };
 
@@ -796,6 +877,7 @@ window.openTransferModal        = UIComponents.openTransferModal.bind(UIComponen
 window.handleTransferTargetChange = UIComponents.handleTransferTargetChange.bind(UIComponents);
 window.confirmTransfer          = UIComponents.confirmTransfer.bind(UIComponents);
 window.closeTransferModal       = UIComponents.closeTransferModal.bind(UIComponents);
+window.syncTransferDevices      = UIComponents.syncTransferDevices.bind(UIComponents);
 window.openExitModal            = UIComponents.openExitModal.bind(UIComponents);
 window.closeExitModal           = UIComponents.closeExitModal.bind(UIComponents);
 window.openRequestModal         = UIComponents.openRequestModal.bind(UIComponents);

@@ -51,10 +51,10 @@ function _buildRowInnerHtml(depo, item, realIndex, qtyDisplay) {
     if (depo === 'b1' || depo === 'b2') {
         const itemType = item.tür || item.type || item.prodType || '-';
         return `
-            <td><input type="checkbox" class="row-select" data-index="${realIndex}"></td>
+            <td><input type="checkbox" class="row-select" data-index="${realIndex}" data-id="${escapeHtml(item.id ?? '')}"></td>
             <td>${item.sütun || '-'}</td>
             <td>${item.raf || '-'}</td>
-            <td>${item.ürün || '-'}</td>
+            <td>${item.ürün || '-'}${item.isWatched ? ' <i class="fas fa-eye" title="Takipte" style="color:var(--color-info);margin-left:4px;"></i>' : ''}</td>
             <td>${item.marka || '-'}</td>
             <td class="js-qty-cell">${qtyDisplay}</td>
             <td class="js-status-cell">${item.durumu || '-'}</td>
@@ -81,7 +81,7 @@ function _buildRowHtml(depo, item, realIndex) {
     const safeName = (item.ürün || item.name || '-').replace(/"/g, '&quot;');
 
     return `<tr class="${rowClass} selectable-row"
-                data-id="${item.id ?? ''}"
+                data-id="${escapeHtml(item.id ?? '')}"
                 data-depo="${depo}"
                 data-index="${realIndex}"
                 data-name="${safeName}"
@@ -126,8 +126,8 @@ function _setupCardViewSelection(container) {
         const item = e.target.closest('.selectable-row[data-index]');
         if (!item) return;
 
-        const { depo, index, id, name } = item.dataset;
-        const key = `${depo}-${index}`;
+        const { depo, id, name } = item.dataset;
+        const key = `${depo}|${id}`; // DATA-06: seçim anahtarı ürün id'si
 
         if (item.classList.contains('selected-row')) {
             item.classList.remove('selected-row');
@@ -135,7 +135,7 @@ function _setupCardViewSelection(container) {
         } else {
             item.classList.add('selected-row');
             if (window._selectedRows) window._selectedRows.add(key);
-            item._fabData = { depo, index: parseInt(index), id, name };
+            item._fabData = { depo, id, name };
         }
 
         if (typeof window.updateFloatingBar === 'function') {
@@ -144,7 +144,7 @@ function _setupCardViewSelection(container) {
 
         if (window.innerWidth <= 768 && item.classList.contains('selected-row')) {
             if (typeof window.showMobileBottomSheet === 'function') {
-                window.showMobileBottomSheet(item._fabData || { depo, index: parseInt(index), id, name });
+                window.showMobileBottomSheet(item._fabData || { depo, id, name });
             }
         }
     });
@@ -339,7 +339,7 @@ export const renderCardSearchResults = function (depo, results) {
 
         return `
             <div class="product-card-item ${isPassive ? 'card-item-passive' : ''} selectable-row"
-                 data-id="${item.id ?? ''}"
+                 data-id="${escapeHtml(item.id ?? '')}"
                  data-depo="${depo}"
                  data-index="${realIndex}"
                  data-name="${safeName}"
@@ -347,7 +347,7 @@ export const renderCardSearchResults = function (depo, results) {
                  tabindex="0">
                 <div class="pci-left">
                     <input type="checkbox" class="row-select card-checkbox"
-                           data-index="${realIndex}"
+                           data-index="${realIndex}" data-id="${escapeHtml(item.id ?? '')}"
                            onclick="event.stopPropagation()">
                     <div class="pci-info">
                         <span class="pci-name">${item.ürün || item.name || '-'}</span>
@@ -432,7 +432,7 @@ export const renderMobileCards = function (depo) {
 
             return `
                 <div class="product-card-item ${isPassive ? 'card-item-passive' : ''} selectable-row"
-                     data-id="${item.id ?? ''}"
+                     data-id="${escapeHtml(item.id ?? '')}"
                      data-depo="${safeDepo}"
                      data-index="${item._realIndex}"
                      data-name="${safeName}"
@@ -440,7 +440,7 @@ export const renderMobileCards = function (depo) {
                      tabindex="0">
                     <div class="pci-left">
                         <input type="checkbox" class="row-select card-checkbox"
-                               data-index="${item._realIndex}"
+                               data-index="${item._realIndex}" data-id="${escapeHtml(item.id ?? '')}"
                                onclick="event.stopPropagation()">
                         <div class="pci-info">
                             <span class="pci-name">${item.ürün || item.name || '-'}</span>
