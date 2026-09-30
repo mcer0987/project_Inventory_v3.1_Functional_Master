@@ -66,7 +66,7 @@ Bilinçli sonuç: ≤10 kayıtlı bir koleksiyonun 5'e kadarı tek çağrıda si
 Tam suite: **34/34 senaryo, pageerror 0** (4 yeni, 3 uyarlandı) · smoke: **index + admin: pageerror 0, "Veri Çekildi" 13/13** (admin tek console.error = favicon 404; `scratch/baseline/2026-09-30T12-26-52_p3-5-hotfix`) · `inventory_demo` test artığı: **0** `__flowtest__` kaydı; sahibinin demo kayıtları (b3 10, requests 3) değişmedi
 
 ## Merge hazırlığı
-- `master`'da bu branch'te olmayan commit yok; branch 38 commit önde; `git merge-tree` çakışmasız.
+- `master`'da bu branch'te olmayan commit yok; branch 34 commit önde (bu belge dahil 35); `git merge-tree` çakışmasız.
 - Önerilen komut (Faz 2 kapanışındaki düzenle):
   `git checkout master && git merge --no-ff refactor/phase-3-data-layer -m "feat(phase-3): data layer hardening (saveData v2, item API, atomic stock, b3 contract, assignment service, device identity, service history, 3.5 hotfixes)"`
 - Merge ve deploy sahibinin onayıyla yapılacak. Canlıda deploy sonrası: VIP → Şema Göçü (B3) sahibi tarafından (karar 4); yedek dosyası saklanmalı.
