@@ -1,5 +1,18 @@
 {
+  "scripts": {
+    "emu": "firebase emulators:start --only firestore,auth --project medipol-inventory-v3",
+    "emu:seed": "node scratch/emu-seed.mjs push",
+    "emu:pull": "node scratch/emu-seed.mjs pull",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-rules-test \"node --test --test-reporter=spec tests/rules/\"",
+    "smoke": "node scratch/smoke-test.js",
+    "flow": "node scratch/flow-tests.js"
+  },
   "dependencies": {
     "puppeteer": "^25.2.1"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase": "^12.19.0",
+    "firebase-tools": "^15.32.0"
   }
 }

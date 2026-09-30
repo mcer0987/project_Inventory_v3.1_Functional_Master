@@ -67,3 +67,6 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Faz 4 · J0: emülatör tohum kopyası (demo verisi, personel kodları içerir)
+scratch/emu-data/
