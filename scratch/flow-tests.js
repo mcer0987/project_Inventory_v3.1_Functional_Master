@@ -10,6 +10,10 @@ const puppeteer = require('puppeteer');
 const ROOT = path.resolve(__dirname, '..');
 const PORT = 5594;
 const MARKER = '__flowtest__';
+// Faz 4 · J0: --emu → uygulama yerel emülatöre bağlanır (?emu=1). Önce `npm run emu` + `npm run emu:seed`.
+const EMU = process.argv.includes('--emu');
+// Yalnız emülatör Auth'unda geçerli sahte admin kodu (scratch/emu-seed.mjs ile aynı; gerçek parola DEĞİLDİR).
+const EMU_ADMIN_CODE = 'emu01';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 function startServer() {
@@ -24,8 +28,9 @@ function startServer() {
 
 // Runs inside the page. Helpers are exposed on window.__ft.
 async function installHelpers(page) {
-    await page.evaluate(async (MARKER) => {
+    await page.evaluate(async (MARKER, EMU, EMU_ADMIN_CODE) => {
         if (window.COLLECTION_ROOT !== 'inventory_demo') throw new Error('ABORT: COLLECTION_ROOT=' + window.COLLECTION_ROOT);
+        if (EMU && !(window.AppEnv && window.AppEnv.EMULATOR)) throw new Error('ABORT: --emu verildi ama sayfa emülatöre bağlanmadı');
         const fs = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
         const col = name => fs.collection(window.fireDb, window.COLLECTION_ROOT, name, 'items');
         window.__ft = {
@@ -40,8 +45,19 @@ async function installHelpers(page) {
             },
             async waitFor(fn, ms = 8000) { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await this.sleep(250); } return false; },
             set(id, v) { const el = document.getElementById(id); if (!el) throw new Error('missing #' + id); el.value = v; el.dispatchEvent(new Event('change')); },
+            emulator: !!(window.AppEnv && window.AppEnv.EMULATOR),
+            // Gerçek Firebase admin oturumu — yalnız emülatörde (gerçek projede admin kimlik bilgisi betiklere girmez, §7.5).
+            async adminLogin() {
+                if (!this.emulator) throw new Error('adminLogin yalnız emülatör modunda');
+                if (!(await window.SecurityConfig.authenticate(EMU_ADMIN_CODE))) throw new Error('emülatör admin girişi başarısız (npm run emu:seed?)');
+                return this.waitFor(async () => window.isDbAdmin(), 8000);
+            },
+            async backToAnonymous() {
+                await window.SecurityConfig.logout();
+                return this.waitFor(async () => !!(window.userAuth && window.userAuth.isAnonymous), 8000);
+            },
         };
-    }, MARKER);
+    }, MARKER, EMU, EMU_ADMIN_CODE);
 }
 
 const SCENARIOS = {
@@ -2198,6 +2214,26 @@ const SCENARIOS = {
 
     // Faz 3.5 · giriş kodu otomatik odağı: etkileşim yoksa odaklanır; veri gelmeden önce kullanıcı sayfayla etkileştiyse
     // (tuş/tıklama) odak çalınmaz; senkron yeniden başlayınca (personel snapshot'ı tekrar gelir) odak ikinci kez çekilmez.
+    // Faz 4 · J0 — emülatör modunun kendisi: uygulama emülatörde, admin oturumu gerçek, kurallar uygulanıyor.
+    async j0Emulator(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft;
+            if (!ft.emulator) return { skipped: 'yalnız --emu ile' };
+            const out = { anonymousAtStart: !!window.userAuth?.isAnonymous, seededB1: (window.data.b1 || []).length };
+            const fs = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+            const ref = fs.doc(window.fireDb, window.COLLECTION_ROOT, 'b1', 'items', 'j0_' + Date.now());
+            const tryWrite = async () => { try { await fs.setDoc(ref, { id: ref.id, ürün: 'J0 ' + ft.MARKER }); return 'ALLOWED'; } catch (e) { return e.code; } };
+            out.anonB1Write = await tryWrite();
+            out.adminLogin = await ft.adminLogin();
+            out.isDbAdmin = window.isDbAdmin();
+            out.adminB1Write = await tryWrite();
+            out.adminB1Delete = await fs.deleteDoc(ref).then(() => 'ALLOWED', e => e.code);
+            out.backToAnonymous = await ft.backToAnonymous();
+            out.syncAfterLogout = await ft.waitFor(async () => (window.data.b1 || []).length === out.seededB1, 8000);
+            return out;
+        });
+    },
+
     async hotfixLoginFocus(page, browser) {
         const url = page.url();
         const probe = async (beforeEnable) => {
@@ -2242,7 +2278,9 @@ const SCENARIOS = {
 };
 
 (async () => {
-    const wanted = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(SCENARIOS);
+    const names = process.argv.slice(2).filter(a => !a.startsWith('--'));
+    const wanted = names.length ? names : Object.keys(SCENARIOS);
+    if (EMU) await fetch('http://127.0.0.1:8080/').catch(() => { throw new Error('Emülatör çalışmıyor: önce npm run emu'); });
     const server = await startServer();
     const browser = await puppeteer.launch({ headless: true, executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' });
     const page = await browser.newPage();
@@ -2251,7 +2289,7 @@ const SCENARIOS = {
     page.on('dialog', d => d.dismiss());
     let failed = false;
     try {
-        await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: 'domcontentloaded' });
+        await page.goto(`http://127.0.0.1:${PORT}/index.html${EMU ? '?emu=1' : ''}`, { waitUntil: 'domcontentloaded' });
         await new Promise(r => setTimeout(r, 7000));
         await installHelpers(page);
         const pre = await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));

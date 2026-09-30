@@ -9,9 +9,10 @@
 
 // 1. MODÜLER FIREBASE IMPORTLARI (Versiyon 10+)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { getAuth, onAuthStateChanged, signInAnonymously, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
     initializeFirestore,
+    connectFirestoreEmulator,
     collection,
     onSnapshot,
     doc,
@@ -45,14 +46,31 @@ export const COLLECTION_ROOT = (
     window.location.hostname.includes('demo')
 ) ? "inventory_demo" : LIVE_COLLECTION_ROOT;
 
+// [WHY]: Faz 4 · J0 (KJ-1) — Firestore kuralları proje genelinde; Rules v2'yi ve admin oturumu isteyen akışları canlıya
+//        yayınlamadan uçtan uca denemek için uygulama yerel Firebase Emulator'e bağlanabilmeli.
+// [HOW]: Yalnız localhost/127.0.0.1'de ve açıkça ?emu=1 ile açılır; sekme boyunca sessionStorage'da kalır (index → admin
+//        geçişinde kaybolmasın), ?emu=0 kapatır. Canlı ve demo alan adlarında hiçbir koşulda devreye girmez.
+const EMULATOR_HOST = '127.0.0.1';
+export const EMULATOR_MODE = (() => {
+    if (!['localhost', '127.0.0.1'].includes(window.location.hostname)) return false;
+    const q = new URLSearchParams(window.location.search).get('emu');
+    try {
+        if (q === '1') sessionStorage.setItem('emu', '1');
+        if (q === '0') sessionStorage.removeItem('emu');
+        return sessionStorage.getItem('emu') === '1';
+    } catch (e) {
+        return q === '1';
+    }
+})();
+
 // [ENV_GUARD] Aktif ortamı geliştirici konsoluna bildiren zorunlu init logu.
 // Bu satırı hiçbir zaman kaldırma; üretimde yanlış kök aktifse anında fark edilir.
-console.log(`🚀 ACTIVE DATABASE ROOT: ${COLLECTION_ROOT}`);
+console.log(`🚀 ACTIVE DATABASE ROOT: ${COLLECTION_ROOT}${EMULATOR_MODE ? ' @ EMULATOR (' + EMULATOR_HOST + ')' : ''}`);
 
 // [BUGFIX] Zero-Trust COLLECTION_ROOT freeze in window.AppEnv
 // [WHY]: Zero-Trust rule requires that COLLECTION_ROOT must not be a bare global string to prevent console bypass.
 // [HOW]: Store it in a frozen EnvConfig object exposed via window.AppEnv.
-const EnvConfig = { COLLECTION_ROOT: COLLECTION_ROOT };
+const EnvConfig = { COLLECTION_ROOT: COLLECTION_ROOT, EMULATOR: EMULATOR_MODE };
 Object.freeze(EnvConfig);
 window.AppEnv = EnvConfig;
 
@@ -126,6 +144,8 @@ export const fireDb = initializeFirestore(app, {
     experimentalForceLongPolling: true,
     useFetchStreams: false
 });
+// Emülatör bağlantısı ilk Firestore işleminden önce kurulmalı (J0).
+if (EMULATOR_MODE) connectFirestoreEmulator(fireDb, EMULATOR_HOST, 8080);
 
 // PM NOTU: global scriptler için db window'a bağlandı
 window.fireDb = fireDb;
@@ -813,6 +833,8 @@ export const findItem = window.findItem = (col, id) => (window.data[col] || []).
 // [WHY]: Uygulama açılır açılmaz verileri çekmek 'Missing Permissions' hatasına sebep oluyordu.
 // [HOW]: Auth durumunu (onAuthStateChanged) dinleyerek sadece oturum açan kullanıcılara veriyi açıyoruz.
 const auth = getAuth(app);
+// Emülatör: aynı Auth örneğini security.js / timer.js / auth-engine de getAuth(app) ile alır; bağlantı ilk işlemden önce.
+if (EMULATOR_MODE) connectAuthEmulator(auth, `http://${EMULATOR_HOST}:9099`, { disableWarnings: true });
 window.userAuth = null;
 let isSyncStarted = false;
 

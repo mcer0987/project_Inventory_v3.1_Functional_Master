@@ -1,6 +1,7 @@
 // [WHY]: Faz 0.4 smoke-test baseline. Every phase compares its console-error and duplicate-load counts against this.
 // [HOW]: Serves the repo on 127.0.0.1 (→ inventory_demo), opens index/admin read-only, counts errors and load logs, saves JSON + screenshots.
-// Usage: node scratch/smoke-test.js [label]
+// Usage: node scratch/smoke-test.js [label] [--emu]
+//        --emu (Faz 4 · J0): uygulama yerel emülatöre bağlanır (?emu=1); önce `npm run emu` + `npm run emu:seed`.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -9,7 +10,9 @@ const puppeteer = require('puppeteer');
 const ROOT = path.resolve(__dirname, '..');
 const PORT = 5599;
 const WAIT_MS = 9000;
-const LABEL = process.argv[2] || 'run';
+const ARGS = process.argv.slice(2);
+const EMU = ARGS.includes('--emu');
+const LABEL = (ARGS.find(a => !a.startsWith('--')) || 'run') + (EMU ? '_emu' : '');
 const PAGES = ['index.html', 'admin.html'];
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
@@ -63,11 +66,13 @@ async function probe(browser, pageName, outDir) {
         }
     });
 
-    await page.goto(`http://127.0.0.1:${PORT}/${pageName}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`http://127.0.0.1:${PORT}/${pageName}${EMU ? '?emu=1' : ''}`, { waitUntil: 'domcontentloaded' });
     await new Promise(r => setTimeout(r, WAIT_MS));
 
     const env = await page.evaluate(() => window.COLLECTION_ROOT || (window.AppEnv && window.AppEnv.COLLECTION_ROOT) || null).catch(() => null);
     if (env && env !== 'inventory_demo') throw new Error(`ABORT: ${pageName} resolved COLLECTION_ROOT=${env}, expected inventory_demo`);
+    const emulator = await page.evaluate(() => !!(window.AppEnv && window.AppEnv.EMULATOR)).catch(() => null);
+    if (EMU && !emulator) throw new Error(`ABORT: ${pageName} emülatöre bağlanmadı`);
 
     const count = re => logs.filter(l => re.test(l)).length;
     const loadedLogs = {};
@@ -87,6 +92,7 @@ async function probe(browser, pageName, outDir) {
         page: pageName,
         finalUrl: finalUrl.replace(`http://127.0.0.1:${PORT}/`, ''),
         collectionRoot: env,
+        emulator,
         pageErrorCount: errors.length,
         consoleErrorCount: consoleErrors.length,
         veriCekildiCount: count(/Veri Çekildi/),
@@ -107,6 +113,7 @@ async function probe(browser, pageName, outDir) {
     const outDir = path.join(ROOT, 'scratch', 'baseline', `${stamp}_${LABEL}`);
     fs.mkdirSync(outDir, { recursive: true });
 
+    if (EMU) await fetch('http://127.0.0.1:8080/').catch(() => { throw new Error('Emülatör çalışmıyor: önce npm run emu'); });
     const server = await startServer();
     const browser = await puppeteer.launch({ headless: true, executablePath: chrome });
     try {
@@ -115,7 +122,7 @@ async function probe(browser, pageName, outDir) {
         const report = { label: LABEL, timestamp: new Date().toISOString(), waitMs: WAIT_MS, results };
         fs.writeFileSync(path.join(outDir, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
         for (const r of results) {
-            console.log(`\n=== ${r.page} → ${r.finalUrl} (root: ${r.collectionRoot}) ===`);
+            console.log(`\n=== ${r.page} → ${r.finalUrl} (root: ${r.collectionRoot}${r.emulator ? ' @ emulator' : ''}) ===`);
             console.log(`pageerror: ${r.pageErrorCount} | console.error: ${r.consoleErrorCount} | "Veri Çekildi": ${r.veriCekildiCount}`);
             console.log(`duplicate load logs: ${JSON.stringify(r.duplicateLoadLogs)}`);
             console.log(`dual-URL modules: ${r.dualUrlModules.map(m => m.path).join(', ') || 'none'}`);
