@@ -352,7 +352,11 @@ export const UIComponents = {
         if (!box || !window.DeviceIds) return;
         if (item && dispatch && window.Schema.isDemirbas(item)) {
             window.DeviceIds.render(box, Number(document.getElementById('transQty')?.value) || 1, {
-                onInput: ids => window.DeviceIds.renderServiceHint(hint, { productId: item.id, ids }),
+                // Faz 3.5: her tuşta değil, yazma durunca (200 ms) — uzun kimlik listelerinde tarama tuş başına tekrarlanmaz
+                onInput: ids => {
+                    clearTimeout(this._serviceHintTimer);
+                    this._serviceHintTimer = setTimeout(() => window.DeviceIds.renderServiceHint(hint, { productId: item.id, ids }), 200);
+                },
             });
         } else {
             window.DeviceIds.hide(box);

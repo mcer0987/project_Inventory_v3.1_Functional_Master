@@ -100,7 +100,35 @@
     // 3.9a: şu an kullanımda olan cihaz kimlikleri — iade edilmemiş zimmetler ve kapanmamış servis/sevk kayıtları.
     // Anahtar Schema.deviceKeys biçiminde ('SN:…' / 'ENV:…'); değer kısa açıklama (hata mesajında gösterilir).
     function isOpenService(r) { return !!r && r.kapandi !== true; }
-    function activeDeviceUses() {
+
+    // [WHY] (Faz 3.5, denetim): Her çağrı tüm zimmet listesini (b3 normalizasyonu + talepler) ve servis kayıtlarını baştan
+    //        tarıyor. Sepette ve zimmette her kalem için ayrı çağrılıyor; 50+ cihazlık girişte (ya da ileride canlı kimlik
+    //        kontrolünde her tuşta) main-thread'i kilitler.
+    // [HOW]: Kısa ömürlü önbellek. Anahtar: veri revizyonu (firebase-handler: her snapshot ve her yerel yazmada artar) +
+    //        ilgili dizilerin kimliği; ayrıca en fazla USES_TTL_MS yaşar (window.data'yı doğrudan değiştiren eski kod için
+    //        emniyet). { fresh: true } önbelleği atlar. Dönen Map salt okunurdur.
+    const USES_TTL_MS = 2000;
+    const USES_SOURCES = ['b3', 'assignments', 'requests', 'serviceRecords'];
+    let usesCache = null;
+    const usesStats = { computed: 0, hits: 0 };
+    function usesSignature() {
+        const d = window.data || {};
+        return [typeof window.getDataRevision === 'function' ? window.getDataRevision() : 0, ...USES_SOURCES.map(c => d[c])];
+    }
+    function activeDeviceUses({ fresh = false } = {}) {
+        const sig = usesSignature(), now = Date.now();
+        if (!fresh && usesCache && now - usesCache.at < USES_TTL_MS && sig.every((v, i) => v === usesCache.sig[i])) {
+            usesStats.hits++;
+            return usesCache.uses;
+        }
+        const uses = computeActiveDeviceUses();
+        usesStats.computed++;
+        usesCache = { sig, at: now, uses };
+        return uses;
+    }
+    function invalidateDeviceUses() { usesCache = null; }
+
+    function computeActiveDeviceUses() {
         const uses = new Map();
         getAssignments().filter(a => !a.iadeEdildi).forEach(a => S().deviceKeys(a).forEach(k => {
             if (!uses.has(k)) uses.set(k, { kind: 'zimmet', id: a._id, text: `${a.personel} üzerinde zimmetli (${a.urun})` });
@@ -170,6 +198,7 @@
     const AssignmentService = {
         getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId,
         activeDeviceUses, checkDeviceIds, isOpenService, serviceRecordsFor, getDeviceHistory,
+        invalidateDeviceUses, usesStats,
     };
     window.AppModules = window.AppModules || {};
     window.AppModules.Assignments = AssignmentService;

@@ -181,6 +181,12 @@ window._dbMirror = {}; // YENİ: Firebase'den gelen saf verilerin kopyası (Değ
 // [WHY]: Koleksiyon listesi 3 yerde ayrı ayrı sabitti (dinleyici, saveData, göç); listede olmayan bir koleksiyona
 //        hedefli kayıt sessizce hiçbir şey yazmıyordu (DATA-13, bkz. DATA-10 'archive').
 // [HOW]: Tek, dondurulmuş liste. saveData listede olmayan koleksiyonu hata olarak reddeder.
+// Faz 3.5 · veri revizyonu: bir snapshot geldiğinde veya yerel bir yazma window.data'yı değiştirdiğinde artar. Türetilmiş
+// hesapların kısa ömürlü önbellekleri (ör. AssignmentService.activeDeviceUses) bununla geçersizleşir.
+let _dataRevision = 0;
+export const getDataRevision = window.getDataRevision = () => _dataRevision;
+const _bumpDataRevision = () => { _dataRevision++; };
+
 export const COLLECTIONS = window.COLLECTIONS = Object.freeze([
     'b1', 'b2', 'b3', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords',
     'staff', 'units', 'locations', 'tasks', 'requests', 'assignments'
@@ -316,6 +322,7 @@ window.startRealtimeSync = function () {
 
             // Veriyi global hafızaya ve Mirror'a (kopya) al
             window.data[colName] = items;
+            _bumpDataRevision();
             // [PERFORMANCE_GUARD]: Modern structuredClone is used to avoid main-thread blocking on large datasets (1000+ items), with a safe fallback to JSON copy for older browsers.
             window._dbMirror[colName] = typeof structuredClone === "function" ? structuredClone(items) : JSON.parse(JSON.stringify(items));
 
@@ -556,9 +563,11 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
         if (!COLLECTIONS.includes(arg1)) return fail('unknown-collection', `Bilinmeyen koleksiyon: "${arg1}"`, { collection: arg1 });
         if (!Array.isArray(arg2)) return fail('invalid-argument', `saveData('${arg1}', …) bir dizi bekliyor.`);
         window.data[arg1] = arg2;
+        _bumpDataRevision();
         targets = [arg1];
     } else if (arg1 && typeof arg1 === 'object') {
         window.data = arg1;
+        _bumpDataRevision();
         targets = COLLECTIONS.filter(c => Array.isArray(window.data[c]));
     } else {
         return fail('invalid-argument', 'saveData koleksiyon adı + dizi veya window.data bekliyor.');
@@ -699,6 +708,7 @@ function _b3GuardError(prepared, opts) {
 }
 
 function _applyLocal(colName, op) {
+    _bumpDataRevision();
     for (const store of [window.data, window._dbMirror]) {
         const list = Array.isArray(store[colName]) ? store[colName] : (store[colName] = []);
         const idx = list.findIndex(_sameId(op.id));

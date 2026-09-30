@@ -1824,7 +1824,7 @@ const SCENARIOS = {
                 o.busyZimmet = await exitWith(1, [{ sn: ' sn-busy ' }]);
                 o.busyService = await exitWith(1, [{ env: 'env-9' }]);
                 o.duplicate = await exitWith(2, [{ sn: 'X-1' }, { sn: 'x-1' }]);
-                window.data.b3[0].iadeEdildi = true;       // iade edilen cihaz tekrar kullanılabilir
+                window.data.b3 = window.data.b3.map((b, i) => i === 0 ? { ...b, iadeEdildi: true } : b);   // iade (snapshot gibi yeni dizi) → cihaz serbest
                 o.afterReturn = typeof (await exitWith(1, [{ sn: 'SN-BUSY' }])) === 'object';
 
                 // sarf: tek kayıt, adet korunur, kimlik istenmez
@@ -1946,6 +1946,7 @@ const SCENARIOS = {
                 o.inServiceRefused = calls.length === before ? alerts.at(-1)[1] : 'yazıldı!';
                 devRows()[0].querySelector('.dev-sn').value = 'ls-1';                 // daha önce servise gitmiş, dönmüş
                 document.getElementById('transDeviceIds').dispatchEvent(new Event('input'));
+                await ft.sleep(300);   // Faz 3.5: ipucu yazma durunca (200 ms) çizilir
                 o.hintForId = document.getElementById('transServiceHistory').querySelectorAll('[data-history]').length;
                 await window.confirmTransfer();
                 const c = calls.at(-1);
@@ -2127,6 +2128,70 @@ const SCENARIOS = {
             o.small.result = typeof res === 'object' ? { deleted: res.collections?.requests?.deleted } : res;
             await ft.waitFor(async () => (await ft.readMarked('requests')).length === 0);
             o.small.leftOnServer = (await ft.readMarked('requests')).length;
+            return o;
+        });
+    },
+
+    // Faz 3.5 · activeDeviceUses önbelleği: tekrarlı çağrılar tek tarama; dizi değişimi, gerçek yazma (veri revizyonu) ve
+    // 2 sn sonra yeniden hesaplanır; iade sonrası kimlik serbest kalır. 600 zimmet + 200 servis kaydıyla ölçülür.
+    async hotfixDeviceUsesMemo(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft, A = window.AssignmentService, o = {};
+            const orig = { b1: window.data.b1, b3: window.data.b3, svc: window.data.serviceRecords, req: window.data.requests, asg: window.data.assignments, pt: window.data.productTypes, ops: window.runStockOps, adm: window.isDbAdmin, alert: window.showAppAlert };
+            const Z = i => ({ id: 5000 + i, sema: 2, tip: 'zimmet', kaynakDepo: 'b1', productId: 'm1', urunAciklama: 'Laptop M', adet: 1, sn: 'MZ-' + i, envanterNo: 'ENVZ-' + i, alanKisi: 'Kişi ' + (i % 40), talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeEdildi: false, isDemirbas: true, tarih: '01.09.2026' });
+            window.data.productTypes = [{ name: 'Laptop', isDemirbas: true }];
+            window.data.b1 = [{ id: 'm1', ürün: 'Laptop M', tür: 'Laptop', raf: 'R', adet: 500, durumu: 'Kullanıma Hazır' }];
+            window.data.b3 = Array.from({ length: 600 }, (_, i) => Z(i));
+            window.data.assignments = []; window.data.requests = [];
+            window.data.serviceRecords = Array.from({ length: 200 }, (_, i) => ({ id: 9000 + i, sn: 'MS-' + i, envanterNo: '-', hedef: 'Teknik Servis', durum: 'Serviste / Yolda', kapandi: false }));
+            const stats = () => ({ ...A.usesStats });
+            const time = fn => { const t = performance.now(); fn(); return +(performance.now() - t).toFixed(1); };
+            try {
+                A.invalidateDeviceUses();
+                const s0 = stats();
+                o.firstCallMs = time(() => A.activeDeviceUses());
+                o.sixtyCachedCallsMs = time(() => { for (let i = 0; i < 60; i++) A.checkDeviceIds({ demirbas: true, qty: 1, ids: [{ sn: 'YENI-' + i }] }); });
+                const s1 = stats();
+                o.cached = { computed: s1.computed - s0.computed, hits: s1.hits - s0.hits, sameInstance: A.activeDeviceUses() === A.activeDeviceUses() };
+                o.sixtyUncachedCallsMs = time(() => { for (let i = 0; i < 60; i++) A.activeDeviceUses({ fresh: true }); });
+                o.busyStillDetected = A.checkDeviceIds({ demirbas: true, qty: 1, ids: [{ sn: 'mz-7' }] }).errors[0] || 'serbest!';
+
+                // geçersizleşme 1: dizi değişimi (snapshot) — iade edilen cihaz hemen serbest
+                const before = A.activeDeviceUses();
+                window.data.b3 = window.data.b3.map(b => b.sn === 'MZ-7' ? { ...b, iadeEdildi: true } : b);
+                o.afterArrayReplace = { recomputed: A.activeDeviceUses() !== before, returnedFree: A.checkDeviceIds({ demirbas: true, qty: 1, ids: [{ sn: 'MZ-7' }] }).ok };
+
+                // geçersizleşme 2: gerçek yazma (requests, işaretli) → veri revizyonu artar → yeniden hesap
+                const rev0 = window.getDataRevision(), cached = A.activeDeviceUses();
+                const rid = window.makeId();
+                await window.appendItem('requests', { id: rid, ürün: 'Memo ' + ft.MARKER, personel: 'Memo ' + ft.MARKER, durum: 'Beklemede', adet: 1 });
+                o.afterRealWrite = { revisionBumped: window.getDataRevision() > rev0, recomputed: A.activeDeviceUses() !== cached };
+                await window.removeItem('requests', rid);
+
+                // geçersizleşme 3: süre (window.data'yı doğrudan değiştiren eski kod için emniyet)
+                const c2 = A.activeDeviceUses();
+                window.data.b3[8].iadeEdildi = true;                 // doğrudan değişiklik: revizyon artmaz
+                o.directMutationWithinTtlStillCached = A.activeDeviceUses() === c2;
+                await ft.sleep(2100);
+                o.afterTtl = { recomputed: A.activeDeviceUses() !== c2, freed: A.checkDeviceIds({ demirbas: true, qty: 1, ids: [{ sn: 'MZ-8' }] }).ok };
+
+                // 60 cihazlık sepet: tek tarama
+                window.isDbAdmin = () => true; window.showAppAlert = () => {};
+                let wrote = 0; window.runStockOps = async arg => { wrote = arg.writes.length; return { stock: arg.stock.map(s => ({ name: s.id, before: 500, after: 500 + s.delta })) }; };
+                window.openCartModal();
+                window.addToCart({ item: window.data.b1[0], repo: 'b1', qty: 500 }); window.updateCartQty(0, '60');
+                document.querySelectorAll('#cartDev_0 .dev-sn').forEach((inp, i) => { inp.value = 'SEPET-' + i; });
+                document.getElementById('cartNote').value = 'n';
+                A.invalidateDeviceUses();
+                const s2 = stats(), t = performance.now();
+                await window.saveCartExit(new Event('submit'));
+                o.cart60 = { ms: +(performance.now() - t).toFixed(1), records: wrote, scans: stats().computed - s2.computed };
+                window.closeModal?.('cartModal');
+            } finally {
+                Object.assign(window, { runStockOps: orig.ops, isDbAdmin: orig.adm, showAppAlert: orig.alert });
+                Object.assign(window.data, { b1: orig.b1, b3: orig.b3, serviceRecords: orig.svc, requests: orig.req, assignments: orig.asg, productTypes: orig.pt });
+                A.invalidateDeviceUses();
+            }
             return o;
         });
     },
