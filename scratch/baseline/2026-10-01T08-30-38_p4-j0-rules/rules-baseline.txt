@@ -1,0 +1,320 @@
+
+> test:rules
+> firebase emulators:exec --only firestore --project demo-rules-test "node --test --test-reporter=spec tests/rules/*.test.mjs"
+
+[36m[1mi  emulators:[22m[39m Starting emulators: firestore
+[36m[1mi  emulators:[22m[39m Detected demo project ID "demo-rules-test", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.
+[36m[1mi  firestore:[22m[39m Firestore Emulator logging to [1mfirestore-debug.log[22m
+[32m[1m+  firestore:[22m[39m Firestore Emulator was started in standard edition.
+[32m[1m+  firestore:[22m[39m Firestore Emulator UI websocket is running on 9150.
+[36m[1mi [22m[39m Running script: [1mnode --test --test-reporter=spec tests/rules/*.test.mjs[22m
+[rules] firestore.rules
+▶ Kökler ve okuma
+  ✔ anonim personel canlı kökte b1 okur (460.388ms)
+  ✔ oturumsuz ziyaretçi okuyamaz (123.849ms)
+  ✔ admin canlı kökte okur (170.642ms)
+  ✔ tanımsız kök reddedilir (admin dahil) (55.9163ms)
+  ✖ bilinmeyen koleksiyon reddedilir (331.9309ms)
+  ✔ V1 arşivi admin için de kapalı (62.6656ms)
+  ✖ KJ-2: inventory_v2 anonim okuyamaz (952.1639ms)
+  ✔ KJ-2: inventory_v2 admin okur (61.3293ms)
+  ✔ KJ-2: inventory_v2 admin yazar (56.3813ms)
+  ✖ kök system_config bloğu kaldırıldı (anonim okuyamaz) (59.6905ms)
+✖ Kökler ve okuma (3116.2279ms)
+▶ Admin kimliği
+  ✔ admin b1 yazar (58.6317ms)
+  ✔ başka e-postalı hesap b1 yazamaz (55.2296ms)
+  ✖ anonim sağlayıcıyla admin e-postası iddiası b1 yazamaz (50.7424ms)
+✖ Admin kimliği (165.0772ms)
+▶ Personel yazma yetkisi (Ek D · Aşama A)
+  ✔ anonim b1 yazamaz (89.7421ms)
+  ✔ anonim b2 yazamaz (47.605ms)
+  ✔ anonim b3 yazamaz (57.1063ms)
+  ✔ anonim personel yazamaz (60.3192ms)
+  ✔ anonim units yazamaz (56.0146ms)
+  ✔ anonim locations yazamaz (50.3447ms)
+  ✔ anonim productTypes yazamaz (51.3102ms)
+  ✔ anonim workflowTemplates yazamaz (47.9415ms)
+  ✔ anonim staff yazamaz (46.0028ms)
+  ✔ anonim system_config yazamaz (47.465ms)
+  ✖ T7: anonim assignments yazamaz (40.4782ms)
+  ✖ T7: anonim serviceRecords yazamaz (52.2576ms)
+  ✔ admin assignments yazar (47.1451ms)
+  ✔ anonim talep oluşturur (46.4849ms)
+  ✔ anonim talep günceller (geri çek) (47.2562ms)
+  ✔ anonim görev oluşturur (50.7559ms)
+  ✔ anonim satın alma talebi oluşturur (39.7475ms)
+✖ Personel yazma yetkisi (Ek D · Aşama A) (879.2024ms)
+▶ Silme
+  ✖ anonim talep silemez (50.7716ms)
+  ✖ anonim satın alma silemez (48.0093ms)
+  ✔ anonim görev siler (43.0517ms)
+  ✔ admin talep siler (53.2765ms)
+  ✔ KJ-5: demo kökünde __flowtest__ işaretli talep silinir (39.3206ms)
+  ✖ KJ-5: demo kökünde işaretsiz talep silinemez (43.3191ms)
+  ✖ KJ-5: istisna canlı kökte geçerli değil (50.9917ms)
+✖ Silme (329.3453ms)
+▶ Bakım modu (RULE-05)
+  ✖ bakımda anonim talep oluşturamaz (47.2821ms)
+  ✖ bakımda anonim görev silemez (51.8494ms)
+  ✔ bakımda admin yazar (54.6123ms)
+  ✔ bakım başka kökte açıkken canlı kökte personel yazar (52.7314ms)
+  ✔ system_config: anonim okur, admin yazar (75.7001ms)
+✖ Bakım modu (RULE-05) (282.6263ms)
+▶ Etiket reddi (RULE-02 savunma derinliği)
+  ✖ requests ürün alanında etiket reddedilir (39.17ms)
+  ✖ requests not alanında etiket reddedilir (50.2994ms)
+  ✖ requests personel alanında etiket reddedilir (38.8858ms)
+  ✖ requests id alanında etiket reddedilir (41.559ms)
+  ✖ tasks title alanında etiket reddedilir (43.3547ms)
+  ✖ tasks description alanında etiket reddedilir (58.2138ms)
+  ✖ tasks priority alanında etiket reddedilir (36.8649ms)
+  ✖ purchaseOrders urun alanında etiket reddedilir (46.9093ms)
+  ✖ purchaseOrders aciklama alanında etiket reddedilir (39.6ms)
+  ✖ purchaseOrders createdByName alanında etiket reddedilir (38.9449ms)
+  ✔ "<5mm" ve "a < b" serbest (42.6495ms)
+  ✔ admin yazmaları etiket kuralına tabi değil (kaçış istemcide) (49.7345ms)
+✖ Etiket reddi (RULE-02 savunma derinliği) (527.3594ms)
+▶ Denetim günlüğü (4.7 · KJ-7)
+  ✖ anonim geçerli kayıt ekler (51.534ms)
+  ✔ fazladan alan reddedilir (43.6477ms)
+  ✔ istemci saati reddedilir (46.6072ms)
+  ✔ başkası adına uid reddedilir (39.615ms)
+  ✔ geçersiz sonuç reddedilir (39.9817ms)
+  ✔ etiketli metin reddedilir (49.2065ms)
+  ✔ oturumsuz ekleyemez (51.8934ms)
+  ✖ anonim okuyamaz (56.5644ms)
+  ✔ admin okur (61.6938ms)
+  ✖ admin güncelleyemez (37.4419ms)
+  ✖ admin silemez (44.1189ms)
+✖ Denetim günlüğü (4.7 · KJ-7) (523.3097ms)
+ℹ tests 65
+ℹ suites 7
+ℹ pass 39
+ℹ fail 26
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6450.8667
+
+✖ failing tests:
+
+test at tests\rules\rules.test.mjs:78:5
+✖ bilinmeyen koleksiyon reddedilir (331.9309ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:80:5
+✖ KJ-2: inventory_v2 anonim okuyamaz (952.1639ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:83:5
+✖ kök system_config bloğu kaldırıldı (anonim okuyamaz) (59.6905ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:89:5
+✖ anonim sağlayıcıyla admin e-postası iddiası b1 yazamaz (50.7424ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:96:5
+✖ T7: anonim assignments yazamaz (40.4782ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:97:5
+✖ T7: anonim serviceRecords yazamaz (52.2576ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:106:5
+✖ anonim talep silemez (50.7716ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1889:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:107:5
+✖ anonim satın alma silemez (48.0093ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:111:5
+✖ KJ-5: demo kökünde işaretsiz talep silinemez (43.3191ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:112:5
+✖ KJ-5: istisna canlı kökte geçerli değil (50.9917ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:116:5
+✖ bakımda anonim talep oluşturamaz (47.2821ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/tests/rules/rules.test.mjs:118:9)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1889:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:120:5
+✖ bakımda anonim görev silemez (51.8494ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/tests/rules/rules.test.mjs:122:9)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ requests ürün alanında etiket reddedilir (39.17ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1889:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ requests not alanında etiket reddedilir (50.2994ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ requests personel alanında etiket reddedilir (38.8858ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ requests id alanında etiket reddedilir (41.559ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ tasks title alanında etiket reddedilir (43.3547ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ tasks description alanında etiket reddedilir (58.2138ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ tasks priority alanında etiket reddedilir (36.8649ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ purchaseOrders urun alanında etiket reddedilir (46.9093ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ purchaseOrders aciklama alanında etiket reddedilir (39.6ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:146:9
+✖ purchaseOrders createdByName alanında etiket reddedilir (38.9449ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:161:5
+✖ anonim geçerli kayıt ekler (51.534ms)
+  [Error [FirebaseError]: 7 PERMISSION_DENIED: 
+  Property email is undefined on object. for 'create' @ L22, Property email is undefined on object. for 'update' @ L22, Property email is undefined on object. for 'create' @ L22] {
+    code: 'permission-denied',
+    customData: undefined
+  }
+
+test at tests\rules\rules.test.mjs:168:5
+✖ anonim okuyamaz (56.5644ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:170:5
+✖ admin güncelleyemez (37.4419ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests\rules\rules.test.mjs:171:5
+✖ admin silemez (44.1189ms)
+  Error: Expected request to fail, but it succeeded.
+      at file:///C:/Users/med3pol/Documents/project_Inventory_v3.1_Functional_Master/node_modules/@firebase/rules-unit-testing/dist/esm/index.esm.js:572:31
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7)
+[33m[1m! [22m[39m Script exited unsuccessfully (code 1)
+[36m[1mi  emulators:[22m[39m Shutting down emulators.
+[36m[1mi  firestore:[22m[39m Stopping Firestore Emulator
+[33m[1m! [22m[39m Firestore Emulator has exited upon receiving signal: SIGINT
+[36m[1mi  hub:[22m[39m Stopping emulator hub
+[36m[1mi  logging:[22m[39m Stopping Logging Emulator
+
+[1m[31mError:[39m[22m Script "[1mnode --test --test-reporter=spec tests/rules/*.test.mjs[22m" exited with code 1

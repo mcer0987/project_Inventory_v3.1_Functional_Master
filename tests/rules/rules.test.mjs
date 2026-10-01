@@ -7,7 +7,10 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, setLogLevel } from 'firebase/firestore';
+
+// Beklenen her ret SDK'da PERMISSION_DENIED uyarısı basar; sonuçlar node:test raporunda.
+setLogLevel('silent');
 
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RULES_FILE = process.env.RULES_FILE || 'firestore.rules';
