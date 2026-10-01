@@ -119,7 +119,11 @@ async function probe(browser, pageName, outDir) {
     try {
         const results = [];
         for (const p of PAGES) results.push(await probe(browser, p, outDir));
-        const report = { label: LABEL, timestamp: new Date().toISOString(), waitMs: WAIT_MS, results };
+        // Faz 4 · J2: XSS kapısı smoke raporunun parçası (izinsiz sink sayısı baseline'ı aşarsa tur kapanmaz).
+        const lint = require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'xss-lint.js'), '--json', path.join(outDir, 'xss-lint.json')], { encoding: 'utf8' });
+        let xssLint = null;
+        try { const j = JSON.parse(fs.readFileSync(path.join(outDir, 'xss-lint.json'), 'utf8')); xssLint = { violations: j.violations.length, allowed: j.stats.allowed, sinks: j.stats.sinks, expressions: j.stats.expressions, exit: lint.status }; } catch (e) { xssLint = { error: e.message, exit: lint.status }; }
+        const report = { label: LABEL, timestamp: new Date().toISOString(), waitMs: WAIT_MS, xssLint, results };
         fs.writeFileSync(path.join(outDir, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
         for (const r of results) {
             console.log(`\n=== ${r.page} → ${r.finalUrl} (root: ${r.collectionRoot}${r.emulator ? ' @ emulator' : ''}) ===`);
@@ -128,7 +132,8 @@ async function probe(browser, pageName, outDir) {
             console.log(`dual-URL modules: ${r.dualUrlModules.map(m => m.path).join(', ') || 'none'}`);
             console.log(`failed requests: ${r.failedRequests.join(', ') || 'none'}`);
         }
-        console.log(`\nReport: ${path.relative(ROOT, outDir)}`);
+        console.log(`\nxss-lint: izinsiz ${xssLint.violations ?? '?'} · gerekçeli istisna ${xssLint.allowed ?? '?'} · ${xssLint.sinks ?? '?'} sink`);
+        console.log(`Report: ${path.relative(ROOT, outDir)}`);
     } finally {
         await browser.close();
         server.close();

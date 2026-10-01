@@ -2338,6 +2338,159 @@ const SCENARIOS = {
         });
     },
 
+    // Faz 4 · J2 — XSS'in tamamı: lint'in düzelttiği yüzeyler zararlı yüklerle (etiket, nitelikten kaçış, JS dizgesinden kaçış).
+    // Yalnız bellek içi veri; Firestore'a yazılmaz. Delegation eylemleri ham değeri bozmadan taşımalı; onay API'si metin/Node/html.
+    async j2XssSurfaces(page, browser) {
+        const PAY = {
+            tag: '<img src=x onerror="window.__xss=(window.__xss||0)+1">',
+            attr: '"><img src=x onerror="window.__xss=(window.__xss||0)+1">',
+            js: "');window.__xss=(window.__xss||0)+1;//",
+            ent: '&quot;);window.__xss=(window.__xss||0)+1;//',
+        };
+        const index = await page.evaluate(async (PAY) => {
+            const ft = window.__ft, out = {};
+            window.__xss = 0;
+            const orig = { b1: window.data.b1, personel: window.data.personel, productTypes: window.data.productTypes, user: window.getActiveUser() };
+            try {
+                // B1 tablo + kartlar + tooltip (table-engine)
+                window.data.b1 = [{ id: 'x1', ürün: PAY.tag, marka: PAY.attr, raf: PAY.js, sütun: PAY.ent, durumu: PAY.tag, tür: PAY.attr, adet: 2, lastUpdate: PAY.tag, isWatched: true }];
+                window.renderTable('b1');
+                window.renderCardSearchResults('b1', window.data.b1);
+                window.renderMobileCards('b1');
+                const row = document.querySelector('tr.selectable-row[data-id="x1"]');
+                if (row) row.dispatchEvent(new MouseEvent('mouseenter'));
+                out.table = { rowRendered: !!row, nameAsText: !!row && row.textContent.includes('<img src=x'), dataName: row && row.dataset.name === PAY.tag, tooltipShown: getComputedStyle(document.getElementById('custom-tooltip') || document.body).display === 'block', tooltipNoImg: !document.querySelector('#custom-tooltip img') };
+
+                // Ürün modalı tür seçenekleri (ui-components)
+                window.data.productTypes = [{ name: PAY.attr, isDemirbas: true }];
+                const realAdm = window.isDbAdmin; window.isDbAdmin = () => true;
+                try { window.openProductModal('add', null, 'b1'); } catch (e) { out.productModalError = e.message; }
+                window.isDbAdmin = realAdm;
+                const opt = [...(document.getElementById('prodType')?.options || [])].find(o => o.value === PAY.attr);
+                out.productTypeOption = !!opt;
+                if (typeof window.closeProductModal === 'function') window.closeProductModal();
+
+                // Navbar adı (auth-engine)
+                window.updateNavbarUI({ name: PAY.tag });
+                out.navbarAsText = (document.getElementById('user-display')?.textContent || document.body.textContent).includes('👤 <img');
+
+                // Akış başlatma personel araması → delegation ham adı taşır (edm-workflow)
+                window.data.personel = [{ id: 'p1', name: 'Zz ' + PAY.js }, { id: 'p2', name: 'Zz ' + PAY.attr }];
+                const input = document.createElement('input');
+                input.setAttribute('onkeyup', 'window.searchPersonnelForStart(this.value, 77)');
+                document.body.appendChild(input);
+                let picked = null; const realSel = window.selectPersonForWorkflow;
+                window.selectPersonForWorkflow = (i, n) => { picked = { i, n }; };
+                window.searchPersonnelForStart('zz', 77);
+                const items = document.querySelectorAll('#personnel_dropdown_77 [data-action="selectPerson"]');
+                if (items[0]) items[0].click();
+                out.startSearch = { items: items.length, pickedExact: !!picked && picked.i === 77 && picked.n === 'Zz ' + PAY.js };
+                window.selectPersonForWorkflow = realSel;
+                document.getElementById('personnel_dropdown_77')?.remove(); input.remove();
+
+                // Onay API'si (M6): metin varsayılan, {html:true} sabit, Node, düğme metni geri uyumu
+                const msgEl = document.getElementById('alertMessage');
+                const answer = async (fn, yes) => { const p = fn(); await ft.sleep(30); const snap = { html: msgEl.innerHTML, text: msgEl.textContent, ok: document.getElementById('alertConfirmBtn').textContent }; document.getElementById(yes ? 'alertConfirmBtn' : 'alertCancelBtn').click(); return { snap, res: await p }; };
+                const t = await answer(() => window.showCustomConfirm('T', PAY.tag), false);
+                const h = await answer(() => window.showCustomConfirm('T', '<b>sabit</b>', { html: true }), false);
+                const nd = document.createElement('div'); nd.id = 'j2Node'; nd.textContent = 'düğüm';
+                const n = await answer(() => window.showCustomConfirm('T', nd), true);
+                const legacy = await answer(() => window.showCustomConfirm('T', 'x', 'Evet, Göster', 'Daha Sonra'), true);
+                out.confirm = {
+                    textDefault: !t.snap.html.includes('<img') && t.snap.text === PAY.tag && t.res === false,
+                    htmlOptIn: h.snap.html === '<b>sabit</b>',
+                    nodeAppended: n.snap.html.includes('id="j2Node"') && n.res === true,
+                    legacyButtonText: legacy.snap.ok === 'Evet, Göster' && document.getElementById('alertConfirmBtn').textContent !== 'Evet, Göster',
+                };
+
+                // TODO "Ata" (M6 çifti): seçim kutusu gerçek, onay atamayı yapar
+                let assigned = null; const realAssign = window.todoModule.assignTask;
+                window.todoModule.assignTask = async (id, who) => { assigned = { id, who }; };
+                window.data.personel = [{ id: 'p3', name: 'Ayşe ' + PAY.attr }];
+                window.todoModule.openAssignModal('t-j2');
+                await ft.sleep(30);
+                const sel = document.getElementById('quickAssignSelect');
+                out.todoAssign = { selectRendered: !!sel && sel.tagName === 'SELECT', options: sel ? sel.options.length : 0 };
+                document.getElementById('alertConfirmBtn').click();
+                await ft.sleep(50);
+                out.todoAssign.assignedExact = !!assigned && assigned.id === 't-j2' && assigned.who === 'Ayşe ' + PAY.attr;
+                window.todoModule.assignTask = realAssign;
+
+                out.injectedImgs = document.querySelectorAll('img[src="x"]').length;
+                out.xssExecuted = window.__xss || 0;
+            } finally {
+                Object.assign(window.data, { b1: orig.b1, personel: orig.personel, productTypes: orig.productTypes });
+                window.renderTable('b1');
+                if (orig.user) window.updateNavbarUI(orig.user);
+            }
+            return out;
+        }, PAY);
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = [];
+        admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        const adminOut = await admin.evaluate(async (PAY) => {
+            const out = {}; window.__xss = 0;
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            // Kritik stok (grup anahtarı delegation) + özel izleme kartları (kayıt JSON'u yerine data-id)
+            window.data.b1 = [{ id: 'c1', ürün: PAY.tag, tür: PAY.attr, raf: PAY.js, adet: 0, limit: 5, marka: PAY.ent, durumu: 'Aktif', isWatched: true }];
+            window.data.b2 = [];
+            window.renderCriticalStockTable();
+            let delKey = null; const realDel = window.deleteCriticalGroup; window.deleteCriticalGroup = k => { delKey = k; };
+            const delBtn = document.querySelector('#criticalStockTable [data-action="deleteCriticalGroup"]');
+            if (delBtn) delBtn.click();
+            out.critical = { rendered: !!delBtn, keyCarriesPayload: typeof delKey === 'string' && delKey.includes(PAY.tag.slice(0, 8)) };
+            window.deleteCriticalGroup = realDel;
+
+            // ADM-05 (Faz 5.6): ilk çizim #customWatchTable'ı kendi kapsayıcısından siler, sonraki çağrılar erken döner.
+            // J2'nin kaçış + delegation değişikliğini sınamak için eksik öğe geri konur (uygulama hatası ayrıca raporlanır).
+            out.watchRerenderBug = !document.querySelector('#customWatchTable');
+            const wc = document.getElementById('watchCardsContainer');
+            if (wc && out.watchRerenderBug) { const t = document.createElement('table'); t.id = 'customWatchTable'; t.style.display = 'none'; wc.parentElement.appendChild(t); }
+            window.renderCustomWatchDashboard();
+            let detail = null, purchase = null; const realD = window.openWatchDetail, realP = window.requestPurchase;
+            window.openWatchDetail = it => { detail = it; }; window.requestPurchase = it => { purchase = it; };
+            const card = document.querySelector('.watch-card[data-action="watchDetail"]');
+            const quick = document.querySelector('[data-action="watchPurchase"]');
+            if (quick) quick.click();
+            if (card) card.click();
+            out.watch = { card: !!card, depoShown: !!card && card.textContent.includes('B1'), quickOnlyInner: !!purchase && purchase.id === 'c1', detailResolvedById: !!detail && detail.id === 'c1' && detail.marka === PAY.ent,
+                diag: { cardData: card && { ...card.dataset }, b1Len: (window.data.b1 || []).length, found: !!window.findItem('b1', 'c1'), detailType: detail === null ? 'null' : typeof detail } };
+            window.openWatchDetail = realD; window.requestPurchase = realP;
+
+            // Mahal başlığı, servis görüntüleme, satın alma rozeti (adım kişisi), şablon personel araması
+            window.data.locations = [{ id: 'l1', name: PAY.tag, code: PAY.attr, persons: [{ name: PAY.attr }] }];
+            window.renderLocationsTable();
+            window.data.serviceRecords = [{ id: 's1', urunAciklama: PAY.tag, originalData: { açıklama: PAY.tag }, hedef: PAY.attr, durum: 'Serviste / Yolda', not: PAY.tag, kaynakDepo: 'b1' }];
+            try { window.viewServiceItem('s1'); } catch (e) { out.serviceError = e.message; }
+            out.serviceAsText = (document.getElementById('serviceViewContent')?.textContent || '').includes('<img src=x');
+            window.data.purchaseOrders = [{ id: 'po-j2', urun: 'J2', evrakNo: 'E-1', durum: 'Onay Bekliyor', createdAt: Date.now(), workflow: { started: true, currentStep: 0, steps: [{ user: PAY.tag, status: 'pending' }] } }];
+            try { window.renderPurchaseModule(); window.renderServicesModule(); } catch (e) { out.purchaseError = e.message; }
+            out.badgeAsText = document.body.textContent.includes('<img src=x onerror="window.__xss=(window.__xss||0)+1"> Bekliyor');
+
+            window.data.personel = [{ id: 'p9', name: 'Qq ' + PAY.js }];
+            let added = null; const realAdd = window.addPersonnelToTemplate; window.addPersonnelToTemplate = (n, t, s) => { added = { n, t, s }; };
+            let box = document.getElementById('tplAuthResults');
+            const temp = !box; if (temp) { box = document.createElement('div'); box.id = 'tplAuthResults'; document.body.appendChild(box); }
+            window.searchPersonnelForTemplate('qq', 'auth');
+            const item = box.querySelector('[data-action="addPersonnel"]');
+            if (item) item.click();
+            out.templateSearch = { item: !!item, addedExact: !!added && added.n === 'Qq ' + PAY.js && added.t === 'auth' && added.s === undefined };
+            window.addPersonnelToTemplate = realAdd; if (temp) box.remove();
+
+            await sleep(300);
+            out.injectedImgs = document.querySelectorAll('img[src="x"]').length;
+            out.xssExecuted = window.__xss || 0;
+            return out;
+        }, PAY);
+        adminOut.pageErrors = errs;
+        await admin.browserContext().close();
+        return { index, admin: adminOut };
+    },
+
     async hotfixLoginFocus(page, browser) {
         const url = page.url();
         const probe = async (beforeEnable) => {
