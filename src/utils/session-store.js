@@ -78,8 +78,19 @@
         return !!(u && !u.isAnonymous && u.email === ADMIN_EMAIL);
     }
 
+    // [WHY]: Faz 4 · J1 (M1, M5) — Rules v2 personelin silme ve admin koleksiyonu yazmalarını reddediyor; birçok fonksiyon
+    //        yalnız arayüzde kapılıydı (konsoldan ya da kapısız bir düğmeden çağrılınca kural reddi genel hata olarak düşüyordu).
+    // [HOW]: Fonksiyonun başında tek kapı: admin oturumu değilse anlaşılır uyarı + false. İki sayfada da yüklü (auth-engine yalnız index'te).
+    function requireDbAdmin(action) {
+        const check = typeof window.isDbAdmin === 'function' ? window.isDbAdmin : isDbAdmin;   // tek tanım: window.isDbAdmin
+        if (check()) return true;
+        const msg = `🔒 ${action || 'Bu işlem'} yönetici oturumu gerektirir.`;
+        if (typeof window.showAppAlert === 'function') window.showAppAlert(msg, 'error');
+        return false;
+    }
+
     const Session = {
-        getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin,
+        getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, requireDbAdmin,
         maskUserData, unmaskUserData, ADMIN_EMAIL,
         get ADMIN_SESSION_MS() { return (window.SessionConfig && window.SessionConfig.ADMIN_LOCK_TIME) || 10 * 60 * 1000; },
     };
@@ -91,4 +102,5 @@
     window.clearSession = clearSession;
     window.isAppLoggedIn = isAppLoggedIn;
     window.isDbAdmin = isDbAdmin;
+    window.requireDbAdmin = requireDbAdmin;
 })();

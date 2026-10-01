@@ -561,6 +561,8 @@ window.todoModule = {
         const priority = document.getElementById('todoTaskPriority').value;
         const date = document.getElementById('todoTaskDate').value;
         const assignee = document.getElementById('todoTaskAssignee').value;
+        // Faz 4 · J1 (M3): Rules v2 etiket reddiyle aynı kontrol, kayıttan önce.
+        if (window.guardTagLike && window.guardTagLike({ 'Başlık': title, 'Açıklama': desc })) return;
 
         const allTasks = Array.isArray(window.data.tasks) ? window.data.tasks : Object.values(window.data.tasks || {});
         const task = allTasks.find(t => String(t.id) === String(taskId));
@@ -699,6 +701,7 @@ window.todoModule = {
             showAppAlert("Lütfen bir başlık girin!", "warning");
             return;
         }
+        if (window.guardTagLike && window.guardTagLike({ 'Başlık': title, 'Açıklama': desc })) return;   // Faz 4 · J1 (M3)
 
         const newTask = {
             id: Date.now(),

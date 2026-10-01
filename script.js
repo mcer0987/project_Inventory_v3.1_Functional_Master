@@ -439,6 +439,7 @@ window.openPersonelModal = function (mode, id = null) {
 };
 
 async function addPersonel() {
+    if (!window.requireDbAdmin('Personel ekleme')) return;   // Faz 4 · J1: personel yalnız admin
     const name = document.getElementById('personelName').value.trim();
     const code = document.getElementById('personelCode').value.trim();
     if (!name) { showAppAlert('Ad Soyad boş olamaz.', 'warning'); return; }
@@ -453,6 +454,7 @@ async function addPersonel() {
 }
 
 async function editPersonel(id) {
+    if (!window.requireDbAdmin('Personel düzenleme')) return;
     const name = document.getElementById('personelName').value.trim();
     if (!name) { showAppAlert('Ad Soyad boş olamaz.', 'warning'); return; }
     if (!(await window.writeOk(window.updateItem('personel', id, { name })))) { showAppAlert('Personel güncellenemedi.', 'error'); return; }
@@ -842,6 +844,7 @@ window.rejectRequest = async function (requestId) {
 };
 
 window.deleteRequest = async function (requestId) {
+    if (!window.requireDbAdmin('Talep silme')) return;   // Faz 4 · J1 (M1): Rules v2'de talep silme yalnız admin
     const request = _findRequest(requestId);
     if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     const onay = await showCustomConfirm("Kaydı Sil", "Bu talep kaydını tamamen silmek istediğinize emin misiniz? Bu işlem geri alınamaz.");
@@ -1296,6 +1299,8 @@ async function importExcel(event) {
     const file = event.target.files[0];
     const depo = event.target.getAttribute('data-depo') || 'b1';
     if (!file) return;
+    // Faz 4 · J1 (M1): içe aktarma b1/b2 yazması — yalnız admin (B2 etiketi kapısızdı, B1 etiketi dosya seçiciyi yine açıyordu).
+    if (!window.requireDbAdmin('Excel içe aktarma')) { event.target.value = ''; return; }
     const reader = new FileReader();
     reader.onload = async function (e) {
         let importedData = [];
@@ -1555,6 +1560,7 @@ function toggleAllRequests(source) {
 }
 
 async function deleteSelectedRequests() {
+    if (!window.requireDbAdmin('Toplu talep silme')) return;   // Faz 4 · J1 (M1)
     const checkboxes = document.querySelectorAll('.req-checkbox:checked');
     if (checkboxes.length === 0) { showAppAlert("Lütfen silinecek kayıtları seçiniz.", "error"); return; }
     const idsToDelete = new Set(Array.from(checkboxes).map(cb => String(cb.value)));

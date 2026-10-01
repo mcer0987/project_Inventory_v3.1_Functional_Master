@@ -27,9 +27,35 @@
         return escapeHtml(JSON.stringify(value === undefined ? null : value));
     }
 
+    // [WHY]: Faz 4 · J1 (M3) — Rules v2 personel yazmalarında etiket benzeri "<harf", "</", "<!", "<?" içeren metni reddeder
+    //        (firestore.rules noTag). Kural reddi kullanıcıya yalnız "kaydedilemedi" olarak döner; hangi alanın sorunlu olduğu görünmez.
+    // [HOW]: Aynı desen istemcide; formlar kayıttan ÖNCE alan adıyla uyarır. "<5mm", "a < b" serbest (kuralla birebir).
+    const TAG_LIKE = /<[a-zA-Z\/!?]/;
+
+    function hasTagLike(value) {
+        return typeof value === 'string' && TAG_LIKE.test(value);
+    }
+
+    // fields: { 'Alan etiketi': değer, … } → ilk sorunlu alanın etiketi ya da null
+    function findTagLike(fields) {
+        for (const [label, value] of Object.entries(fields || {})) if (hasTagLike(value)) return label;
+        return null;
+    }
+
+    // Sorun varsa kullanıcıyı uyarır ve true döner (çağıran kaydı durdurur).
+    function guardTagLike(fields) {
+        const label = findTagLike(fields);
+        if (!label) return false;
+        const msg = `"${label}" alanında "<" ile başlayan etiket benzeri ifade kullanılamaz (ör. "<b>", "</"). "< 5" gibi kullanımlar serbesttir.`;
+        if (typeof window.showAppAlert === 'function') window.showAppAlert(msg, 'warning');
+        return true;
+    }
+
     window.AppModules = window.AppModules || {};
-    window.AppModules.Html = { escapeHtml, safeUrl, jsArg };
+    window.AppModules.Html = { escapeHtml, safeUrl, jsArg, hasTagLike, findTagLike, guardTagLike };
     window.escapeHtml = escapeHtml;
     window.safeUrl = safeUrl;
     window.jsArg = jsArg;
+    window.hasTagLike = hasTagLike;
+    window.guardTagLike = guardTagLike;
 })();

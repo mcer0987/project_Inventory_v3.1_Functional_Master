@@ -237,6 +237,8 @@ export const saveProduct = async function (e) {
 };
 
 export const toggleWatch = async function (depo, id) {
+    // Faz 4 · J1 (M1): takip b1/b2 yazması — Rules v2'de yalnız admin; personel FAB'da düğmeyi görse de kayıt reddedilirdi.
+    if (!window.requireDbAdmin('Ürün takibi')) return;
     const item = _find(depo, id);
     if (!item) { _missing(); return; }
 
@@ -272,6 +274,8 @@ export const saveRequest = async function (event) {
     const not = val('reqNote');
 
     if (!urun) { alert('Lütfen talep edilen ürünü yazın.', 'warning'); return; }
+    // Faz 4 · J1 (M3): Rules v2 etiket reddiyle aynı kontrol, kayıttan önce ve alan adıyla.
+    if (window.guardTagLike && window.guardTagLike({ 'Ürün': urun, 'Gerekçe / Not': not })) return;
     if (!Number.isInteger(adet) || adet < 1) { alert('Adet en az 1 olmalıdır.', 'warning'); return; }
     if (talepTuru === 'Geçici Zimmet') {
         const today = new Date(); today.setHours(0, 0, 0, 0);

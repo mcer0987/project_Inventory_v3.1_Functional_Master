@@ -95,7 +95,10 @@ describe('Personel yazma yetkisi (Ek D · Aşama A)', () => {
     }
     test('T7: anonim assignments yazamaz', () => assertFails(setDoc(item(ctx.anon(), LIVE, 'assignments', 'as1'), { id: 'as1', sn: 'SN1' })));
     test('T7: anonim serviceRecords yazamaz', () => assertFails(setDoc(item(ctx.anon(), LIVE, 'serviceRecords', 'sr1'), { id: 'sr1' })));
-    test('admin assignments yazar', () => assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'assignments', 'as1'), { id: 'as1' })));
+    test('anonim iş akışı şablonlarını okur (Ek D: personel okuma)', () => assertSucceeds(getDoc(item(ctx.anon(), LIVE, 'workflowTemplates', 'w1'))));
+    test('anonim personel kaydını güncelleyemez', () => assertFails(updateDoc(item(ctx.anon(), LIVE, 'personel', 'u1'), { name: 'X' })));
+    test('anonim görev güncellemesinde etiket reddedilir', () => assertFails(updateDoc(item(ctx.anon(), LIVE, 'tasks', 't1'), { title: XSS })));
+    test('admin assignments yazar',() => assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'assignments', 'as1'), { id: 'as1' })));
     test('anonim talep oluşturur', () => assertSucceeds(setDoc(item(ctx.anon(), LIVE, 'requests', 'r2'), { id: 'r2', ürün: 'Klavye', adet: 1, durum: 'Beklemede' })));
     test('anonim talep günceller (geri çek)', () => assertSucceeds(updateDoc(item(ctx.anon(), LIVE, 'requests', 'r1'), { durum: 'draft' })));
     test('anonim görev oluşturur', () => assertSucceeds(setDoc(item(ctx.anon(), LIVE, 'tasks', 't2'), { id: 't2', title: 'Yeni görev', priority: 'high' })));
@@ -110,6 +113,14 @@ describe('Silme', () => {
     test('KJ-5: demo kökünde __flowtest__ işaretli talep silinir', () => assertSucceeds(deleteDoc(item(ctx.anon(), DEMO, 'requests', 'rtest'))));
     test('KJ-5: demo kökünde işaretsiz talep silinemez', () => assertFails(deleteDoc(item(ctx.anon(), DEMO, 'requests', 'rreal'))));
     test('KJ-5: istisna canlı kökte geçerli değil', () => assertFails(deleteDoc(item(ctx.anon(), LIVE, 'requests', 'rlivetest'))));
+    test('KJ-5: demo satın alma, işaret açıklamada → silinir', async () => {
+        await seed(db => setDoc(item(db, DEMO, 'purchaseOrders', 'potest'), { id: 'potest', urun: 'Toner', aciklama: 'x __flowtest__' }));
+        await assertSucceeds(deleteDoc(item(ctx.anon(), DEMO, 'purchaseOrders', 'potest')));
+    });
+    test('KJ-5: işaret sayısal alanda olsa da hata vermez, silinmez', async () => {
+        await seed(db => setDoc(item(db, DEMO, 'requests', 'rnum'), { id: 'rnum', ürün: 42, adet: 1 }));
+        await assertFails(deleteDoc(item(ctx.anon(), DEMO, 'requests', 'rnum')));
+    });
 });
 
 describe('Bakım modu (RULE-05)', () => {

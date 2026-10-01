@@ -682,6 +682,7 @@ window.inventoryManagementModule = {
   //        hedef depoda tek eşleşen adla) bulunur ve runStockTransaction(+adet) ile atomik artırılır; iptal gerçekten iptaldir;
   //        gerçekleşen iade ayrı alana yazılır; b3, assignments ve bağlı talep güncellenir.
   removeAssignment: async function (id, sourceTable) {
+    if (!window.requireDbAdmin('Zimmet iadesi')) return;   // Faz 4 · J1 (M5): assignments yalnız admin (depoya dönmeyen dal kapısızdı)
     const alert = (m, t) => { if (typeof showAppAlert === 'function') showAppAlert(m, t); };
     const today = typeof getTurkiyeTarihi === 'function' ? getTurkiyeTarihi() : new Date().toLocaleDateString('tr-TR');
     const sameId = x => String(x.id) === String(id);

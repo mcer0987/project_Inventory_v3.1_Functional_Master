@@ -470,7 +470,7 @@
                 </button>
 
                 <label for="fileInput" class="uab-btn uab-btn-purple"
-                    onclick="if(validateAdminAction()) document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
+                    onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
                     <i class="fas fa-file-excel"></i> Import
                 </label>
 
@@ -551,7 +551,7 @@
                 </button>
 
                 <label for="fileInput" class="uab-btn uab-btn-purple"
-                    onclick="document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
+                    onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
                     <i class="fas fa-file-excel"></i> Import
                 </label>
             </div>

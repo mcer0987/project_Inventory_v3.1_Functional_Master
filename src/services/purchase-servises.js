@@ -194,11 +194,19 @@ function fillPurchaseSelects() {
 // -----------------------------
 // KAYDET
 // -----------------------------
+// [WHY]: Faz 4 · J1 (M3) — Rules v2 personelin satın alma metinlerinde etiket benzeri "<" ifadesini reddeder; ret dosyalar
+//        yüklendikten sonra genel hata olarak düşerdi. [HOW]: Kural denetlenen form alanları yüklemeden ÖNCE kontrol edilir.
+function _purchaseTextBlocked() {
+    const v = id => document.getElementById(id)?.value || '';
+    return typeof window.guardTagLike === 'function' && window.guardTagLike({ 'Ürün / Hizmet': v('purName'), 'Açıklama': v('purDesc') });
+}
+
 window.savePurchaseRequest = async function (e) {
     if (e) {
         e.preventDefault();
         e.stopPropagation();
     }
+    if (_purchaseTextBlocked()) return false;
     console.log("🚀 savePurchaseRequest tetiklendi...");
 
     const fileInput = document.getElementById("purchaseFile");
@@ -895,6 +903,7 @@ window.viewServiceItem = function (serviceId) {
 // SERVİS DURUM GÜNCELLE
 // ─────────────────────────────────────────────────────────────
 window.updateServiceStatus = function (serviceId) {
+    if (!window.requireDbAdmin('Servis durumu güncelleme')) return;   // Faz 4 · J1 (M5): serviceRecords yalnız admin
     const record = _findService(serviceId);
     if (!record) return;
 
@@ -1377,6 +1386,7 @@ function _purWorkflowHTML(item) {
 // ─────────────────────────────────────────────────────────────
 window.updatePurchaseRequest = async function (e, id) {
     if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (_purchaseTextBlocked()) return;
 
     const item = _findPurchase(id);
     if (!item) { if (typeof showAppAlert === 'function') showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
@@ -1482,9 +1492,12 @@ window.deleteRequestFile = async function (requestId, fileIndex, fileRef) {
 window.deletePurchaseRequest = async function (id) {
     const item = _findPurchase(id);
     if (!item) return;
-    // Admin her talebi; sahibi yalnız akışı başlamamış talebini silebilir (EBYS-12).
-    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
-    if (!isAdmin && !(_isPurchaseOwner(item) && !item.workflow?.started)) { _denyManage(); return; }
+    // [WHY]: Faz 4 · J1 (M1) — Rules v2'de satın alma silme yalnız admin'e ait; sahibine tanınan "akışı başlamamışsa sil"
+    //        izni kuralla çelişiyordu (kayıt reddedilirdi). Personel talebini iptal edebilir (cancelPurchaseRequest).
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+        if (typeof showAppAlert === 'function') showAppAlert('🔒 Talep silme yöneticiye aittir; talebinizi "İptal Et" ile geri çekebilirsiniz.', 'error');
+        return;
+    }
 
     const onay = await showCustomConfirm(
         'Talebi Kalıcı Sil',

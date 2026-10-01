@@ -176,6 +176,7 @@ window.renderSelectedPersonnel = function () {
 
 // --- VERİ KAYDETME ---
 window.saveUnitData = async function () {
+    if (!window.requireDbAdmin('Birim kaydı')) return;   // Faz 4 · J1: units yalnız admin
     if (unitEditor.saving) return;
     const name = (document.getElementById('unitNameInput')?.value || '').trim();
     if (!name) { _unitAlert('Birim adı boş olamaz!', 'warning'); return; }
@@ -209,7 +210,8 @@ window.saveUnitData = async function () {
 };
 
 window.deleteUnit = async function (unitId) {
-    const unit = (window.data.units || []).find(u => u && typeof u === 'object' && String(u.id) === String(unitId));
+    if (!window.requireDbAdmin('Birim silme')) return;
+    const unit =(window.data.units || []).find(u => u && typeof u === 'object' && String(u.id) === String(unitId));
     if (!unit) { _unitAlert('Birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     const ok = typeof showCustomConfirm === 'function'
         ? await showCustomConfirm('Birimi Sil', `"${_unitName(unit)}" birimi silinecek. Emin misiniz?`)
@@ -2330,7 +2332,8 @@ window.saveTemplateData = async function () {
     }
 
     // [BUGFIX] Bug 2: Admin guard — workflowTemplates is a root collection with admin-only write rules.
-    const isAdmin = window.currentUser?.yetki === 'admin' || localStorage.getItem('admin_auth');
+    // Faz 4 · J1: yetki localStorage bayrağıyla değil Firebase admin oturumuyla (bayrak elle yazılabiliyordu).
+    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
     if (!isAdmin) {
         if (typeof showAppAlert === 'function') {
             showAppAlert("⛔ Şablon kaydetme yetkisi yok. Yalnızca Admin kullanıcılar şablon oluşturabilir.", "error");
@@ -2387,6 +2390,7 @@ window.renderWorkflowTemplates = function () {
 };
 
 window.deleteWorkflowTemplate = async function (id) {
+    if (!window.requireDbAdmin('Şablon silme')) return;   // Faz 4 · J1: workflowTemplates yalnız admin
     if (!confirm("Bu şablonu silmek istediğinize emin misiniz?")) return;
 
     try {

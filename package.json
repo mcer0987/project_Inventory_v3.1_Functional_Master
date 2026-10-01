@@ -3,7 +3,7 @@
     "emu": "firebase emulators:start --only firestore,auth --project medipol-inventory-v3",
     "emu:seed": "node scratch/emu-seed.mjs push",
     "emu:pull": "node scratch/emu-seed.mjs pull",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-rules-test \"node --test --test-reporter=spec tests/rules/*.test.mjs\"",
+    "test:rules": "firebase emulators:exec --config tests/rules/firebase.rules-test.json --only firestore --project demo-rules-test \"node --test --test-reporter=spec tests/rules/*.test.mjs\"",
     "smoke": "node scratch/smoke-test.js",
     "flow": "node scratch/flow-tests.js"
   },

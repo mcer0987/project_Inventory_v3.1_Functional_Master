@@ -554,11 +554,32 @@ export const writeOk = window.writeOk = p => Promise.resolve(p).then(r => r !== 
     if (e && e.name === 'SaveDataError') return false;
     throw e;
 });
+// [WHY]: Faz 4 · J1 (M2) — Rules v2 bakım modunda personel yazmasını, her zaman da yetkisiz koleksiyon / etiketli metin
+//        yazmasını reddeder. Ret "Firestore yazması başarısız: Missing or insufficient permissions" olarak görünüyordu;
+//        çağıranların çoğu writeOk ile bunu genel "kaydedilemedi"ye çeviriyor ve gerçek sebep kayboluyordu.
+// [HOW]: permission-denied → bakım açıksa 'maintenance', değilse 'forbidden'; gerçek sebep veri katmanında bir kez gösterilir
+//        (toplu silme kilidindeki gibi). Bakımda personel yazması Firestore'a hiç gönderilmez (kural yayınlanmadan da aynı davranış).
+export const MAINTENANCE_WRITE_MESSAGE = '🛠️ Sistem bakımda: şu an kayıt yapılamıyor. Bakım bitince tekrar deneyin.';
+export const FORBIDDEN_WRITE_MESSAGE = '🔒 Kayıt reddedildi: bu işlem için yetkiniz yok ya da metinde etiket benzeri "<" ifadesi var.';
+const _maintenanceBlocksWrite = () => !!(window.data && window.data.config && window.data.config.maintenance === true)
+    && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin());
+function _deniedFailure(e) {
+    if (!e || e.code !== 'permission-denied') return null;
+    return _maintenanceBlocksWrite()
+        ? { code: 'maintenance', message: MAINTENANCE_WRITE_MESSAGE }
+        : { code: 'forbidden', message: FORBIDDEN_WRITE_MESSAGE };
+}
+const _SHOWN_BY_DATA_LAYER = ['bulk-delete-blocked', 'maintenance', 'forbidden'];
+function _announceDenied(code, message) {
+    if (code !== 'maintenance' && code !== 'forbidden') return;
+    if (typeof window.showAppAlert === 'function') window.showAppAlert(message, 'error');
+}
+
 window.addEventListener('unhandledrejection', ev => {
     const e = ev.reason;
     if (!e || e.name !== 'SaveDataError') return;
     ev.preventDefault();
-    if (e.code === 'bulk-delete-blocked') return; // saveData kendi uyarısını zaten gösterdi
+    if (_SHOWN_BY_DATA_LAYER.includes(e.code)) return; // veri katmanı kendi uyarısını zaten gösterdi
     const text = e.code === 'no-auth' ? 'Oturum yok; kayıt yapılamadı. Sayfayı yenileyip tekrar giriş yapın.'
         : e.code === 'not-found' ? 'Kayıt bulunamadı; başka biri değiştirmiş veya silmiş olabilir.'
         : `Kayıt yapılamadı: ${e.message}`;
@@ -663,6 +684,10 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
         p.deletes.forEach(key => ops.push({ type: 'delete', ref: _docRef(p.colName, key) }));
         p.writes.forEach(w => ops.push({ type: 'set', ref: _docRef(p.colName, w.key), data: w.data }));
     });
+    if (ops.length && _maintenanceBlocksWrite()) {
+        _announceDenied('maintenance', MAINTENANCE_WRITE_MESSAGE);
+        return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
+    }
     try {
         const CHUNK_SIZE = 490;
         for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
@@ -671,6 +696,8 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
             await batch.commit();
         }
     } catch (e) {
+        const denied = _deniedFailure(e);
+        if (denied) { _announceDenied(denied.code, denied.message); return fail(denied.code, denied.message, { code: e.code }); }
         return fail('write-failed', `Firestore yazması başarısız: ${e.message}`, { code: e.code });
     }
 
@@ -794,6 +821,10 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
     if (prepared.length > 490) return fail('invalid-argument', `Tek atomik işlemde en fazla 490 doküman yazılabilir (${prepared.length}).`);
     const guard = _b3GuardError(prepared, opts);   // Faz 3.5: b3 sözleşmesi — ihlalde batch'in hiçbir parçası yazılmaz
     if (guard) return fail(guard.code, guard.message, guard.details);
+    if (_maintenanceBlocksWrite()) {
+        _announceDenied('maintenance', MAINTENANCE_WRITE_MESSAGE);
+        return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
+    }
 
     try {
         const batch = writeBatch(fireDb);
@@ -806,6 +837,8 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
         await batch.commit();
     } catch (e) {
         if (e && e.code === 'not-found') return fail('not-found', 'Kayıt Firestore\'da bulunamadı; başka biri silmiş olabilir.', { code: e.code });
+        const denied = _deniedFailure(e);
+        if (denied) { _announceDenied(denied.code, denied.message); return fail(denied.code, denied.message, { code: e.code }); }
         return fail('write-failed', `Firestore yazması başarısız: ${e.message}`, { code: e && e.code });
     }
 
