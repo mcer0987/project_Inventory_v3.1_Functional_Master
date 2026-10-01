@@ -29,6 +29,8 @@ firebase-debug.log*
 # Backup and dev-only directories
 backup/
 scratch/
+audits/
+tests/
 functions/
 
 # Puppeteer debug scripts

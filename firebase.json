@@ -23,7 +23,8 @@
       "nginx.conf",
       "firestore.rules",
       ".agents/**",
-      "tests/**"
+      "tests/**",
+      "audits/**"
     ],
     "headers": [
       {
