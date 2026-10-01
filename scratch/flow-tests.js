@@ -56,6 +56,16 @@ async function installHelpers(page) {
                 await window.SecurityConfig.logout();
                 return this.waitFor(async () => !!(window.userAuth && window.userAuth.isAnonymous), 8000);
             },
+            // Faz 4 · J1: yönetici işlemi. Emülatörde gerçek admin oturumu (Rules v2 yüklü); gerçek demoda yayındaki eski
+            // kurallar anonim yazmaya izin verdiği için yalnız istemci kapısı (isDbAdmin) taklit edilir.
+            async asAdmin(fn) {
+                if (this.emulator) {
+                    await this.adminLogin();
+                    try { return await fn(); } finally { await this.backToAnonymous(); }
+                }
+                const real = window.isDbAdmin; window.isDbAdmin = () => true;
+                try { return await fn(); } finally { window.isDbAdmin = real; }
+            },
         };
     }, MARKER, EMU, EMU_ADMIN_CODE);
 }
@@ -233,8 +243,8 @@ const SCENARIOS = {
             out.rejected = { durum: (await db(2)).durum, rejectedBy: (await db(2)).rejectedBy };
 
             await ft.waitFor(async () => window.data.requests.find(r => r.id === base + 2)?.durum === 'rejected');
-            await window.deleteRequest(base + 2);
-            out.deletedById = await ft.waitFor(async () => !(await db(2)) && !!(await db(1)) && !!(await db(3)));
+            await ft.asAdmin(() => window.deleteRequest(base + 2));   // J1: talep silme yalnız admin
+            out.deletedById =await ft.waitFor(async () => !(await db(2)) && !!(await db(1)) && !!(await db(3)));
             window.saveData = realSave; window.showRequestApprovalModal = realModal; window.applyItemOps = realApply;
             return out;
         });
@@ -355,7 +365,8 @@ const SCENARIOS = {
             const origUnits = window.data.units;
             window.data.personel = [...(window.data.personel || []), { name: 'Zeynep Flowtest' }, { name: 'Zehra Flowtest' }];
             window.data.units = [{ id: 'u1', name: 'Mevcut Birim', personnel: ['Zeynep Flowtest'] }, { id: 'u2', name: 'Diğer Birim', personnel: [] }];
-            const realSave = window.saveData;
+            const realSave = window.saveData, realAdm = window.isDbAdmin;
+            window.isDbAdmin = () => true;   // J1: birim yazmaları yalnız admin; yazma burada taklit ediliyor
             window.saveData = async (col, items) => { if (col !== 'units') return realSave(col, items); saves.push(JSON.parse(JSON.stringify(items))); window.data.units = items; return true; };
             window.showCustomConfirm = async () => true;
             const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
@@ -402,7 +413,7 @@ const SCENARIOS = {
             out.deleteById = saves.at(-1).map(u => u.id).sort().join(',');
             out.rendered = (document.getElementById('unitListArea') || document.getElementById('adminDefUnitTableBody'))?.textContent.includes('Mevcut Birim (düz.)');
 
-            window.saveData = realSave; window.data.units = origUnits;
+            window.saveData = realSave; window.data.units = origUnits; window.isDbAdmin = realAdm;
             window.data.personel = window.data.personel.filter(p => !String(p.name).includes('Flowtest'));
             await sleep(10);
             return out;
@@ -1021,6 +1032,7 @@ const SCENARIOS = {
                 api: ['appendItem', 'updateItem', 'removeItem'].map(k => [k, window[k]]) };
             ['appendItem', 'updateItem', 'removeItem'].forEach(k => { window[k] = async (...a) => { ops.push([k, ...JSON.parse(JSON.stringify(a))]); return { written: 1 }; }; });
             window.validateAdminAction = () => true;
+            const realAdm = window.isDbAdmin; window.isDbAdmin = () => true;   // J1: personel yazmaları yalnız admin (taklit)
             let confirmAnswer = false; window.showCustomConfirm = async () => confirmAnswer;
             window.showAppAlert = () => {};
             window.data.personel = [{ id: 'p1', name: 'Ayşe', code: '11111', role: 'x' }, { id: 'p2', name: '<img src=x onerror="window.__px=1">', code: '22222' }];
@@ -1053,7 +1065,7 @@ const SCENARIOS = {
 
             window.data.personel = orig.p;
             orig.api.forEach(([k, f]) => { window[k] = f; });
-            Object.assign(window, { validateAdminAction: orig.val, showCustomConfirm: orig.confirm, showAppAlert: orig.alert });
+            Object.assign(window, { validateAdminAction: orig.val, showCustomConfirm: orig.confirm, showAppAlert: orig.alert, isDbAdmin: realAdm });
             document.getElementById('personelModal').style.display = 'none';
             return out;
         });
@@ -1452,11 +1464,19 @@ const SCENARIOS = {
         const ids = await page.evaluate(async () => {
             const ft = window.__ft, P = '<img src=x onerror="window.__xss=(window.__xss||0)+1">';
             const reqId = Date.now(), poId = '1);window.__xssId=1;//' + ft.MARKER;
+            // J1: Rules v2 personelin etiketli yazmasını reddeder (savunma derinliği). Render kaçışını sınamak için yükler,
+            // emülatörde etiket kuralına tabi olmayan admin oturumuyla yazılır (gerçek demoda eski kurallar anonime izin verir).
+            let anonPayloadRejected = 'n/a (gerçek demo: eski kurallar)';
+            if (ft.emulator) {
+                anonPayloadRejected = await window.appendItem('requests', { id: reqId + 1, ürün: P, personel: 'X ' + ft.MARKER }).then(() => 'ALLOWED', e => e.code);
+                await ft.adminLogin();
+            }
             await window.saveData('requests', [...(window.data.requests || []), { id: reqId, ürün: P, personel: 'X ' + ft.MARKER, not: P, durum: 'Beklemede', tarih: '01.01.2026', adet: 1 }]);
             await window.saveData('tasks', [...(window.data.tasks || []), { id: 'task_' + reqId, title: P + ft.MARKER, description: P, priority: P, type: 'task', status: 'pending', assigneeId: 'pool', checklist: [{ text: P, done: false }], interactions: [{ user: P, message: P }] }]);
             await window.saveData('purchaseOrders', [...(window.data.purchaseOrders || []), { id: poId, urun: P + ft.MARKER, evrakNo: P, talepEden: P, birim: P, tarih: P, durum: 'Taslak', akis: [] }]);
             await ft.waitFor(async () => (await ft.readMarked('requests')).length && (await ft.readMarked('tasks')).length && (await ft.readMarked('purchaseOrders')).length);
-            return { reqId, poId };
+            if (ft.emulator) await ft.backToAnonymous();
+            return { reqId, poId, anonPayloadRejected };
         });
 
         const admin = await (await browser.createBrowserContext()).newPage();
@@ -1483,6 +1503,7 @@ const SCENARIOS = {
                 purchaseButton: clicked,
             };
         }, ids.poId);
+        out.anonPayloadRejected = ids.anonPayloadRejected;
         out.adminPageErrors = errs;
         await admin.browserContext().close();
         return out;
@@ -2230,6 +2251,89 @@ const SCENARIOS = {
             out.adminB1Delete = await fs.deleteDoc(ref).then(() => 'ALLOWED', e => e.code);
             out.backToAnonymous = await ft.backToAnonymous();
             out.syncAfterLogout = await ft.waitFor(async () => (window.data.b1 || []).length === out.seededB1, 8000);
+            return out;
+        });
+    },
+
+    // Faz 4 · J1 — Rules v2 Aşama A ile istemci hizalaması (M1-M3). Yalnız emülatörde (yeni kurallar yalnız orada yüklü).
+    async j1RulesAlignment(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft;
+            if (!ft.emulator) return { skipped: 'yalnız --emu ile' };
+            const out = {}, alerts = [];
+            const origAlert = window.showAppAlert, origConfirm = window.showCustomConfirm;
+            window.showAppAlert = (m, t) => { alerts.push(`${t}: ${m}`); };
+            window.showCustomConfirm = async () => true;
+            const take = () => alerts.splice(0).join(' | ');
+            const has = async (col, id) => (await ft.readAll(col)).some(d => String(d.id) === String(id));
+            try {
+                window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+                out.anonymous = !!window.userAuth?.isAnonymous;
+
+                // M1 · personel silme kapıları (kayıt yerinde kalır, anlaşılır mesaj)
+                const po = { id: window.makeId(), urun: 'J1 ' + ft.MARKER, aciklama: ft.MARKER, createdBy: '00001', createdByName: 'Flow Test ' + ft.MARKER, durum: 'Onay Bekliyor' };
+                await window.appendItem('purchaseOrders', po);
+                await ft.waitFor(async () => (window.data.purchaseOrders || []).some(p => String(p.id) === String(po.id)));
+                await window.deletePurchaseRequest(po.id);
+                out.staffDeletePurchase = { kept: await has('purchaseOrders', po.id), alert: take() };
+
+                const rq = { id: window.makeId(), ürün: 'J1 ' + ft.MARKER, adet: 1, durum: 'Beklemede', personel: 'Flow Test ' + ft.MARKER };
+                await window.appendItem('requests', rq);
+                await ft.waitFor(async () => (window.data.requests || []).some(r => String(r.id) === String(rq.id)));
+                await window.deleteRequest(rq.id);
+                out.staffDeleteRequest = { kept: await has('requests', rq.id), alert: take() };
+
+                const b1 = (window.data.b1 || [])[0];
+                await window.toggleWatch('b1', b1.id);
+                out.staffToggleWatch = { unchanged: !!(await ft.readAll('b1')).find(x => String(x.id) === String(b1.id))?.isWatched === !!b1.isWatched, alert: take() };
+
+                // Kapıyı atlayan doğrudan yazma: kural reddi → 'forbidden' + tek anlaşılır mesaj
+                const direct = async p => { try { await p; return 'ok'; } catch (e) { return e.code; } };
+                out.directAssignmentWrite = { code: await direct(window.appendItem('assignments', { id: window.makeId(), sn: ft.MARKER })), alert: take() };
+                // İşaretli demo kayıtları KJ-5 gereği silinebilir; reddi işaretsiz bir kayıtla sına (admin oluşturur ve temizler).
+                const unmarked = { id: window.makeId(), ürün: 'J1 işaretsiz kayıt', adet: 1, durum: 'Beklemede', personel: 'J1' };
+                await ft.asAdmin(() => window.appendItem('requests', unmarked));
+                await ft.waitFor(async () => (window.data.requests || []).some(r => String(r.id) === String(unmarked.id)));
+                take();
+                out.directStaffDeleteUnmarked = { code: await direct(window.removeItem('requests', unmarked.id)), kept: await has('requests', unmarked.id), alert: take() };
+                out.directStaffDeleteMarkedDemo = { code: await direct(window.removeItem('requests', rq.id)), note: 'KJ-5: işaretli demo kaydı silinebilir' };
+                await window.appendItem('requests', rq);
+
+                // M3 · etiket ön kontrolü (form) ve kural (doğrudan)
+                window.openRequestModal(false);
+                ft.set('reqProdName', 'Etiket ' + ft.MARKER); ft.set('reqQty', '1'); ft.set('reqType', 'Kalıcı Zimmet');
+                ft.set('reqNote', '<img src=x onerror=alert(1)> ' + ft.MARKER);
+                const before = (await ft.readMarked('requests')).length;
+                await window.saveRequest(new Event('submit'));
+                await ft.sleep(800);
+                out.formTagBlocked = { created: (await ft.readMarked('requests')).length - before, alert: take() };
+                ft.set('reqNote', 'vida <5mm, a < b ' + ft.MARKER);
+                await window.saveRequest(new Event('submit'));
+                out.formLessThanAllowed = await ft.waitFor(async () => (await ft.readMarked('requests')).length === before + 1);
+                take();
+                out.directTagWrite = { code: await direct(window.appendItem('requests', { id: window.makeId(), ürün: '<b>x</b> ' + ft.MARKER })), alert: take() };
+
+                // M2 · bakım: personel yazması Firestore'a gitmeden durur, bakım mesajı (sunucu tarafı kural matrisinde)
+                const cfg = window.data.config;
+                window.data.config = { ...(cfg || {}), maintenance: true };
+                out.maintenanceWrite = { code: await direct(window.updateItem('requests', rq.id, { not: 'bakım ' + ft.MARKER })), alert: take() };
+                window.data.config = cfg;
+                out.afterMaintenanceWrite = await direct(window.updateItem('requests', rq.id, { not: 'normal ' + ft.MARKER }));
+
+                // Admin yolu: aynı kapılar admin oturumunda açılır
+                out.adminLogin = await ft.adminLogin();
+                await window.toggleWatch('b1', b1.id);
+                out.adminToggleWatch = await ft.waitFor(async () => !!(await ft.readAll('b1')).find(x => String(x.id) === String(b1.id))?.isWatched !== !!b1.isWatched);
+                await window.toggleWatch('b1', b1.id);   // geri al
+                await window.deletePurchaseRequest(po.id);
+                out.adminDeletePurchase = !(await has('purchaseOrders', po.id));
+                await window.removeItem('requests', unmarked.id);
+                out.adminDeleteUnmarked = !(await has('requests', unmarked.id));
+                take();
+                out.backToAnonymous = await ft.backToAnonymous();
+            } finally {
+                window.showAppAlert = origAlert; window.showCustomConfirm = origConfirm;
+            }
             return out;
         });
     },
