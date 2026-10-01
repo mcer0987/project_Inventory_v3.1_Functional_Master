@@ -477,17 +477,20 @@ window.searchPersonnelForStart = function (query, index) {
                     style="padding:10px 12px; cursor:pointer; background:var(--color-surface); transition:all 0.2s ease; border-bottom:${isLast ? 'none' : '1px solid var(--color-surface-alt)'};"
                     onmouseover="this.style.background='var(--color-surface-alt)';" 
                     onmouseout="this.style.background='var(--color-surface)';"
-                    onclick="window.selectPersonForWorkflow(${index}, '${name.replace(/'/g, "\\'")}')">
+                    data-action="selectPerson" data-step="${escapeHtml(index)}" data-name="${escapeHtml(name)}">
                     <div style="display:flex; align-items:center; gap:10px;">
                         <div style="width:32px; height:32px; border-radius:50%; background:var(--color-primary); display:flex; align-items:center; justify-content:center; color:white; font-weight:600; font-size:12px;">
-                            ${name.charAt(0).toUpperCase()}
+                            ${escapeHtml(name.charAt(0).toUpperCase())}
                         </div>
                         <div style="flex:1;">
-                            <div style="font-weight:500; color:var(--color-text); font-size:13px; line-height:1.2;">${name}</div>
+                            <div style="font-weight:500; color:var(--color-text); font-size:13px; line-height:1.2;">${escapeHtml(name)}</div>
                         </div>
                     </div>
                 </div>`;
     }).join('');
+    // [WHY]: Faz 4 · J2 — personel adı onclick'e '…' içinde gömülüyordu ("’" kaçışı "&#39;" ve '"' ile aşılabiliyordu).
+    // [HOW]: data-step + data-name (escapeHtml), tek dinleyici.
+    window.bindActions(dropdown, { selectPerson: el => window.selectPersonForWorkflow(Number(el.dataset.step), el.dataset.name) });
 
     // Input'un pozisyonunu al
     const rect = inputElement.getBoundingClientRect();
@@ -1390,7 +1393,7 @@ window.renderMyApprovals = function () {
                         <span class="badge ${badgeClass}">${statusText}</span>
                     </div>
                     <div class="approval-id-badge">
-                        #${item.id}
+                        #${escapeHtml(item.id)}
                     </div>
                 </div>
                 
@@ -1441,7 +1444,7 @@ window.renderMyApprovals = function () {
 
     } catch (err) {
         console.error("❌ renderMyApprovals Loop Hatası:", err);
-        container.innerHTML = `<div class="alert alert-danger">Liste yüklenirken bir hata oluştu: ${err.message}</div>`;
+        container.innerHTML = `<div class="alert alert-danger">Liste yüklenirken bir hata oluştu: ${escapeHtml(err.message)}</div>`;
     }
 
     // Sayacı ve İstatistikleri güncelle
@@ -1553,7 +1556,7 @@ window.renderTemplateSteps = function () {
             "Olur (E-İmza)",
             "Islak İmza"
         ].map(t => `
-                        <option value="${t}" ${escapeHtml(step.tip === t ? 'selected' : '')}>${t}</option>
+                        <option value="${escapeHtml(t)}" ${step.tip === t ? 'selected' : ''}>${escapeHtml(t)}</option>
                     `).join('')}
                 </select>
             </td>
@@ -1620,16 +1623,20 @@ window.searchPersonnelForTemplate = function (query, type, stepIndex = null) {
     if (filtered.length > 0) {
         resDiv.innerHTML = filtered.map(p => {
             const name = p.adSoyad || p.ad || p.name || "İsimsiz";
-            return `<div class="p-3 border-bottom search-item-modern" onclick="window.addPersonnelToTemplate('${name}', '${type}', ${stepIndex})">
+            return `<div class="p-3 border-bottom search-item-modern" data-action="addPersonnel" data-name="${escapeHtml(name)}" data-type="${escapeHtml(type)}" data-step="${escapeHtml(stepIndex)}">
                 <div class="d-flex align-items-center justify-content-between">
                     <div class="d-flex align-items-center gap-2">
-                        <div class="avatar-mini shadow-sm">${name.charAt(0)}</div>
-                        <span class="fw-bold text-dark" style="font-size:0.85rem;">${name}</span>
+                        <div class="avatar-mini shadow-sm">${escapeHtml(name.charAt(0))}</div>
+                        <span class="fw-bold text-dark" style="font-size:0.85rem;">${escapeHtml(name)}</span>
                     </div>
                     <i class="fas fa-plus-circle text-primary opacity-50"></i>
                 </div>
             </div>`;
         }).join('');
+        // Faz 4 · J2: personel adı onclick'e kaçışsız gömülüyordu → data-* + tek dinleyici.
+        window.bindActions(resDiv, {
+            addPersonnel: el => window.addPersonnelToTemplate(el.dataset.name, el.dataset.type, el.dataset.step === '' ? undefined : Number(el.dataset.step)),
+        });
         resDiv.style.display = 'block';
     } else {
         resDiv.innerHTML = '<div class="p-3 text-center text-danger fw-bold" style="font-size:0.8rem;"><i class="fas fa-exclamation-circle me-1"></i> Sonuç Bulunamadı</div>';
@@ -2268,7 +2275,7 @@ window.renderTemplateAuth = function () {
     list.innerHTML = WorkflowState.tempTplAuth.map((name, index) => `
         <span class="personnel-tag-premium">
             <i class="fas fa-user-shield me-1"></i>
-            <span>${name}</span>
+            <span>${escapeHtml(name)}</span>
             <i class="fas fa-times-circle ms-2 delete-icon" onclick="WorkflowState.tempTplAuth.splice(${index},1); window.renderTemplateAuth();"></i>
         </span>
     `).join('');

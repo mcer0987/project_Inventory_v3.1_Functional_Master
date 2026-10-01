@@ -696,7 +696,7 @@ window.showRequestApprovalModal = function (request) {
             sel.innerHTML = `<option value="${NO_STOCK}">— Stoktan düşmeden onayla (stok dışı / tedarik edilecek)</option>` +
                 visible.map(c => {
                     const qty = _stockQty(c.p);
-                    return `<option value="${escapeHtml(c.key)}" ${qty < want ? 'disabled' : ''}>${c.repo.toUpperCase()} · ${escapeHtml(_stockLabel(c.p))} · Raf ${escapeHtml(c.p.raf || '-')} · Stok: ${escapeHtml(qty)}${qty < want ? ' (yetersiz)' : ''}</option>`;
+                    return `<option value="${escapeHtml(c.key)}" ${qty < want ? 'disabled' : ''}>${escapeHtml(c.repo.toUpperCase())} ·${escapeHtml(_stockLabel(c.p))} · Raf ${escapeHtml(c.p.raf || '-')} · Stok: ${escapeHtml(qty)}${qty < want ? ' (yetersiz)' : ''}</option>`;
                 }).join('');
             sel.value = selected;
         };
@@ -1260,7 +1260,7 @@ window.exportPDF = function (depo) {
         if (status.includes("arız") || status.includes("bozuk") || status.includes("tutmuyor")) return "status-ariza";
         return "status-diger";
     }
-    let html = `<html><head><title>${depo} Rapor</title><style>
+    let html = `<html><head><title>${escapeHtml(depo)} Rapor</title><style>
         body { font-family: "Roboto", Arial, sans-serif; margin: 0; padding: 20px; color: #222; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; }
         th, td { border: 1px solid #cfd6dc; padding: 6px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1279,13 +1279,13 @@ window.exportPDF = function (depo) {
         .status-ariza { background: #ffebee; color: #c62828; font-weight: 600; }
         .status-sifir { background: #e3f2fd; color: #1565c0; font-weight: 600; }
         .status-diger { background: #fff8e1; color: #ef6c00; font-weight: 600; }
-    </style></head><body><div class="print-container"><div style="font-size:18px; font-weight:bold; margin-bottom:6px;">${depo.toUpperCase()} DEPO ENVANTERİ</div>
-    <div style="font-size:12px; margin-bottom:14px;">Rapor Tarihi: ${getTurkiyeSaati()}</div><table><thead><tr><th>#</th><th>Sütun</th><th>Raf</th><th>Ürün</th><th>Marka</th><th>Adet</th><th>Durum</th><th>Tür</th></tr></thead><tbody>`;
+    </style></head><body><div class="print-container"><div style="font-size:18px; font-weight:bold; margin-bottom:6px;">${escapeHtml(depo.toUpperCase())} DEPO ENVANTERİ</div>
+    <div style="font-size:12px; margin-bottom:14px;">Rapor Tarihi: ${escapeHtml(getTurkiyeSaati())}</div><table><thead><tr><th>#</th><th>Sütun</th><th>Raf</th><th>Ürün</th><th>Marka</th><th>Adet</th><th>Durum</th><th>Tür</th></tr></thead><tbody>`;
 
     items.forEach((item, index) => {
         const status = item.durumu ?? item.status ?? "-";
         html += `<tr><td>${index + 1}</td><td>${escapeHtml(item.sütun || '-')}</td><td>${escapeHtml(item.raf || '-')}</td><td class="wrap">${escapeHtml(item.ürün || '-')}</td><td class="wrap">${escapeHtml(item.marka || '-')}</td>
-        <td style="text-align:center; font-weight:600;">${escapeHtml(item.adet ?? item.qty ?? 0)}</td><td class="${getStatusClass(status)}">${status}</td><td>${escapeHtml(item.tür ?? item.type ?? '-')}</td></tr>`;
+        <td style="text-align:center; font-weight:600;">${escapeHtml(item.adet ?? item.qty ?? 0)}</td><td class="${getStatusClass(status) /* xss-ok: dört sabit sınıf adından biri */}">${escapeHtml(status)}</td><td>${escapeHtml(item.tür ?? item.type ?? '-')}</td></tr>`;
     });
     html += `</tbody></table></div></body></html>`;
 
@@ -1399,34 +1399,7 @@ window.exportToExcel = function (depo) {
     showAppAlert(`${depo.toUpperCase()} Raporu oluşturuldu.`, "success");
 };
 
-function showCustomConfirm(title, message, callback) {
-    const overlay = document.getElementById('customAlertOverlay');
-    const confirmBtn = document.getElementById('alertConfirmBtn');
-    const cancelBtn = document.getElementById('alertCancelBtn');
-    if (!overlay) {
-        const res = confirm(message);
-        if (res && callback && typeof callback === 'function') callback();
-        return Promise.resolve(res);
-    }
-    document.getElementById('alertTitle').innerText = title;
-    // [WHY]: Onay metinleri kayıt verisi (ürün/evrak adı) içeriyor; innerHTML ile XSS'e açıktı (SEC-01).
-    const alertMessageEl = document.getElementById('alertMessage');
-    alertMessageEl.textContent = message;
-    alertMessageEl.style.whiteSpace = 'pre-line';
-    overlay.style.display = 'flex';
-    return new Promise((resolve) => {
-        confirmBtn.onclick = () => {
-            overlay.style.display = 'none';
-            if (callback && typeof callback === 'function') callback();
-            resolve(true);
-        };
-        cancelBtn.onclick = () => {
-            overlay.style.display = 'none';
-            resolve(false);
-        };
-    });
-}
-window.showCustomConfirm = showCustomConfirm;
+// Faz 4 · J2 (M6): showCustomConfirm'in tek tanımı src/utils/alert.js'te (iki sayfada script.js'ten önce yüklenir).
 
 // [WHY]: Eski localStorage önbelleği window.data'yı Firebase'den önce eksik/bayat veriyle eziyordu (DATA-07).
 // [HOW]: Tek kaynak Firestore snapshot'larıdır; kalmış önbellek bir kez silinir.

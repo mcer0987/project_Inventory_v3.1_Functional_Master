@@ -104,7 +104,7 @@ function showSuccessBanner(message) {
         justify-content: center;
         gap: 10px;
     `;
-    banner.innerHTML = `✅ ${message}`;
+    banner.textContent = `✅ ${message}`;   // Faz 4 · J2: mesaj metindir (SEC-01)
     
     document.body.appendChild(banner);
 
@@ -118,44 +118,65 @@ function showSuccessBanner(message) {
 
 
 /**
- * Özel Onay Kutusu Fonksiyonu
- * @param {string} title - Başlık
- * @param {string} message - Mesaj içeriği
- * @returns {Promise<boolean>} - Evet ise true, Hayır ise false döner
+ * Özel onay kutusu — projedeki TEK tanım (Faz 4 · J2 · M6).
+ * [WHY]: İki tanım vardı: alert.js (innerHTML) ve onu ezen script.js (textContent). Hangisinin çalıştığı yükleme sırasına
+ *        bağlıydı; HTML bekleyen tek çağıran (TODO "Ata") textContent sürümünde seçim kutusunu metin olarak gösteriyor ve
+ *        onayda çöküyordu. Kayıt verisi içeren onlarca çağıran ise güvenliği yalnız bu tesadüfe borçluydu.
+ * [HOW]: Varsayılan güvenli: metin mesajı textContent (+ satır sonları). DOM gerekiyorsa çağıran Node verir (güvenle kurulmuş).
+ *        { html: true } yalnız SABİT metinler içindir — kayıt verisi asla bu yolla verilmez.
+ * @param {string} title
+ * @param {string|Node} message
+ * @param {Function|Object|string} [arg3] onayda çağrılacak fonksiyon | seçenekler | onay düğmesi metni (geri uyum)
+ * @param {Object|string} [arg4] seçenekler | vazgeç düğmesi metni (geri uyum)
+ *        Seçenekler: { html, confirmText, cancelText, danger }
+ * @returns {Promise<boolean>} Evet → true, Hayır → false
  */
+function showCustomConfirm(title, message, arg3, arg4) {
+    let callback = null, opts = {};
+    if (typeof arg3 === 'function') callback = arg3;
+    else if (typeof arg3 === 'string') opts.confirmText = arg3;
+    else if (arg3 && typeof arg3 === 'object') opts = { ...arg3 };
+    if (typeof arg4 === 'string') opts.cancelText = arg4;
+    else if (arg4 && typeof arg4 === 'object') opts = { ...opts, ...arg4 };
 
-function showCustomConfirm(title, message, callback) {
     const overlay = document.getElementById('customAlertOverlay');
     const confirmBtn = document.getElementById('alertConfirmBtn');
     const cancelBtn = document.getElementById('alertCancelBtn');
+    const messageEl = document.getElementById('alertMessage');
+    const isNode = typeof Node !== 'undefined' && message instanceof Node;
 
-    // İşlem tipine göre buton rengini ayarla
-    if (typeof btnType !== 'undefined' && btnType === 'danger') {
-        confirmBtn.style.backgroundColor = '#e74c3c'; // Kırmızı
-    } else {
-        confirmBtn.style.backgroundColor = '#2ecc71'; // Yeşil
+    if (!overlay || !confirmBtn || !cancelBtn || !messageEl) {
+        const res = confirm(isNode ? message.textContent : String(message ?? ''));
+        if (res && callback) callback();
+        return Promise.resolve(res);
     }
-    
-    // İçeriği güncelle
+
     document.getElementById('alertTitle').innerText = title;
-    document.getElementById('alertMessage').innerHTML = message;
-    
-    // Görünür yap
+    messageEl.textContent = '';
+    messageEl.style.whiteSpace = 'pre-line';
+    if (isNode) messageEl.appendChild(message);
+    else if (opts.html === true) messageEl.innerHTML = message; // xss-ok: yalnız sabit metin sözleşmesi ({html:true})
+    else messageEl.textContent = String(message ?? '');
+
+    // Düğme metinleri ve rengi yalnız bu açılış için; kapanınca varsayılana döner.
+    const defaults = { confirm: confirmBtn.dataset.defaultText ?? (confirmBtn.dataset.defaultText = confirmBtn.textContent),
+                       cancel: cancelBtn.dataset.defaultText ?? (cancelBtn.dataset.defaultText = cancelBtn.textContent) };
+    confirmBtn.textContent = opts.confirmText || defaults.confirm;
+    cancelBtn.textContent = opts.cancelText || defaults.cancel;
+    confirmBtn.style.backgroundColor = opts.danger ? '#e74c3c' : '';
     overlay.style.display = 'flex';
 
     return new Promise((resolve) => {
-        // Evet'e basılırsa
-        confirmBtn.onclick = () => {
+        const close = (answer) => {
             overlay.style.display = 'none';
-            if (callback && typeof callback === 'function') callback();
-            resolve(true);
+            confirmBtn.textContent = defaults.confirm;
+            cancelBtn.textContent = defaults.cancel;
+            confirmBtn.style.backgroundColor = '';
+            if (answer && callback) callback();
+            resolve(answer);
         };
-
-        // Hayır'a basılırsa
-        cancelBtn.onclick = () => {
-            overlay.style.display = 'none';
-            resolve(false);
-        };
+        confirmBtn.onclick = () => close(true);
+        cancelBtn.onclick = () => close(false);
     });
 }
 window.showCustomConfirm = showCustomConfirm;

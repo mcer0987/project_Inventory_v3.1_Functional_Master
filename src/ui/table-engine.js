@@ -40,33 +40,36 @@ window.pageSize = PAGE_SIZE;
 // ─────────────────────────────────────────────────────────────────────────────
 // Yardımcı Helper Fonksiyonları
 // ─────────────────────────────────────────────────────────────────────────────
+// [WHY]: Faz 4 · J2 (SEC-01) — B1/B2 tabloları ve kartları ürün, marka, raf, durum, tür alanlarını ham basıyordu; tarih
+//        satır içi handler'a JS dizgesi olarak gömülüyordu ('…' tırnağıyla kaçılabilir).
+// [HOW]: Her ham alan şablona girdiği yerde escapeHtml; tarih data-tip niteliğinde, handler this.dataset.tip okur.
 function _buildQtyDisplay(itemQty, updateDate) {
     if (window.innerWidth <= 768) {
-        return `${itemQty} <span class="mobile-info-trigger" onclick="window.showMobileTooltip(event, '${updateDate}')" style="margin-left: 6px; cursor: pointer; color: #3498db; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.85em; transition: opacity 0.2s;"><i class="fas fa-info-circle"></i></span>`;
+        return `${escapeHtml(itemQty)} <span class="mobile-info-trigger" data-tip="${escapeHtml(updateDate)}" onclick="window.showMobileTooltip(event, this.dataset.tip)" style="margin-left: 6px; cursor: pointer; color: #3498db; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.85em; transition: opacity 0.2s;"><i class="fas fa-info-circle"></i></span>`;
     }
-    return String(itemQty);
+    return escapeHtml(itemQty);
 }
 
-function _buildRowInnerHtml(depo, item, realIndex, qtyDisplay) {
+function _buildRowInnerHtml(depo, item, realIndex, qtyHtml) {
     if (depo === 'b1' || depo === 'b2') {
         const itemType = item.tür || item.type || item.prodType || '-';
         return `
-            <td><input type="checkbox" class="row-select" data-index="${realIndex}" data-id="${escapeHtml(item.id ?? '')}"></td>
-            <td>${item.sütun || '-'}</td>
-            <td>${item.raf || '-'}</td>
-            <td>${item.ürün || '-'}${item.isWatched ? ' <i class="fas fa-eye" title="Takipte" style="color:var(--color-info);margin-left:4px;"></i>' : ''}</td>
-            <td>${item.marka || '-'}</td>
-            <td class="js-qty-cell">${qtyDisplay}</td>
-            <td class="js-status-cell">${item.durumu || '-'}</td>
-            <td>${itemType}</td>`;
+            <td><input type="checkbox" class="row-select" data-index="${escapeHtml(realIndex)}" data-id="${escapeHtml(item.id ?? '')}"></td>
+            <td>${escapeHtml(item.sütun || '-')}</td>
+            <td>${escapeHtml(item.raf || '-')}</td>
+            <td>${escapeHtml(item.ürün || '-')}${item.isWatched ? ' <i class="fas fa-eye" title="Takipte" style="color:var(--color-info);margin-left:4px;"></i>' : ''}</td>
+            <td>${escapeHtml(item.marka || '-')}</td>
+            <td class="js-qty-cell">${qtyHtml}</td>
+            <td class="js-status-cell">${escapeHtml(item.durumu || '-')}</td>
+            <td>${escapeHtml(itemType)}</td>`;
     }
     return `
         <td><input type="checkbox" class="row-select"></td>
-        <td>${item.ürün || item.name || '-'}</td>
-        <td>${item.tür || item.type || '-'}</td>
-        <td>${item.raf || item.shelf || '-'}</td>
-        <td class="js-status-cell">${item.durumu || item.status || '-'}</td>
-        <td class="js-qty-cell">${qtyDisplay}</td>`;
+        <td>${escapeHtml(item.ürün || item.name || '-')}</td>
+        <td>${escapeHtml(item.tür || item.type || '-')}</td>
+        <td>${escapeHtml(item.raf || item.shelf || '-')}</td>
+        <td class="js-status-cell">${escapeHtml(item.durumu || item.status || '-')}</td>
+        <td class="js-qty-cell">${qtyHtml}</td>`;
 }
 
 function _buildRowHtml(depo, item, realIndex) {
@@ -74,18 +77,19 @@ function _buildRowHtml(depo, item, realIndex) {
         ? tsToTurkiye(item.lastUpdate)
         : (item.lastUpdate ? String(item.lastUpdate) : 'Tarih bilgisi yok');
     const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
-    const qtyDisplay = _buildQtyDisplay(itemQty, updateDate);
-    const innerHtml = _buildRowInnerHtml(depo, item, realIndex, qtyDisplay);
+    const qtyHtml = _buildQtyDisplay(itemQty, updateDate);
+    const innerHtml = _buildRowInnerHtml(depo, item, realIndex, qtyHtml);
     const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
     const rowClass = isPassive ? 'passive-row' : '';
-    const safeName = (item.ürün || item.name || '-').replace(/"/g, '&quot;');
+    const safeName = escapeHtml(item.ürün || item.name || '-');
 
     return `<tr class="${rowClass} selectable-row"
                 data-id="${escapeHtml(item.id ?? '')}"
-                data-depo="${depo}"
-                data-index="${realIndex}"
+                data-depo="${escapeHtml(depo)}"
+                data-index="${escapeHtml(realIndex)}"
                 data-name="${safeName}"
-                onmouseenter="window.showRowTooltip(event, '${updateDate}')"
+                data-tip="${escapeHtml(updateDate)}"
+                onmouseenter="window.showRowTooltip(event, this.dataset.tip)"
                 onmousemove="window.moveRowTooltip(event)"
                 onmouseleave="window.hideRowTooltip()">
                 ${innerHtml}
@@ -334,32 +338,32 @@ export const renderCardSearchResults = function (depo, results) {
         const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
         const isWatched = item.isWatched;
         const qtyClass = itemQty === 0 ? 'qty-zero' : (itemQty <= 3 ? 'qty-low' : 'qty-ok');
-        const safeName = (item.ürün || item.name || '-').replace(/"/g, '&quot;');
+        const safeName = escapeHtml(item.ürün || item.name || '-');
         const turAdi = item.tür || item.type || item.prodType || 'Diğer';
 
         return `
             <div class="product-card-item ${isPassive ? 'card-item-passive' : ''} selectable-row"
                  data-id="${escapeHtml(item.id ?? '')}"
-                 data-depo="${depo}"
-                 data-index="${realIndex}"
+                 data-depo="${escapeHtml(depo)}"
+                 data-index="${escapeHtml(realIndex)}"
                  data-name="${safeName}"
                  role="button"
                  tabindex="0">
                 <div class="pci-left">
                     <input type="checkbox" class="row-select card-checkbox"
-                           data-index="${realIndex}" data-id="${escapeHtml(item.id ?? '')}"
+                           data-index="${escapeHtml(realIndex)}" data-id="${escapeHtml(item.id ?? '')}"
                            onclick="event.stopPropagation()">
                     <div class="pci-info">
-                        <span class="pci-name">${item.ürün || item.name || '-'}</span>
+                        <span class="pci-name">${safeName}</span>
                         <span class="pci-meta">
-                            <span class="pci-meta-tag"><i class="fas fa-layer-group"></i> ${turAdi}</span>
-                            <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${item.raf || '-'}</span>
-                            ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${item.marka}</span>` : ''}
+                            <span class="pci-meta-tag"><i class="fas fa-layer-group"></i> ${escapeHtml(turAdi)}</span>
+                            <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(item.raf || '-')}</span>
+                            ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${escapeHtml(item.marka)}</span>` : ''}
                         </span>
                     </div>
                 </div>
                 <div class="pci-right">
-                    <span class="pci-qty-badge ${qtyClass}">${itemQty}</span>
+                    <span class="pci-qty-badge ${qtyClass}">${escapeHtml(itemQty)}</span>
                     ${isWatched ? '<span class="pci-watch-dot" title="Takipte"><i class="fas fa-eye"></i></span>' : ''}
                     ${isPassive ? '<span class="pci-passive-tag">Pasif</span>' : ''}
                 </div>
@@ -427,55 +431,57 @@ export const renderMobileCards = function (depo) {
             const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
             const isWatched = item.isWatched;
             const qtyClass = itemQty === 0 ? 'qty-zero' : (itemQty <= 3 ? 'qty-low' : 'qty-ok');
-            const safeDepo = depo.replace(/'/g, '');
-            const safeName = (item.ürün || item.name || '-').replace(/"/g, '&quot;');
+            const safeDepo = escapeHtml(depo);
+            const safeName = escapeHtml(item.ürün || item.name || '-');
 
             return `
                 <div class="product-card-item ${isPassive ? 'card-item-passive' : ''} selectable-row"
                      data-id="${escapeHtml(item.id ?? '')}"
                      data-depo="${safeDepo}"
-                     data-index="${item._realIndex}"
+                     data-index="${escapeHtml(item._realIndex)}"
                      data-name="${safeName}"
                      role="button"
                      tabindex="0">
                     <div class="pci-left">
                         <input type="checkbox" class="row-select card-checkbox"
-                               data-index="${item._realIndex}" data-id="${escapeHtml(item.id ?? '')}"
+                               data-index="${escapeHtml(item._realIndex)}" data-id="${escapeHtml(item.id ?? '')}"
                                onclick="event.stopPropagation()">
                         <div class="pci-info">
-                            <span class="pci-name">${item.ürün || item.name || '-'}</span>
+                            <span class="pci-name">${safeName}</span>
                             <span class="pci-meta">
-                                <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${item.raf || '-'}</span>
-                                ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${item.marka}</span>` : ''}
-                                ${item.sütun ? `<span class="pci-meta-tag"><i class="fas fa-columns"></i> ${item.sütun}</span>` : ''}
+                                <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(item.raf || '-')}</span>
+                                ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${escapeHtml(item.marka)}</span>` : ''}
+                                ${item.sütun ? `<span class="pci-meta-tag"><i class="fas fa-columns"></i> ${escapeHtml(item.sütun)}</span>` : ''}
                             </span>
                         </div>
                     </div>
                     <div class="pci-right">
-                        <span class="pci-qty-badge js-qty-cell ${qtyClass}">${itemQty}</span>
+                        <span class="pci-qty-badge js-qty-cell ${qtyClass}">${escapeHtml(itemQty)}</span>
                         ${isWatched ? '<span class="pci-watch-dot" title="Takipte"><i class="fas fa-eye"></i></span>' : ''}
                         ${isPassive ? '<span class="pci-passive-tag js-status-cell">Pasif</span>' : '<span class="js-status-cell" style="display:none;"></span>'}
                     </div>
                 </div>`;
         }).join('');
 
+        // Grup kimliği yalnız depo (b1|b2, renderMobileCards başında doğrulanır) + sayısal sıra: kayıt verisi içermez.
+        const gid = `${depo /* xss-ok: b1|b2 doğrulanmış sabit */}_${groupIdx}`;
         return `
-            <div class="type-group-card" id="typeGroup_${depo}_${groupIdx}">
+            <div class="type-group-card" id="typeGroup_${gid /* xss-ok: depo sabiti + sıra */}">
                 <div class="type-group-header"
-                     onclick="window._toggleCardGroup('typeGroupBody_${depo}_${groupIdx}', 'typeGroupIcon_${depo}_${groupIdx}')">
+                     onclick="window._toggleCardGroup('typeGroupBody_${gid /* xss-ok: depo sabiti + sıra */}', 'typeGroupIcon_${gid /* xss-ok: depo sabiti + sıra */}')">
                     <div class="tgh-left">
                         <i class="fas fa-layer-group tgh-icon"></i>
-                        <span class="tgh-name">${turAdi}</span>
+                        <span class="tgh-name">${escapeHtml(turAdi)}</span>
                         <span class="tgh-count">${items.length} ürün</span>
                     </div>
                     <div class="tgh-right">
                         <span class="tgh-stock-badge">
-                            <i class="fas fa-cubes"></i> ${totalStock} adet
+                            <i class="fas fa-cubes"></i> ${escapeHtml(totalStock)} adet
                         </span>
-                        <i class="fas fa-chevron-down tgh-chevron" id="typeGroupIcon_${depo}_${groupIdx}"></i>
+                        <i class="fas fa-chevron-down tgh-chevron" id="typeGroupIcon_${gid /* xss-ok: depo sabiti + sıra */}"></i>
                     </div>
                 </div>
-                <div class="type-group-body" id="typeGroupBody_${depo}_${groupIdx}">
+                <div class="type-group-body" id="typeGroupBody_${gid /* xss-ok: depo sabiti + sıra */}">
                     ${itemsHtml}
                 </div>
             </div>`;
@@ -604,7 +610,7 @@ export const showRowTooltip = function (event, updateDate) {
     if (window.innerWidth <= 768) return;
     const tt = document.getElementById('custom-tooltip');
     if (tt) {
-        tt.innerHTML = `🕒 Son Güncelleme: <span style="color:#f1c40f">${updateDate}</span>`;
+        tt.innerHTML = `🕒 Son Güncelleme: <span style="color:#f1c40f">${escapeHtml(updateDate)}</span>`;
         tt.style.display = 'block';
     }
 };

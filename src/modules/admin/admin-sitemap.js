@@ -101,7 +101,7 @@ window.openSitemapModal = function() {
         html += `
             <div style="
                 margin-bottom: 24px;
-                border-left: 3px solid ${module.color};
+                border-left: 3px solid ${escapeHtml(module.color)};
                 padding: 18px 18px 18px 20px;
                 background: rgba(255,255,255,0.02);
                 border-radius: 0 12px 12px 0;
@@ -109,7 +109,7 @@ window.openSitemapModal = function() {
                 animation-delay: ${idx * 0.06}s;
             ">
                 <h4 style="
-                    color: ${module.color};
+                    color: ${escapeHtml(module.color)};
                     margin-top: 0;
                     font-weight: 800;
                     font-size: 1.05rem;
@@ -117,9 +117,9 @@ window.openSitemapModal = function() {
                     align-items: center;
                     letter-spacing: 0.5px;
                 ">
-                    <i class="fas ${module.icon} me-2"></i> ${module.title}
+                    <i class="fas ${escapeHtml(module.icon)} me-2"></i> ${escapeHtml(module.title)}
                 </h4>
-                <p style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 14px; line-height: 1.5;">${module.description}</p>
+                <p style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 14px; line-height: 1.5;">${escapeHtml(module.description)}</p>
                 
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px;">
         `;
@@ -132,7 +132,7 @@ window.openSitemapModal = function() {
                         border-radius: 8px;
                         border: 1px solid rgba(255,255,255,0.04);
                         transition: all 0.2s;
-                    " onmouseenter="this.style.borderColor='${module.color}40'; this.style.background='rgba(0,0,0,0.35)'"
+                    " onmouseenter="this.style.borderColor='${escapeHtml(module.color) /* xss-ok: sabit sitemapData rengi (#hex) */}40'; this.style.background='rgba(0,0,0,0.35)'"
                        onmouseleave="this.style.borderColor='rgba(255,255,255,0.04)'; this.style.background='rgba(0,0,0,0.25)'">
                         <div style="
                             color: #cbd5e1;
@@ -140,8 +140,8 @@ window.openSitemapModal = function() {
                             font-weight: bold;
                             margin-bottom: 4px;
                             font-size: 0.85rem;
-                        ">${fn.name}</div>
-                        <div style="color: #64748b; font-size: 0.78rem; line-height: 1.4;">${fn.desc}</div>
+                        ">${escapeHtml(fn.name)}</div>
+                        <div style="color: #64748b; font-size: 0.78rem; line-height: 1.4;">${escapeHtml(fn.desc)}</div>
                     </div>
             `;
         });

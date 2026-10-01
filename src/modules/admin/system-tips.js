@@ -237,7 +237,7 @@ class TipManager {
                 </svg>
             </div>
             <div class="system-tip-body">
-                <span class="system-tip-text">${message}</span>
+                <span class="system-tip-text">${escapeHtml(message)}</span>
             </div>
             <button class="system-tip-close" title="Bu ipucunu bir daha gösterme" aria-label="İpucunu kapat">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"

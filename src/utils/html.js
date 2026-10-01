@@ -46,13 +46,32 @@
     function guardTagLike(fields) {
         const label = findTagLike(fields);
         if (!label) return false;
-        const msg = `"${label}" alanında "<" ile başlayan etiket benzeri ifade kullanılamaz (ör. "<b>", "</"). "< 5" gibi kullanımlar serbesttir.`;
+        const msg = `"${label /* xss-ok: düz metin; showAppAlert textContent ile gösterir */}" alanında "<" ile başlayan etiket benzeri ifade kullanılamaz (ör. "<b>", "</"). "< 5" gibi kullanımlar serbesttir.`;
         if (typeof window.showAppAlert === 'function') window.showAppAlert(msg, 'warning');
         return true;
     }
 
+    // [WHY]: Faz 4 · J2 (4.3, KJ-6) — satır içi onclick'e kayıt verisi gömmek (ad, anahtar, kaydın JSON'u) tırnak/entity
+    //        oyunlarıyla JS'e kaçmaya açıktı. Yeni kod için standart: veri data-* niteliğinde (escapeHtml ile), davranış tek dinleyicide.
+    // [HOW]: bindActions(container, { eylem: (el, event) => … }) — kapsayıcıya tek click dinleyicisi; tıklanan öğeye en yakın
+    //        [data-action] bulunur, el.dataset ile veri okunur. Kapsayıcı innerHTML ile yeniden çizilse de dinleyici kalır;
+    //        her çağrı eylem tablosunu günceller (çift dinleyici olmaz). İç içe eylemlerde yalnız en içteki çalışır.
+    function bindActions(container, handlers) {
+        if (!container) return;
+        container.__dataActions = Object.assign(container.__dataActions || {}, handlers);
+        if (container.__dataActionsBound) return;
+        container.__dataActionsBound = true;
+        container.addEventListener('click', (event) => {
+            const el = event.target.closest('[data-action]');
+            if (!el || !container.contains(el)) return;
+            const fn = container.__dataActions[el.dataset.action];
+            if (typeof fn === 'function') fn(el, event);
+        });
+    }
+
     window.AppModules = window.AppModules || {};
-    window.AppModules.Html = { escapeHtml, safeUrl, jsArg, hasTagLike, findTagLike, guardTagLike };
+    window.AppModules.Html = { escapeHtml, safeUrl, jsArg, hasTagLike, findTagLike, guardTagLike, bindActions };
+    window.bindActions = bindActions;
     window.escapeHtml = escapeHtml;
     window.safeUrl = safeUrl;
     window.jsArg = jsArg;

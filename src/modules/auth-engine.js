@@ -190,7 +190,7 @@ export const updateNavbarUI = function (user) {
             <i class="fas fa-bell todo-nav-icon"></i>
             <span class="todo-nav-badge badge-hidden" id="nav-todo-count">0</span>
         </div>
-        <span style="font-weight: bold; color: white; font-size: 14px;">👤 ${user.name}</span>
+        <span style="font-weight: bold; color: white; font-size: 14px;">👤 ${escapeHtml(user.name)}</span>
         ${adminButtonHTML}
         <button onclick="handleLogout()" 
                 style="background: #e74c3c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">

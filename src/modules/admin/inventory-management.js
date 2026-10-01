@@ -140,7 +140,7 @@ window.inventoryManagementModule = {
         { id: 'kpi-pending', label: 'Bekleyen Talep', icon: 'fa-hourglass-half', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)' }
       ].map(k => `
               <div style="background:${escapeHtml(k.bg)}; border:1px solid ${escapeHtml(k.color)}33; border-radius:14px; padding:16px; text-align:center; transition:0.2s;"
-                   onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px ${k.color}22'"
+                   onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px ${k.color /* xss-ok: sabit KPI renk tablosu (#hex) */}22'"
                    onmouseout="this.style.transform=''; this.style.boxShadow=''">
                 <div style="font-size:1.6rem; color:${escapeHtml(k.color)}; margin-bottom:6px;"><i class="fas ${escapeHtml(k.icon)}"></i></div>
                 <div id="${escapeHtml(k.id)}" style="font-size:1.8rem; font-weight:800; color:${escapeHtml(k.color)};">-</div>
@@ -290,12 +290,12 @@ window.inventoryManagementModule = {
               </td>
               <td style="padding:12px 16px; text-align:center; font-weight:700; color:var(--color-text);">${escapeHtml(a.adet)}</td>
               <td style="padding:12px 16px;">
-                <span style="background:${tColor.bg}; color:${tColor.text}; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">
+                <span style="background:${escapeHtml(tColor.bg)}; color:${escapeHtml(tColor.text)}; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">
                   ${tColor.icon} ${escapeHtml(a.talepTuru)}
                 </span>
               </td>
               <td style="padding:12px 16px; text-align:center;">
-                <span style="background:${pColor.bg}; color:${pColor.text}; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">
+                <span style="background:${escapeHtml(pColor.bg)}; color:${escapeHtml(pColor.text)}; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">
                   ${pColor.icon} ${escapeHtml(a.oncelik)}
                 </span>
               </td>
