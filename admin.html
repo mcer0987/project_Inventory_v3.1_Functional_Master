@@ -34,37 +34,45 @@
         // [WHY]: Query'li URL ikinci bir firebase-handler instance'ı yaratıyordu (ARC-02: çift dinleyici, 26 okuma).
         import { checkAdminAuth } from './src/services/firebase-handler.js';
 
+        // [WHY]: Faz 4 · J3 — kilit kartı tek yerden açılır; neden metni karta yazılır (süre doldu / kilitlendi / parola gerekli).
+        const LOCK_TEXT = {
+            lock:        ['Oturum Kilitlendi', 'Devam etmek için yönetici parolasını girin.'],
+            'not-admin': ['Yönetici Girişi Gerekli', 'Bu sekmede yönetici oturumu yok. Devam etmek için yönetici parolasını girin.'],
+            stale:       ['Oturum Sona Erdi', 'Yönetici oturumu geçersiz. Devam etmek için yönetici parolasını girin.'],
+        };
+        window.showAdminLock = function (reason) {
+            const lockModal = document.getElementById('adminLockModal');
+            if (!lockModal) return;
+            const [title, desc] = LOCK_TEXT[reason] || ['Oturum Süresi Doldu', 'Devam etmek için yönetici parolasını girin.'];
+            document.getElementById('adminLockTitle').textContent = title;
+            document.getElementById('adminLockDesc').textContent = desc;
+            document.getElementById('lockErrorMsg').style.display = 'none';
+            const wasOpen = lockModal.style.display === 'flex';
+            lockModal.style.setProperty('display', 'flex', 'important');
+            if (!wasOpen && reason === 'expired' && typeof window.showAppAlert === 'function') {
+                window.showAppAlert("Güvenlik nedeniyle oturum kapatıldı.", "info");
+            }
+        };
+
         checkAdminAuth();
 
         // Süreyi her saniye kontrol et
         setInterval(() => {
-            const authData = localStorage.getItem('admin_auth');
-            const now = new Date().getTime();
+            const S = window.SecurityConfig;
+            const lockModal = document.getElementById('adminLockModal');
+            const locked = lockModal && lockModal.style.display === 'flex';
+            const timeLeft = window.AppModules.Session.getAdminVisaRemaining();
 
-            if (authData) {
-                const auth = JSON.parse(authData);
-                const timeLeft = auth.expiry - now;
+            // 1. UYARI: Süre azalınca (örn. 1 dk kala) sarı barı göster
+            const warningDiv = document.getElementById('sessionWarning');
+            if (warningDiv) {
+                const warn = !locked && timeLeft !== null && timeLeft > 0 && timeLeft < (window.SessionConfig?.WARNING_BEFORE || 60000);
+                warningDiv.style.display = warn ? 'block' : 'none';
+            }
 
-                // 1. UYARI: Süre azalınca (örn. 1 dk kala) sarı barı göster
-                const warningDiv = document.getElementById('sessionWarning');
-                if (warningDiv) {
-                    if (timeLeft > 0 && timeLeft < (window.SessionConfig?.WARNING_BEFORE || 60000)) {
-                        warningDiv.style.display = 'block';
-                    } else {
-                        warningDiv.style.display = 'none';
-                    }
-                }
-
-                // 2. KİLİT: Süre dolduysa
-                if (timeLeft <= 0) {
-                    const lockModal = document.getElementById('adminLockModal');
-                    if (lockModal && lockModal.style.display !== 'flex') {
-                        lockModal.style.display = 'flex';
-                        if (typeof window.showAppAlert === 'function') {
-                            window.showAppAlert("Güvenlik nedeniyle oturum kapatıldı.", "info");
-                        }
-                    }
-                }
+            // 2. KİLİT: Süre dolduysa (ya da vize silindiyse) Firebase oturumu da kapatılır (T3) — tek yol: endAdminSession.
+            if (!locked && S && !S.isSignInPending() && (timeLeft === null || timeLeft <= 0)) {
+                S.endAdminSession('expired');
             }
         }, window.SessionConfig?.CHECK_INTERVAL || 1000);
 
@@ -72,34 +80,37 @@
         window.unlockAdmin = async function () {
             // [R-SYS]
             const pass = window._dx ? window._dx._g('lock-val-node') : document.getElementById('lock-val-node').value;
-            const isAuthenticated = await SecurityConfig.authenticate(pass);
+            const errorEl = document.getElementById('lockErrorMsg');
+            errorEl.style.display = 'none';
+            const isAuthenticated = await SecurityConfig.authenticate(pass);   // vizeyi de yazar (J3)
 
             if (isAuthenticated) {
-                const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
-                localStorage.setItem('admin_auth', JSON.stringify({ expiry: expiry }));
-
-                if (!window.getActiveUser()) window.setActiveUser({ name: 'Admin', role: 'admin' });
+                // Parola girildikten sonra kimlik atanır (personeldeki yönetici kaydı, yoksa "Yönetici").
+                if (!window.getActiveUser()) window.setActiveUser(SecurityConfig.resolveAdminIdentity());
+                window.currentUser = window.getActiveUser();
 
                 document.getElementById('adminLockModal').style.display = 'none';
                 if (window._dx) window._dx._r('lock-val-node');
+
+                // M10: kilitte signOut edildi; veri akışı yeni (admin) oturumla sürmeli.
+                if (typeof window.ensureRealtimeSync === 'function') window.ensureRealtimeSync();
+                if (typeof window.startSessionTimer === 'function') window.startSessionTimer();
             } else {
-                alert("Hatalı şifre!");
+                errorEl.textContent = SecurityConfig.lastErrorMessage || 'Hatalı şifre, tekrar deneyin.';
+                errorEl.style.display = 'block';
+                if (window._dx) window._dx._r('lock-val-node');
             }
         };
 
         // Oturumu tamamen kapatıp ana sayfaya döndüren fonksiyon
         // [WHY]: logout() admin.html'de kilit kartını yeniden gösteriyordu; "Oturumu Kapat" kullanıcıyı kartta bırakıyordu (AUTH-08).
-        window.adminForceLogout = async function () {
-            window.clearSession();
-            if (window.SecurityConfig && typeof window.SecurityConfig.logout === 'function') {
-                await window.SecurityConfig.logout();
-            }
-            window.location.replace('index.html');
+        window.adminForceLogout = function () {
+            return window.SecurityConfig.endAdminSession('logout');
         };
 
-        // [R-SYS] Init
+        // [R-SYS] Init — yönetici parola alanında yapıştırmaya izin (parola yöneticisi · SEC-02)
         window.addEventListener('load', () => {
-            if (window._dx) window._dx._s('lock-val-node');
+            if (window._dx) window._dx._s('lock-val-node', { allowPaste: true });
         });
     </script>
 
@@ -148,20 +159,20 @@
                 <i class="fas fa-lock"></i>
             </div>
 
-            <h2 style="margin:0 0 6px; font-size:1.25rem;
+            <h2 id="adminLockTitle" style="margin:0 0 6px; font-size:1.25rem;
                 color: var(--color-text, #e2e8f0); font-weight:700;">
                 Oturum Süresi Doldu
             </h2>
-            <p style="margin:0 0 24px; font-size:0.875rem;
+            <p id="adminLockDesc" style="margin:0 0 24px; font-size:0.875rem;
                 color: var(--color-text-muted, #94a3b8);">
-                Devam etmek için yönetici şifresini girin.
+                Devam etmek için yönetici parolasını girin.
             </p>
 
             <!-- Şifre input -->
             <div style="position:relative; margin-bottom:16px;">
                 <i class="fas fa-key" style="position:absolute;left:14px;top:50%;
                     transform:translateY(-50%); color:#64748b; font-size:13px;"></i>
-                <input type="text" id="lock-val-node" placeholder="••••••" style="width:100%; box-sizing:border-box;
+                <input type="text" id="lock-val-node" placeholder="Yönetici parolası" style="width:100%; box-sizing:border-box;
                         padding:12px 14px 12px 38px;
                         background: var(--color-surface-alt, #1a2535);
                         color: var(--color-text, #e2e8f0);

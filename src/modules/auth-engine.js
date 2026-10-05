@@ -174,7 +174,8 @@ export const updateNavbarUI = function (user) {
     // [WHY]: Admin butonu yalnızca Muhammed Cer veya Admin adlı kullanıcılara gösterilir.
     // [HOW]: İsim karşılaştırması; yetki kontrolünü Firebase Auth'tan değil
     //        localStorage objesinden yapıyor (UI-only karar, güvenlik değil).
-    const isAdmin = (user.name === 'Muhammed Cer' || user.name === 'Admin');
+    // J3: parola sonrası kimlik personel listesinde yoksa "Yönetici" etiketi taşır; düğme Firebase admin oturumunda da görünür.
+    const isAdmin = (user.name === 'Muhammed Cer' || user.name === 'Admin') || window.isDbAdmin();
     const adminButtonHTML = isAdmin ? `
         <button type="button" class="btn-admin-panel" 
                 onclick="window.location.href='admin.html'" 
@@ -229,9 +230,7 @@ window.updateNavbarUI = updateNavbarUI;
  *        okunmaya devam ediyor ama yetki kararına dahil edilmiyor.
  */
 export const checkAuth = function () {
-    const authData = localStorage.getItem('admin_auth');
     const activeUser = window.getActiveUser();
-    const adminVizesi = sessionStorage.getItem('adminVizesi') === 'true';
 
     const loginModal = document.getElementById('loginModal');
     const inventoryScreen = document.getElementById('inventory-screen');
@@ -239,22 +238,29 @@ export const checkAuth = function () {
     let isAuthValid = false;
 
     // GERÇEK GÜVENLİK BARİYERİ: Firebase'den oturum yoksa kapı duvar.
+    // [WHY]: Faz 4 · J3 (M9, AUTH-05) — kalıcı admin token'ı, vizesi dolmuş ya da kimliği silinmiş olsa bile buradan
+    //        sanal "Admin" kimliği ve adminVizesi bayrağı üretiyordu: tarayıcıyı kapatıp açan herkes admin olarak giriyordu.
+    // [HOW]: Admin oturumu yalnız geçerli vize + parola sonrası atanmış kimlikle geçerlidir. Biri eksikse oturum "bayat" →
+    //        endAdminSession('stale') Firebase oturumunu da kapatır (yoksa kimliksiz bir DB-admin token'ı kalırdı).
+    //        Giriş sürerken (vize henüz yazılmadı) karar ertelenir.
     if (window.isDbAdmin()) {
-        isAuthValid = true;
-
-        // Yardımcı modüller için UI state'lerini yenile (Güvenli şekilde)
-        if (!activeUser) window.setActiveUser({ name: 'Admin', role: 'admin' });
-        if (!adminVizesi) sessionStorage.setItem('adminVizesi', 'true');
+        const S = window.SecurityConfig;
+        if (S && S.isSignInPending()) return;
+        if (window.AppModules.Session.hasValidAdminVisa() && activeUser) {
+            isAuthValid = true;
+        } else {
+            console.warn('🔒 [auth-engine] Bayat yönetici oturumu (vize/kimlik yok) — kapatılıyor.');
+            if (S) {
+                S.endAdminSession('stale').then(() => {
+                    if (typeof window.showAppAlert === 'function') window.showAppAlert('Yönetici oturumunun süresi dolmuş. Lütfen yeniden giriş yapın.', 'warning');
+                });
+            }
+            return;
+        }
     }
 
     if (isAuthValid) {
-        let userObj = activeUser;
-        if (!userObj && (authData || adminVizesi)) {
-            userObj = { name: 'Admin', role: 'admin' };
-        }
-        if (userObj) {
-            updateNavbarUI(userObj);
-        }
+        updateNavbarUI(activeUser);
 
         // Şablon motoru varsa yükle
         if (typeof window.loadTemplates === 'function') {
@@ -476,13 +482,12 @@ export const checkAdminAndGo = async function () {
 
     // [WHY]: Frontend hash kaldırıldı. Backend (Firebase Admin SDK) onayı zorunludur.
     // [HOW]: window.SecurityConfig lazy-resolve — security.js bu nesneyi window'a atar.
+    // J3: authenticate parolayı geçiş kuralına göre biçimler (5 hane → eski kod, ≥12 → parola) ve vizeyi oturumla birlikte yazar.
     const isAdminPass = await window.SecurityConfig.authenticate(code);
 
     if (isAdminPass) {
         // [WHY]: Personel listesinde admin kaydı yoksa (ör. boş demo DB) giriş sessizce hiçbir şey yapmıyordu.
-        const user = (window.data.personel || []).find(
-            p => p.name === 'Muhammed Cer' || p.name === 'Admin'
-        ) || { name: 'Admin', code: 'ADMIN', yetki: 'admin' };
+        const user = window.SecurityConfig.resolveAdminIdentity();
 
         if (ENABLE_BIOMETRIC_LOGIN) {
             if (typeof window.verifyBiometrics !== 'function') {
@@ -497,19 +502,18 @@ export const checkAdminAndGo = async function () {
                 if (typeof window.showAppAlert === 'function') {
                     window.showAppAlert('Biyometrik doğrulama başarısız!', 'error');
                 }
+                await window.SecurityConfig.endAdminSession('manual');
                 return;
             }
         }
 
         window.setActiveUser(user);
-        const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
-        localStorage.setItem('admin_auth', JSON.stringify({ expiry }));
 
         if (typeof updateNavbarUI === 'function') updateNavbarUI(user);
         window.location.href = 'admin.html';
     } else {
         if (typeof window.showAppAlert === 'function') {
-            window.showAppAlert('Admin yetkisi yok', 'danger');
+            window.showAppAlert(window.SecurityConfig.lastErrorMessage || 'Admin yetkisi yok', 'danger');
         }
     }
 };
@@ -533,11 +537,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // [WHY]: Firebase Auth asenkron; kullanıcı veri yüklenene kadar navbar boş kalır.
     // [HOW]: LocalStorage önbelleği ile anında UI çiziyoruz. Güvenlik firebase-handler'da.
     try {
+        // J3 (M9): depolama bayrağından sanal "Admin" çizilmez; yalnız kayıtlı kimlik.
         const cachedUser = window.getActiveUser();
         if (cachedUser) {
             updateNavbarUI(cachedUser);
-        } else if (localStorage.getItem('admin_auth') || sessionStorage.getItem('adminVizesi') === 'true') {
-            updateNavbarUI({ name: 'Admin', role: 'admin' });
         }
     } catch (e) { /* Önbellek okuma hatası kritik değil */ }
 
@@ -571,11 +574,9 @@ window.addEventListener('storage', () => {
  *        monolith parçası içinde bulunuyordu. ESM v3.1 mimarisinde tüm kimlik doğrulama
  *        ve oturum yönetimi işlevleri auth-engine.js altında tek bir sorumluluk alanında toplanır.
  * [HOW]: 1) Açık işlem modalları varsa ve bu bir timeout çıkışıysa işlem bölünmez (süre uzatılır).
- *        2) LocalStorage ve SessionStorage üzerindeki oturum belirteçleri silinir.
- *        3) window.SecurityConfig.logout() veya Firebase Auth signOut tetiklenir.
- *        4) Küresel state değişkenleri (currentUser, isFirebaseLoaded vb.) sıfırlanır.
- *        5) Gevşek bağlılık (Loose Coupling) için 'onAppLogout' custom event'i tetiklenir.
- *           Böylece main.js üzerindeki Observer, sayfa yenilemeden (Soft Reset) UI sıfırlamasını yapar.
+ *        2) Küresel state değişkenleri (isFirebaseLoaded vb.) sıfırlanır.
+ *        3) SecurityConfig.endAdminSession: clearSession → await signOut → 'onAppLogout' (tek sonlandırma yolu, J3).
+ *           main.js üzerindeki Observer, sayfa yenilemeden (Soft Reset) UI sıfırlamasını yapar.
  */
 export const handleLogout = async function (reason = 'manual') {
     // [WHY]: HTML onclick binding'lerinden Event objesi gelebilir; bunu standart 'manual' stringine çevirmeliyiz.
@@ -595,55 +596,30 @@ export const handleLogout = async function (reason = 'manual') {
     }
 
     console.warn(`🚪 [auth-engine] Logout işlemi başlatılıyor... Sebep: ${reason}`);
-
-    // 1. Timers ve Uyarıları temizle
-    if (typeof window.sessionTimer !== 'undefined') clearTimeout(window.sessionTimer);
-    if (typeof window.warningTimeout !== 'undefined') clearTimeout(window.warningTimeout);
     if (typeof window.logInterval !== 'undefined') clearInterval(window.logInterval);
 
-    const warningDiv = document.getElementById('sessionWarning');
-    if (warningDiv) warningDiv.style.display = 'none';
-
-    // 2. Kimlik verilerini ve önbelleği temizle
-    window.clearSession();
-
-    // 3. Küresel Uygulama State'lerini Sıfırla (userAuth'u yalnız onAuthStateChanged yönetir — AUTH-10)
+    // 1. Küresel Uygulama State'lerini Sıfırla (userAuth'u yalnız onAuthStateChanged yönetir — AUTH-10)
     window._initialRenderDone = false;
     window.isFirebaseLoaded = false;
     window._launchpadTriggered = false;
-
-    // 4. CSS Sınıfını Kaldır
     document.body.classList.remove('logged-in');
 
-    // 5. Firebase Auth Oturumunu Kapat
-    // [WHY]: Sayfa yenilendiğinde otomatik re-login olmaması için Firebase Auth oturumu sonlandırılmalıdır.
-    // [HOW]: SecurityConfig.logout veya dinamiğe bağlı signOut tetiklenir.
-    if (window.SecurityConfig && typeof window.SecurityConfig.logout === 'function') {
-        await window.SecurityConfig.logout();
+    // 2. TEK SONLANDIRMA YOLU (Faz 4 · J3): zamanlayıcılar → clearSession() → await signOut (yerel kalıcılığa dönerek) →
+    //    'onAppLogout'. main.js gözlemcisi bu olayla sayfa yenilemeden (Soft Reset) giriş ekranını açar.
+    if (window.SecurityConfig && typeof window.SecurityConfig.endAdminSession === 'function') {
+        await window.SecurityConfig.endAdminSession(reason);
     } else {
-        try {
-            const { getAuth, signOut } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js");
-            const auth = getAuth(window.firebaseApp || window.app);
-            await signOut(auth);
-        } catch (e) {
-            console.error("❌ Firebase Auth signOut error during dynamic fallback:", e);
-        }
+        window.clearSession();
+        window.dispatchEvent(new CustomEvent('onAppLogout', { detail: { reason } }));
     }
 
-    // 6. Uyarı Mesajı Göster
+    // 3. Uyarı Mesajı Göster
     if (typeof window.showAppAlert === 'function') {
         const msg = reason === 'timeout'
             ? "Oturum süresi dolduğu için güvenli çıkış yapıldı."
             : "Oturum başarıyla kapatıldı.";
         window.showAppAlert(msg, reason === 'timeout' ? "warning" : "success");
     }
-
-    // 7. SOFT RESET TETİKLEYİCİSİ (Observer Notification)
-    // [WHY]: location.reload() atmak SPA (Single Page Application) deneyimini bozar ve yavaştır.
-    // [HOW]: 'onAppLogout' custom event'i yayınlanır. main.js içindeki Observer bunu yakalayarak
-    //        ekranları bulandırır, modalları kapatır ve login modalını (veya initUI) tetikler.
-    console.log("🔄 [auth-engine] Soft Reset tetikleyicisi yayınlanıyor: onAppLogout");
-    window.dispatchEvent(new CustomEvent('onAppLogout', { detail: { reason } }));
 };
 
 // [COMPATIBILITY_BRIDGE] & [DUAL-EXPOSURE]:

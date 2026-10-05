@@ -237,28 +237,23 @@ window.showWarehousePromptModal = function (options = {}) {
 };
 
 // [WHY]: Allows administrators to authenticate and bypass the maintenance overlay directly when the system is in maintenance mode.
-// [HOW]: Authenticates the code using SecurityConfig.authenticate, sets admin_auth, clears the maintenance mode flag, and reloads.
+// [HOW]: SecurityConfig.authenticate (parola geçiş kuralı + vize, J3), parola sonrası kimlik, bakım bayrağı temizlenir, panele geçilir.
 window.adminBypassMaintenance = async function () {
     const codeInput = document.getElementById('maintenanceCode');
     const code = codeInput ? codeInput.value.trim() : "";
     if (!code) {
-        alert("Lütfen giriş kodunu giriniz!");
+        alert("Lütfen yönetici parolasını giriniz!");
         return;
     }
 
     if (typeof SecurityConfig !== 'undefined' && SecurityConfig.authenticate) {
         const success = await SecurityConfig.authenticate(code);
         if (success) {
-            const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
-            localStorage.setItem('admin_auth', JSON.stringify({ expiry: expiry }));
-
-            const adminUser = (window.data && window.data.personel || []).find(p => p.name === 'Muhammed Cer' || p.name === 'Admin')
-                || { name: 'Admin', role: 'admin' };
-            window.setActiveUser(adminUser);
+            window.setActiveUser(SecurityConfig.resolveAdminIdentity());
             localStorage.removeItem("system_maintenance_mode");
             window.location.href = 'admin.html';
         } else {
-            alert("Hatalı yönetici kodu!");
+            alert(SecurityConfig.lastErrorMessage || "Hatalı yönetici parolası!");
         }
     } else {
         alert("Güvenlik sistemi yükleniyor, lütfen birkaç saniye sonra tekrar deneyin.");

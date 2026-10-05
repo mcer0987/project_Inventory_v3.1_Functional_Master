@@ -89,10 +89,50 @@
         return false;
     }
 
+    // ─── Yönetici vizesi (localStorage.admin_auth) ────────────────────────────────────────────────
+    // [WHY]: Faz 4 · J3 (AUTH-06, T4) — vize biçimi 5 dosyada ayrı ayrı okunup yazılıyordu; timer.js süresi DOLMUŞ vizeyi
+    //        etkinlikle uzatıyordu (F5 / fare hareketi kilitli paneli canlandırıyordu).
+    // [HOW]: Biçimi yalnız bu dosya bilir. Vize yetki DEĞİLDİR (yetki = isDbAdmin); yalnız admin oturumunun süresidir.
+    const ADMIN_VISA_KEY = 'admin_auth';
+    const adminSessionMs = () => (window.SessionConfig && window.SessionConfig.ADMIN_LOCK_TIME) || 10 * 60 * 1000;
+
+    // Kalan süre (ms); vize yoksa ya da okunamıyorsa null. 0 veya negatif = süresi dolmuş.
+    function getAdminVisaRemaining() {
+        const raw = localStorage.getItem(ADMIN_VISA_KEY);
+        if (!raw) return null;
+        try {
+            const expiry = Number(JSON.parse(raw).expiry);
+            return Number.isFinite(expiry) ? expiry - Date.now() : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function hasValidAdminVisa() {
+        const left = getAdminVisaRemaining();
+        return left !== null && left > 0;
+    }
+
+    function grantAdminVisa() {
+        localStorage.setItem(ADMIN_VISA_KEY, JSON.stringify({ expiry: Date.now() + adminSessionMs() }));
+    }
+
+    // Yalnız GEÇERLİ vize uzar; süresi dolmuş ya da olmayan vize false döner (çağıran oturumu sonlandırır).
+    function extendAdminVisa(ms) {
+        if (!hasValidAdminVisa()) return false;
+        localStorage.setItem(ADMIN_VISA_KEY, JSON.stringify({ expiry: Date.now() + (ms || adminSessionMs()) }));
+        return true;
+    }
+
+    function clearAdminVisa() {
+        localStorage.removeItem(ADMIN_VISA_KEY);
+    }
+
     const Session = {
         getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, requireDbAdmin,
         maskUserData, unmaskUserData, ADMIN_EMAIL,
-        get ADMIN_SESSION_MS() { return (window.SessionConfig && window.SessionConfig.ADMIN_LOCK_TIME) || 10 * 60 * 1000; },
+        getAdminVisaRemaining, hasValidAdminVisa, grantAdminVisa, extendAdminVisa, clearAdminVisa,
+        get ADMIN_SESSION_MS() { return adminSessionMs(); },
     };
 
     window.AppModules = window.AppModules || {};

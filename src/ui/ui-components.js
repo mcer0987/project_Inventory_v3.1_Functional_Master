@@ -510,8 +510,8 @@ export const UIComponents = {
             const item = findRow();
 
             if (item && (item.isDemirbas === true || item.isDemirbas === 'true')) {
-                const isAdmin = (typeof window.checkIsAdmin === 'function' && window.checkIsAdmin()) ||
-                    sessionStorage.getItem('adminVizesi') === 'true';
+                // J3: yetki Firebase admin oturumundan; adminVizesi (sessionStorage) elle yazılarak muhafız atlanabiliyordu.
+                const isAdmin = window.isDbAdmin();
 
                 if (!isAdmin) {
                     if (typeof showAppAlert === 'function') {

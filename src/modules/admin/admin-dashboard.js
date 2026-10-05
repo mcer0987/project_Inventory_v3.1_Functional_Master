@@ -1638,9 +1638,9 @@ window.updateSyncStatus = function () {
 window.adminLogout = async function () {
     const onay = await showCustomConfirm('Güvenli Çıkış', 'Admin oturumunu kilitlemek istediğinize emin misiniz?');
     if (onay) {
-        localStorage.removeItem('admin_auth');
-        const lockModal = document.getElementById('adminLockModal');
-        if (lockModal) lockModal.style.display = 'flex';
+        // [WHY]: Faz 4 · J3 (T3) — yalnız vize siliniyor, kilit kartı açılıyordu; Firebase admin oturumu kartın arkasında
+        //        (ve kalıcı oturumda) geçerli kalıyordu. Tek yol: clearSession → await signOut → onAppLogout → kilit kartı.
+        await window.SecurityConfig.endAdminSession('lock');
     }
 };
 

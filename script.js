@@ -37,9 +37,10 @@ window.isFirebaseLoaded = window.isFirebaseLoaded || false;
 window.currentUser = window.getActiveUser();
 
 // [R-SYS] - Internal Data Input Mask Manager
+// opts.allowPaste: yönetici parola alanlarında yapıştırmaya izin (parola yöneticisi · Faz 4 J3, SEC-02); personel kodunda kapalı.
 window._dx = {
     _b: {},
-    _s: (id) => {
+    _s: (id, opts = {}) => {
         const el = document.getElementById(id);
         if (!el) return;
         window._dx._b[id] = "";
@@ -56,8 +57,8 @@ window._dx = {
             el.value = "•".repeat(window._dx._b[id].length);
         };
         el.addEventListener('input', _handler);
-        el.addEventListener('paste', (e) => e.preventDefault());
-        el.addEventListener('contextmenu', (e) => e.preventDefault());
+        if (!opts.allowPaste) el.addEventListener('paste', (e) => e.preventDefault());
+        if (!opts.allowPaste) el.addEventListener('contextmenu', (e) => e.preventDefault());
         el.setAttribute('autocomplete', 'off');
         el.setAttribute('autocorrect', 'off');
         el.setAttribute('spellcheck', 'false');
@@ -970,7 +971,7 @@ window.sendDraftInventoryRequest = async function (id) {
                     div.innerHTML = `📦 <b>${escapeHtml(res.item.ürün || res.item.name || "-")}</b> - ${escapeHtml(res.item.marka || "")} (Stok: ${escapeHtml(res.qty)}) <br><small>Raf: ${escapeHtml(res.item.raf || "-")} / Sütun: ${escapeHtml(res.item.sütun || "-")}</small>`;
                 }
                 div.onclick = function () {
-                    const isAdmin = window.checkIsAdmin() || sessionStorage.getItem('adminVizesi') === 'true';
+                    const isAdmin = window.isDbAdmin();   // J3: adminVizesi bayrağı elle yazılabiliyordu
                     if (res.isDemirbasStrict && !isAdmin) {
                         showAppAlert(`🛡️ GÜVENLİK: Bu ürün demirbaştır. Sadece yöneticiler çıkış yapabilir!`, "warning");
                         return;
