@@ -1,0 +1,10 @@
+# [WHY]: Faz 4 · J5 — güvenlik başlıkları tek yerde; site.inc her location'da include eder (add_header mirası yok).
+# [HOW]: Kaynak firebase.json ("**" başlıkları) — burası onun birebir kopyası; smoke testi (scratch/csp.js) ikisini karşılaştırır.
+#        İmaj açılışında envsubst ile /etc/nginx/generated/security-headers.inc üretilir. CSP_CONNECT_EXTRA varsayılan boş;
+#        yalnız yerel emülatörle geliştirirken "http://127.0.0.1:8080 http://127.0.0.1:9099" verilir (DOCKER_GUIDE.md §4).
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: blob:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.emailjs.com ${CSP_CONNECT_EXTRA}; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options "DENY" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+add_header Strict-Transport-Security $hsts_header always;
