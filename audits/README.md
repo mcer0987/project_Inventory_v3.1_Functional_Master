@@ -48,13 +48,15 @@ Ayrıntı ve kanıt bağlantıları: [test-baselines/faz4-guvenlik-baseline.md](
 
 | Ölçüt | Değer | Tur |
 |---|---|---|
-| Kural matrisi — Rules v2 (repo) | **70/70** | J1 |
+| Kural matrisi — Rules v2 (repo) | **72/72** (J4: rapor sorgusu admin ✔ / anonim ✖) | J4 |
 | Kural matrisi — yayındaki kurallar (karşılaştırma) | 42/70 (28 açık; Faz 4 deploy'unda kapanır) | J1 |
-| xss-lint — izinsiz / gerekçeli istisna | **0** / 14 (192 sink, 814 dinamik ifade) | J3 |
+| xss-lint — izinsiz / gerekçeli istisna | **0** / 14 (194 sink, 817 dinamik ifade) | J4 |
 | xss-lint öz-testi | 17/17 | J2 |
 | XSS yüzey testi (`j2XssSurfaces`) — çalışan yük / enjekte `img` | 0 / 0 | J2 |
 | Oturum ve vize (`j3SessionVisa`) — admin oturumu sekmeye bağlı, kilitte/çıkışta signOut, sanal "Admin" yok, dolmuş vize canlanmıyor | tümü ✔ (emülatör: gerçek admin yolu; gerçek demo: oturumsuz kapı + birim) | J3 |
-| Smoke (index/admin) | pageerror 0, "Veri Çekildi" 13/13; admin.html oturumsuz açılışta kilit kartı (M8) | J3 |
+| Self-approval (`j4SelfApproval`) — personel engeli + `blocked`, admin parola doğrulaması + `approved`/`cancelled`, günlük değişmez, rapor iki sayfada | tümü ✔ (gerçek demoda günlük yazılmaz, bellekte sınanır) | J4 |
+| Biyometrik yedek yol (her 5 karakteri kabul eden prompt) | kaldırıldı; `verifyBiometrics` bayrak kapalıyken `false` | J4 |
+| Smoke (index/admin) | pageerror 0, "Veri Çekildi" 13/13; admin.html oturumsuz açılışta kilit kartı (M8) | J4 |
 
 ## 5. Dış denetim raporu ekleme
 1. Raporu `audit-reports/` altına şu adla koyun: `YYYY-AA-GG_<faz-tur>_<denetçi>_<konu>.md` — ör. `2026-09-30_Faz3.5_Gemini_bagimsiz-mimari-denetim.md`.

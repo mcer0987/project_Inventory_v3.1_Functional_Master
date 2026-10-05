@@ -1,18 +1,18 @@
 {
-  "generatedAt": "2026-10-05T08:25:52.350Z",
+  "generatedAt": "2026-10-05T11:38:04.188Z",
   "stats": {
     "files": 39,
-    "sinks": 192,
-    "htmlTemplates": 233,
-    "expressions": 814,
-    "safe": 800,
+    "sinks": 194,
+    "htmlTemplates": 234,
+    "expressions": 817,
+    "safe": 803,
     "allowed": 14
   },
   "violations": [],
   "allowed": [
     {
       "file": "script.js",
-      "line": 1289,
+      "line": 1302,
       "expr": "getStatusClass(status)"
     },
     {

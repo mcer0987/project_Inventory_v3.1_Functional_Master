@@ -8,6 +8,7 @@ Her tur sonunda güncellenir. Ham kanıtlar `scratch/baseline/<klasör>/` altın
 | J0 | Yayındaki (`firestore.rules`, TEYİT 0.2c: Console ile aynı) | 65 | 39 | 26 | `2026-10-01T08-30-38_p4-j0-rules/rules-baseline.txt` |
 | J1 | **Rules v2 Aşama A** | 70 | **70** | 0 | `2026-10-01T09-25-47_p4-j1-rules/rules-v2.txt` |
 | J1 | Yayındaki (karşılaştırma) | 70 | 42 | 28 | `2026-10-01T09-25-47_p4-j1-rules/rules-live-for-comparison.txt` |
+| J4 | Rules v2 (+ rapor sorgusu: admin listeler, anonim listeleyemez) | 72 | **72** | 0 | `npm run test:rules` (05.10.2026) |
 
 Yayındaki kuralların 28 açığı (özet): oturumlu herkes talep/satın alma siliyor; bakımda personel yazabiliyor; personel-yazılabilir alanlarda etiket kabul ediliyor; `assignments`/`serviceRecords` anonime açık; bilinmeyen koleksiyon ve `inventory_v2` okunabiliyor; anonim sağlayıcıyla admin e-postası iddiası geçiyor; `auditLogs` kuralı yok. **Kapanış: Faz 4 deploy'u (kurallar + istemci aynı komutta).**
 
@@ -32,6 +33,7 @@ Yayındaki kuralların 28 açığı (özet): oturumlu herkes talep/satın alma s
 | J0 | gerçek demo / emülatör | 35/35 · 35/35 | 0 | 0 hata, 13/13 · favicon 404, 13/13 |
 | J1 | gerçek demo / emülatör (Rules v2) | 36/36 · 36/36 | 0 | aynı |
 | J2 | gerçek demo / emülatör (Rules v2) | 37/37 · 37/37 | 0 | aynı + xss-lint 0 izinsiz |
+| J4 | gerçek demo / emülatör (Rules v2) | 39/39 · 39/39 | 0 | aynı — `2026-10-05T11-36-42_p4-j4`, `2026-10-05T11-36-16_p4-j4_emu` |
 | J3 | gerçek demo / emülatör (Rules v2) | 38/38 · 38/38 | 0 | aynı; admin.html oturumsuz açılışta kilit kartı — `2026-10-05T08-23-05_p4-j3`, `2026-10-05T08-22-34_p4-j3_emu` |
 
 ## Oturum ve vize (J3 · `j3SessionVisa`)
@@ -53,3 +55,22 @@ Gerçek admin oturumu gerektiren adımlar yalnız emülatörde (sahte `emu01` he
 | F5 + dolmuş vize, admin token'ı canlıyken → signOut | – | ✔ |
 | "Oturumu Kapat" → index, anonim oturum yerel kalıcılıkta | – | ✔ |
 | J3 öncesi istemcinin kalıcı (IndexedDB) admin oturumu → açılışta bayat → signOut (M9) | – | ✔ |
+
+## Self-approval ve denetim günlüğü (J4 · `j4SelfApproval`)
+Denetim günlüğü kalıcıdır ve kural gereği silinemez; bu yüzden **gerçek demoda test kaydı yazılmaz** (`appendAuditLog` bellekte toplanır, alanlar yine sınanır). Emülatörde gerçek yazılır ve admin olarak başka bir sekmeden geri okunur.
+
+| Kontrol | Gerçek demo | Emülatör |
+|---|---|---|
+| Tek politika `Schema.isSelfApproval` (id > kod > Türkçe güvenli ad; satın almada kod / ad) | ✔ | ✔ |
+| Personel kendi satın alma adımını onaylayamaz → yazma 0, adım bekliyor, `blocked` | ✔ | ✔ (kayıt okundu) |
+| Personel kendi talebini onaylayamaz → onay penceresi açılmaz, `blocked` | ✔ | ✔ |
+| Personel başkasının talebini onaylayamaz → yönetici kapısı (günlük yok) | ✔ | ✔ |
+| Sarmalayıcı yok; kontrol `confirmRequest` / `approveStep` içinde | ✔ | ✔ |
+| `auditLogs` COLLECTIONS dışında; `saveData` yazamaz; yedek yalnız COLLECTIONS | ✔ | ✔ |
+| Biyometrik kapalı, `prompt` 0, eski yardımcılar yok | ✔ | ✔ |
+| Rapor düğmesi ada göre değil oturuma göre; personelde rapor reddedilir | ✔ | ✔ |
+| Admin kendi talebi (index): yanlış parola reddedilir, vazgeç → `cancelled`, yazma 0; doğru parola → `approved` | – | ✔ |
+| Admin kendi satın alma adımı (admin.html): parola → `approved` | – | ✔ |
+| Günlük admin dahil güncellenemez / silinemez (uygulamadan) | – | ✔ `permission-denied` ×2 |
+| Etiketli metin günlüğe düşer ("<" → "‹"), raporda enjekte `img` 0 | – | ✔ |
+| Rapor (admin.html, ayrı sekme) bu koşunun 6 kaydını üç sonuç rozetiyle gösteriyor | – | ✔ |
