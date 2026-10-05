@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
+const CSP = require('./csp');   // Faz 4 · J5: firebase.json güvenlik başlıkları + CSP ihlal toplayıcı
 
 const ROOT = path.resolve(__dirname, '..');
 const PORT = 5599;
@@ -15,16 +16,20 @@ const EMU = ARGS.includes('--emu');
 const LABEL = (ARGS.find(a => !a.startsWith('--')) || 'run') + (EMU ? '_emu' : '');
 const PAGES = ['index.html', 'admin.html'];
 
+const csp = CSP.createCollector();
+const SEC_HEADERS = CSP.testHeaders({ emu: EMU });
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
 
 function startServer() {
     const server = http.createServer((req, res) => {
+        if (csp.handle(req, res)) return;
         const urlPath = decodeURIComponent(req.url.split('?')[0]);
         const file = path.normalize(path.join(ROOT, urlPath === '/' ? 'index.html' : urlPath));
         if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
             res.writeHead(404); return res.end('not found');
         }
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+        const ext = path.extname(file).toLowerCase();
+        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-store', ...(ext === '.html' ? SEC_HEADERS : {}) });
         fs.createReadStream(file).pipe(res);
     });
     return new Promise(r => server.listen(PORT, '127.0.0.1', () => r(server)));
@@ -56,7 +61,8 @@ async function probe(browser, pageName, outDir) {
         if (m.type() === 'error') consoleErrors.push(t.slice(0, 300));
         logs.push(t);
     });
-    const failedRequests = [];
+    const failedRequests = [], externalOrigins = {};
+    page.on('request', r => { const o = new URL(r.url()).origin; if (o !== `http://127.0.0.1:${PORT}`) externalOrigins[o] = (externalOrigins[o] || 0) + 1; });
     page.on('response', r => { if (r.status() >= 400) failedRequests.push(`${r.status()} ${r.url().replace(`http://127.0.0.1:${PORT}`, '')}`); });
     page.on('request', r => {
         const u = new URL(r.url());
@@ -99,6 +105,7 @@ async function probe(browser, pageName, outDir) {
         duplicateLoadLogs: Object.fromEntries(Object.entries(loadedLogs).filter(([, n]) => n > 1)),
         dualUrlModules,
         failedRequests,
+        externalOrigins,
         loadedLogs,
         pageErrors: errors,
         consoleErrors,
@@ -119,11 +126,21 @@ async function probe(browser, pageName, outDir) {
     try {
         const results = [];
         for (const p of PAGES) results.push(await probe(browser, p, outDir));
+        // J5 · pozitif kontrol: CSP gerçekten uygulanıyor mu? İzinsiz bir adrese istek engellenmeli ve raporlanmalı.
+        const appViolations = csp.violations.length;
+        const ctl = await (await browser.createBrowserContext()).newPage();
+        await ctl.goto(`http://127.0.0.1:${PORT}/404.html`, { waitUntil: 'domcontentloaded' });
+        const ctlFetch = await ctl.evaluate(() => fetch('https://csp-control.invalid/x').then(() => 'ALLOWED', e => 'blocked: ' + e.name));
+        await new Promise(r => setTimeout(r, 800));
+        const enforced = csp.violations.slice(appViolations).some(v => String(v.blocked).includes('csp-control.invalid'));
+        csp.violations.splice(appViolations);
+        await ctl.browserContext().close();
         // Faz 4 · J2: XSS kapısı smoke raporunun parçası (izinsiz sink sayısı baseline'ı aşarsa tur kapanmaz).
         const lint = require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'xss-lint.js'), '--json', path.join(outDir, 'xss-lint.json')], { encoding: 'utf8' });
         let xssLint = null;
         try { const j = JSON.parse(fs.readFileSync(path.join(outDir, 'xss-lint.json'), 'utf8')); xssLint = { violations: j.violations.length, allowed: j.stats.allowed, sinks: j.stats.sinks, expressions: j.stats.expressions, exit: lint.status }; } catch (e) { xssLint = { error: e.message, exit: lint.status }; }
-        const report = { label: LABEL, timestamp: new Date().toISOString(), waitMs: WAIT_MS, xssLint, results };
+        const cspReport = { ...csp.summary(), enforcedControl: { enforced, fetch: ctlFetch }, nginx: CSP.checkNginxCsp() };
+        const report = { label: LABEL, timestamp: new Date().toISOString(), waitMs: WAIT_MS, xssLint, csp: cspReport, results };
         fs.writeFileSync(path.join(outDir, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
         for (const r of results) {
             console.log(`\n=== ${r.page} → ${r.finalUrl} (root: ${r.collectionRoot}${r.emulator ? ' @ emulator' : ''}) ===`);
@@ -131,7 +148,10 @@ async function probe(browser, pageName, outDir) {
             console.log(`duplicate load logs: ${JSON.stringify(r.duplicateLoadLogs)}`);
             console.log(`dual-URL modules: ${r.dualUrlModules.map(m => m.path).join(', ') || 'none'}`);
             console.log(`failed requests: ${r.failedRequests.join(', ') || 'none'}`);
+            console.log(`external origins: ${Object.keys(r.externalOrigins).join(' ') || 'none'}`);
         }
+        console.log(`
+CSP uygulanıyor (pozitif kontrol): ${enforced ? '✔' : '✖'} · CSP ihlali: ${cspReport.count}${cspReport.count ? ' ' + JSON.stringify(cspReport.distinct) : ''} · nginx = firebase.json: CSP ${cspReport.nginx.cspEqual ? '✔' : '✖'} · diğer başlıklar ${cspReport.nginx.otherHeadersEqual ? '✔' : '✖ ' + cspReport.nginx.mismatched.join(',')}`);
         console.log(`\nxss-lint: izinsiz ${xssLint.violations ?? '?'} · gerekçeli istisna ${xssLint.allowed ?? '?'} · ${xssLint.sinks ?? '?'} sink`);
         console.log(`Report: ${path.relative(ROOT, outDir)}`);
     } finally {

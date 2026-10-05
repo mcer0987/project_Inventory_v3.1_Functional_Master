@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
+const CSP = require('./csp');   // Faz 4 · J5 (M15): firebase.json başlıkları HTML yanıtlarına; ihlaller report-uri ile toplanır
 
 const ROOT = path.resolve(__dirname, '..');
 const PORT = 5594;
@@ -16,11 +17,14 @@ const EMU = process.argv.includes('--emu');
 const EMU_ADMIN_CODE = 'emu01';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
+const csp = CSP.createCollector();
+const SEC_HEADERS = CSP.testHeaders({ emu: EMU });
 function startServer() {
     const server = http.createServer((req, res) => {
+        if (csp.handle(req, res)) return;
         const file = path.normalize(path.join(ROOT, decodeURIComponent(req.url.split('?')[0])));
         if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end(); }
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+        res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store', ...(path.extname(file) === '.html' ? SEC_HEADERS : {}) });
         fs.createReadStream(file).pipe(res);
     });
     return new Promise(r => server.listen(PORT, '127.0.0.1', () => r(server)));
@@ -2807,10 +2811,10 @@ const SCENARIOS = {
         if (!EMU) { out.emulator = 'skipped (admin parola doğrulaması ve günlüğün geri okunması yalnız --emu)'; return out; }
 
         // ── Yalnız emülatör: admin kendi kaydı (index talep, admin.html satın alma), günlüğün kalıcılığı, rapor ──
-        const reauthFlow = async (p, startExpr, steps) => p.evaluate(async (startExpr, steps) => {
+        const reauthFlow = async (p, fnName, arg, steps) => p.evaluate(async (fnName, arg, steps) => {
             const sleep = ms => new Promise(r => setTimeout(r, ms));
             const until = async (fn, ms = 8000) => { const t = Date.now(); while (Date.now() - t < ms) { if (fn()) return true; await sleep(100); } return false; };
-            const run = (0, eval)(startExpr);
+            const run = window[fnName](arg);
             const log = [];
             for (const st of steps) {
                 if (!(await until(() => !!document.getElementById('adminReauthModal')))) { log.push('no-modal'); break; }
@@ -2823,7 +2827,7 @@ const SCENARIOS = {
             }
             await run;
             return log;
-        }, startExpr, steps);
+        }, fnName, arg, steps);
 
         const emu = out.emu = {};
         // 1 · index: admin kendi talebi → yanlış parola (ağda reddedilir) + vazgeç → 'cancelled'; ikinci deneme doğru → 'approved'
@@ -2844,9 +2848,9 @@ const SCENARIOS = {
             o.reportButton = !!document.getElementById('btn-security-report');
             return o;
         }, TOKEN);
-        emu.indexReauthCancel = await reauthFlow(page, `window.confirmRequest('rqa_${TOKEN}')`, ['yanlis-parola-12345', 'cancel']);
+        emu.indexReauthCancel = await reauthFlow(page, 'confirmRequest', 'rqa_' + TOKEN, ['yanlis-parola-12345', 'cancel']);
         emu.indexAfterCancel = await page.evaluate(() => ({ writes: window.__j4Writes, alert: window.__j4Alerts.splice(0).join(' | ') }));
-        emu.indexReauthOk = await reauthFlow(page, `window.confirmRequest('rqa_${TOKEN}')`, ['emu01']);
+        emu.indexReauthOk = await reauthFlow(page, 'confirmRequest', 'rqa_' + TOKEN, ['emu01']);
         emu.indexAfterOk = await page.evaluate(() => ({ writes: window.__j4Writes, alert: window.__j4Alerts.splice(0).join(' | ') }));
         // tag'li metin günlüğe düşer (kural etiketi reddeder → "<" görsel eşdeğeriyle değişir)
         emu.sanitizedWrite = await page.evaluate(TOKEN => window.appendAuditLog({ type: 'J4 test', refCol: 'requests', refId: 'x', item: '<img src=x> ' + TOKEN + ' etiket', qty: 1, actorName: 'J4', result: 'cancelled', reason: 'J4 sanitize testi' }), TOKEN);
@@ -2880,7 +2884,7 @@ const SCENARIOS = {
                 window.__j4Alerts = []; window.showAppAlert = (m, t) => window.__j4Alerts.push(`${t}: ${m}`);
                 return { identity: me.name, reportButton: !!document.getElementById('btn-security-report') };
             }, TOKEN);
-            emu.adminReauthOk = await reauthFlow(a, `window.approveStep('poa_${TOKEN}')`, ['emu01']);
+            emu.adminReauthOk = await reauthFlow(a, 'approveStep', 'poa_' + TOKEN, ['emu01']);
             emu.adminAfterOk = await a.evaluate(TOKEN => ({ upserts: window.__j4Upserts, stepApproved: window.data.purchaseOrders.find(p => p.id === 'poa_' + TOKEN)?.workflow.steps[0].status, alert: window.__j4Alerts.splice(0).join(' | ') }), TOKEN);
 
             // Rapor: düğme → tek seferlik okuma; bu koşunun kayıtları (index personel + index admin + admin.html) görünür
@@ -2977,6 +2981,10 @@ const SCENARIOS = {
             console.log(`\npost-cleanup removed: ${post}`);
         } catch (e) { console.log('cleanup error: ' + e.message); }
         console.log('pageerrors:', pageErrors);
+        await new Promise(r => setTimeout(r, 500));   // son ihlal raporlarının ulaşması için
+        const cs = csp.summary();
+        console.log(`csp violations: ${cs.count}${cs.count ? ' ' + JSON.stringify(cs.distinct) + ' ' + JSON.stringify(cs.samples, null, 1) : ''}`);
+        if (cs.count) failed = true;   // KJ-4: tam suite 0 ihlal
         await browser.close();
         server.close();
     }
