@@ -759,6 +759,15 @@ window.confirmRequest = async function (requestId) {
         if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
         if (!_isPendingRequest(request)) { showAppAlert('Bu talep zaten işlenmiş veya taslak durumda.', 'warning'); _refreshRequestTables(); return; }
 
+        // [WHY]: Faz 4 · J4 (T6, EBYS-04) — onayın kendi içinde yetki ve self-approval kontrolü yoktu; yalnız index'teki
+        //        sarmalayıcı (window üzerinden çağrılırsa) kendi talebini onaylamayı engelliyordu, admin.html'de hiçbir kontrol yoktu.
+        // [HOW]: Personelin kendi talebi → engel + 'blocked' (pencere hiç açılmaz). Diğer her durumda yönetici kapısı. Admin'in
+        //        kendi talebi → seçimden sonra, yazmadan hemen önce parola yeniden doğrulaması; günlük sonuca göre.
+        const selfCtx = rec => ({ kind: 'request', record: rec, refCol: 'requests', type: 'Zimmet/Talep Onayı', item: rec.ürün, qty: Number(rec.adet) || 1 });
+        const isSelf = window.Schema.isSelfApproval({ actor: window.getActiveUser() || window.currentUser, record: request, kind: 'request' });
+        if (isSelf && !window.isDbAdmin()) { await window.SecurityConfig.guardSelfApproval(selfCtx(request)); return; }
+        if (!window.requireDbAdmin('Talep onayı')) return;
+
         const choice = await window.showRequestApprovalModal(request);
         if (!choice) return;
         const snValue = choice.sn || '-';
@@ -766,6 +775,8 @@ window.confirmRequest = async function (requestId) {
         // modal açıkken snapshot gelmiş olabilir: güncel nesne ve durum yeniden kontrol edilir
         const live = _findRequest(requestId);
         if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
+        const guard = await window.SecurityConfig.guardSelfApproval(selfCtx(live));
+        if (!guard.allowed) return;
 
         // [WHY] (H3 · 3.4): Stok önce ayrı bir transaction'la düşülüyor, talep ve b3 sonra ayrı ayrı yazılıyordu; ara adımlardan
         //        biri başarısız olunca "stok geri al + talebi geri döndür" telafileri de başarısız olabiliyordu.
@@ -811,10 +822,12 @@ window.confirmRequest = async function (requestId) {
                 await window.applyItemOps(writes);
             }
         } catch (e) {
+            await window.SecurityConfig.logSelfApproval(guard, false);
             showAppAlert(`Onay kaydedilemedi; hiçbir değişiklik yapılmadı. ${e.message || ''}`, 'error');
             _refreshRequestTables();
             return;
         }
+        await window.SecurityConfig.logSelfApproval(guard, true);
         const stockText = stockChange ? ` ${repo.toUpperCase()} stok: ${stockChange.before} → ${stockChange.after}.` : ' Stoktan düşülmedi.';
         showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.${stockText}`, "success");
         _refreshRequestTables();

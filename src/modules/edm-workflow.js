@@ -992,10 +992,17 @@ window.approveStep = async function (id) {
     const lockKey = String(id);
     if (_workflowActionsInFlight.has(lockKey)) return;
     _workflowActionsInFlight.add(lockKey);
+    let guard = null;
     try {
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
         if (!item || !item.workflow) return;
         if (!_canActOnCurrentStep(item)) { _denyStepAction(); return; }
+
+        // [WHY]: Faz 4 · J4 (EBYS-04, M12) — kendi satın alma talebinin adımını onaylama kontrolü yalnız index'teki
+        //        sarmalayıcıdaydı (admin.html'de ve doğrudan çağrıda yoktu). Personel → engel + 'blocked'; admin → parola.
+        guard = await window.SecurityConfig.guardSelfApproval({ kind: 'purchase', record: item, refCol: 'purchaseOrders',
+            type: 'Satın Alma Onayı', item: item.urun || item.ürünAdi || item.baslik || item.evrakNo, qty: Number(item.adet || item.miktar) || 1 });
+        if (!guard.allowed) return;
         _beginMutation(lockKey, item);
 
         const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
@@ -1102,6 +1109,8 @@ window.approveStep = async function (id) {
         // Snapshot dizisi değişmiş olabilir; değiştirilmiş talep güncel dizideki yerine konularak tek seferde yazılır.
         const saved = await window.writeOk(window.upsertItem('purchaseOrders', item));
         if (saved === false) _rollback(lockKey); else _endMutation(lockKey);
+        await window.SecurityConfig.logSelfApproval(guard, saved !== false);
+        guard = null;
         window.closeWorkflowModal();
         if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
 
@@ -1119,6 +1128,7 @@ window.approveStep = async function (id) {
             showAppAlert(`Onay hatası: ${error.message}`, "error");
         }
         _rollback(lockKey);
+        if (guard && guard.allowed) await window.SecurityConfig.logSelfApproval(guard, false);
     } finally {
         _workflowActionsInFlight.delete(lockKey);
         _endMutation(lockKey);

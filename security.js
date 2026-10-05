@@ -69,6 +69,118 @@ const SecurityConfig = {
         }
     },
 
+    // [WHY]: Faz 4 · J4 (KJ-3, M13) — admin kendi talebini/adımını onaylarken "biyometrik imza" isteniyordu; cihazda donanım
+    //        yoksa her 5 karakteri kabul eden bir prompt'a düşüyordu (fiilen doğrulama yoktu).
+    // [HOW]: Açık admin oturumunda parola yeniden doğrulanır (reauthenticateWithCredential). Oturum değişmez; yanlış parola
+    //        yalnız false döner. Geçiş kuralı girişle aynı (normalizeAdminPassword).
+    async reauthenticateAdmin(password) {
+        this.lastErrorMessage = null;
+        const norm = this.normalizeAdminPassword(password);
+        if (!norm.ok) { this.lastErrorMessage = norm.error; return false; }
+        try {
+            const { sdk, auth } = await this._auth();
+            const user = auth.currentUser;
+            if (!user || user.isAnonymous || user.email !== "admin@medipol.local") { this.lastErrorMessage = 'Yönetici oturumu yok.'; return false; }
+            await sdk.reauthenticateWithCredential(user, sdk.EmailAuthProvider.credential(user.email, norm.value));
+            return true;
+        } catch (e) {
+            console.warn('[Security] Parola yeniden doğrulanamadı:', e.code || e.message);
+            if (e.code === 'auth/too-many-requests') this.lastErrorMessage = 'Çok fazla deneme. Bir süre sonra tekrar deneyin.';
+            return false;
+        }
+    },
+
+    // Parola penceresi. Sonuç: 'verified' | 'cancelled' (Vazgeç / Esc) | 'failed' (3 hatalı deneme).
+    promptAdminReauth({ title = 'Parola ile Doğrulama', message = '' } = {}) {
+        return new Promise(resolve => {
+            document.getElementById('adminReauthModal')?.remove();
+            const overlay = document.createElement('div');
+            overlay.id = 'adminReauthModal';
+            overlay.setAttribute('role', 'dialog');
+            overlay.setAttribute('aria-modal', 'true');
+            overlay.style.cssText = 'position:fixed; inset:0; z-index:12500; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;';
+            overlay.innerHTML = `
+                <div style="background:var(--color-surface,#fff); color:var(--color-text,#1e293b); border-radius:14px; padding:24px; width:min(380px,92vw); box-shadow:0 20px 50px rgba(0,0,0,0.35);">
+                    <h3 id="adminReauthTitle" style="margin:0 0 8px; font-size:1.1rem;"></h3>
+                    <p id="adminReauthMessage" style="margin:0 0 16px; font-size:0.9rem; color:var(--color-text-muted,#64748b); white-space:pre-line;"></p>
+                    <input type="password" id="adminReauthInput" autocomplete="current-password" placeholder="Yönetici parolası"
+                        style="width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--color-border,#cbd5e1); border-radius:8px; font-size:14px;">
+                    <p id="adminReauthError" style="display:none; color:#e74c3c; font-size:0.8rem; margin:8px 0 0;"></p>
+                    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:18px;">
+                        <button type="button" id="adminReauthCancel" style="padding:8px 14px; border-radius:8px; border:1px solid var(--color-border,#cbd5e1); background:transparent; color:inherit; cursor:pointer;">Vazgeç</button>
+                        <button type="button" id="adminReauthOk" style="padding:8px 14px; border-radius:8px; border:none; background:#2563eb; color:#fff; cursor:pointer;">Doğrula ve Onayla</button>
+                    </div>
+                </div>`;
+            overlay.querySelector('#adminReauthTitle').textContent = title;
+            overlay.querySelector('#adminReauthMessage').textContent = message;
+            document.body.appendChild(overlay);
+            const input = overlay.querySelector('#adminReauthInput');
+            const errorEl = overlay.querySelector('#adminReauthError');
+            const okBtn = overlay.querySelector('#adminReauthOk');
+            let attempts = 0, busy = false;
+            const close = result => { overlay.remove(); resolve(result); };
+            const submit = async () => {
+                if (busy) return;
+                busy = true; okBtn.disabled = true;
+                const ok = await this.reauthenticateAdmin(input.value);
+                busy = false; okBtn.disabled = false;
+                if (ok) return close('verified');
+                attempts++;
+                if (attempts >= 3) return close('failed');
+                errorEl.textContent = (this.lastErrorMessage || 'Parola hatalı.') + ` (${3 - attempts} deneme hakkı kaldı)`;
+                errorEl.style.display = 'block';
+                input.value = '';
+                input.focus();
+            };
+            okBtn.onclick = submit;
+            overlay.querySelector('#adminReauthCancel').onclick = () => close('cancelled');
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') submit();
+                if (e.key === 'Escape') close('cancelled');
+            });
+            setTimeout(() => input.focus(), 0);
+        });
+    },
+
+    // [WHY]: Faz 4 · J4 (EBYS-04, T6, M12) — kontrol monkey-patch sarmalayıcıdaydı: yalnız index'te, yalnız çağrı window
+    //        üzerinden gelirse çalışıyordu; admin.html'de hiç yoktu; günlük sessionStorage'daydı.
+    // [HOW]: confirmRequest ve approveStep'in İÇİNDEN, yetki kontrolünden sonra çağrılır (iki sayfada da). Kendi kaydı değilse
+    //        { allowed: true }. Personel → engel + 'blocked'. Admin → parola yeniden doğrulaması; vazgeçerse/başaramazsa
+    //        'cancelled'; doğrularsa { allowed: true, self: true, entry } — çağıran kayıt BAŞARILI olunca logApproved(entry) yazar.
+    //        ctx: { kind: 'request'|'purchase', record, refCol, type, item, qty }
+    async guardSelfApproval(ctx) {
+        const actor = (typeof window.getActiveUser === 'function' && window.getActiveUser()) || window.currentUser;
+        if (!window.Schema.isSelfApproval({ actor, record: ctx.record, kind: ctx.kind })) return { allowed: true, self: false };
+        const entry = {
+            type: ctx.type, refCol: ctx.refCol, refId: ctx.record.id, item: ctx.item, qty: ctx.qty,
+            actorName: actor && actor.name, actorPersonelId: actor && actor.id,
+        };
+        const alert = (m, t) => { if (typeof window.showAppAlert === 'function') window.showAppAlert(m, t); };
+        if (!window.isDbAdmin()) {
+            console.warn(`🛡️ [Self-Approval] Personel kendi kaydını onaylamaya çalıştı: ${entry.actorName}`);
+            await window.appendAuditLog({ ...entry, result: 'blocked', reason: 'Personel kendi kaydını onaylayamaz' });
+            alert('🛡️ GÜVENLİK ENGELİ: Kendi kaydınızı onaylayamazsınız. Girişim denetim günlüğüne yazıldı.', 'error');
+            return { allowed: false, self: true };
+        }
+        const res = await this.promptAdminReauth({
+            title: 'Kendi kaydınızı onaylıyorsunuz',
+            message: `"${ctx.item || ctx.record.id}" kaydını siz açtınız. Onay için yönetici parolanızı yeniden girin; işlem denetim günlüğüne yazılır.`,
+        });
+        if (res !== 'verified') {
+            await window.appendAuditLog({ ...entry, result: 'cancelled', reason: res === 'failed' ? 'Parola doğrulanamadı (3 deneme)' : 'Yönetici parola doğrulamasından vazgeçti' });
+            alert(res === 'failed' ? 'Parola doğrulanamadı; onay verilmedi.' : 'Onay iptal edildi.', 'warning');
+            return { allowed: false, self: true };
+        }
+        return { allowed: true, self: true, entry };
+    },
+
+    async logSelfApproval(guard, saved) {
+        if (!guard || !guard.self || !guard.entry) return;
+        const r = await window.appendAuditLog({ ...guard.entry, result: saved ? 'approved' : 'cancelled',
+            reason: saved ? 'Yönetici parola ile yeniden doğrulandı' : 'Parola doğrulandı ama kayıt başarısız' });
+        if (!r.ok && typeof window.showAppAlert === 'function') window.showAppAlert('Onay verildi ancak denetim günlüğüne yazılamadı.', 'warning');
+    },
+
     // Parola girildikten sonra atanan kimlik: personel listesindeki yönetici kaydı, yoksa "Yönetici" etiketi (sanal "Admin" değil).
     resolveAdminIdentity() {
         const personel = (window.data && window.data.personel) || [];

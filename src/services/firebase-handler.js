@@ -23,7 +23,12 @@ import {
     setDoc,
     writeBatch,
     runTransaction,
-    deleteField
+    deleteField,
+    getDocs,
+    query,
+    orderBy,
+    limit,
+    serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ============================================================
@@ -154,6 +159,52 @@ window.fireDb = fireDb;
 // [WHY]: system_config kökte ortam ayrımsızdı; localhost'tan kill switch / force logout / mesaj testi canlı kullanıcıları etkiliyordu (RULE-04, VIP-05).
 // [HOW]: Tüm sistem ayarları ${COLLECTION_ROOT}/system_config/items/{admin_settings|admin_messages} altında. Kural: oturumlu okur, admin yazar.
 export const systemConfigRef = window.systemConfigRef = (name) => doc(fireDb, COLLECTION_ROOT, 'system_config', 'items', name);
+
+// ─── Denetim günlüğü (Faz 4 · J4 · 4.7, KJ-7, M14) ───────────────────────────────────────────────
+// [WHY]: Self-approval günlüğü sessionStorage'daydı: sekme kapanınca kayboluyor, başka cihazdan görülemiyor, kullanıcı
+//        tarafından silinebiliyordu; admin.html'de hiç yazılmıyordu (EBYS-04/05).
+// [HOW]: ${ROOT}/auditLogs/items — yalnız EKLEME (setDoc ile yeni id; kural update/delete'i admin dahil reddeder).
+//        COLLECTIONS'a bilerek EKLENMEZ: personel okuyamaz (dinleyici izin hatası verirdi), sürekli dinleyici kota yer;
+//        saveData / yedek / geri yükleme yalnız COLLECTIONS'ı yazdığı için günlüğe dokunamaz. Alanlar kuraldaki listeyle
+//        birebir; metinlerde "<" görsel eşdeğeriyle değişir (kural etiketli metni reddeder, kayıt düşmesin).
+const AUDIT_RESULTS = ['blocked', 'approved', 'cancelled'];
+const _auditText = v => (v === undefined || v === null || v === '') ? null : String(v).replace(/</g, '‹').slice(0, 300);
+export const appendAuditLog = window.appendAuditLog = async function (entry = {}) {
+    const u = window.userAuth;
+    if (!u) return { ok: false, code: 'no-auth' };
+    if (!AUDIT_RESULTS.includes(entry.result)) return { ok: false, code: 'invalid-argument' };
+    const id = 'al_' + window.makeId();
+    const qty = Number(entry.qty);
+    const rec = {
+        id,
+        type: _auditText(entry.type),
+        refCol: _auditText(entry.refCol),
+        refId: _auditText(entry.refId),
+        item: _auditText(entry.item),
+        qty: Number.isFinite(qty) ? qty : null,
+        actorName: _auditText(entry.actorName),
+        actorPersonelId: _auditText(entry.actorPersonelId),
+        uid: u.uid,
+        authKind: u.isAnonymous ? 'anonymous' : (window.isDbAdmin() ? 'admin' : 'password'),
+        result: entry.result,
+        reason: _auditText(entry.reason),
+        page: window.location.pathname.includes('admin.html') ? 'admin' : 'index',
+        ts: serverTimestamp(),
+    };
+    try {
+        await setDoc(doc(fireDb, COLLECTION_ROOT, 'auditLogs', 'items', id), rec);
+        return { ok: true, id };
+    } catch (e) {
+        console.error('❌ [auditLogs] Denetim kaydı yazılamadı:', e.code || e.message, rec);
+        return { ok: false, code: e.code || 'write-failed' };
+    }
+};
+
+// Rapor ekranı: tek seferlik okuma (sürekli dinleyici yok → kota dostu). Kural: yalnız admin okur.
+export const fetchAuditLogs = window.fetchAuditLogs = async function (max = 200) {
+    const snap = await getDocs(query(collection(fireDb, COLLECTION_ROOT, 'auditLogs', 'items'), orderBy('ts', 'desc'), limit(max)));
+    return snap.docs.map(d => ({ _docId: d.id, ...d.data() }));
+};
 
 // [WHY]: VIP panelinden "Force Logout" (Oturumu Sonlandır) komutu verilen kullanıcının tarayıcısında çıkış yapılması.
 //        Eski alan (force_logout_user_id) hiç temizlenmiyor ve zaman/tekillik kontrolü yoktu: hedef kişi sonraki her

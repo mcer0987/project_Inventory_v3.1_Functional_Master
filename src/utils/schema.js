@@ -308,8 +308,30 @@
         };
     }
 
+    // [WHY]: Faz 4 · J4 (EBYS-04, T6) — "kendi kaydını onaylama" kontrolü yalnız index'te, monkey-patch sarmalayıcıda ve iki
+    //        farklı (yalnız ad / kod + ad) eşleştirmeyle yapılıyordu; admin.html'de hiç yoktu.
+    // [HOW]: Tek politika. Talep: personelId → eski kod → Türkçe güvenli ad (AssignmentService.matchesPerson ile aynı sıra;
+    //        id'ler varsa ad benzerliği karar vermez). Satın alma: açanın kodu (createdBy) ya da adı (createdByName / talepEden;
+    //        şablondan açılanlarda createdBy addır). kind: 'request' | 'purchase'.
+    function isSelfApproval({ actor, record, kind } = {}) {
+        if (!actor || !record) return false;
+        const me = normName(actor.name);
+        if (kind === 'request') {
+            if (!isBlank(record.personelId) && !isBlank(actor.id)) return String(record.personelId) === String(actor.id);
+            if (!isBlank(record.personelKodu) && !isBlank(actor.code)) return String(record.personelKodu) === String(actor.code);
+            return me !== '' && normName(record.personel) === me;
+        }
+        if (kind === 'purchase') {
+            const by = isBlank(record.createdBy) || record.createdBy === 'unknown' ? null : String(record.createdBy);
+            if (by && !isBlank(actor.code) && by === String(actor.code)) return true;
+            if (me === '') return false;
+            return [record.createdByName, record.talepEden, by].some(n => !isBlank(n) && normName(n) === me);
+        }
+        return false;
+    }
+
     const Schema = {
-        makeId, normName, idToTs, isDemirbas, normalizeStock, findStock,
+        makeId, normName, idToTs, isDemirbas, normalizeStock, findStock, isSelfApproval,
         B3_SCHEMA_VERSION, B3_KEYS, B3_LEGACY_KEYS, B3_TIP, STOK_DISI,
         buildB3Entry, normalizeB3, toCanonicalB3, validateB3,
         requestStatus, normalizeRequest,

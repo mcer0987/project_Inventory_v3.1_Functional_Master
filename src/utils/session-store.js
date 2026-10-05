@@ -64,7 +64,6 @@
         localStorage.removeItem('admin_auth');
         localStorage.removeItem('launchpadBypassed');
         sessionStorage.removeItem('adminVizesi');
-        sessionStorage.removeItem('self_approval_audit_logs');
         window.currentUser = null;
     }
 
@@ -128,7 +127,14 @@
         localStorage.removeItem(ADMIN_VISA_KEY);
     }
 
+    // [WHY]: Faz 4 · J4 (4.5 · K2, AUTH-03) — biyometrik adım kayıt akışı olmadan çalışıyordu (bir cihaz sınıfında girişi
+    //        engelliyor, diğerlerinde her 5 karakteri kabul eden prompt'a düşüyordu). Bayrak auth-engine içinde ayrıca tanımlıydı.
+    // [HOW]: TEK bayrak burada; auth-engine ve security-biometrics buradan okur. Gerçek WebAuthn kaydı (K2-b) bu fazda yok —
+    //        sunucusuz ortamda yalnız bir UX kapısı olurdu (doğrulama sonucu istemcide, atlatılabilir).
+    const ENABLE_BIOMETRIC_LOGIN = false;
+
     const Session = {
+        ENABLE_BIOMETRIC_LOGIN,
         getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, requireDbAdmin,
         maskUserData, unmaskUserData, ADMIN_EMAIL,
         getAdminVisaRemaining, hasValidAdminVisa, grantAdminVisa, extendAdminVisa, clearAdminVisa,

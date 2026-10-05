@@ -24,8 +24,8 @@
  */
 
 // [WHY]: WebAuthn adımı kayıt akışı olmadan çalışıyor; bir cihaz sınıfında girişi engelliyor, diğerlerinde güvenlik sağlamıyor (AUTH-03).
-// [HOW]: K2 kararı gelene kadar kapalı. true yapmak eski davranışı (kod + biyometrik) geri getirir.
-const ENABLE_BIOMETRIC_LOGIN = false;
+// [HOW]: K2 kararı gelene kadar kapalı. Tek bayrak Session Store'da (Faz 4 · J4); burada yalnız okunur.
+const ENABLE_BIOMETRIC_LOGIN = window.AppModules.Session.ENABLE_BIOMETRIC_LOGIN === true;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // checkIsAdmin
