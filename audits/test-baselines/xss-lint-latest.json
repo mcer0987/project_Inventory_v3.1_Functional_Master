@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-10-01T07:14:32.072Z",
+  "generatedAt": "2026-10-05T08:25:52.350Z",
   "stats": {
     "files": 39,
-    "sinks": 194,
+    "sinks": 192,
     "htmlTemplates": 233,
     "expressions": 814,
     "safe": 800,
@@ -12,7 +12,7 @@
   "allowed": [
     {
       "file": "script.js",
-      "line": 1288,
+      "line": 1289,
       "expr": "getStatusClass(status)"
     },
     {

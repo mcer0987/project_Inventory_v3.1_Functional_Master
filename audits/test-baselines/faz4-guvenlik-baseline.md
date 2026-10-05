@@ -32,3 +32,24 @@ Yayındaki kuralların 28 açığı (özet): oturumlu herkes talep/satın alma s
 | J0 | gerçek demo / emülatör | 35/35 · 35/35 | 0 | 0 hata, 13/13 · favicon 404, 13/13 |
 | J1 | gerçek demo / emülatör (Rules v2) | 36/36 · 36/36 | 0 | aynı |
 | J2 | gerçek demo / emülatör (Rules v2) | 37/37 · 37/37 | 0 | aynı + xss-lint 0 izinsiz |
+| J3 | gerçek demo / emülatör (Rules v2) | 38/38 · 38/38 | 0 | aynı; admin.html oturumsuz açılışta kilit kartı — `2026-10-05T08-23-05_p4-j3`, `2026-10-05T08-22-34_p4-j3_emu` |
+
+## Oturum ve vize (J3 · `j3SessionVisa`)
+Gerçek admin oturumu gerektiren adımlar yalnız emülatörde (sahte `emu01` hesabı; ≥12 karakter testi için parola geçici olarak değiştirilir ve koşu sonunda geri alınır). Gerçek projede admin kimlik bilgisi kullanılmaz.
+
+| Kontrol | Gerçek demo | Emülatör |
+|---|---|---|
+| Parola geçiş kuralı: 5 → `"0"+kod`, 6-11 → ağa gitmeden ret, ≥12 → olduğu gibi | ✔ | ✔ |
+| `maxlength` kalktı (giriş, bakım, kilit alanları); kilit alanında yapıştırma serbest, personel kodunda kapalı | ✔ | ✔ |
+| Vize + `adminVizesi` bayrağı varken sanal "Admin" çizilmiyor, yetki verilmiyor | ✔ | ✔ |
+| admin.html, bu sekmede admin oturumu yokken → kilit kartı ("Yönetici Girişi Gerekli"), paylaşılan vize silinmiyor (M8) | ✔ | ✔ |
+| Dolmuş vizeyle açılış → kilit kartı, vize silinir, canlanmaz | ✔ | ✔ |
+| Zamanlayıcı dolmuş vizeyi uzatmıyor → `endAdminSession('expired')`; force logout aynı yoldan | ✔ | ✔ |
+| Admin oturumu sessionStorage'da; yeni sekme (tarayıcı kapat-aç eşdeğeri) anonim | – | ✔ |
+| Aynı sekmede F5 → admin oturumu korunur (başka sekmenin anonim oturumu varken de) | – | ✔ |
+| Vize dolumu → signOut (`userAuth.isAnonymous === true`), kilitliyken etkinlik vizeyi canlandırmıyor | – | ✔ |
+| Kilit açma → admin, senkron sağlıklı, canlı yazma dinleyiciye ulaşıyor (M10) | – | ✔ |
+| "Güvenli Çıkış" → signOut + kilit; ≥12 karakterli parola ile açma; rotasyon sonrası eski kod reddediliyor | – | ✔ |
+| F5 + dolmuş vize, admin token'ı canlıyken → signOut | – | ✔ |
+| "Oturumu Kapat" → index, anonim oturum yerel kalıcılıkta | – | ✔ |
+| J3 öncesi istemcinin kalıcı (IndexedDB) admin oturumu → açılışta bayat → signOut (M9) | – | ✔ |
