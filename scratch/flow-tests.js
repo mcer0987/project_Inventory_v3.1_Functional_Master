@@ -2491,6 +2491,218 @@ const SCENARIOS = {
         return { index, admin: adminOut };
     },
 
+    // Faz 4 · J3 — oturum ve vize (4.4): tek endAdminSession, sekmeye bağlı admin oturumu (AUTH-05), sanal "Admin"in kaldırılması
+    // (M9), admin.html kapısı (M8), kilitte signOut + veri akışının sürmesi (M10), parola geçiş kuralı (M11). Statik ve birim
+    // kontrolleri iki ortamda; gerçek admin oturumu gerektirenler yalnız --emu (gerçek projede admin kimlik bilgisi kullanılmaz).
+    async j3SessionVisa(page, browser) {
+        const src = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const out = {};
+        const idx = src('index.html'), adm = src('admin.html');
+        const inputTag = (html, id) => (html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`)) || [''])[0];
+        out.static = {
+            noMaxlength: [inputTag(idx, 'access-val-node'), inputTag(idx, 'maintenanceCode'), inputTag(adm, 'lock-val-node')].every(t => t && !/maxlength/.test(t)),
+            no5HaneText: !/5 haneli/.test(idx),
+            noVizeFlagReads: ['script.js', 'src/ui/ui-components.js', 'src/modules/auth-engine.js', 'src/services/firebase-handler.js'].every(f => !/getItem\(\s*['"]adminVizesi/.test(src(f))),
+            noVirtualAdmin: ['src/modules/auth-engine.js', 'admin.html', 'src/utils/alert.js', 'security.js'].every(f => !/name:\s*'Admin'/.test(src(f))),
+            loginAsAdminRemoved: !/window\.loginAsAdmin\s*=/.test(src('src/services/firebase-handler.js')),
+        };
+
+        // Birim: geçiş kuralı, 6-11 karakterin ağa gitmeden reddi, vize uzatma (T4), zamanlayıcının tek yola gitmesi
+        out.unit = await page.evaluate(async () => {
+            const S = window.SecurityConfig, Sess = window.AppModules.Session, o = {};
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const n = s => { const r = S.normalizeAdminPassword(s); return r.ok ? (r.legacy ? 'legacy:' + r.value : 'as-is') : (r.error ? 'min12' : 'invalid'); };
+            o.normalize = { five: n('12345'), six: n('abcdef'), eleven: n('x'.repeat(11)), twelve: n('x'.repeat(12)), four: n('1234'), empty: n('') };
+            const uid = window.userAuth && window.userAuth.uid;
+            const saved = { visa: localStorage.getItem('admin_auth'), end: S.endAdminSession };
+            o.midLength = { result: await S.authenticate('abcdefgh'), message: S.lastErrorMessage,
+                authUnchanged: !!window.userAuth && window.userAuth.uid === uid && window.userAuth.isAnonymous, visaWritten: Sess.getAdminVisaRemaining() !== null };
+            const ended = []; S.endAdminSession = async r => { ended.push(r); };
+            try {
+                localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 1000 }));
+                o.extendExpired = Sess.extendAdminVisa();
+                window.startSessionTimer();
+                o.timerOnExpired = { ended: ended.slice(), notRevived: Sess.getAdminVisaRemaining() < 0 };
+                Sess.grantAdminVisa();
+                const e0 = JSON.parse(localStorage.getItem('admin_auth')).expiry; await sleep(15);
+                window.startSessionTimer();
+                o.timerExtendsValid = JSON.parse(localStorage.getItem('admin_auth')).expiry > e0 && ended.length === 1;
+                const routed = []; S.endAdminSession = async r => { routed.push(r); };
+                const realAlert = window.showAppAlert; window.showAppAlert = () => {};
+                await window.logout('force_logout');
+                window.showAppAlert = realAlert;
+                o.logoutRoutesToEndAdminSession = routed;
+            } finally {
+                S.endAdminSession = saved.end;
+                clearTimeout(window.sessionTimer); clearTimeout(window.warningTimeout);
+                localStorage.removeItem('admin_auth'); if (saved.visa) localStorage.setItem('admin_auth', saved.visa);
+            }
+            const ev = new Event('paste', { cancelable: true }); document.getElementById('access-val-node').dispatchEvent(ev);
+            o.staffCodePasteBlocked = ev.defaultPrevented;
+            return o;
+        });
+
+        const base = page.url().split('/index.html')[0], q = EMU ? '?emu=1' : '';
+        const ctxErrors = [];
+        const lockState = p => p.evaluate(() => {
+            const m = document.getElementById('adminLockModal'), left = window.AppModules.Session.getAdminVisaRemaining();
+            return { locked: !!m && m.style.display === 'flex', title: (document.getElementById('adminLockTitle') || {}).textContent?.trim(),
+                isDbAdmin: window.isDbAdmin(), anon: !!(window.userAuth && window.userAuth.isAnonymous), visa: left === null ? null : left > 0 ? 'valid' : 'expired',
+                user: (window.getActiveUser() || {}).name || null,
+                fbSession: Object.keys(sessionStorage).some(k => k.startsWith('firebase:authUser:')), fbLocal: Object.keys(localStorage).some(k => k.startsWith('firebase:authUser:')) };
+        });
+        const waitFn = (p, fn, ms = 20000) => p.waitForFunction(fn, { timeout: ms, polling: 250 }).then(() => true, () => false);
+
+        // M9 (iki ortam): admin oturumu yokken vize + adminVizesi bayrağı → sanal "Admin" çizilmez, yetki verilmez
+        {
+            const ctx = await browser.createBrowserContext(), p = await ctx.newPage();
+            p.on('pageerror', e => ctxErrors.push(e.message));
+            await p.evaluateOnNewDocument(() => { localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })); sessionStorage.setItem('adminVizesi', 'true'); });
+            await p.goto(`${base}/index.html${q}`, { waitUntil: 'domcontentloaded' });
+            await waitFn(p, () => !!window.userAuth && window.isFirebaseLoaded === true);
+            await sleep(1000);
+            out.noVirtualAdminIndex = await p.evaluate(() => ({ user: window.getActiveUser(), navbar: !!document.getElementById('userDisplay'), checkIsAdmin: window.checkIsAdmin(),
+                loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none' }));
+
+            // M8 (iki ortam): geçerli vize ama bu sekmede Firebase admin oturumu yok → kilit kartı; paylaşılan vize silinmez
+            const a = await ctx.newPage(); a.on('pageerror', e => ctxErrors.push(e.message));
+            await a.goto(`${base}/admin.html${q}`, { waitUntil: 'domcontentloaded' });
+            await waitFn(a, () => document.getElementById('adminLockModal').style.display === 'flex');
+            out.adminGateNoSession = await lockState(a);
+            out.adminLockPasteAllowed = await a.evaluate(() => { const ev = new Event('paste', { cancelable: true }); document.getElementById('lock-val-node').dispatchEvent(ev); return !ev.defaultPrevented; });
+            await ctx.close();
+
+            // F5 + dolmuş vize (iki ortam): canlanmaz, endAdminSession('expired') → kilit kartı, vize silinir
+            const ctx2 = await browser.createBrowserContext(), e = await ctx2.newPage();
+            e.on('pageerror', x => ctxErrors.push(x.message));
+            await e.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 5000 })));
+            await e.goto(`${base}/admin.html${q}`, { waitUntil: 'domcontentloaded' });
+            await waitFn(e, () => document.getElementById('adminLockModal').style.display === 'flex' && !!window.userAuth);
+            await sleep(1500);
+            out.adminExpiredOnLoad = await lockState(e);
+            await ctx2.close();
+        }
+
+        if (!EMU) { out.emulator = 'skipped (gerçek admin oturumu yalnız --emu)'; out.pageErrors = ctxErrors; return out; }
+
+        const AUTH = 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        const LONG = 'emu-j3-uzun-parola';   // yalnız emülatör hesabı; koşu sonunda eski koda geri alınır
+        const emu = out.emu = {};
+        const ctx = await browser.createBrowserContext();
+        const open = async url => { const p = await ctx.newPage(); p.on('pageerror', x => ctxErrors.push(x.message)); p.on('dialog', d => d.dismiss()); await p.goto(url, { waitUntil: 'domcontentloaded' }); return p; };
+        const unlock = (p, pass) => p.evaluate(async pass => {
+            window._dx._b['lock-val-node'] = pass; await window.unlockAdmin();
+            const err = document.getElementById('lockErrorMsg');
+            return { error: err.style.display !== 'none' ? err.textContent : null };
+        }, pass);
+        const lockedAnon = p => waitFn(p, () => document.getElementById('adminLockModal').style.display === 'flex' && !!window.userAuth && window.userAuth.isAnonymous);
+        const restorePassword = p => p.evaluate(async (AUTH, LONG, CODE) => {
+            const sdk = await import(AUTH), auth = sdk.getAuth(window.firebaseApp);
+            if (!(auth.currentUser && !auth.currentUser.isAnonymous)) { if (!(await window.SecurityConfig.authenticate(LONG))) return 'not-needed-or-failed'; }
+            await sdk.updatePassword(auth.currentUser, '0' + CODE); return 'restored';
+        }, AUTH, LONG, EMU_ADMIN_CODE).catch(err => 'restore error: ' + err.message);
+        let a = null, rotated = false;
+        try {
+            // 1 · gerçek giriş yolu: index "Yönetici Paneli" → admin.html (aynı sekme)
+            a = await open(`${base}/index.html?emu=1`);
+            await waitFn(a, () => window.isFirebaseLoaded === true && !!window.userAuth);
+            const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await nav;
+            await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true);
+            emu.login = { path: await a.evaluate(() => location.pathname), ...(await lockState(a)) };
+
+            // 2 · "tarayıcı kapat-aç" eşdeğeri: aynı profilde YENİ sekme (sessionStorage taşınmaz; localStorage/IndexedDB paylaşılır)
+            const b = await open(`${base}/index.html?emu=1`);
+            await waitFn(b, () => !!window.userAuth && window.isFirebaseLoaded === true);
+            emu.newTabIndex = await b.evaluate(() => ({ anon: window.userAuth.isAnonymous, isDbAdmin: window.isDbAdmin(),
+                loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none' }));
+            const c = await open(`${base}/admin.html?emu=1`);
+            await waitFn(c, () => document.getElementById('adminLockModal').style.display === 'flex');
+            emu.newTabAdmin = await lockState(c);
+            await b.close(); await c.close();
+            emu.firstTabStillAdmin = await lockState(a);
+
+            // 3 · F5 aynı sekmede: sekmeye bağlı oturum korunur
+            await a.reload({ waitUntil: 'domcontentloaded' });
+            await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true);
+            emu.reloadSameTab = await lockState(a);
+
+            // 4 · vize dolumu (aralık kontrolü) → signOut → kilit kartı; kilitliyken etkinlik vizeyi canlandırmaz
+            await a.evaluate(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 1000 })));
+            emu.expiry = { reached: await lockedAnon(a), ...(await lockState(a)) };
+            await a.mouse.move(40, 40); await a.mouse.move(90, 120); await a.keyboard.press('Shift'); await sleep(2500);
+            emu.activityWhileLocked = await lockState(a);
+
+            // 5 · kilit açma: 6-11 karakter ağa gitmeden reddedilir; doğru kodla açılır ve canlı veri akmaya devam eder (M10)
+            emu.unlockMidLength = { ...(await unlock(a, 'abcdefgh')), ...(await lockState(a)) };
+            emu.unlock = await unlock(a, EMU_ADMIN_CODE);
+            await waitFn(a, () => window.isDbAdmin());
+            emu.afterUnlock = { ...(await lockState(a)), sync: await a.evaluate(() => window.getSyncHealth()) };
+            emu.liveDataAfterUnlock = await a.evaluate(async MARKER => {
+                const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+                const id = 'j3_live_' + Date.now(), ref = fsm.doc(window.fireDb, window.COLLECTION_ROOT, 'b1', 'items', id);
+                const until = async fn => { const t = Date.now(); while (Date.now() - t < 8000) { if (fn()) return true; await new Promise(r => setTimeout(r, 200)); } return false; };
+                await fsm.setDoc(ref, { id, ürün: 'J3 canlı ' + MARKER, adet: 1 });
+                const arrived = await until(() => (window.data.b1 || []).some(x => x.id === id));
+                await fsm.deleteDoc(ref);
+                const removed = await until(() => !(window.data.b1 || []).some(x => x.id === id));
+                return { arrived, removed };
+            }, MARKER);
+
+            // 6 · ≥12 karakterli parola (emülatör hesabında geçici rotasyon) + "Güvenli Çıkış" (signOut)
+            await a.evaluate(async (AUTH, LONG) => { const sdk = await import(AUTH); await sdk.updatePassword(sdk.getAuth(window.firebaseApp).currentUser, LONG); }, AUTH, LONG);
+            rotated = true;
+            await a.evaluate(() => { window.showCustomConfirm = async () => true; window.adminLogout(); });
+            emu.secureExit = { reached: await lockedAnon(a), ...(await lockState(a)) };
+            emu.unlockOldCodeAfterRotation = { ...(await unlock(a, EMU_ADMIN_CODE)), ...(await lockState(a)) };
+            emu.unlockLong = await unlock(a, LONG);
+            emu.unlockLongOk = await waitFn(a, () => window.isDbAdmin());
+            emu.passwordRestore = await restorePassword(a); rotated = emu.passwordRestore !== 'restored';
+
+            // 7 · F5 + dolmuş vize, admin token'ı canlıyken: vize canlanmaz, Firebase oturumu kapanır
+            await a.evaluate(() => { localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 1000 })); location.reload(); }).catch(() => {});
+            await sleep(1500);
+            emu.reloadExpired = { reached: await lockedAnon(a), ...(await lockState(a)) };
+
+            // 8 · "Oturumu Kapat" → index; anonim oturum yerel kalıcılıkta
+            await unlock(a, EMU_ADMIN_CODE);
+            await waitFn(a, () => window.isDbAdmin());
+            const nav2 = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+            await a.evaluate(() => { window.adminForceLogout(); });
+            await nav2;
+            await waitFn(a, () => !!window.userAuth && window.isFirebaseLoaded === true);
+            emu.logoutToIndex = { path: await a.evaluate(() => location.pathname), ...(await a.evaluate(() => ({ anon: window.userAuth.isAnonymous, user: window.getActiveUser(),
+                visa: window.AppModules.Session.getAdminVisaRemaining(), loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none',
+                fbSession: Object.keys(sessionStorage).some(k => k.startsWith('firebase:authUser:')), fbLocal: Object.keys(localStorage).some(k => k.startsWith('firebase:authUser:')) }))) };
+
+            // 9 · M9: J3 öncesi istemcinin bıraktığı KALICI admin oturumu (IndexedDB, vize/kimlik yok) → açılışta bayat → signOut
+            const d = await ctx.newPage(); d.on('pageerror', x => ctxErrors.push(x.message));
+            const cfg = await a.evaluate(() => window.firebaseApp.options);
+            await d.goto(`${base}/404.html`, { waitUntil: 'domcontentloaded' });
+            emu.legacySeed = await d.evaluate(async (cfg, AUTH, CODE) => {
+                const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+                const sdk = await import(AUTH), auth = sdk.getAuth(initializeApp(cfg));
+                sdk.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+                localStorage.removeItem('admin_auth'); localStorage.removeItem('activeUser');
+                // eski istemci: getAuth varsayılanı (IndexedDB, kalıcı), persistence ayarı yok
+                await sdk.signInWithEmailAndPassword(auth, 'admin@medipol.local', '0' + CODE);
+                return auth.currentUser.email;
+            }, cfg, AUTH, EMU_ADMIN_CODE);
+            await d.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+            await waitFn(d, () => !!window.userAuth && window.userAuth.isAnonymous && window.isFirebaseLoaded === true);
+            await sleep(1000);
+            emu.legacyPersistentAdmin = await d.evaluate(() => ({ anon: !!window.userAuth?.isAnonymous, isDbAdmin: window.isDbAdmin(), user: window.getActiveUser(),
+                navbar: !!document.getElementById('userDisplay'), loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none' }));
+        } finally {
+            if (rotated && a) emu.passwordRestoreFinally = await restorePassword(a);
+            await ctx.close();
+        }
+        out.pageErrors = ctxErrors;
+        return out;
+    },
+
     async hotfixLoginFocus(page, browser) {
         const url = page.url();
         const probe = async (beforeEnable) => {
