@@ -39,7 +39,8 @@ Ham kanıtlar (smoke raporları, ekran görüntüleri, kural testi çıktıları
 | `npm run lint:xss:self-test` | Kapının kendisini sınar (bilinen iyi/kötü örnekler) | Tümü ✔ |
 | `npm run emu` (ayrı terminal) → `npm run emu:seed` | Uygulama emülatörü (Firestore 8080, Auth 9099) + demo kopyası + sahte admin | — |
 | `node scratch/smoke-test.js <etiket> [--emu]` | index/admin yükleme, hata sayıları, çift yükleme, xss-lint özeti | Baseline'ı aşmaz |
-| `node scratch/flow-tests.js [--emu] [senaryo…]` | Uçtan uca akış senaryoları; `--emu` ile admin oturumu gerçek | `FAILED` yok, pageerror 0, artık 0 |
+| `node scratch/flow-tests.js [--emu] [senaryo…]` | Uçtan uca akış senaryoları; `--emu` ile admin oturumu gerçek; HTML yanıtlarında canlı CSP | `FAILED` yok, pageerror 0, artık 0, `csp violations: 0` |
+| `node scratch/docker-check.js [url] [--emu]` | Çalışan Docker konteynerinin denetimi (DOCKER_GUIDE.md §3.3) | `✔ docker-check: tümü geçti` |
 
 Tarayıcıda emülatör: `http://127.0.0.1:<port>/index.html?emu=1` (sekme boyunca kalır, `?emu=0` kapatır). Konsolda `🚀 ACTIVE DATABASE ROOT: inventory_demo @ EMULATOR` görülmelidir.
 
@@ -56,7 +57,9 @@ Ayrıntı ve kanıt bağlantıları: [test-baselines/faz4-guvenlik-baseline.md](
 | Oturum ve vize (`j3SessionVisa`) — admin oturumu sekmeye bağlı, kilitte/çıkışta signOut, sanal "Admin" yok, dolmuş vize canlanmıyor | tümü ✔ (emülatör: gerçek admin yolu; gerçek demo: oturumsuz kapı + birim) | J3 |
 | Self-approval (`j4SelfApproval`) — personel engeli + `blocked`, admin parola doğrulaması + `approved`/`cancelled`, günlük değişmez, rapor iki sayfada | tümü ✔ (gerçek demoda günlük yazılmaz, bellekte sınanır) | J4 |
 | Biyometrik yedek yol (her 5 karakteri kabul eden prompt) | kaldırıldı; `verifyBiometrics` bayrak kapalıyken `false` | J4 |
-| Smoke (index/admin) | pageerror 0, "Veri Çekildi" 13/13; admin.html oturumsuz açılışta kilit kartı (M8) | J4 |
+| CSP (firebase.json = nginx) — akış suite'i + smoke, iki ortam | **0 ihlal**; pozitif kontrol: izinsiz istek engelleniyor ✔ | J5 |
+| Docker konteyneri (`scratch/docker-check.js`) — başlıklar, engeller (17 yol 404), JS/CSS no-cache + ETag 304, iki sayfada 0 CSP ihlali | ✔ (üretim ve emülatör modu) | J5 |
+| Smoke (index/admin) | pageerror 0, console.error 0 (favicon 404 kapandı), "Veri Çekildi" 13/13 | J5 |
 
 ## 5. Dış denetim raporu ekleme
 1. Raporu `audit-reports/` altına şu adla koyun: `YYYY-AA-GG_<faz-tur>_<denetçi>_<konu>.md` — ör. `2026-09-30_Faz3.5_Gemini_bagimsiz-mimari-denetim.md`.

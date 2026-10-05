@@ -33,6 +33,7 @@ Yayındaki kuralların 28 açığı (özet): oturumlu herkes talep/satın alma s
 | J0 | gerçek demo / emülatör | 35/35 · 35/35 | 0 | 0 hata, 13/13 · favicon 404, 13/13 |
 | J1 | gerçek demo / emülatör (Rules v2) | 36/36 · 36/36 | 0 | aynı |
 | J2 | gerçek demo / emülatör (Rules v2) | 37/37 · 37/37 | 0 | aynı + xss-lint 0 izinsiz |
+| J5 | gerçek demo / emülatör (Rules v2, **CSP uygulanıyor**) | 39/39 · 39/39 (CSP ihlali 0) | 0 | console.error 0 — `2026-10-05T12-54-03_p4-j5`, `2026-10-05T13-03-54_p4-j5_emu` |
 | J4 | gerçek demo / emülatör (Rules v2) | 39/39 · 39/39 | 0 | aynı — `2026-10-05T11-36-42_p4-j4`, `2026-10-05T11-36-16_p4-j4_emu` |
 | J3 | gerçek demo / emülatör (Rules v2) | 38/38 · 38/38 | 0 | aynı; admin.html oturumsuz açılışta kilit kartı — `2026-10-05T08-23-05_p4-j3`, `2026-10-05T08-22-34_p4-j3_emu` |
 
@@ -74,3 +75,19 @@ Denetim günlüğü kalıcıdır ve kural gereği silinemez; bu yüzden **gerçe
 | Günlük admin dahil güncellenemez / silinemez (uygulamadan) | – | ✔ `permission-denied` ×2 |
 | Etiketli metin günlüğe düşer ("<" → "‹"), raporda enjekte `img` 0 | – | ✔ |
 | Rapor (admin.html, ayrı sekme) bu koşunun 6 kaydını üç sonuç rozetiyle gösteriyor | – | ✔ |
+
+## CSP ve dağıtım (J5)
+Politika kaynağı `firebase.json` (`"**"` başlıkları); nginx şablonu birebir kopyası (smoke her koşuda karşılaştırır). Test sunucuları aynı başlıkları HTML yanıtlarına ekler, ihlaller `report-uri` ile toplanır; emülatör modunda yalnız `connect-src`'ye emülatör adresleri eklenir.
+
+| Kontrol | Sonuç |
+|---|---|
+| Akış suite'i (39 senaryo) — gerçek demo / emülatör | CSP ihlali **0 / 0** |
+| Smoke index + admin — gerçek demo / emülatör | CSP ihlali **0 / 0**; pozitif kontrol (izinsiz `fetch`) engellendi ve raporlandı |
+| Gözlenen dış kaynaklar | gstatic, cdnjs, jsdelivr, identitytoolkit, firestore (+ emülatör) — hepsi politikada; `securetoken` token yenilemesi için tutuldu |
+| nginx şablonu = firebase.json | CSP ✔, diğer 4 başlık ✔ |
+| Docker imajı | `nginx -t` ✔ (uyarı 0); web kökünde 47 uygulama dosyası (1,5 MB), `backup*`, `scratch`, `tests`, `audits`, `*.md`, `firebase.json` yok |
+| Çalışan konteyner (`docker-check.js`) | 17 hassas yol 404 (`/backup/x.js` dahil); JS/CSS/HTML `no-cache` + ETag → 304; 404 sayfası başlıklı; `Server` sürümsüz; X-XSS-Protection yok; iki sayfa 0 CSP ihlali, `inventory_demo` |
+| Konteyner + emülatör (`CSP_CONNECT_EXTRA`) | emülatöre bağlandı, 0 ihlal; aynı deneme üretim konteynerinde engellendi (canlı politika yerel adreslere izin vermiyor) |
+| TLS (`tls.conf.example`, geçici sertifika) | 443 → 200 + HSTS; 80'de HSTS yok |
+| Compose | sağlık kontrolü `healthy` |
+| CDN | tüm etiketler kesin sürüm + SRI (sha384); `@latest` yok; compat kaldırıldı |
