@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, setLogLevel } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, setLogLevel, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 
 // Beklenen her ret SDK'da PERMISSION_DENIED uyarısı basar; sonuçlar node:test raporunda.
 setLogLevel('silent');
@@ -180,4 +180,8 @@ describe('Denetim günlüğü (4.7 · KJ-7)', () => {
     test('admin okur', () => assertSucceeds(getDoc(item(ctx.admin(), LIVE, 'auditLogs', 'a1'))));
     test('admin güncelleyemez', () => assertFails(updateDoc(item(ctx.admin(), LIVE, 'auditLogs', 'a1'), { result: 'approved' })));
     test('admin silemez', () => assertFails(deleteDoc(item(ctx.admin(), LIVE, 'auditLogs', 'a1'))));
+    // J4: rapor ekranının tek seferlik sorgusu (orderBy ts desc, limit 200)
+    const reportQuery = db => getDocs(query(collection(db, LIVE, 'auditLogs', 'items'), orderBy('ts', 'desc'), limit(200)));
+    test('admin rapor sorgusunu çalıştırır (J4)', () => assertSucceeds(reportQuery(ctx.admin())));
+    test('anonim rapor sorgusunu çalıştıramaz (J4)', () => assertFails(reportQuery(ctx.anon())));
 });

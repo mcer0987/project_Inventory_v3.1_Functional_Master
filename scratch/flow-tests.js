@@ -67,6 +67,13 @@ async function installHelpers(page) {
                 try { return await fn(); } finally { window.isDbAdmin = real; }
             },
         };
+        // Faz 4 · J4: denetim günlüğü kalıcıdır ve kural gereği silinemez → gerçek demoda test kaydı YAZILMAZ; çağrılar bellekte
+        // toplanır (alanlar yine sınanır). Emülatörde gerçek yazılır ve admin olarak geri okunur.
+        if (!EMU) {
+            window.__auditStub = [];
+            window.__ft.realAppendAuditLog = window.appendAuditLog;
+            window.appendAuditLog = async e => { window.__auditStub.push(JSON.parse(JSON.stringify(e))); return { ok: true, id: 'stub' }; };
+        }
     }, MARKER, EMU, EMU_ADMIN_CODE);
 }
 
@@ -212,6 +219,8 @@ const SCENARIOS = {
             window.applyItemOps = async (ops, o) => { const rest = ops.filter(x => x.col !== 'b3'); b3Attempts += ops.length - rest.length; return rest.length ? realApply(rest, o) : { written: 0 }; };
             window.showCustomConfirm = async () => true;
             window.setActiveUser({ name: 'Yönetici Test' });
+            // J4 (T6): confirmRequest kendi içinde yönetici kapılı; talep yazmaları personel oturumunda da serbest (kural), b3 kayıtlı.
+            const realIsAdmin = window.isDbAdmin; window.isDbAdmin = () => true;
 
             window.showRequestApprovalModal = async () => null;
             await window.confirmRequest(base + 1);
@@ -233,9 +242,11 @@ const SCENARIOS = {
             out.draftRefused = (await db(3)).durum === 'draft';
 
             window.setActiveUser({ name: 'Personel B ' + ft.MARKER });
+            window.isDbAdmin = realIsAdmin;   // personel kendi talebi: gerçek kapı (J4: engel + 'blocked' günlüğü)
             await window.confirmRequest(base + 2);
             await ft.sleep(800);
             out.selfApprovalBlocked = (await db(2)).durum === 'Beklemede';
+            window.isDbAdmin = () => true;
 
             window.setActiveUser({ name: 'Yönetici Test' });
             await window.rejectRequest(base + 2);
@@ -243,9 +254,12 @@ const SCENARIOS = {
             out.rejected = { durum: (await db(2)).durum, rejectedBy: (await db(2)).rejectedBy };
 
             await ft.waitFor(async () => window.data.requests.find(r => r.id === base + 2)?.durum === 'rejected');
+            // asAdmin gerçek giriş/çıkış yapar (emülatör): yamalı isDbAdmin açıkken yapılırsa çıkıştaki anonim oturum checkAuth'ta
+            // "bayat admin" sayılıp tekrar tekrar kapatılır (J3 · M9) — önce gerçek kapı geri konur.
+            window.isDbAdmin = realIsAdmin;
             await ft.asAdmin(() => window.deleteRequest(base + 2));   // J1: talep silme yalnız admin
             out.deletedById =await ft.waitFor(async () => !(await db(2)) && !!(await db(1)) && !!(await db(3)));
-            window.saveData = realSave; window.showRequestApprovalModal = realModal; window.applyItemOps = realApply;
+            window.saveData = realSave; window.showRequestApprovalModal = realModal; window.applyItemOps = realApply; window.isDbAdmin = realIsAdmin;
             return out;
         });
     },
@@ -283,6 +297,7 @@ const SCENARIOS = {
             window.applyItemOps = async (ops) => atomic([], ops);
             const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
             window.setActiveUser({ name: 'Yönetici Test' });
+            const realIsAdmin = window.isDbAdmin; window.isDbAdmin = () => true;   // J4 (T6): confirmRequest yönetici kapılı
             const modal = () => document.getElementById('requestApprovalModal');
             const openFor = async n => { const run = { p: window.confirmRequest(base + n) }; await ft.waitFor(async () => !!modal(), 2000); return run; };
 
@@ -350,7 +365,7 @@ const SCENARIOS = {
             out.txFailure = { stillPending: (await db(2)).durum === 'Beklemede', message: alerts.at(-1)?.[1] };
 
             out.oneCallPerApproval = txCalls;
-            window.saveData = realSave; window.runStockOps = realOps; window.applyItemOps = realApply; window.showAppAlert = realAlert;
+            window.saveData = realSave; window.runStockOps = realOps; window.applyItemOps = realApply; window.showAppAlert = realAlert; window.isDbAdmin = realIsAdmin;
             window.data.b1 = window.data.b1.filter(p => p !== prod && p !== low);
             return out;
         });
@@ -2700,6 +2715,192 @@ const SCENARIOS = {
             await ctx.close();
         }
         out.pageErrors = ctxErrors;
+        return out;
+    },
+
+    // Faz 4 · J4 — self-approval iş kuralında (4.7 · EBYS-04, T6, M12), auditLogs (KJ-7, M14), rapor (EBYS-05), biyometrik
+    // yedek yolunun kapanması (4.5 · AUTH-03, M13). Onay yazmaları bellek içi / kayıtlı; günlük gerçek demoda bellekte, emülatörde
+    // gerçek yazılır ve admin olarak (başka bir sekmeden) geri okunur. Admin parola yeniden doğrulaması yalnız --emu.
+    async j4SelfApproval(page, browser) {
+        const src = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const TOKEN = 'J4-' + Date.now();
+        const out = {};
+        const sar = src('src/modules/self-approval-reporter.js');
+        out.static = {
+            noMonkeyPatch: !/originalConfirmRequest|originalApproveStep|_isSecured/.test(sar),
+            noSessionStorageLog: !/self_approval_audit_logs/.test(sar + src('src/utils/session-store.js')),
+            noFallbackPrompt: !/function _fallbackChallenge|\bprompt\(/.test(src('security-biometrics.js')),
+            guardInConfirmRequest: /guardSelfApproval/.test(src('script.js')),
+            guardInApproveStep: /guardSelfApproval/.test(src('src/modules/edm-workflow.js')),
+            backupLimitedToCollections: /_backupKeys/.test(src('src/modules/admin/admin-backup.js')),
+            reporterOnAdminPage: /self-approval-reporter\.js/.test(src('src/modules/admin/admin-main.js')),
+        };
+
+        // ── İki ortam: index, personel (anonim) oturumu ──
+        out.index = await page.evaluate(async TOKEN => {
+            const ft = window.__ft, o = {}, alerts = [];
+            const S = window.Schema;
+            const realAlert = window.showAppAlert, realModal = window.showRequestApprovalModal, realUpsert = window.upsertItem, realPrompt = window.prompt;
+            const orig = { po: window.data.purchaseOrders, req: window.data.requests };
+            window.showAppAlert = (m, t) => alerts.push(`${t}: ${m}`);
+            const audit = async () => ft.emulator ? null : window.__auditStub.splice(0);
+            try {
+                // Tek politika (Schema.isSelfApproval)
+                const me = { name: 'İsmail Kaya', code: '12345', id: 'p1' };
+                o.policy = {
+                    requestById: S.isSelfApproval({ actor: me, kind: 'request', record: { personelId: 'p1', personel: 'Başkası' } }),
+                    requestIdBeatsName: S.isSelfApproval({ actor: me, kind: 'request', record: { personelId: 'p2', personel: 'ismail kaya' } }),
+                    requestByNameTurkish: S.isSelfApproval({ actor: { name: 'İSMAİL  KAYA' }, kind: 'request', record: { personel: 'ismail kaya' } }),
+                    purchaseByCode: S.isSelfApproval({ actor: me, kind: 'purchase', record: { createdBy: '12345', createdByName: 'X' } }),
+                    purchaseByName: S.isSelfApproval({ actor: me, kind: 'purchase', record: { createdBy: 'unknown', talepEden: 'ismail kaya' } }),
+                    purchaseOther: S.isSelfApproval({ actor: me, kind: 'purchase', record: { createdBy: '99999', createdByName: 'Ali' } }),
+                };
+
+                // Personel kendi satın alma adımını onaylayamaz → engel + 'blocked', kayıt yazılmaz
+                const staff = { name: 'J4 Personel ' + ft.MARKER, code: '00004' };
+                window.setActiveUser(staff); window.currentUser = staff;
+                const po = { id: 'po_' + TOKEN, urun: TOKEN + ' Toner <b>', adet: 2, createdBy: staff.code, createdByName: staff.name, talepEden: staff.name, durum: 'Onay Bekliyor', akis: [],
+                    workflow: { id: 'wf_' + TOKEN, started: true, finished: false, currentStep: 0, currentState: 'initiation', history: [], steps: [{ user: staff.name, tip: 'Yönetici', status: 'pending' }] } };
+                window.data.purchaseOrders = [...(orig.po || []), po];
+                let upserts = 0; window.upsertItem = async () => { upserts++; return { written: 1 }; };
+                await window.approveStep(po.id);
+                o.staffOwnPurchase = { writes: upserts, stepStillPending: po.workflow.steps[0].status === 'pending', alert: alerts.splice(0).join(' | '), audit: await audit() };
+
+                // Personel kendi talebini onaylayamaz (onay penceresi hiç açılmaz); başkasının talebinde yönetici kapısı
+                let modals = 0; window.showRequestApprovalModal = async () => { modals++; return null; };
+                const rq = { id: 'rq_' + TOKEN, ürün: TOKEN + ' Mouse', adet: 1, personel: staff.name, durum: 'Beklemede' };
+                const other = { id: 'rq2_' + TOKEN, ürün: TOKEN + ' Klavye', adet: 1, personel: 'Başka Personel', durum: 'Beklemede' };
+                window.data.requests = [...(orig.req || []), rq, other];
+                await window.confirmRequest(rq.id);
+                o.staffOwnRequest = { modals, alert: alerts.splice(0).join(' | '), audit: await audit() };
+                await window.confirmRequest(other.id);
+                o.staffOthersRequest = { modals, alert: alerts.splice(0).join(' | '), audit: await audit() };
+
+                // Sarmalayıcı yok: window.confirmRequest / approveStep iş mantığının kendisi
+                o.noWrappers = window.confirmRequest._isSecured === undefined && window.approveStep._isSecured === undefined
+                    && /guardSelfApproval/.test(String(window.confirmRequest)) && /guardSelfApproval/.test(String(window.approveStep));
+
+                // M14: günlük uygulama koleksiyonu değil; saveData yazamaz
+                o.auditNotInCollections = !window.COLLECTIONS.includes('auditLogs');
+                o.saveDataRejectsAudit = await window.saveData('auditLogs', [{ id: 'x' }], { strict: false }).then(r => r === false, () => 'threw');
+
+                // 4.5 / M13: biyometrik kapalı, yedek prompt yok
+                let prompts = 0; window.prompt = () => { prompts++; return '12345'; };
+                o.biometric = { flag: window.AppModules.Session.ENABLE_BIOMETRIC_LOGIN, verify: await window.verifyBiometrics({ reason: 'test' }), prompts,
+                    helpersRemoved: typeof window.generateBiometricChallenge === 'undefined' && typeof window.authenticateWith2FA === 'undefined' };
+
+                // EBYS-05: ada göre değil oturuma göre — "Muhammed Cer" adlı personelde düğme yok
+                window.updateNavbarUI({ name: 'Muhammed Cer' });
+                o.reportButtonForNamedStaff = !!document.getElementById('btn-security-report');
+                alerts.length = 0;
+                await window.AppModules.SelfApproval.showReportModal();
+                o.reportRefusedForStaff = { modal: !!document.getElementById('self-approval-report-modal'), alert: alerts.splice(0).join(' | ') };
+            } finally {
+                window.showAppAlert = realAlert; window.showRequestApprovalModal = realModal; window.upsertItem = realUpsert; window.prompt = realPrompt;
+                window.data.purchaseOrders = orig.po; window.data.requests = orig.req;
+                document.getElementById('userDisplay')?.remove();
+            }
+            return o;
+        }, TOKEN);
+
+        if (!EMU) { out.emulator = 'skipped (admin parola doğrulaması ve günlüğün geri okunması yalnız --emu)'; return out; }
+
+        // ── Yalnız emülatör: admin kendi kaydı (index talep, admin.html satın alma), günlüğün kalıcılığı, rapor ──
+        const reauthFlow = async (p, startExpr, steps) => p.evaluate(async (startExpr, steps) => {
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const until = async (fn, ms = 8000) => { const t = Date.now(); while (Date.now() - t < ms) { if (fn()) return true; await sleep(100); } return false; };
+            const run = (0, eval)(startExpr);
+            const log = [];
+            for (const st of steps) {
+                if (!(await until(() => !!document.getElementById('adminReauthModal')))) { log.push('no-modal'); break; }
+                if (st === 'cancel') { document.getElementById('adminReauthCancel').click(); log.push('cancelled'); continue; }
+                document.getElementById('adminReauthInput').value = st;
+                document.getElementById('adminReauthOk').click();
+                await until(() => !document.getElementById('adminReauthModal') || getComputedStyle(document.getElementById('adminReauthError')).display !== 'none');
+                const err = document.getElementById('adminReauthError');
+                log.push(document.getElementById('adminReauthModal') ? 'error: ' + err.textContent : 'closed');
+            }
+            await run;
+            return log;
+        }, startExpr, steps);
+
+        const emu = out.emu = {};
+        // 1 · index: admin kendi talebi → yanlış parola (ağda reddedilir) + vazgeç → 'cancelled'; ikinci deneme doğru → 'approved'
+        emu.indexAdminLogin = await page.evaluate(() => window.__ft.adminLogin());
+        emu.indexAdminRequest = await page.evaluate(async TOKEN => {
+            const ft = window.__ft, o = {}, alerts = [];
+            const realAlert = window.showAppAlert, realModal = window.showRequestApprovalModal, realApply = window.applyItemOps, origReq = window.data.requests;
+            const adminUser = { name: 'J4 Yönetici ' + ft.MARKER, code: 'ADMIN' };
+            window.setActiveUser(adminUser); window.currentUser = adminUser;
+            window.showAppAlert = (m, t) => alerts.push(`${t}: ${m}`);
+            window.showRequestApprovalModal = async () => ({ sn: 'SN-J4', source: null });
+            window.__j4Writes = 0; window.applyItemOps = async ops => { window.__j4Writes += ops.length; return { written: ops.length }; };
+            window.data.requests = [...(origReq || []), { id: 'rqa_' + TOKEN, ürün: TOKEN + ' Monitör', adet: 1, personel: adminUser.name, durum: 'Beklemede' }];
+            window.__j4Restore = () => { window.showAppAlert = realAlert; window.showRequestApprovalModal = realModal; window.applyItemOps = realApply; window.data.requests = origReq; };
+            window.__j4Alerts = alerts;
+            // navbar düğmesi admin oturumunda
+            window.updateNavbarUI(adminUser);
+            o.reportButton = !!document.getElementById('btn-security-report');
+            return o;
+        }, TOKEN);
+        emu.indexReauthCancel = await reauthFlow(page, `window.confirmRequest('rqa_${TOKEN}')`, ['yanlis-parola-12345', 'cancel']);
+        emu.indexAfterCancel = await page.evaluate(() => ({ writes: window.__j4Writes, alert: window.__j4Alerts.splice(0).join(' | ') }));
+        emu.indexReauthOk = await reauthFlow(page, `window.confirmRequest('rqa_${TOKEN}')`, ['emu01']);
+        emu.indexAfterOk = await page.evaluate(() => ({ writes: window.__j4Writes, alert: window.__j4Alerts.splice(0).join(' | ') }));
+        // tag'li metin günlüğe düşer (kural etiketi reddeder → "<" görsel eşdeğeriyle değişir)
+        emu.sanitizedWrite = await page.evaluate(TOKEN => window.appendAuditLog({ type: 'J4 test', refCol: 'requests', refId: 'x', item: '<img src=x> ' + TOKEN + ' etiket', qty: 1, actorName: 'J4', result: 'cancelled', reason: 'J4 sanitize testi' }), TOKEN);
+        // günlük değiştirilemez / silinemez (admin dahil)
+        emu.immutable = await page.evaluate(async id => {
+            const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+            const ref = fsm.doc(window.fireDb, window.COLLECTION_ROOT, 'auditLogs', 'items', id);
+            return { update: await fsm.updateDoc(ref, { result: 'approved' }).then(() => 'ALLOWED', e => e.code), delete: await fsm.deleteDoc(ref).then(() => 'ALLOWED', e => e.code) };
+        }, emu.sanitizedWrite.id);
+        await page.evaluate(() => { window.__j4Restore(); document.getElementById('userDisplay')?.remove(); });
+        emu.indexBackToAnonymous = await page.evaluate(() => window.__ft.backToAnonymous());
+
+        // 2 · admin.html (ayrı sekme / bağlam): giriş → kendi satın alma adımı → parola → 'approved'; rapor iki sayfanın kayıtlarını gösterir
+        const ctx = await browser.createBrowserContext();
+        const errs = [];
+        try {
+            const base = page.url().split('/index.html')[0];
+            const a = await ctx.newPage(); a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
+            await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+            await a.waitForFunction(() => window.isFirebaseLoaded === true && !!window.userAuth, { timeout: 20000 });
+            const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await nav;
+            await a.waitForFunction(() => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && window.approveStep, { timeout: 20000 });
+            emu.adminPage = await a.evaluate(TOKEN => {
+                const me = window.getActiveUser();
+                const po = { id: 'poa_' + TOKEN, urun: TOKEN + ' Yazıcı', adet: 1, createdBy: me.code, createdByName: me.name, talepEden: me.name, durum: 'Onay Bekliyor', akis: [],
+                    workflow: { id: 'wfa_' + TOKEN, started: true, finished: false, currentStep: 0, currentState: 'initiation', history: [], steps: [{ user: 'Başka Onaycı', tip: 'Yönetici', status: 'pending' }] } };
+                window.data.purchaseOrders = [...(window.data.purchaseOrders || []), po];
+                window.__j4Upserts = 0; window.upsertItem = async () => { window.__j4Upserts++; return { written: 1 }; };
+                window.__j4Alerts = []; window.showAppAlert = (m, t) => window.__j4Alerts.push(`${t}: ${m}`);
+                return { identity: me.name, reportButton: !!document.getElementById('btn-security-report') };
+            }, TOKEN);
+            emu.adminReauthOk = await reauthFlow(a, `window.approveStep('poa_${TOKEN}')`, ['emu01']);
+            emu.adminAfterOk = await a.evaluate(TOKEN => ({ upserts: window.__j4Upserts, stepApproved: window.data.purchaseOrders.find(p => p.id === 'poa_' + TOKEN)?.workflow.steps[0].status, alert: window.__j4Alerts.splice(0).join(' | ') }), TOKEN);
+
+            // Rapor: düğme → tek seferlik okuma; bu koşunun kayıtları (index personel + index admin + admin.html) görünür
+            emu.report = await a.evaluate(async TOKEN => {
+                const sleep = ms => new Promise(r => setTimeout(r, ms));
+                document.getElementById('btn-security-report').click();
+                const t = Date.now(); while (Date.now() - t < 8000 && !document.querySelector('#sarContent[data-count]')) await sleep(150);
+                const rows = [...document.querySelectorAll('#self-approval-report-modal tbody tr')].map(tr => tr.textContent.replace(/\s+/g, ' ').trim()).filter(t => t.includes(TOKEN));
+                const logs = (await window.fetchAuditLogs(200)).filter(l => String(l.item || '').includes(TOKEN));
+                return {
+                    rows: rows.length,
+                    badges: [...new Set(rows.map(r => (r.match(/Engellendi|Onaylandı \(parola doğrulandı\)|Vazgeçildi \/ onay verilmedi/) || ['?'])[0]))],
+                    records: logs.map(l => ({ result: l.result, refCol: l.refCol, page: l.page, authKind: l.authKind, actor: (l.actorName || '').replace(/ __flowtest__/, ''), item: l.item.replace(TOKEN, 'T'), reason: l.reason, hasTs: !!(l.ts && l.ts.toDate), keys: Object.keys(l).filter(k => k !== '_docId').sort().join(',') })),
+                    injectedImgs: document.querySelectorAll('#self-approval-report-modal img').length,
+                };
+            }, TOKEN);
+        } finally {
+            await ctx.close();
+        }
+        out.pageErrors = errs;
         return out;
     },
 
