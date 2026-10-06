@@ -2949,6 +2949,44 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 4 · J6 — J5'te sürümü sabitlenen / değişen ve SRI eklenen CDN kütüphaneleri iki sayfada gerçekten çalışıyor mu (Ek A:
+    // Excel, PDF raporu, grafikler, VIP sürükle-bırak, e-posta). Dosya indirilmez: çıktılar bellekte üretilir. Yazma yok.
+    async j6CdnLibraries(page, browser) {
+        const probe = () => (async () => {
+            const o = {};
+            o.globals = { XLSX: typeof window.XLSX, jsPDF: typeof (window.jspdf && window.jspdf.jsPDF), Chart: typeof window.Chart, LZString: typeof window.LZString,
+                emailjs: typeof window.emailjs, Sortable: typeof window.Sortable };
+            try {
+                const doc = new window.jspdf.jsPDF();
+                doc.autoTable({ head: [['Ürün', 'Adet']], body: [['Laptop', '2'], ['Mouse', '5']] });
+                o.pdfAutoTable = { bytes: doc.output('arraybuffer').byteLength, finalY: Math.round((doc.lastAutoTable || doc.autoTable.previous || {}).finalY || 0) };
+            } catch (e) { o.pdfAutoTable = 'ERR ' + e.message; }
+            try {
+                const wb = window.XLSX.utils.book_new();
+                window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet([{ ürün: 'Laptop', adet: 2 }]), 'Test');
+                o.xlsxBytes = window.XLSX.write(wb, { type: 'array', bookType: 'xlsx' }).byteLength;
+            } catch (e) { o.xlsxBytes = 'ERR ' + e.message; }
+            try { o.lzRoundTrip = window.LZString.decompressFromUTF16(window.LZString.compressToUTF16('envanter')) === 'envanter'; } catch (e) { o.lzRoundTrip = 'ERR ' + e.message; }
+            o.charts = window.Chart && window.Chart.instances ? Object.keys(window.Chart.instances).length : null;
+            o.fontAwesome = getComputedStyle(document.querySelector('.fas') || document.body, '::before').fontFamily || '';
+            o.fontAwesome = /Font Awesome/i.test(o.fontAwesome);
+            return o;
+        })();
+        const out = {};
+        out.index = await page.evaluate(probe);
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = [];
+        admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        out.admin = await admin.evaluate(probe);
+        out.admin.sortableGrid = await admin.evaluate(() => !!document.querySelector('.vip-grid, #vipGrid, [data-sortable]') || typeof window.Sortable === 'function');
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
+    },
+
     // Faz 4 · J6 — Ek A'nın Faz 4'ün dokunduğu oturum / bakım / VIP maddeleri uçtan uca (önceki senaryolar bunları birim
     // düzeyinde sınıyordu). İki ortam: gerçek personel girişi → modal + yazma → çıkış → tekrar giriş → zaman aşımı → tekrar
     // giriş; mobil otomatik kart görünümü. Yalnız emülatör (kural 7: VIP komutları yalnız emülatörde): yönetici mesajı bir kez,
