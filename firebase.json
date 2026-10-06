@@ -26,7 +26,13 @@
       "docker-compose*.yml",
       "nginx/**",
       "*.ps1",
-      "storage.rules"
+      "storage.rules",
+      "**/*.log",
+      "**/*.tar",
+      "**/*.tar.gz",
+      "**/*.pem",
+      "**/*.key",
+      "certs/**"
     ],
     "headers": [
       {
