@@ -2,6 +2,24 @@
 
 Her tur sonunda güncellenir. Ham kanıtlar `scratch/baseline/<klasör>/` altında; tur ayrıntısı ilgili walkthrough'ta.
 
+## ★ Faz 4A nihai güvenlik baseline'ı (06.10.2026 · J6, merge öncesi)
+
+| Kapı | Sonuç | Komut / kanıt |
+|---|---|---|
+| Firestore kural matrisi (Rules v2 Aşama A) | **72/72** | `npm run test:rules` |
+| Yayındaki kurallar, karşılaştırma | 42/70 — 28 açık, deploy'da kapanır | J1 |
+| XSS kapısı — izinsiz / gerekçeli / öz-test | **0** / 14 / **17/17** (194 sink, 817 ifade) | `npm run lint:xss`, [xss-lint-latest.json](xss-lint-latest.json) |
+| Tarayıcı içi XSS yüzeyleri — çalışan yük / enjekte img | **0 / 0** (index + admin) | `j2XssSurfaces`, `xssAdminPanel` |
+| Akış suite'i — gerçek demo | **41/41**, FAILED 0, pageerror 0, artık 0, CSP ihlali **0** | `npm run flow` |
+| Akış suite'i — emülatör (Rules v2) | **41/41**, FAILED 0, pageerror 0, artık 0, CSP ihlali **0** | `npm run flow -- --emu` |
+| CSP pozitif kontrolü (politika gerçekten uygulanıyor) | ✔ | smoke |
+| Smoke index / admin (iki ortam) | pageerror 0, console.error **0**, "Veri Çekildi" 13/13; nginx = firebase.json ✔ | `2026-10-06T12-04-41_p4-final`, `…12-05-07_p4-final_emu` |
+| Docker imajı (güncel kod) + çalışan konteyner | `nginx -t` uyarısız; 47 dosya; `docker-check` ✔ | `2026-10-06T12-04-41_p4-final/docker-check.txt` |
+| Hosting'e gidecek dosyalar | 47 (yalnız uygulama) | `node scratch/hosting-files.js` |
+| Ek A matrisi (39 madde + 2 Faz 4 eki) | 24 tam otomatik · 14 kısmi · 3 elle (liste sahibinde) | Faz 4 Kapanış Walkthrough §5, §9 |
+
+Deploy günü kapananlar: M16 (kurallar + istemci tek komut), M17 / T14 (parola ≥12), SEC-05 paneli (EmailJS). Aşama B (RULE-02 kalanı, AUTH-07/09) Faz 4B'de.
+
 ## Firestore kural matrisi (`npm run test:rules`)
 | Tur | Kurallar | Senaryo | ✔ | ✖ | Kanıt |
 |---|---|---|---|---|---|

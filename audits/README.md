@@ -44,8 +44,8 @@ Ham kanıtlar (smoke raporları, ekran görüntüleri, kural testi çıktıları
 
 Tarayıcıda emülatör: `http://127.0.0.1:<port>/index.html?emu=1` (sekme boyunca kalır, `?emu=0` kapatır). Konsolda `🚀 ACTIVE DATABASE ROOT: inventory_demo @ EMULATOR` görülmelidir.
 
-## 4. Güncel güvenlik baseline'ı
-Ayrıntı ve kanıt bağlantıları: [test-baselines/faz4-guvenlik-baseline.md](test-baselines/faz4-guvenlik-baseline.md).
+## 4. Güncel güvenlik baseline'ı — **Faz 4A nihai (06.10.2026)**
+Ayrıntı ve kanıt bağlantıları: [test-baselines/faz4-guvenlik-baseline.md](test-baselines/faz4-guvenlik-baseline.md). Kapanış ve Ek A matrisi: `Mimari ve Geliştirmeler/v3.2 Geliştirme Süreci/Faz 4 Kapanış Walkthrough.md`. Canlı yayın: `Faz 4A Deploy Runbook.md`.
 
 | Ölçüt | Değer | Tur |
 |---|---|---|
@@ -57,7 +57,9 @@ Ayrıntı ve kanıt bağlantıları: [test-baselines/faz4-guvenlik-baseline.md](
 | Oturum ve vize (`j3SessionVisa`) — admin oturumu sekmeye bağlı, kilitte/çıkışta signOut, sanal "Admin" yok, dolmuş vize canlanmıyor | tümü ✔ (emülatör: gerçek admin yolu; gerçek demo: oturumsuz kapı + birim) | J3 |
 | Self-approval (`j4SelfApproval`) — personel engeli + `blocked`, admin parola doğrulaması + `approved`/`cancelled`, günlük değişmez, rapor iki sayfada | tümü ✔ (gerçek demoda günlük yazılmaz, bellekte sınanır) | J4 |
 | Biyometrik yedek yol (her 5 karakteri kabul eden prompt) | kaldırıldı; `verifyBiometrics` bayrak kapalıyken `false` | J4 |
-| CSP (firebase.json = nginx) — akış suite'i + smoke, iki ortam | **0 ihlal**; pozitif kontrol: izinsiz istek engelleniyor ✔ | J5 |
+| Akış suite'i — gerçek demo / emülatör | **41/41** · **41/41** (FAILED 0, pageerror 0, artık 0) | J6 |
+| CSP (firebase.json = nginx) — akış suite'i + smoke, iki ortam | **0 ihlal**; pozitif kontrol: izinsiz istek engelleniyor ✔ | J6 |
+| Hosting'e gidecek dosyalar (`node scratch/hosting-files.js`) | 47 uygulama dosyası (Docker ile aynı); J6'da `firestore-debug.log` sızıntısı kapatıldı | J6 |
 | Docker konteyneri (`scratch/docker-check.js`) — başlıklar, engeller (17 yol 404), JS/CSS no-cache + ETag 304, iki sayfada 0 CSP ihlali | ✔ (üretim ve emülatör modu) | J5 |
 | Smoke (index/admin) | pageerror 0, console.error 0 (favicon 404 kapandı), "Veri Çekildi" 13/13 | J5 |
 

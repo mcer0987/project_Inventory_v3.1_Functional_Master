@@ -1,7 +1,8 @@
 # Faz 4 Uygulama Planı — Yetki ve Güvenlik
 
 > **Tarih:** 30.09.2026 · **Branch:** `feat/phase-4-security-and-rules` (master `2e8ae8f`'den; dalda yalnız plan notu `c89ad3a`)
-> **Durum:** ✅ ONAYLANDI (sahibi, 30.09.2026) — KJ-1…KJ-7 önerildiği gibi (a); TEYİT 0.2a/0.2c/0.2d alındı (§7.1). Uygulama J0'dan başlar.
+> **Durum:** ✅ ONAYLANDI (sahibi, 30.09.2026) — KJ-1…KJ-7 önerildiği gibi (a); TEYİT 0.2a/0.2c/0.2d alındı (§7.1).
+> **Faz 4A (J0–J6) TAMAMLANDI — 06.10.2026.** Merge'e hazır (sahibinin onayıyla), canlıya deploy edilmedi. Kapanış: `Faz 4 Kapanış Walkthrough.md` · Yayın: `Faz 4A Deploy Runbook.md` (§8'in mühürlü hali).
 > **Referans:** Master Plan Faz 4 (4.1-4.8), Ek C (Rules v2), Ek D (Yetki matrisi), Bulgu Kataloğu. Bu plandaki dosya:satır referansları 30.09 tarihli kod taramasından (üç paralel tarama + elle doğrulama) alındı.
 
 ## 0. Başlangıç durumu
@@ -272,6 +273,7 @@ service cloud.firestore {
 | TEYİT 0.2d | Spark planı; **Storage aktif değil** → J5'te `storage.rules` yazılmaz, EBYS-14'ün açık hata politikası geçerli; CSP'den Storage kaynakları J5'teki istek günlüğüne göre çıkarılır |
 
 ## 8. Yayın (deploy) runbook'u — Faz 4 sonu, sahibinin onayıyla
+> **06.10.2026:** Uygulanabilir ve mühürlü hali → [Faz 4A Deploy Runbook.md](Faz%204A%20Deploy%20Runbook.md) (hazırlık + önizleme provası, snapshot, tek komut deploy, parola, 9 maddelik canlı doğrulama, sıralı geri alma, teyit cümlesi). Aşağıdaki özet onun kaynağıdır.
 1. VIP → DB snapshot (`lifeserver_master`).
 2. `firebase deploy --only firestore:rules,hosting` (**tek komut**: kurallar ve istemci birlikte — M16). Storage aktif değil (TEYİT 0.2d).
 3. **Hemen** Console → Authentication → admin parolası ≥12 karaktere (M17); eski parola reddedilmeli.
@@ -286,12 +288,12 @@ service cloud.firestore {
 - XOR maskeleme (SEC-06, K3-a) — değişmez; güvenlik aracı sayılmaz.
 
 ## Faz 4 kabul (Master Plan + Ek A · Güvenlik)
-- [ ] `npm run test:rules` yeşil (Ek D Aşama A satırlarının tamamı)
-- [ ] `<img src=x onerror=alert(1)>` içeren talep/görev/satın alma/zimmet/servis/ürün/personel kaydı hiçbir ekranda script çalıştırmıyor; xss-lint 0
-- [ ] Anonim oturum talepleri/satın almaları silemiyor; bakımda personel yazamıyor, admin yazabiliyor
-- [ ] Tarayıcı kapat-aç sonrası admin oturumu yok; vize dolumu Firebase oturumunu kapatıyor
-- [ ] Self-approval iki sayfada iş kuralında; günlük `auditLogs`'ta, sekme kapanınca kaybolmuyor
-- [ ] CSP ihlali 0; smoke metrikleri baseline'ı aşmıyor
+- [x] `npm run test:rules` yeşil (Ek D Aşama A satırlarının tamamı) — 72/72
+- [x] `<img src=x onerror=alert(1)>` içeren talep/görev/satın alma/zimmet/servis/ürün/personel kaydı hiçbir ekranda script çalıştırmıyor; xss-lint 0 — J2
+- [x] Anonim oturum talepleri/satın almaları silemiyor; bakımda personel yazamıyor, admin yazabiliyor — J1, J6
+- [x] Tarayıcı kapat-aç sonrası admin oturumu yok; vize dolumu Firebase oturumunu kapatıyor — J3
+- [x] Self-approval iki sayfada iş kuralında; günlük `auditLogs`'ta, sekme kapanınca kaybolmuyor — J4
+- [x] CSP ihlali 0; smoke metrikleri baseline'ı aşmıyor — J5, J6 (akış 41/41 ×2)
 
 ---
 *Onayınızla J0'dan başlanır. Her tur sonunda walkthrough sunulur; deploy yalnız §8 ve açık onayınızla yapılır.*
