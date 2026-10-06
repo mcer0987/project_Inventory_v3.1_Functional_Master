@@ -194,18 +194,18 @@ window.todoModule = {
                             <div class="d-flex justify-content-between align-items-center mb-1">
                                 <small class="fw-bold text-muted">
                                     <i class="fas fa-tasks"></i> Alt Maddeler 
-                                    ${this.getChecklistStats(task.checklist || [])}
+                                    ${this.getChecklistStats(task.checklist || []) /* xss-ok: yalnız sayaçlar */}
                                 </small>
                                 <button onclick="todoModule.openChecklistModal(${jsArg(String(task.id))})" class="btn-madde-ekle"><i class="fas fa-list-check"></i> Yönet</button>
                             </div>
                             <div id="checklist-${escapeHtml(task.id)}">
-                                ${this.generateChecklistItems(task.id, task.checklist || [], 3)}
+                                ${this.generateChecklistItems(task.id, task.checklist || [], 3) /* xss-ok: birleştirilmiş HTML, metinler içeride escapeHtml */}
                             </div>
                         </div>
 
                         ${!task.isPersonal ? `
                         <div class="task-interactions mt-3" id="interactions-${escapeHtml(task.id)}">
-                            ${this.generateInteractions(task.interactions || [])}
+                            ${this.generateInteractions(task.interactions || []) /* xss-ok: birleştirilmiş HTML, alanlar içeride escapeHtml */}
                         </div>
 
                         <div class="interaction-input-group mt-2">
@@ -561,6 +561,8 @@ window.todoModule = {
         const priority = document.getElementById('todoTaskPriority').value;
         const date = document.getElementById('todoTaskDate').value;
         const assignee = document.getElementById('todoTaskAssignee').value;
+        // Faz 4 · J1 (M3): Rules v2 etiket reddiyle aynı kontrol, kayıttan önce.
+        if (window.guardTagLike && window.guardTagLike({ 'Başlık': title, 'Açıklama': desc })) return;
 
         const allTasks = Array.isArray(window.data.tasks) ? window.data.tasks : Object.values(window.data.tasks || {});
         const task = allTasks.find(t => String(t.id) === String(taskId));
@@ -613,7 +615,7 @@ window.todoModule = {
         modal.innerHTML = `
             <div class="modal-content" style="max-width: 500px; margin: 5% auto; padding: 30px; border-radius: 15px;">
                 <h3 class="fw-bold mb-4">${modalTitle}</h3>
-                <input type="hidden" id="todoTaskMode" value="${mode}">
+                <input type="hidden" id="todoTaskMode" value="${escapeHtml(mode)}">
                 <div class="form-group mb-3">
                     <label>Başlık</label>
                     <input type="text" id="todoTaskTitle" class="form-control" placeholder="Örn: Raporu hazırla">
@@ -656,19 +658,27 @@ window.todoModule = {
     openAssignModal: function (taskId) {
         const personnelList = Array.isArray(window.data.personel) ? window.data.personel : Object.values(window.data.personel || {});
 
-        showCustomConfirm(
-            "👤 Görevi Ata",
-            `<div style="min-width: 250px;">
-                <p>Bu görevi kime atamak istersiniz?</p>
-                <select id="quickAssignSelect" class="form-select">
-                    ${personnelList.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
-                </select>
-            </div>`,
-            async () => {
-                const assignee = document.getElementById('quickAssignSelect').value;
-                await this.assignTask(taskId, assignee);
-            }
-        );
+        // [WHY]: Faz 4 · J2 (M6) — HTML metniyle çağrılıyordu; textContent'li onay kutusu seçim kutusunu metin olarak gösteriyor,
+        //        onayda #quickAssignSelect bulunamayıp çöküyordu (özellik bozuktu). [HOW]: Güvenle kurulmuş DOM düğümü verilir.
+        const box = document.createElement('div');
+        box.style.minWidth = '250px';
+        const question = document.createElement('p');
+        question.textContent = 'Bu görevi kime atamak istersiniz?';
+        const select = document.createElement('select');
+        select.id = 'quickAssignSelect';
+        select.className = 'form-select';
+        personnelList.forEach(p => {
+            if (!p || !p.name) return;
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name;
+            select.appendChild(opt);
+        });
+        box.append(question, select);
+
+        showCustomConfirm("👤 Görevi Ata", box, async () => {
+            if (select.value) await this.assignTask(taskId, select.value);
+        }, { confirmText: 'Ata' });
     },
 
     assignTask: async function (taskId, assignee) {
@@ -699,6 +709,7 @@ window.todoModule = {
             showAppAlert("Lütfen bir başlık girin!", "warning");
             return;
         }
+        if (window.guardTagLike && window.guardTagLike({ 'Başlık': title, 'Açıklama': desc })) return;   // Faz 4 · J1 (M3)
 
         const newTask = {
             id: Date.now(),

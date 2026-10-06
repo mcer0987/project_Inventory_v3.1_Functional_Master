@@ -17,7 +17,8 @@ window.renderPersonelTable = function () {
 };
 
 window.deletePersonel = async function (id) {
-    const person = (window.data.personel || []).find(p => String(p.id) === String(id));
+    if (!window.requireDbAdmin('Personel silme')) return;   // Faz 4 · J1: personel yalnız admin
+    const person =(window.data.personel || []).find(p => String(p.id) === String(id));
     if (!person) { showAppAlert('Personel bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     const ok = await showCustomConfirm('Personeli Sil', `"${person.name || '-'}" silinecek; bu kişi artık oturum kodu ile giriş yapamaz. Onaylıyor musunuz?`);
     if (ok !== true) return;

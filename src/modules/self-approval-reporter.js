@@ -1,64 +1,35 @@
 /**
  * self-approval-reporter.js — Medipol Envanter Takip Sistemi
  * ==========================================================
- * v3.1 ESM Modüler Mimari — Kendi Kendini Onaylama Yönetimi (Self-Approval)
+ * Kendi Kendini Onaylama (Self-Approval) — denetim raporu arayüzü
  *
- * [WHY]: Manifestoya göre, Gemini (Sub-Agent: Interaction & Security) rolü kapsamında
- *        kullanıcıların kendi taleplerini onaylamasını (Self-Approval) denetleyen,
- *        biyometrik doğrulamaları zorunlu kılan ve tamamlanan işlemleri
- *        kullanıcıya gösteren güvenli bir denetim/raporlama (View Layer) katmanı gerekir.
- * [HOW]: Proxy/Wrapper deseni kullanılarak window.confirmRequest ve window.approveStep
- *        metotları sarmalanır. Kendi kendine onaylama tespit edildiğinde:
- *        1) Admin olmayanlar için işlem bloke edilir.
- *        2) Adminler için biyometrik doğrulama tetiklenir (destekleniyorsa).
- *        3) İşlemler denetim günlüğüne (audit log) kaydedilir ve glassmorphic
- *           bir raporlama ekranıyla dinamik olarak raporlanır.
- *
- * // [STATUS]: SelfApproval Namespace'i window.AppModules.SelfApproval'a bağlandı. Legacy köprüleri (bridge) kuruldu.
+ * [WHY]: Faz 4 · J4 (EBYS-04, EBYS-05, M12) — bu modül window.confirmRequest / window.approveStep'i sarmalıyordu (monkey-patch):
+ *        kontrol yalnız index'te ve yalnız çağrı window üzerinden gelirse çalışıyordu, admin.html'de hiç yoktu; günlük
+ *        sessionStorage'daydı (sekme kapanınca kayboluyordu); admin onayı "biyometrik imza" diye 5 karakterlik prompt'a düşüyordu.
+ * [HOW]: Kural artık iş mantığında: confirmRequest (script.js) ve approveStep (edm-workflow.js) SecurityConfig.guardSelfApproval
+ *        çağırır; politika Schema.isSelfApproval, günlük firebase-handler appendAuditLog (${ROOT}/auditLogs, yalnız ekleme).
+ *        Bu modül yalnız RAPOR arayüzüdür: günlüğü açılışta tek seferlik okur (fetchAuditLogs, son 200) ve gösterir.
+ *        Buton iki sayfada da yalnız Firebase admin oturumunda: index navbar'ı (onNavbarRendered) ve admin.html üst çubuğu.
  */
 
-// AppModules Namespace'ini al/başlat
 window.AppModules = window.AppModules || {};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Audit Logger (Denetim Günlüğü Yönetimi)
-// ─────────────────────────────────────────────────────────────────────────────
-const SelfApprovalLogger = {
-    // [WHY]: Raporların sayfa yenilense de kaybolmaması için sessionStorage kullanıyoruz.
-    // [HOW]: JSON formatında okuyup yazarak denetim geçmişini koruyoruz.
-    getLogs() {
-        try {
-            const stored = sessionStorage.getItem('self_approval_audit_logs');
-            return stored ? JSON.parse(stored) : [];
-        } catch (e) {
-            console.error('Denetim günlüğü okunamadı:', e);
-            return [];
-        }
-    },
+const RESULT_BADGE = {
+    blocked:   ['sar-badge-blocked', 'Engellendi'],
+    approved:  ['sar-badge-verified', 'Onaylandı (parola doğrulandı)'],
+    cancelled: ['sar-badge-cancelled', 'Vazgeçildi / onay verilmedi'],
+};
+const AUTH_LABEL = { admin: 'yönetici', anonymous: 'personel', password: 'parola' };
 
-    logEvent(event) {
-        const logs = this.getLogs();
-        logs.unshift({
-            id: Date.now(),
-            ...event
-        });
-        try {
-            sessionStorage.setItem('self_approval_audit_logs', JSON.stringify(logs));
-        } catch (e) {
-            console.error('Denetim günlüğü yazılamadı:', e);
-        }
-    }
+const _fmtTs = ts => {
+    try {
+        const d = ts && typeof ts.toDate === 'function' ? ts.toDate() : (ts ? new Date(ts) : null);
+        return d && !isNaN(d) ? d.toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' }) : '-';
+    } catch (e) { return '-'; }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UI/View Layer: Raporlama Ekranı (DOM Manipülasyonu)
-// ─────────────────────────────────────────────────────────────────────────────
-const showReportModal = function () {
-    let modal = document.getElementById('self-approval-report-modal');
-    if (modal) modal.remove();
-
-    // 1. CSS STİL TANIMLAMALARI (Self-contained Glassmorphic Tasarım)
-    // [WHY]: style.css'e dokunmadan envanter sisteminin genel temasıyla uyumlu premium stil sağlar.
+function _injectStyle() {
+    if (document.getElementById('self-approval-style')) return;
     const styleEl = document.createElement('style');
     styleEl.id = 'self-approval-style';
     styleEl.textContent = `
@@ -181,6 +152,11 @@ const showReportModal = function () {
             color: #f87171;
             border: 1px solid rgba(239, 68, 68, 0.2);
         }
+        .sar-badge-cancelled {
+            background: rgba(148, 163, 184, 0.15);
+            color: #cbd5e1;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
         .sar-empty {
             text-align: center;
             padding: 40px 20px;
@@ -217,82 +193,85 @@ const showReportModal = function () {
         }
     `;
     document.head.appendChild(styleEl);
+}
 
-    // 2. DOM YAPISINI İNŞA ET
-    modal = document.createElement('div');
-    modal.id = 'self-approval-report-modal';
-    modal.className = 'sar-backdrop';
+function _rowsHtml(logs) {
+    return logs.map(log => {
+        const [badgeClass, label] = RESULT_BADGE[log.result] || ['sar-badge-cancelled', String(log.result || '-')];
+        return `
+            <tr>
+                <td style="font-size: 0.8rem; color: #94a3b8; white-space: nowrap;">${escapeHtml(_fmtTs(log.ts))}</td>
+                <td style="font-weight: 500;">${escapeHtml(log.type || '-')}</td>
+                <td>${escapeHtml(log.item || '-')} <strong>(${escapeHtml(log.qty ?? 1)} Adet)</strong></td>
+                <td style="color: #94a3b8;">${escapeHtml(log.actorName || '-')}<br><small>${escapeHtml(AUTH_LABEL[log.authKind] || log.authKind || '')} · ${escapeHtml(log.page || '')}</small></td>
+                <td><span class="sar-badge ${escapeHtml(badgeClass)}">${escapeHtml(label)}</span><br><small style="color:#94a3b8;">${escapeHtml(log.reason || '')}</small></td>
+            </tr>`;
+    }).join('');
+}
 
-    const logs = SelfApprovalLogger.getLogs();
-    let tableContentHtml = '';
-
-    if (logs.length === 0) {
-        tableContentHtml = `
+function _bodyHtml(logs) {
+    if (!logs.length) {
+        return `
             <div class="sar-empty">
                 <i class="fas fa-shield-alt"></i>
-                <p>Denetim günlüğü temiz. Henüz kendi kendine onaylama girişimi algılanmadı.</p>
-            </div>
-        `;
-    } else {
-        const rowsHtml = logs.map(log => {
-            const badgeClass = log.securityLevel.includes('Bloke') ? 'sar-badge-blocked' : 'sar-badge-verified';
-            return `
-                <tr>
-                    <td style="font-weight: 500;">${escapeHtml(log.type)}</td>
-                    <td>${escapeHtml(log.item)} <strong>(${escapeHtml(log.qty)} Adet)</strong></td>
-                    <td style="color: #94a3b8;">${escapeHtml(log.user)}</td>
-                    <td style="font-size: 0.8rem; color: #64748b;">${escapeHtml(log.timestamp)}</td>
-                    <td><span class="sar-badge ${badgeClass}">${escapeHtml(log.securityLevel)}</span></td>
-                </tr>
-            `;
-        }).join('');
-
-        tableContentHtml = `
-            <div class="sar-table-wrapper">
-                <table class="sar-table">
-                    <thead>
-                        <tr>
-                            <th>İşlem Türü</th>
-                            <th>Ürün / Talep</th>
-                            <th>Kullanıcı</th>
-                            <th>Tarih</th>
-                            <th>Güvenlik Durumu</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rowsHtml}
-                    </tbody>
-                </table>
-            </div>
-        `;
+                <p>Denetim günlüğü temiz. Henüz kendi kendine onaylama girişimi kaydedilmedi.</p>
+            </div>`;
     }
+    const rowsHtml = _rowsHtml(logs);
+    return `
+        <div class="sar-table-wrapper">
+            <table class="sar-table">
+                <thead>
+                    <tr><th>Tarih</th><th>İşlem Türü</th><th>Ürün / Talep</th><th>Kullanıcı</th><th>Sonuç</th></tr>
+                </thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+        </div>`;
+}
 
+const showReportModal = async function () {
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+        if (typeof window.showAppAlert === 'function') window.showAppAlert('🔒 Güvenlik raporu yönetici oturumu gerektirir.', 'error');
+        return;
+    }
+    document.getElementById('self-approval-report-modal')?.remove();
+    _injectStyle();
+
+    const modal = document.createElement('div');
+    modal.id = 'self-approval-report-modal';
+    modal.className = 'sar-backdrop';
     modal.innerHTML = `
         <div class="sar-modal">
             <div class="sar-header">
                 <h3><i class="fas fa-shield-alt"></i> Kendi Kendini Onaylama Denetim Paneli</h3>
-                <button class="sar-close-btn" onclick="window.AppModules.SelfApproval.closeReportModal()">&times;</button>
+                <button class="sar-close-btn" data-action="close">&times;</button>
             </div>
             <div class="sar-body">
                 <p style="margin-top: 0; margin-bottom: 20px; font-size: 0.9rem; color: #94a3b8;">
-                    Bu panel, yöneticilerin veya personellerin kendi açtıkları talepleri onaylama (Self-Approval) girişimlerini
-                    denetlemek için tasarlanmıştır. Güvenlik politikaları gereği, admin dışındakilerin kendi taleplerini onaylaması
-                    bloke edilir. Adminlerin onayları ise biyometrik donanımlarla (Windows Hello / TouchID / FaceID) imzalanır.
+                    Kendi açtığı talebi veya satın alma adımını onaylama girişimleri. Personelin girişimi engellenir; yöneticinin
+                    kendi kaydını onaylaması parolanın yeniden doğrulanmasını gerektirir. Kayıtlar veritabanında tutulur ve
+                    değiştirilemez / silinemez (son 200 kayıt).
                 </p>
-                ${tableContentHtml}
+                <div id="sarContent" class="sar-empty"><p>Denetim günlüğü yükleniyor…</p></div>
             </div>
             <div class="sar-footer">
-                <button class="sar-btn-close" onclick="window.AppModules.SelfApproval.closeReportModal()">Kapat</button>
+                <button class="sar-btn-close" data-action="close">Kapat</button>
             </div>
-        </div>
-    `;
-
+        </div>`;
+    window.bindActions(modal, { close: () => closeReportModal() });
     document.body.appendChild(modal);
+    setTimeout(() => modal.classList.add('active'), 10);
 
-    // Animasyon başlat
-    setTimeout(() => {
-        modal.classList.add('active');
-    }, 10);
+    const content = modal.querySelector('#sarContent');
+    try {
+        const logs = await window.fetchAuditLogs(200);
+        content.className = '';
+        content.innerHTML = _bodyHtml(logs);
+        content.dataset.count = String(logs.length);
+    } catch (e) {
+        console.error('[self-approval-reporter] Denetim günlüğü okunamadı:', e);
+        content.textContent = `Denetim günlüğü okunamadı: ${e.code || e.message}`;
+    }
 };
 
 const closeReportModal = function () {
@@ -308,218 +287,31 @@ const closeReportModal = function () {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Security Wrappers (Proxy Pattern)
+// Navbar düğmesi (index) — admin.html'de düğme üst çubukta sabittir
 // ─────────────────────────────────────────────────────────────────────────────
-
-// [WHY]: confirmRequest işlevini sarmalayarak self-approval girişimlerini yakalamak.
-// [HOW]: window.confirmRequest çağrıldığında, istek sahibiyle aktif kullanıcı eşleşirse
-//        yetki sınırlar kontrol edilir, gerekirse bloke edilir veya biyometrik istenir.
-const initializeSecurityProxies = function () {
-    const originalConfirmRequest = window.confirmRequest;
-    if (originalConfirmRequest && !originalConfirmRequest._isSecured) {
-        // Talep artık id ile hedefleniyor (ITSM-05); sarmalayıcı aynı referansla arar.
-        const securedConfirm = async function (requestId) {
-            const request = (window.data?.requests || []).find(r => String(r.id) === String(requestId));
-            if (!request) return originalConfirmRequest(requestId);
-
-            const currentUser = window.currentUser?.name;
-            const requestor = request.personel;
-
-            // Kendi kendine onaylama tespiti (case-insensitive & trim)
-            if (currentUser && requestor && currentUser.trim().toLowerCase() === requestor.trim().toLowerCase()) {
-                console.warn(`🛡️ [Self-Approval Guard] Kendi kendine onaylama tespit edildi: ${currentUser}`);
-
-                const isAdmin = typeof window.checkIsAdmin === 'function' && window.checkIsAdmin();
-                if (!isAdmin) {
-                    if (typeof window.showAppAlert === 'function') {
-                        window.showAppAlert("🛡️ GÜVENLİK ENGELİ: Kendi taleplerinizi onaylayamazsınız!", "error");
-                    } else {
-                        alert("🛡️ GÜVENLİK ENGELİ: Kendi taleplerinizi onaylayamazsınız!");
-                    }
-
-                    // Bloke edilen işlemi logla
-                    SelfApprovalLogger.logEvent({
-                        type: 'Zimmet/Talep Onayı',
-                        item: request.ürün || 'Bilinmeyen Ürün',
-                        qty: request.adet || 1,
-                        user: currentUser,
-                        timestamp: new Date().toLocaleString('tr-TR'),
-                        securityLevel: 'Bloke Edildi (Yetkisiz Personel)'
-                    });
-                    return;
-                }
-
-                // Admin onaylıyor ise biyometrik doğrulama zorunlu kılınır
-                if (window.isBiometricAvailable && await window.isBiometricAvailable()) {
-                    if (typeof window.showAppAlert === 'function') {
-                        window.showAppAlert("🔑 Güvenlik doğrulaması: Kendi onayınız için biyometrik imza gereklidir.", "info");
-                    }
-                    const verified = await window.verifyBiometrics({ reason: 'Self-approval authorization' });
-                    if (!verified) {
-                        if (typeof window.showAppAlert === 'function') {
-                            window.showAppAlert("❌ Biyometrik doğrulama reddedildi veya zaman aşımına uğradı.", "error");
-                        }
-                        return;
-                    }
-                }
-
-                // Başarılı admin bypass loglaması
-                SelfApprovalLogger.logEvent({
-                    type: 'Zimmet/Talep Onayı',
-                    item: request.ürün || 'Bilinmeyen Ürün',
-                    qty: request.adet || 1,
-                    user: currentUser,
-                    timestamp: new Date().toLocaleString('tr-TR'),
-                    securityLevel: 'Onaylandı (Admin Biyometrik İmza)'
-                });
-            }
-
-            return originalConfirmRequest(requestId);
-        };
-        securedConfirm._isSecured = true;
-        window.confirmRequest = securedConfirm;
-        if (window.AppModules.Inventory) {
-            window.AppModules.Inventory.confirmRequest = securedConfirm;
-        }
-    }
-
-    // [WHY]: approveStep (Workflow satın alma adımı) sarmalanması.
-    const originalApproveStep = window.approveStep;
-    if (originalApproveStep && !originalApproveStep._isSecured) {
-        const securedApproveStep = async function (id) {
-            const item = window.data?.purchaseOrders?.find(x => String(x.id) === String(id));
-            if (!item || !item.workflow) return originalApproveStep(id);
-
-            const creator = item.createdBy || item.createdByCode;
-            const currentUser = window.currentUser?.name;
-            let currentCode = null;
-            const activeUserObj = window.getActiveUser();
-            if (activeUserObj) currentCode = activeUserObj.code;
-
-            const isSelfApproval = (creator && (String(creator) === String(currentCode) || String(creator).toLowerCase() === String(currentUser).toLowerCase()));
-
-            if (isSelfApproval) {
-                console.warn(`🛡️ [Self-Approval Guard] Satın alma adımında kendi kendine onaylama tespit edildi: ${currentUser}`);
-
-                const isAdmin = typeof window.checkIsAdmin === 'function' && window.checkIsAdmin();
-                if (!isAdmin) {
-                    if (typeof window.showAppAlert === 'function') {
-                        window.showAppAlert("🛡️ GÜVENLİK ENGELİ: Kendi satın alma taleplerinizi onaylayamazsınız!", "error");
-                    } else {
-                        alert("🛡️ GÜVENLİK ENGELİ: Kendi satın alma taleplerinizi onaylayamazsınız!");
-                    }
-
-                    SelfApprovalLogger.logEvent({
-                        type: 'Satın Alma Onayı',
-                        item: item.ürünAdi || item.title || item.evrakNo || 'Satın Alma #' + id,
-                        qty: item.miktar || 1,
-                        user: currentUser,
-                        timestamp: new Date().toLocaleString('tr-TR'),
-                        securityLevel: 'Bloke Edildi (Yetkisiz Personel)'
-                    });
-                    return;
-                }
-
-                if (window.isBiometricAvailable && await window.isBiometricAvailable()) {
-                    if (typeof window.showAppAlert === 'function') {
-                        window.showAppAlert("🔑 Güvenlik doğrulaması: Kendi onayınız için biyometrik imza gereklidir.", "info");
-                    }
-                    const verified = await window.verifyBiometrics({ reason: 'Self-approval authorization' });
-                    if (!verified) {
-                        if (typeof window.showAppAlert === 'function') {
-                            window.showAppAlert("❌ Biyometrik doğrulama reddedildi veya zaman aşımına uğradı.", "error");
-                        }
-                        return;
-                    }
-                }
-
-                SelfApprovalLogger.logEvent({
-                    type: 'Satın Alma Onayı',
-                    item: item.ürünAdi || item.title || item.evrakNo || 'Satın Alma #' + id,
-                    qty: item.miktar || 1,
-                    user: currentUser,
-                    timestamp: new Date().toLocaleString('tr-TR'),
-                    securityLevel: 'Onaylandı (Admin Biyometrik İmza)'
-                });
-            }
-
-            return originalApproveStep(id);
-        };
-        securedApproveStep._isSecured = true;
-        window.approveStep = securedApproveStep;
-    }
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Dynamic Button Injection (Navbar Entegrasyonu)
-// ─────────────────────────────────────────────────────────────────────────────
-// [WHY]: window.updateNavbarUI sarmalayıcısı, auth-engine içeriden çağırdığı için hiç tetiklenmiyordu (EBYS-05).
-// [HOW]: auth-engine her navbar çiziminden sonra 'onNavbarRendered' yayınlar; buton bu olayda eklenir.
-window.addEventListener('onNavbarRendered', (e) => {
-        const user = (e && e.detail && e.detail.user) || {};
-        const isAdmin = (user.name === 'Muhammed Cer' || user.name === 'Admin');
-        if (isAdmin) {
-            const userDisplay = document.getElementById('userDisplay');
-            if (userDisplay) {
-                if (!document.getElementById('btn-security-report')) {
-                    const reportBtn = document.createElement('button');
-                    reportBtn.id = 'btn-security-report';
-                    reportBtn.type = 'button';
-                    reportBtn.className = 'btn-admin-panel';
-                    reportBtn.innerHTML = '<i class="fas fa-shield-alt"></i> Güvenlik Raporu';
-                    reportBtn.style.cssText = `
-                        padding: 6px 12px; 
-                        width: auto; 
-                        margin-top: 0; 
-                        font-size: 12px; 
-                        background: #e67e22; 
-                        border: none; 
-                        border-radius: 4px; 
-                        color: white; 
-                        cursor: pointer; 
-                        transition: transform 0.1s, background-color 0.2s;
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 5px;
-                    `;
-
-                    reportBtn.onmouseover = () => reportBtn.style.backgroundColor = '#d35400';
-                    reportBtn.onmouseout = () => reportBtn.style.backgroundColor = '#e67e22';
-
-                    // Active state scale (Native feel)
-                    reportBtn.addEventListener('mousedown', () => reportBtn.style.transform = 'scale(0.95)');
-                    reportBtn.addEventListener('mouseup', () => reportBtn.style.transform = 'scale(1)');
-                    reportBtn.addEventListener('mouseleave', () => reportBtn.style.transform = 'scale(1)');
-
-                    reportBtn.onclick = () => showReportModal();
-
-                    const logoutBtn = userDisplay.querySelector('button[onclick="handleLogout()"]');
-                    if (logoutBtn) {
-                        userDisplay.insertBefore(reportBtn, logoutBtn);
-                    } else {
-                        userDisplay.appendChild(reportBtn);
-                    }
-                }
-            }
-        }
-        
-        // Proxy'leri her oturum açıldığında/yenilendiğinde bağla
-        initializeSecurityProxies();
+// [WHY]: Düğme ada göre ('Muhammed Cer' / 'Admin') çıkıyordu: "Yönetici" kimlikli admin göremiyor, o adla giren personel görüyordu.
+// [HOW]: auth-engine her navbar çiziminden sonra 'onNavbarRendered' yayınlar; düğme yalnız Firebase admin oturumunda eklenir.
+window.addEventListener('onNavbarRendered', () => {
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) return;
+    const userDisplay = document.getElementById('userDisplay');
+    if (!userDisplay || document.getElementById('btn-security-report')) return;
+    const reportBtn = document.createElement('button');
+    reportBtn.id = 'btn-security-report';
+    reportBtn.type = 'button';
+    reportBtn.className = 'btn-admin-panel';
+    reportBtn.innerHTML = '<i class="fas fa-shield-alt"></i> Güvenlik Raporu';
+    reportBtn.style.cssText = 'padding: 6px 12px; width: auto; margin-top: 0; font-size: 12px; background: #e67e22; border: none; border-radius: 4px; color: white; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;';
+    reportBtn.onclick = () => showReportModal();
+    const logoutBtn = userDisplay.querySelector('button[onclick="handleLogout()"]');
+    if (logoutBtn) userDisplay.insertBefore(reportBtn, logoutBtn);
+    else userDisplay.appendChild(reportBtn);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Namespace Export
 // ─────────────────────────────────────────────────────────────────────────────
-export const SelfApproval = {
-    showReportModal,
-    closeReportModal,
-    getLogs: () => SelfApprovalLogger.getLogs(),
-    initializeSecurityProxies
-};
+export const SelfApproval = { showReportModal, closeReportModal };
 
 window.AppModules.SelfApproval = SelfApproval;
 
-// Otomatik başlatma (sayfa yüklendiğinde proxy'leri bağla)
-initializeSecurityProxies();
-
-console.log('✅ [self-approval-reporter.js] Kendi kendini onaylama denetim ve raporlama modülü yüklendi.');
+console.log('✅ [self-approval-reporter.js] Self-approval denetim raporu modülü yüklendi.');

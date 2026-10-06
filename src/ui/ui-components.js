@@ -166,20 +166,21 @@ export const UIComponents = {
 
         if (colSelect && locConfig) {
             colSelect.innerHTML = locConfig.columns
-                .map(c => `<option value="${c}">${c}</option>`).join('');
+                .map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
         }
         if (shelfSelect && locConfig) {
             shelfSelect.innerHTML = locConfig.shelves
-                .map(s => `<option value="${s}">${s}</option>`).join('');
+                .map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
         }
         if (typeSelect) {
+            // Faz 4 · J2: ürün türü adı kayıt verisi (productTypes) — option değerinde ve metninde kaçırılır.
             typeSelect.innerHTML = '<option value="">Tür Seçiniz...</option>';
             allTypes.forEach(t => {
                 const isDemirbas = t.isDemirbas === true || t.isDemirbas === 'true';
                 const label      = isDemirbas ? 'Demirbaş' : 'Sarf';
                 typeSelect.innerHTML += `
-                    <option value="${t.name}" data-is-demirbas="${isDemirbas}">
-                        ${t.name} (${label})
+                    <option value="${escapeHtml(t.name)}" data-is-demirbas="${isDemirbas}">
+                        ${escapeHtml(t.name)} (${label})
                     </option>`;
             });
         }
@@ -330,8 +331,8 @@ export const UIComponents = {
             const locs     = (typeof INV_CONFIG !== 'undefined') ? INV_CONFIG.locations[targetData.key] : null;
             const colSel   = document.getElementById('transNewCol');
             const shelfSel = document.getElementById('transNewShelf');
-            if (locs && colSel)   colSel.innerHTML   = locs.columns.map(c => `<option>${c}</option>`).join('');
-            if (locs && shelfSel) shelfSel.innerHTML = locs.shelves.map(s => `<option>${s}</option>`).join('');
+            if (locs && colSel)   colSel.innerHTML   = locs.columns.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+            if (locs && shelfSel) shelfSel.innerHTML = locs.shelves.map(s => `<option>${escapeHtml(s)}</option>`).join('');
         } else {
             internalDiv.style.display = 'none';
         }
@@ -509,8 +510,8 @@ export const UIComponents = {
             const item = findRow();
 
             if (item && (item.isDemirbas === true || item.isDemirbas === 'true')) {
-                const isAdmin = (typeof window.checkIsAdmin === 'function' && window.checkIsAdmin()) ||
-                    sessionStorage.getItem('adminVizesi') === 'true';
+                // J3: yetki Firebase admin oturumundan; adminVizesi (sessionStorage) elle yazılarak muhafız atlanabiliyordu.
+                const isAdmin = window.isDbAdmin();
 
                 if (!isAdmin) {
                     if (typeof showAppAlert === 'function') {

@@ -9,9 +9,13 @@
 
 // 1. MODÜLER FIREBASE IMPORTLARI (Versiyon 10+)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import {
+    initializeAuth, onAuthStateChanged, signInAnonymously, connectAuthEmulator, setPersistence,
+    browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
     initializeFirestore,
+    connectFirestoreEmulator,
     collection,
     onSnapshot,
     doc,
@@ -19,7 +23,12 @@ import {
     setDoc,
     writeBatch,
     runTransaction,
-    deleteField
+    deleteField,
+    getDocs,
+    query,
+    orderBy,
+    limit,
+    serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ============================================================
@@ -45,14 +54,31 @@ export const COLLECTION_ROOT = (
     window.location.hostname.includes('demo')
 ) ? "inventory_demo" : LIVE_COLLECTION_ROOT;
 
+// [WHY]: Faz 4 · J0 (KJ-1) — Firestore kuralları proje genelinde; Rules v2'yi ve admin oturumu isteyen akışları canlıya
+//        yayınlamadan uçtan uca denemek için uygulama yerel Firebase Emulator'e bağlanabilmeli.
+// [HOW]: Yalnız localhost/127.0.0.1'de ve açıkça ?emu=1 ile açılır; sekme boyunca sessionStorage'da kalır (index → admin
+//        geçişinde kaybolmasın), ?emu=0 kapatır. Canlı ve demo alan adlarında hiçbir koşulda devreye girmez.
+const EMULATOR_HOST = '127.0.0.1';
+export const EMULATOR_MODE = (() => {
+    if (!['localhost', '127.0.0.1'].includes(window.location.hostname)) return false;
+    const q = new URLSearchParams(window.location.search).get('emu');
+    try {
+        if (q === '1') sessionStorage.setItem('emu', '1');
+        if (q === '0') sessionStorage.removeItem('emu');
+        return sessionStorage.getItem('emu') === '1';
+    } catch (e) {
+        return q === '1';
+    }
+})();
+
 // [ENV_GUARD] Aktif ortamı geliştirici konsoluna bildiren zorunlu init logu.
 // Bu satırı hiçbir zaman kaldırma; üretimde yanlış kök aktifse anında fark edilir.
-console.log(`🚀 ACTIVE DATABASE ROOT: ${COLLECTION_ROOT}`);
+console.log(`🚀 ACTIVE DATABASE ROOT: ${COLLECTION_ROOT}${EMULATOR_MODE ? ' @ EMULATOR (' + EMULATOR_HOST + ')' : ''}`);
 
 // [BUGFIX] Zero-Trust COLLECTION_ROOT freeze in window.AppEnv
 // [WHY]: Zero-Trust rule requires that COLLECTION_ROOT must not be a bare global string to prevent console bypass.
 // [HOW]: Store it in a frozen EnvConfig object exposed via window.AppEnv.
-const EnvConfig = { COLLECTION_ROOT: COLLECTION_ROOT };
+const EnvConfig = { COLLECTION_ROOT: COLLECTION_ROOT, EMULATOR: EMULATOR_MODE };
 Object.freeze(EnvConfig);
 window.AppEnv = EnvConfig;
 
@@ -77,38 +103,36 @@ const firebaseConfig = {
  * 'SecurityConfig.getAdminHash()' üzerinden dinamik (bulut tabanlı) şifre kontrolü sağlar.
  */
 
-// [WHY]: Legacy loginAsAdmin function was referencing undefined hashing helpers in security.js.
-// [HOW]: Refactored to use the modern SecurityConfig.authenticate (Invisible Email Illusion) for security compliance.
-window.loginAsAdmin = async function (enteredCode) {
-    if (typeof SecurityConfig !== 'undefined' && SecurityConfig.authenticate) {
-        const success = await SecurityConfig.authenticate(enteredCode);
-        if (success) {
-            const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
-            localStorage.setItem('admin_auth', JSON.stringify({ expiry: expiry }));
-            window.location.href = 'admin.html';
-        } else {
-            alert("Hatalı kod!");
-        }
-    } else {
-        alert("Güvenlik yapılandırması yüklenemedi!");
-    }
-};
-
+// [WHY]: Faz 4 · J3 (M8, T3) — kapı yalnız localStorage.admin_auth süresine bakıyordu: vize başka sekmeden kalmışsa (ya da
+//        elle yazılmışsa) panel, Firebase admin oturumu olmadan açılıyordu; süresi dolan vize ise signOut etmeden index'e
+//        yönlendiriyordu (admin token'ı kalıcı oturumda yaşamaya devam ediyordu). Ölü loginAsAdmin (vizeyi ayrıca yazan
+//        dördüncü yol) kaldırıldı.
+// [HOW]: Vize hiç yok → index.html. Vize dolmuş → endAdminSession('expired') (kilit kartı). Geçerli vize → oturum hazır
+//        olunca: Firebase admin değil (yeni sekme, sekmeye bağlı oturum yok) → kilit kartı / parola; admin ama kimlik yok →
+//        bayat → endAdminSession('stale').
 export const checkAdminAuth = function () {
-    const authData = localStorage.getItem('admin_auth');
-    const now = new Date().getTime();
+    const Session = window.AppModules.Session;
+    const left = Session.getAdminVisaRemaining();
 
-    if (!authData) {
+    if (left === null) {
         window.location.replace('index.html');
         return;
     }
-
-    const auth = JSON.parse(authData);
-    if (now > auth.expiry) {
-        localStorage.removeItem('admin_auth');
-        window.location.replace('index.html');
+    if (left <= 0) {
+        window.SecurityConfig.endAdminSession('expired');
         return;
     }
+
+    whenAuthReady().then(() => {
+        const S = window.SecurityConfig;
+        if (S.isSignInPending()) return;
+        if (!window.isDbAdmin()) {
+            console.warn('🔒 [checkAdminAuth] Bu sekmede yönetici oturumu yok — parola istenecek.');
+            if (typeof window.showAdminLock === 'function') window.showAdminLock('not-admin');
+            return;
+        }
+        if (!Session.hasValidAdminVisa() || !window.getActiveUser()) S.endAdminSession('stale');
+    });
 };
 
 // 3. FIREBASE VE VERİTABANI BAŞLATMA
@@ -126,6 +150,8 @@ export const fireDb = initializeFirestore(app, {
     experimentalForceLongPolling: true,
     useFetchStreams: false
 });
+// Emülatör bağlantısı ilk Firestore işleminden önce kurulmalı (J0).
+if (EMULATOR_MODE) connectFirestoreEmulator(fireDb, EMULATOR_HOST, 8080);
 
 // PM NOTU: global scriptler için db window'a bağlandı
 window.fireDb = fireDb;
@@ -133,6 +159,52 @@ window.fireDb = fireDb;
 // [WHY]: system_config kökte ortam ayrımsızdı; localhost'tan kill switch / force logout / mesaj testi canlı kullanıcıları etkiliyordu (RULE-04, VIP-05).
 // [HOW]: Tüm sistem ayarları ${COLLECTION_ROOT}/system_config/items/{admin_settings|admin_messages} altında. Kural: oturumlu okur, admin yazar.
 export const systemConfigRef = window.systemConfigRef = (name) => doc(fireDb, COLLECTION_ROOT, 'system_config', 'items', name);
+
+// ─── Denetim günlüğü (Faz 4 · J4 · 4.7, KJ-7, M14) ───────────────────────────────────────────────
+// [WHY]: Self-approval günlüğü sessionStorage'daydı: sekme kapanınca kayboluyor, başka cihazdan görülemiyor, kullanıcı
+//        tarafından silinebiliyordu; admin.html'de hiç yazılmıyordu (EBYS-04/05).
+// [HOW]: ${ROOT}/auditLogs/items — yalnız EKLEME (setDoc ile yeni id; kural update/delete'i admin dahil reddeder).
+//        COLLECTIONS'a bilerek EKLENMEZ: personel okuyamaz (dinleyici izin hatası verirdi), sürekli dinleyici kota yer;
+//        saveData / yedek / geri yükleme yalnız COLLECTIONS'ı yazdığı için günlüğe dokunamaz. Alanlar kuraldaki listeyle
+//        birebir; metinlerde "<" görsel eşdeğeriyle değişir (kural etiketli metni reddeder, kayıt düşmesin).
+const AUDIT_RESULTS = ['blocked', 'approved', 'cancelled'];
+const _auditText = v => (v === undefined || v === null || v === '') ? null : String(v).replace(/</g, '‹').slice(0, 300);
+export const appendAuditLog = window.appendAuditLog = async function (entry = {}) {
+    const u = window.userAuth;
+    if (!u) return { ok: false, code: 'no-auth' };
+    if (!AUDIT_RESULTS.includes(entry.result)) return { ok: false, code: 'invalid-argument' };
+    const id = 'al_' + window.makeId();
+    const qty = Number(entry.qty);
+    const rec = {
+        id,
+        type: _auditText(entry.type),
+        refCol: _auditText(entry.refCol),
+        refId: _auditText(entry.refId),
+        item: _auditText(entry.item),
+        qty: Number.isFinite(qty) ? qty : null,
+        actorName: _auditText(entry.actorName),
+        actorPersonelId: _auditText(entry.actorPersonelId),
+        uid: u.uid,
+        authKind: u.isAnonymous ? 'anonymous' : (window.isDbAdmin() ? 'admin' : 'password'),
+        result: entry.result,
+        reason: _auditText(entry.reason),
+        page: window.location.pathname.includes('admin.html') ? 'admin' : 'index',
+        ts: serverTimestamp(),
+    };
+    try {
+        await setDoc(doc(fireDb, COLLECTION_ROOT, 'auditLogs', 'items', id), rec);
+        return { ok: true, id };
+    } catch (e) {
+        console.error('❌ [auditLogs] Denetim kaydı yazılamadı:', e.code || e.message, rec);
+        return { ok: false, code: e.code || 'write-failed' };
+    }
+};
+
+// Rapor ekranı: tek seferlik okuma (sürekli dinleyici yok → kota dostu). Kural: yalnız admin okur.
+export const fetchAuditLogs = window.fetchAuditLogs = async function (max = 200) {
+    const snap = await getDocs(query(collection(fireDb, COLLECTION_ROOT, 'auditLogs', 'items'), orderBy('ts', 'desc'), limit(max)));
+    return snap.docs.map(d => ({ _docId: d.id, ...d.data() }));
+};
 
 // [WHY]: VIP panelinden "Force Logout" (Oturumu Sonlandır) komutu verilen kullanıcının tarayıcısında çıkış yapılması.
 //        Eski alan (force_logout_user_id) hiç temizlenmiyor ve zaman/tekillik kontrolü yoktu: hedef kişi sonraki her
@@ -160,8 +232,10 @@ export const handleForceLogoutCommand = window.handleForceLogoutCommand = functi
         console.warn('🚨 [Force Logout] Bu oturum yönetici tarafından sonlandırıldı. Hedef ID:', targetId);
         if (typeof window.logout === 'function') {
             window.logout('force_logout');
+        } else if (window.SecurityConfig && typeof window.SecurityConfig.endAdminSession === 'function') {
+            // Fallback: logout köprüsü yüklenmemişse aynı tek sonlandırma yolu (J3)
+            window.SecurityConfig.endAdminSession('force_logout');
         } else {
-            // Fallback: logout fonksiyonu henüz yüklenmemişse manuel temizle
             window.clearSession();
             window.location.replace('index.html');
         }
@@ -204,6 +278,7 @@ export const COLLECTIONS = window.COLLECTIONS = Object.freeze([
 const _extraListeners = new Map();   // key -> subscribe():unsubscribe
 let _syncUnsubscribers = [];
 let _syncRunning = false;
+let _syncUid = null;          // senkronun başlatıldığı oturum (J3 · M10)
 let _syncStopping = false;
 const _deniedListeners = new Set();
 
@@ -254,6 +329,19 @@ function _markListenerHealthy(name) {
 
 window.getSyncHealth = () => ({ running: _syncRunning, denied: [..._deniedListeners], extra: [..._extraListeners.keys()] });
 
+// [WHY]: Faz 4 · J3 (M10) — kilit artık signOut ediyor: kilit süresince senkron anonim oturumla yeniden başlar, kilit açılınca
+//        (anonim → admin) Firestore aynı dinleyicileri yeni kimlikle sürdürür. Kilit sırasında bir dinleyici ölmüşse (izin
+//        reddi) ya da senkron hiç başlamamışsa veri akışı kendiliğinden geri gelmezdi.
+// [HOW]: Kilit açılınca çağrılır; yalnız gerekiyorsa (çalışmıyor ya da reddedilmiş dinleyici var) yeniden başlatır —
+//        sağlıklı senkronu baştan okumak her kilit döngüsünde tüm koleksiyonları yeniden okumak demek (Spark kotası).
+export const ensureRealtimeSync = window.ensureRealtimeSync = function () {
+    if (!window.userAuth) return 'no-auth';
+    if (_syncRunning && _deniedListeners.size === 0) return 'healthy';
+    isSyncStarted = true;
+    window.startRealtimeSync();
+    return 'restarted';
+};
+
 let _authReadyResolvers = [];
 export const whenAuthReady = window.whenAuthReady = function () {
     if (window.userAuth) return Promise.resolve(window.userAuth);
@@ -294,6 +382,7 @@ function _markUserInteraction(e) {
 window.startRealtimeSync = function () {
     stopRealtimeSync();
     _syncRunning = true;
+    _syncUid = window.userAuth ? window.userAuth.uid : null;
 
     const statusDiv = document.getElementById('loginStatus');
     // [WHY]: Support 'access-val-node' ID which is used in index.html for security obfuscation.
@@ -405,18 +494,12 @@ window.startRealtimeSync = function () {
             localStorage.removeItem('launchpadDisabledGlobal');
 
             // [WHY]: Kill Switch entegrasyonu. Firestore'daki 'maintenance' bayrağını dinleyerek normal kullanıcıları bakım moduna alırız.
-            // [HOW]: Admin vizesi (admin_auth) yoksa ve maintenance aktifse localStorage'a yazar ve sayfayı yenileriz.
+            // [HOW]: Firebase admin oturumu yoksa ve maintenance aktifse localStorage'a yazar ve sayfayı yenileriz.
             if (data.hasOwnProperty('maintenance')) {
                 const isMaintenance = data.maintenance === true;
 
-                let isAdmin = false;
-                const authData = localStorage.getItem('admin_auth');
-                if (authData) {
-                    try {
-                        const auth = JSON.parse(authData);
-                        isAdmin = new Date().getTime() <= auth.expiry;
-                    } catch(e) {}
-                }
+                // Faz 4 · J3: muafiyet elle yazılabilen admin_auth vizesine değil Firebase admin oturumuna bağlı (kural da öyle).
+                const isAdmin = window.isDbAdmin();
 
                 const prevMaintenance = localStorage.getItem("system_maintenance_mode") === "true";
 
@@ -534,11 +617,32 @@ export const writeOk = window.writeOk = p => Promise.resolve(p).then(r => r !== 
     if (e && e.name === 'SaveDataError') return false;
     throw e;
 });
+// [WHY]: Faz 4 · J1 (M2) — Rules v2 bakım modunda personel yazmasını, her zaman da yetkisiz koleksiyon / etiketli metin
+//        yazmasını reddeder. Ret "Firestore yazması başarısız: Missing or insufficient permissions" olarak görünüyordu;
+//        çağıranların çoğu writeOk ile bunu genel "kaydedilemedi"ye çeviriyor ve gerçek sebep kayboluyordu.
+// [HOW]: permission-denied → bakım açıksa 'maintenance', değilse 'forbidden'; gerçek sebep veri katmanında bir kez gösterilir
+//        (toplu silme kilidindeki gibi). Bakımda personel yazması Firestore'a hiç gönderilmez (kural yayınlanmadan da aynı davranış).
+export const MAINTENANCE_WRITE_MESSAGE = '🛠️ Sistem bakımda: şu an kayıt yapılamıyor. Bakım bitince tekrar deneyin.';
+export const FORBIDDEN_WRITE_MESSAGE = '🔒 Kayıt reddedildi: bu işlem için yetkiniz yok ya da metinde etiket benzeri "<" ifadesi var.';
+const _maintenanceBlocksWrite = () => !!(window.data && window.data.config && window.data.config.maintenance === true)
+    && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin());
+function _deniedFailure(e) {
+    if (!e || e.code !== 'permission-denied') return null;
+    return _maintenanceBlocksWrite()
+        ? { code: 'maintenance', message: MAINTENANCE_WRITE_MESSAGE }
+        : { code: 'forbidden', message: FORBIDDEN_WRITE_MESSAGE };
+}
+const _SHOWN_BY_DATA_LAYER = ['bulk-delete-blocked', 'maintenance', 'forbidden'];
+function _announceDenied(code, message) {
+    if (code !== 'maintenance' && code !== 'forbidden') return;
+    if (typeof window.showAppAlert === 'function') window.showAppAlert(message, 'error');
+}
+
 window.addEventListener('unhandledrejection', ev => {
     const e = ev.reason;
     if (!e || e.name !== 'SaveDataError') return;
     ev.preventDefault();
-    if (e.code === 'bulk-delete-blocked') return; // saveData kendi uyarısını zaten gösterdi
+    if (_SHOWN_BY_DATA_LAYER.includes(e.code)) return; // veri katmanı kendi uyarısını zaten gösterdi
     const text = e.code === 'no-auth' ? 'Oturum yok; kayıt yapılamadı. Sayfayı yenileyip tekrar giriş yapın.'
         : e.code === 'not-found' ? 'Kayıt bulunamadı; başka biri değiştirmiş veya silmiş olabilir.'
         : `Kayıt yapılamadı: ${e.message}`;
@@ -643,6 +747,10 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
         p.deletes.forEach(key => ops.push({ type: 'delete', ref: _docRef(p.colName, key) }));
         p.writes.forEach(w => ops.push({ type: 'set', ref: _docRef(p.colName, w.key), data: w.data }));
     });
+    if (ops.length && _maintenanceBlocksWrite()) {
+        _announceDenied('maintenance', MAINTENANCE_WRITE_MESSAGE);
+        return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
+    }
     try {
         const CHUNK_SIZE = 490;
         for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
@@ -651,6 +759,8 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
             await batch.commit();
         }
     } catch (e) {
+        const denied = _deniedFailure(e);
+        if (denied) { _announceDenied(denied.code, denied.message); return fail(denied.code, denied.message, { code: e.code }); }
         return fail('write-failed', `Firestore yazması başarısız: ${e.message}`, { code: e.code });
     }
 
@@ -774,6 +884,10 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
     if (prepared.length > 490) return fail('invalid-argument', `Tek atomik işlemde en fazla 490 doküman yazılabilir (${prepared.length}).`);
     const guard = _b3GuardError(prepared, opts);   // Faz 3.5: b3 sözleşmesi — ihlalde batch'in hiçbir parçası yazılmaz
     if (guard) return fail(guard.code, guard.message, guard.details);
+    if (_maintenanceBlocksWrite()) {
+        _announceDenied('maintenance', MAINTENANCE_WRITE_MESSAGE);
+        return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
+    }
 
     try {
         const batch = writeBatch(fireDb);
@@ -786,6 +900,8 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
         await batch.commit();
     } catch (e) {
         if (e && e.code === 'not-found') return fail('not-found', 'Kayıt Firestore\'da bulunamadı; başka biri silmiş olabilir.', { code: e.code });
+        const denied = _deniedFailure(e);
+        if (denied) { _announceDenied(denied.code, denied.message); return fail(denied.code, denied.message, { code: e.code }); }
         return fail('write-failed', `Firestore yazması başarısız: ${e.message}`, { code: e && e.code });
     }
 
@@ -812,7 +928,14 @@ export const findItem = window.findItem = (col, id) => (window.data[col] || []).
 
 // [WHY]: Uygulama açılır açılmaz verileri çekmek 'Missing Permissions' hatasına sebep oluyordu.
 // [HOW]: Auth durumunu (onAuthStateChanged) dinleyerek sadece oturum açan kullanıcılara veriyi açıyoruz.
-const auth = getAuth(app);
+// [WHY]: Faz 4 · J3 (AUTH-05) — admin oturumu sekmeye bağlı (sessionStorage). Varsayılan getAuth açılışta önce IndexedDB'ye
+//        bakar: başka bir sekmenin anonim oturumu orada olunca aynı sekmedeki admin oturumu F5'te yok sayılıp siliniyordu.
+// [HOW]: Açılış sırası sekme → yerel → (eski istemcilerin) IndexedDB. Anonim oturum her zaman yerel kalıcılıkta açılır
+//        (aşağıda, signInAnonymously öncesi); J3 öncesi istemcinin IndexedDB'de bıraktığı oturum okunur ve yerele taşınır.
+//        security.js aynı örneği getAuth(app) ile alır.
+const auth = initializeAuth(app, { persistence: [browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence] });
+// Emülatör: aynı Auth örneğini security.js / timer.js / auth-engine de getAuth(app) ile alır; bağlantı ilk işlemden önce.
+if (EMULATOR_MODE) connectAuthEmulator(auth, `http://${EMULATOR_HOST}:9099`, { disableWarnings: true });
 window.userAuth = null;
 let isSyncStarted = false;
 
@@ -821,7 +944,14 @@ let isSyncStarted = false;
 //        Without resetting this flag, onAuthStateChanged won't restart them on re-login.
 // [HOW]: Listen for the 'onAppLogout' custom event (fired by auth-engine.js handleLogout)
 //        and reset isSyncStarted=false so the next successful Firebase auth triggers a fresh startRealtimeSync().
+// J3: çıkış zinciri (SecurityConfig.logout) dinleyicileri signOut'tan ÖNCE zaten kapatır. Yeni anonim oturum bu olaydan önce
+//     gelip senkronu kendi adına başlattıysa durdurulmaz (aksi halde kilit/çıkış süresince dinleyici kalmazdı).
 window.addEventListener('onAppLogout', () => {
+    const u = window.userAuth;
+    if (_syncRunning && u && u.isAnonymous && _syncUid === u.uid) {
+        console.log('🔄 [firebase-handler] onAppLogout: senkron yeni anonim oturumla zaten çalışıyor.');
+        return;
+    }
     console.warn('🔄 [firebase-handler] onAppLogout alındı — dinleyiciler kapatılıyor. Yeniden giriş, listener motoru yeniden başlatacak.');
     stopRealtimeSync();
     isSyncStarted = false;
@@ -841,7 +971,10 @@ onAuthStateChanged(auth, async (user) => {
         // to re-fire startRealtimeSync() after a logout+re-login without a page refresh.
         // Faz 3.8: SecurityConfig.logout dinleyicileri kapatır (_syncRunning=false). Çıkış sonrası anonim oturum
         // 'onAppLogout' olayından önce gelse bile senkron yeniden başlar; aksi halde dinleyiciler ölü kalırdı.
-        if (!isSyncStarted || !_syncRunning) {
+        // J3 (M10): çıkış/kilit sonrası gelen YENİ anonim oturum, başka bir oturum adına açılmış (signOut ile ölmüş) senkronu
+        //     devralmaz — yeniden başlatır. Anonim → admin geçişinde (giriş, kilit açma) Firestore aynı dinleyicileri yeni
+        //     kimlikle sürdürür; orada yeniden okuma yapılmaz (kota), kilit açma ayrıca ensureRealtimeSync çağırır.
+        if (!isSyncStarted || !_syncRunning || (user.isAnonymous && _syncUid !== user.uid)) {
             isSyncStarted = true;
             window.startRealtimeSync();
         }
@@ -857,6 +990,8 @@ onAuthStateChanged(auth, async (user) => {
         // [WHY]: Normal personeller giriş yapmadan personel listesini çekemiyordu. 'Veriler Senkronize Ediliyor' kilidini açmak zorundayız.
         // [HOW]: Kullanıcının aktif bir token'ı yoksa, sadece okuma yetkisine sahip bir Anonim Oturum (Anonymous Auth) başlatıyoruz.
         try {
+            // AUTH-05: personel (anonim) oturumu sekmeye değil tarayıcıya bağlı kalsın — admin çıkışı/kilidi sonrası da.
+            await setPersistence(auth, browserLocalPersistence);
             await signInAnonymously(auth);
             console.log("✅ [Auth] Anonim Oturum (Okuma Yetkili) başarıyla açıldı.");
         } catch (error) {

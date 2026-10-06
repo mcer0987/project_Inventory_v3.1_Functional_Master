@@ -39,26 +39,32 @@ function isAnyModalOpen() {
     return false;
 }
 
+// Admin kilit kartı açık mı (admin.html). Kilitliyken etkinlik vizeyi uzatmaz ve zamanlayıcı kurulmaz.
+function isAdminLocked() {
+    const lock = document.getElementById('adminLockModal');
+    return !!lock && lock.style.display === 'flex';
+}
+
 function startSessionTimer() {
     // 🛡️ [GÜVENLİK] Eğer kullanıcı giriş yapmamışsa timer başlatma!
     if (!localStorage.getItem('activeUser') && !localStorage.getItem('admin_auth')) {
         console.log("🛡️ [TIMER] Oturum yok, başlatılmadı.");
         return;
     }
+    if (isAdminLocked()) return;
 
     const totalTime = getActiveSessionTime();
     const warningTime = totalTime - window.SessionConfig.WARNING_BEFORE;
 
-    // 🔄 [SYNC] localStorage'daki admin_auth süresini de güncelle (Admin paneliyle senkronizasyon için)
-    const authData = localStorage.getItem('admin_auth');
-    if (authData) {
-        try {
-            const auth = JSON.parse(authData);
-            auth.expiry = Date.now() + totalTime;
-            localStorage.setItem('admin_auth', JSON.stringify(auth));
-            // console.log("🔄 [TIMER] localStorage admin_auth süresi güncellendi.");
-        } catch (e) {
-            console.error("❌ [TIMER] localStorage güncellenemedi:", e);
+    // 🔄 [SYNC] Admin vizesi etkinlikle uzar — yalnız süresi DOLMAMIŞSA (Faz 4 · J3, T4 / AUTH-06). Dolmuş vize F5 ya da
+    //    fare hareketiyle canlanmaz; oturum tek yoldan sonlandırılır.
+    const Session = window.AppModules && window.AppModules.Session;
+    if (Session && localStorage.getItem('admin_auth') && !Session.extendAdminVisa(totalTime)) {
+        const pending = window.SecurityConfig && window.SecurityConfig.isSignInPending();
+        if (!pending) {
+            console.warn("🔒 [TIMER] Admin vizesi dolmuş; uzatılmadı.");
+            endSession('expired');
+            return;
         }
     }
 
@@ -97,6 +103,7 @@ function resetSessionTimer(force = false) {
     if (!localStorage.getItem('activeUser') && !localStorage.getItem('admin_auth')) {
         return;
     }
+    if (isAdminLocked()) return;
 
     const now = Date.now();
     if (!force && now - lastResetTime < 2000) return;
@@ -135,7 +142,18 @@ function showNotification(message, type = 'info') {
     }, 4000);
 }
 
-function logout(reason = 'manual') {
+// Yönetici oturumunun TEK sonlandırma yolu (security.js · SecurityConfig.endAdminSession). Güvenlik modülü yüklenmemişse
+// en azından yerel kimlik silinir ve giriş sayfasına dönülür.
+function endSession(reason) {
+    if (window.SecurityConfig && typeof window.SecurityConfig.endAdminSession === 'function') {
+        return window.SecurityConfig.endAdminSession(reason);
+    }
+    window.clearSession();
+    window.location.replace('index.html');
+    return Promise.resolve();
+}
+
+async function logout(reason = 'manual') {
     // [COMPATIBILITY_BRIDGE]: ESM v3.1 yapısına geçildiği için, eğer auth-engine.js yüklenmişse
     // çıkış işlemini merkezi motora ve Observer mekanizmasına (Soft Reset) yönlendir.
     if (typeof window.handleLogout === 'function' && window.handleLogout !== logout) {
@@ -150,95 +168,22 @@ function logout(reason = 'manual') {
     }
 
     console.warn(`🚪 [LOGOUT] İşlem başlatılıyor... Sebep: ${reason}`);
-
-    // 1. Timers ve Uyarıları temizle
-    if (typeof window.sessionTimer !== 'undefined') clearTimeout(window.sessionTimer);
-    if (typeof window.warningTimeout !== 'undefined') clearTimeout(window.warningTimeout);
     if (typeof window.logInterval !== 'undefined') clearInterval(window.logInterval);
-
-    const warningDiv = document.getElementById('sessionWarning');
-    if (warningDiv) warningDiv.style.display = 'none';
-
-    // 2. Kimlik verilerini temizle
-    window.clearSession();
-
-    // [WHY]: Clear the Firebase Auth session to prevent automatic re-login on page refresh.
-    // [HOW]: Invoke window.SecurityConfig.logout() or dynamically import the auth SDK and sign out.
-    if (window.SecurityConfig && typeof window.SecurityConfig.logout === 'function') {
-        window.SecurityConfig.logout();
-    } else {
-        try {
-            import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js").then(({ getAuth, signOut }) => {
-                const auth = getAuth(window.firebaseApp || window.app);
-                signOut(auth);
-            });
-        } catch (e) {
-            console.error("❌ Firebase Auth signOut error during dynamic fallback:", e);
-        }
-    }
-
-    // [WHY]: admin.html'de bu yol kullanılıyor ve olay yayınlanmadığı için firebase-handler senkronu sıfırlamıyor,
-    //        signOut ile ölen dinleyiciler kilit açıldıktan sonra yeniden başlamıyordu (AUTH-08).
-    window.dispatchEvent(new CustomEvent('onAppLogout', { detail: { reason } }));
-
-    // 3. CSS Sınıfını Kaldır
     document.body.classList.remove('logged-in');
     window._launchpadTriggered = false;
 
-    // 4. Launchpad görünürlük kontrolü [DECOMMISSIONED]
-    const lpView = document.getElementById('launchpad-view');
-    if (lpView) {
-        lpView.style.display = 'none';
-    }
+    // [WHY]: Faz 4 · J3 — bu yol (admin.html) signOut'u beklemeden kilit kartını gösteriyordu; admin token'ı kartın arkasında
+    //        geçerli kalıyordu (T3). Şimdi: clearSession → await signOut → onAppLogout → kilit kartı (endAdminSession).
+    await endSession(reason);
 
-    // 5. Modalı Ekrana Getir veya Redirect Et
+    // auth-engine yüklenemediyse (index'te main.js gözlemcisi yok) giriş ekranı burada açılır.
     const loginModal = document.getElementById('loginModal');
-    const adminLockModal = document.getElementById('adminLockModal');
-    const inventoryScreen = document.getElementById('inventory-screen');
-
     if (loginModal) {
         loginModal.classList.remove('hidden-modal');
         loginModal.style.setProperty('display', 'flex', 'important');
-
-        const codeInput = document.getElementById('access-val-node');
-        if (codeInput) {
-            codeInput.value = '';
-            if (window._dx) window._dx._r('access-val-node');
-        }
-
-        const statusDiv = document.getElementById('loginStatus');
-        if (statusDiv) {
-            statusDiv.innerHTML = '';
-        }
-
-        if (inventoryScreen) {
-            inventoryScreen.style.setProperty('display', 'block', 'important');
-            inventoryScreen.style.setProperty('visibility', 'visible', 'important');
-            inventoryScreen.style.setProperty('opacity', '1', 'important');
-        }
+        if (window._dx) window._dx._r('access-val-node');
         const userDisplay = document.getElementById('userDisplay');
         if (userDisplay) userDisplay.style.display = 'none';
-        return;
-    } else if (adminLockModal) {
-        adminLockModal.style.setProperty('display', 'flex', 'important');
-        console.log("🔒 [LOGOUT] Admin paneli kilitlendi.");
-        return;
-    } else {
-        window.location.replace('index.html');
-        return;
-    }
-
-    const userDisplay = document.getElementById('userDisplay');
-    if (userDisplay) {
-        userDisplay.innerHTML = '<span style="color:#e74c3c; font-weight:bold;">Oturum Kapalı</span>';
-    }
-
-    // 6. Launchpad kontrolü yoksa showAppAlert
-    if (typeof showAppAlert === 'function') {
-        const msg = reason === 'timeout'
-            ? "Oturum süresi dolduğu için güvenli çıkış yapıldı."
-            : "Oturum başarıyla kapatıldı.";
-        showAppAlert(msg, reason === 'timeout' ? "warning" : "success");
     }
 }
 

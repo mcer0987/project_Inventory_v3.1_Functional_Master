@@ -6,17 +6,25 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
+const CSP = require('./csp');   // Faz 4 · J5 (M15): firebase.json başlıkları HTML yanıtlarına; ihlaller report-uri ile toplanır
 
 const ROOT = path.resolve(__dirname, '..');
 const PORT = 5594;
 const MARKER = '__flowtest__';
+// Faz 4 · J0: --emu → uygulama yerel emülatöre bağlanır (?emu=1). Önce `npm run emu` + `npm run emu:seed`.
+const EMU = process.argv.includes('--emu');
+// Yalnız emülatör Auth'unda geçerli sahte admin kodu (scratch/emu-seed.mjs ile aynı; gerçek parola DEĞİLDİR).
+const EMU_ADMIN_CODE = 'emu01';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
+const csp = CSP.createCollector();
+const SEC_HEADERS = CSP.testHeaders({ emu: EMU });
 function startServer() {
     const server = http.createServer((req, res) => {
+        if (csp.handle(req, res)) return;
         const file = path.normalize(path.join(ROOT, decodeURIComponent(req.url.split('?')[0])));
         if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end(); }
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+        res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store', ...(path.extname(file) === '.html' ? SEC_HEADERS : {}) });
         fs.createReadStream(file).pipe(res);
     });
     return new Promise(r => server.listen(PORT, '127.0.0.1', () => r(server)));
@@ -24,8 +32,9 @@ function startServer() {
 
 // Runs inside the page. Helpers are exposed on window.__ft.
 async function installHelpers(page) {
-    await page.evaluate(async (MARKER) => {
+    await page.evaluate(async (MARKER, EMU, EMU_ADMIN_CODE) => {
         if (window.COLLECTION_ROOT !== 'inventory_demo') throw new Error('ABORT: COLLECTION_ROOT=' + window.COLLECTION_ROOT);
+        if (EMU && !(window.AppEnv && window.AppEnv.EMULATOR)) throw new Error('ABORT: --emu verildi ama sayfa emülatöre bağlanmadı');
         const fs = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
         const col = name => fs.collection(window.fireDb, window.COLLECTION_ROOT, name, 'items');
         window.__ft = {
@@ -40,8 +49,36 @@ async function installHelpers(page) {
             },
             async waitFor(fn, ms = 8000) { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await this.sleep(250); } return false; },
             set(id, v) { const el = document.getElementById(id); if (!el) throw new Error('missing #' + id); el.value = v; el.dispatchEvent(new Event('change')); },
+            emulator: !!(window.AppEnv && window.AppEnv.EMULATOR),
+            // Gerçek Firebase admin oturumu — yalnız emülatörde (gerçek projede admin kimlik bilgisi betiklere girmez, §7.5).
+            async adminLogin() {
+                if (!this.emulator) throw new Error('adminLogin yalnız emülatör modunda');
+                if (!(await window.SecurityConfig.authenticate(EMU_ADMIN_CODE))) throw new Error('emülatör admin girişi başarısız (npm run emu:seed?)');
+                return this.waitFor(async () => window.isDbAdmin(), 8000);
+            },
+            async backToAnonymous() {
+                await window.SecurityConfig.logout();
+                return this.waitFor(async () => !!(window.userAuth && window.userAuth.isAnonymous), 8000);
+            },
+            // Faz 4 · J1: yönetici işlemi. Emülatörde gerçek admin oturumu (Rules v2 yüklü); gerçek demoda yayındaki eski
+            // kurallar anonim yazmaya izin verdiği için yalnız istemci kapısı (isDbAdmin) taklit edilir.
+            async asAdmin(fn) {
+                if (this.emulator) {
+                    await this.adminLogin();
+                    try { return await fn(); } finally { await this.backToAnonymous(); }
+                }
+                const real = window.isDbAdmin; window.isDbAdmin = () => true;
+                try { return await fn(); } finally { window.isDbAdmin = real; }
+            },
         };
-    }, MARKER);
+        // Faz 4 · J4: denetim günlüğü kalıcıdır ve kural gereği silinemez → gerçek demoda test kaydı YAZILMAZ; çağrılar bellekte
+        // toplanır (alanlar yine sınanır). Emülatörde gerçek yazılır ve admin olarak geri okunur.
+        if (!EMU) {
+            window.__auditStub = [];
+            window.__ft.realAppendAuditLog = window.appendAuditLog;
+            window.appendAuditLog = async e => { window.__auditStub.push(JSON.parse(JSON.stringify(e))); return { ok: true, id: 'stub' }; };
+        }
+    }, MARKER, EMU, EMU_ADMIN_CODE);
 }
 
 const SCENARIOS = {
@@ -186,6 +223,8 @@ const SCENARIOS = {
             window.applyItemOps = async (ops, o) => { const rest = ops.filter(x => x.col !== 'b3'); b3Attempts += ops.length - rest.length; return rest.length ? realApply(rest, o) : { written: 0 }; };
             window.showCustomConfirm = async () => true;
             window.setActiveUser({ name: 'Yönetici Test' });
+            // J4 (T6): confirmRequest kendi içinde yönetici kapılı; talep yazmaları personel oturumunda da serbest (kural), b3 kayıtlı.
+            const realIsAdmin = window.isDbAdmin; window.isDbAdmin = () => true;
 
             window.showRequestApprovalModal = async () => null;
             await window.confirmRequest(base + 1);
@@ -207,9 +246,11 @@ const SCENARIOS = {
             out.draftRefused = (await db(3)).durum === 'draft';
 
             window.setActiveUser({ name: 'Personel B ' + ft.MARKER });
+            window.isDbAdmin = realIsAdmin;   // personel kendi talebi: gerçek kapı (J4: engel + 'blocked' günlüğü)
             await window.confirmRequest(base + 2);
             await ft.sleep(800);
             out.selfApprovalBlocked = (await db(2)).durum === 'Beklemede';
+            window.isDbAdmin = () => true;
 
             window.setActiveUser({ name: 'Yönetici Test' });
             await window.rejectRequest(base + 2);
@@ -217,9 +258,12 @@ const SCENARIOS = {
             out.rejected = { durum: (await db(2)).durum, rejectedBy: (await db(2)).rejectedBy };
 
             await ft.waitFor(async () => window.data.requests.find(r => r.id === base + 2)?.durum === 'rejected');
-            await window.deleteRequest(base + 2);
-            out.deletedById = await ft.waitFor(async () => !(await db(2)) && !!(await db(1)) && !!(await db(3)));
-            window.saveData = realSave; window.showRequestApprovalModal = realModal; window.applyItemOps = realApply;
+            // asAdmin gerçek giriş/çıkış yapar (emülatör): yamalı isDbAdmin açıkken yapılırsa çıkıştaki anonim oturum checkAuth'ta
+            // "bayat admin" sayılıp tekrar tekrar kapatılır (J3 · M9) — önce gerçek kapı geri konur.
+            window.isDbAdmin = realIsAdmin;
+            await ft.asAdmin(() => window.deleteRequest(base + 2));   // J1: talep silme yalnız admin
+            out.deletedById =await ft.waitFor(async () => !(await db(2)) && !!(await db(1)) && !!(await db(3)));
+            window.saveData = realSave; window.showRequestApprovalModal = realModal; window.applyItemOps = realApply; window.isDbAdmin = realIsAdmin;
             return out;
         });
     },
@@ -257,6 +301,7 @@ const SCENARIOS = {
             window.applyItemOps = async (ops) => atomic([], ops);
             const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
             window.setActiveUser({ name: 'Yönetici Test' });
+            const realIsAdmin = window.isDbAdmin; window.isDbAdmin = () => true;   // J4 (T6): confirmRequest yönetici kapılı
             const modal = () => document.getElementById('requestApprovalModal');
             const openFor = async n => { const run = { p: window.confirmRequest(base + n) }; await ft.waitFor(async () => !!modal(), 2000); return run; };
 
@@ -324,7 +369,7 @@ const SCENARIOS = {
             out.txFailure = { stillPending: (await db(2)).durum === 'Beklemede', message: alerts.at(-1)?.[1] };
 
             out.oneCallPerApproval = txCalls;
-            window.saveData = realSave; window.runStockOps = realOps; window.applyItemOps = realApply; window.showAppAlert = realAlert;
+            window.saveData = realSave; window.runStockOps = realOps; window.applyItemOps = realApply; window.showAppAlert = realAlert; window.isDbAdmin = realIsAdmin;
             window.data.b1 = window.data.b1.filter(p => p !== prod && p !== low);
             return out;
         });
@@ -339,7 +384,8 @@ const SCENARIOS = {
             const origUnits = window.data.units;
             window.data.personel = [...(window.data.personel || []), { name: 'Zeynep Flowtest' }, { name: 'Zehra Flowtest' }];
             window.data.units = [{ id: 'u1', name: 'Mevcut Birim', personnel: ['Zeynep Flowtest'] }, { id: 'u2', name: 'Diğer Birim', personnel: [] }];
-            const realSave = window.saveData;
+            const realSave = window.saveData, realAdm = window.isDbAdmin;
+            window.isDbAdmin = () => true;   // J1: birim yazmaları yalnız admin; yazma burada taklit ediliyor
             window.saveData = async (col, items) => { if (col !== 'units') return realSave(col, items); saves.push(JSON.parse(JSON.stringify(items))); window.data.units = items; return true; };
             window.showCustomConfirm = async () => true;
             const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
@@ -386,7 +432,7 @@ const SCENARIOS = {
             out.deleteById = saves.at(-1).map(u => u.id).sort().join(',');
             out.rendered = (document.getElementById('unitListArea') || document.getElementById('adminDefUnitTableBody'))?.textContent.includes('Mevcut Birim (düz.)');
 
-            window.saveData = realSave; window.data.units = origUnits;
+            window.saveData = realSave; window.data.units = origUnits; window.isDbAdmin = realAdm;
             window.data.personel = window.data.personel.filter(p => !String(p.name).includes('Flowtest'));
             await sleep(10);
             return out;
@@ -1005,6 +1051,7 @@ const SCENARIOS = {
                 api: ['appendItem', 'updateItem', 'removeItem'].map(k => [k, window[k]]) };
             ['appendItem', 'updateItem', 'removeItem'].forEach(k => { window[k] = async (...a) => { ops.push([k, ...JSON.parse(JSON.stringify(a))]); return { written: 1 }; }; });
             window.validateAdminAction = () => true;
+            const realAdm = window.isDbAdmin; window.isDbAdmin = () => true;   // J1: personel yazmaları yalnız admin (taklit)
             let confirmAnswer = false; window.showCustomConfirm = async () => confirmAnswer;
             window.showAppAlert = () => {};
             window.data.personel = [{ id: 'p1', name: 'Ayşe', code: '11111', role: 'x' }, { id: 'p2', name: '<img src=x onerror="window.__px=1">', code: '22222' }];
@@ -1037,7 +1084,7 @@ const SCENARIOS = {
 
             window.data.personel = orig.p;
             orig.api.forEach(([k, f]) => { window[k] = f; });
-            Object.assign(window, { validateAdminAction: orig.val, showCustomConfirm: orig.confirm, showAppAlert: orig.alert });
+            Object.assign(window, { validateAdminAction: orig.val, showCustomConfirm: orig.confirm, showAppAlert: orig.alert, isDbAdmin: realAdm });
             document.getElementById('personelModal').style.display = 'none';
             return out;
         });
@@ -1436,11 +1483,19 @@ const SCENARIOS = {
         const ids = await page.evaluate(async () => {
             const ft = window.__ft, P = '<img src=x onerror="window.__xss=(window.__xss||0)+1">';
             const reqId = Date.now(), poId = '1);window.__xssId=1;//' + ft.MARKER;
+            // J1: Rules v2 personelin etiketli yazmasını reddeder (savunma derinliği). Render kaçışını sınamak için yükler,
+            // emülatörde etiket kuralına tabi olmayan admin oturumuyla yazılır (gerçek demoda eski kurallar anonime izin verir).
+            let anonPayloadRejected = 'n/a (gerçek demo: eski kurallar)';
+            if (ft.emulator) {
+                anonPayloadRejected = await window.appendItem('requests', { id: reqId + 1, ürün: P, personel: 'X ' + ft.MARKER }).then(() => 'ALLOWED', e => e.code);
+                await ft.adminLogin();
+            }
             await window.saveData('requests', [...(window.data.requests || []), { id: reqId, ürün: P, personel: 'X ' + ft.MARKER, not: P, durum: 'Beklemede', tarih: '01.01.2026', adet: 1 }]);
             await window.saveData('tasks', [...(window.data.tasks || []), { id: 'task_' + reqId, title: P + ft.MARKER, description: P, priority: P, type: 'task', status: 'pending', assigneeId: 'pool', checklist: [{ text: P, done: false }], interactions: [{ user: P, message: P }] }]);
             await window.saveData('purchaseOrders', [...(window.data.purchaseOrders || []), { id: poId, urun: P + ft.MARKER, evrakNo: P, talepEden: P, birim: P, tarih: P, durum: 'Taslak', akis: [] }]);
             await ft.waitFor(async () => (await ft.readMarked('requests')).length && (await ft.readMarked('tasks')).length && (await ft.readMarked('purchaseOrders')).length);
-            return { reqId, poId };
+            if (ft.emulator) await ft.backToAnonymous();
+            return { reqId, poId, anonPayloadRejected };
         });
 
         const admin = await (await browser.createBrowserContext()).newPage();
@@ -1467,6 +1522,7 @@ const SCENARIOS = {
                 purchaseButton: clicked,
             };
         }, ids.poId);
+        out.anonPayloadRejected = ids.anonPayloadRejected;
         out.adminPageErrors = errs;
         await admin.browserContext().close();
         return out;
@@ -2198,6 +2254,660 @@ const SCENARIOS = {
 
     // Faz 3.5 · giriş kodu otomatik odağı: etkileşim yoksa odaklanır; veri gelmeden önce kullanıcı sayfayla etkileştiyse
     // (tuş/tıklama) odak çalınmaz; senkron yeniden başlayınca (personel snapshot'ı tekrar gelir) odak ikinci kez çekilmez.
+    // Faz 4 · J0 — emülatör modunun kendisi: uygulama emülatörde, admin oturumu gerçek, kurallar uygulanıyor.
+    async j0Emulator(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft;
+            if (!ft.emulator) return { skipped: 'yalnız --emu ile' };
+            const out = { anonymousAtStart: !!window.userAuth?.isAnonymous, seededB1: (window.data.b1 || []).length };
+            const fs = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+            const ref = fs.doc(window.fireDb, window.COLLECTION_ROOT, 'b1', 'items', 'j0_' + Date.now());
+            const tryWrite = async () => { try { await fs.setDoc(ref, { id: ref.id, ürün: 'J0 ' + ft.MARKER }); return 'ALLOWED'; } catch (e) { return e.code; } };
+            out.anonB1Write = await tryWrite();
+            out.adminLogin = await ft.adminLogin();
+            out.isDbAdmin = window.isDbAdmin();
+            out.adminB1Write = await tryWrite();
+            out.adminB1Delete = await fs.deleteDoc(ref).then(() => 'ALLOWED', e => e.code);
+            out.backToAnonymous = await ft.backToAnonymous();
+            out.syncAfterLogout = await ft.waitFor(async () => (window.data.b1 || []).length === out.seededB1, 8000);
+            return out;
+        });
+    },
+
+    // Faz 4 · J1 — Rules v2 Aşama A ile istemci hizalaması (M1-M3). Yalnız emülatörde (yeni kurallar yalnız orada yüklü).
+    async j1RulesAlignment(page) {
+        return page.evaluate(async () => {
+            const ft = window.__ft;
+            if (!ft.emulator) return { skipped: 'yalnız --emu ile' };
+            const out = {}, alerts = [];
+            const origAlert = window.showAppAlert, origConfirm = window.showCustomConfirm;
+            window.showAppAlert = (m, t) => { alerts.push(`${t}: ${m}`); };
+            window.showCustomConfirm = async () => true;
+            const take = () => alerts.splice(0).join(' | ');
+            const has = async (col, id) => (await ft.readAll(col)).some(d => String(d.id) === String(id));
+            try {
+                window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+                out.anonymous = !!window.userAuth?.isAnonymous;
+
+                // M1 · personel silme kapıları (kayıt yerinde kalır, anlaşılır mesaj)
+                const po = { id: window.makeId(), urun: 'J1 ' + ft.MARKER, aciklama: ft.MARKER, createdBy: '00001', createdByName: 'Flow Test ' + ft.MARKER, durum: 'Onay Bekliyor' };
+                await window.appendItem('purchaseOrders', po);
+                await ft.waitFor(async () => (window.data.purchaseOrders || []).some(p => String(p.id) === String(po.id)));
+                await window.deletePurchaseRequest(po.id);
+                out.staffDeletePurchase = { kept: await has('purchaseOrders', po.id), alert: take() };
+
+                const rq = { id: window.makeId(), ürün: 'J1 ' + ft.MARKER, adet: 1, durum: 'Beklemede', personel: 'Flow Test ' + ft.MARKER };
+                await window.appendItem('requests', rq);
+                await ft.waitFor(async () => (window.data.requests || []).some(r => String(r.id) === String(rq.id)));
+                await window.deleteRequest(rq.id);
+                out.staffDeleteRequest = { kept: await has('requests', rq.id), alert: take() };
+
+                const b1 = (window.data.b1 || [])[0];
+                await window.toggleWatch('b1', b1.id);
+                out.staffToggleWatch = { unchanged: !!(await ft.readAll('b1')).find(x => String(x.id) === String(b1.id))?.isWatched === !!b1.isWatched, alert: take() };
+
+                // Kapıyı atlayan doğrudan yazma: kural reddi → 'forbidden' + tek anlaşılır mesaj
+                const direct = async p => { try { await p; return 'ok'; } catch (e) { return e.code; } };
+                out.directAssignmentWrite = { code: await direct(window.appendItem('assignments', { id: window.makeId(), sn: ft.MARKER })), alert: take() };
+                // İşaretli demo kayıtları KJ-5 gereği silinebilir; reddi işaretsiz bir kayıtla sına (admin oluşturur ve temizler).
+                const unmarked = { id: window.makeId(), ürün: 'J1 işaretsiz kayıt', adet: 1, durum: 'Beklemede', personel: 'J1' };
+                await ft.asAdmin(() => window.appendItem('requests', unmarked));
+                await ft.waitFor(async () => (window.data.requests || []).some(r => String(r.id) === String(unmarked.id)));
+                take();
+                out.directStaffDeleteUnmarked = { code: await direct(window.removeItem('requests', unmarked.id)), kept: await has('requests', unmarked.id), alert: take() };
+                out.directStaffDeleteMarkedDemo = { code: await direct(window.removeItem('requests', rq.id)), note: 'KJ-5: işaretli demo kaydı silinebilir' };
+                await window.appendItem('requests', rq);
+
+                // M3 · etiket ön kontrolü (form) ve kural (doğrudan)
+                window.openRequestModal(false);
+                ft.set('reqProdName', 'Etiket ' + ft.MARKER); ft.set('reqQty', '1'); ft.set('reqType', 'Kalıcı Zimmet');
+                ft.set('reqNote', '<img src=x onerror=alert(1)> ' + ft.MARKER);
+                const before = (await ft.readMarked('requests')).length;
+                await window.saveRequest(new Event('submit'));
+                await ft.sleep(800);
+                out.formTagBlocked = { created: (await ft.readMarked('requests')).length - before, alert: take() };
+                ft.set('reqNote', 'vida <5mm, a < b ' + ft.MARKER);
+                await window.saveRequest(new Event('submit'));
+                out.formLessThanAllowed = await ft.waitFor(async () => (await ft.readMarked('requests')).length === before + 1);
+                take();
+                out.directTagWrite = { code: await direct(window.appendItem('requests', { id: window.makeId(), ürün: '<b>x</b> ' + ft.MARKER })), alert: take() };
+
+                // M2 · bakım: personel yazması Firestore'a gitmeden durur, bakım mesajı (sunucu tarafı kural matrisinde)
+                const cfg = window.data.config;
+                window.data.config = { ...(cfg || {}), maintenance: true };
+                out.maintenanceWrite = { code: await direct(window.updateItem('requests', rq.id, { not: 'bakım ' + ft.MARKER })), alert: take() };
+                window.data.config = cfg;
+                out.afterMaintenanceWrite = await direct(window.updateItem('requests', rq.id, { not: 'normal ' + ft.MARKER }));
+
+                // Admin yolu: aynı kapılar admin oturumunda açılır
+                out.adminLogin = await ft.adminLogin();
+                await window.toggleWatch('b1', b1.id);
+                out.adminToggleWatch = await ft.waitFor(async () => !!(await ft.readAll('b1')).find(x => String(x.id) === String(b1.id))?.isWatched !== !!b1.isWatched);
+                await window.toggleWatch('b1', b1.id);   // geri al
+                await window.deletePurchaseRequest(po.id);
+                out.adminDeletePurchase = !(await has('purchaseOrders', po.id));
+                await window.removeItem('requests', unmarked.id);
+                out.adminDeleteUnmarked = !(await has('requests', unmarked.id));
+                take();
+                out.backToAnonymous = await ft.backToAnonymous();
+            } finally {
+                window.showAppAlert = origAlert; window.showCustomConfirm = origConfirm;
+            }
+            return out;
+        });
+    },
+
+    // Faz 4 · J2 — XSS'in tamamı: lint'in düzelttiği yüzeyler zararlı yüklerle (etiket, nitelikten kaçış, JS dizgesinden kaçış).
+    // Yalnız bellek içi veri; Firestore'a yazılmaz. Delegation eylemleri ham değeri bozmadan taşımalı; onay API'si metin/Node/html.
+    async j2XssSurfaces(page, browser) {
+        const PAY = {
+            tag: '<img src=x onerror="window.__xss=(window.__xss||0)+1">',
+            attr: '"><img src=x onerror="window.__xss=(window.__xss||0)+1">',
+            js: "');window.__xss=(window.__xss||0)+1;//",
+            ent: '&quot;);window.__xss=(window.__xss||0)+1;//',
+        };
+        const index = await page.evaluate(async (PAY) => {
+            const ft = window.__ft, out = {};
+            window.__xss = 0;
+            const orig = { b1: window.data.b1, personel: window.data.personel, productTypes: window.data.productTypes, user: window.getActiveUser() };
+            try {
+                // B1 tablo + kartlar + tooltip (table-engine)
+                window.data.b1 = [{ id: 'x1', ürün: PAY.tag, marka: PAY.attr, raf: PAY.js, sütun: PAY.ent, durumu: PAY.tag, tür: PAY.attr, adet: 2, lastUpdate: PAY.tag, isWatched: true }];
+                window.renderTable('b1');
+                window.renderCardSearchResults('b1', window.data.b1);
+                window.renderMobileCards('b1');
+                const row = document.querySelector('tr.selectable-row[data-id="x1"]');
+                if (row) row.dispatchEvent(new MouseEvent('mouseenter'));
+                out.table = { rowRendered: !!row, nameAsText: !!row && row.textContent.includes('<img src=x'), dataName: row && row.dataset.name === PAY.tag, tooltipShown: getComputedStyle(document.getElementById('custom-tooltip') || document.body).display === 'block', tooltipNoImg: !document.querySelector('#custom-tooltip img') };
+
+                // Ürün modalı tür seçenekleri (ui-components)
+                window.data.productTypes = [{ name: PAY.attr, isDemirbas: true }];
+                const realAdm = window.isDbAdmin; window.isDbAdmin = () => true;
+                try { window.openProductModal('add', null, 'b1'); } catch (e) { out.productModalError = e.message; }
+                window.isDbAdmin = realAdm;
+                const opt = [...(document.getElementById('prodType')?.options || [])].find(o => o.value === PAY.attr);
+                out.productTypeOption = !!opt;
+                if (typeof window.closeProductModal === 'function') window.closeProductModal();
+
+                // Navbar adı (auth-engine)
+                window.updateNavbarUI({ name: PAY.tag });
+                out.navbarAsText = (document.getElementById('user-display')?.textContent || document.body.textContent).includes('👤 <img');
+
+                // Akış başlatma personel araması → delegation ham adı taşır (edm-workflow)
+                window.data.personel = [{ id: 'p1', name: 'Zz ' + PAY.js }, { id: 'p2', name: 'Zz ' + PAY.attr }];
+                const input = document.createElement('input');
+                input.setAttribute('onkeyup', 'window.searchPersonnelForStart(this.value, 77)');
+                document.body.appendChild(input);
+                let picked = null; const realSel = window.selectPersonForWorkflow;
+                window.selectPersonForWorkflow = (i, n) => { picked = { i, n }; };
+                window.searchPersonnelForStart('zz', 77);
+                const items = document.querySelectorAll('#personnel_dropdown_77 [data-action="selectPerson"]');
+                if (items[0]) items[0].click();
+                out.startSearch = { items: items.length, pickedExact: !!picked && picked.i === 77 && picked.n === 'Zz ' + PAY.js };
+                window.selectPersonForWorkflow = realSel;
+                document.getElementById('personnel_dropdown_77')?.remove(); input.remove();
+
+                // Onay API'si (M6): metin varsayılan, {html:true} sabit, Node, düğme metni geri uyumu
+                const msgEl = document.getElementById('alertMessage');
+                const answer = async (fn, yes) => { const p = fn(); await ft.sleep(30); const snap = { html: msgEl.innerHTML, text: msgEl.textContent, ok: document.getElementById('alertConfirmBtn').textContent }; document.getElementById(yes ? 'alertConfirmBtn' : 'alertCancelBtn').click(); return { snap, res: await p }; };
+                const t = await answer(() => window.showCustomConfirm('T', PAY.tag), false);
+                const h = await answer(() => window.showCustomConfirm('T', '<b>sabit</b>', { html: true }), false);
+                const nd = document.createElement('div'); nd.id = 'j2Node'; nd.textContent = 'düğüm';
+                const n = await answer(() => window.showCustomConfirm('T', nd), true);
+                const legacy = await answer(() => window.showCustomConfirm('T', 'x', 'Evet, Göster', 'Daha Sonra'), true);
+                out.confirm = {
+                    textDefault: !t.snap.html.includes('<img') && t.snap.text === PAY.tag && t.res === false,
+                    htmlOptIn: h.snap.html === '<b>sabit</b>',
+                    nodeAppended: n.snap.html.includes('id="j2Node"') && n.res === true,
+                    legacyButtonText: legacy.snap.ok === 'Evet, Göster' && document.getElementById('alertConfirmBtn').textContent !== 'Evet, Göster',
+                };
+
+                // TODO "Ata" (M6 çifti): seçim kutusu gerçek, onay atamayı yapar
+                let assigned = null; const realAssign = window.todoModule.assignTask;
+                window.todoModule.assignTask = async (id, who) => { assigned = { id, who }; };
+                window.data.personel = [{ id: 'p3', name: 'Ayşe ' + PAY.attr }];
+                window.todoModule.openAssignModal('t-j2');
+                await ft.sleep(30);
+                const sel = document.getElementById('quickAssignSelect');
+                out.todoAssign = { selectRendered: !!sel && sel.tagName === 'SELECT', options: sel ? sel.options.length : 0 };
+                document.getElementById('alertConfirmBtn').click();
+                await ft.sleep(50);
+                out.todoAssign.assignedExact = !!assigned && assigned.id === 't-j2' && assigned.who === 'Ayşe ' + PAY.attr;
+                window.todoModule.assignTask = realAssign;
+
+                out.injectedImgs = document.querySelectorAll('img[src="x"]').length;
+                out.xssExecuted = window.__xss || 0;
+            } finally {
+                Object.assign(window.data, { b1: orig.b1, personel: orig.personel, productTypes: orig.productTypes });
+                window.renderTable('b1');
+                if (orig.user) window.updateNavbarUI(orig.user);
+            }
+            return out;
+        }, PAY);
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = [];
+        admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        const adminOut = await admin.evaluate(async (PAY) => {
+            const out = {}; window.__xss = 0;
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            // Kritik stok (grup anahtarı delegation) + özel izleme kartları (kayıt JSON'u yerine data-id)
+            window.data.b1 = [{ id: 'c1', ürün: PAY.tag, tür: PAY.attr, raf: PAY.js, adet: 0, limit: 5, marka: PAY.ent, durumu: 'Aktif', isWatched: true }];
+            window.data.b2 = [];
+            window.renderCriticalStockTable();
+            let delKey = null; const realDel = window.deleteCriticalGroup; window.deleteCriticalGroup = k => { delKey = k; };
+            const delBtn = document.querySelector('#criticalStockTable [data-action="deleteCriticalGroup"]');
+            if (delBtn) delBtn.click();
+            out.critical = { rendered: !!delBtn, keyCarriesPayload: typeof delKey === 'string' && delKey.includes(PAY.tag.slice(0, 8)) };
+            window.deleteCriticalGroup = realDel;
+
+            // ADM-05 (Faz 5.6): ilk çizim #customWatchTable'ı kendi kapsayıcısından siler, sonraki çağrılar erken döner.
+            // J2'nin kaçış + delegation değişikliğini sınamak için eksik öğe geri konur (uygulama hatası ayrıca raporlanır).
+            out.watchRerenderBug = !document.querySelector('#customWatchTable');
+            const wc = document.getElementById('watchCardsContainer');
+            if (wc && out.watchRerenderBug) { const t = document.createElement('table'); t.id = 'customWatchTable'; t.style.display = 'none'; wc.parentElement.appendChild(t); }
+            window.renderCustomWatchDashboard();
+            let detail = null, purchase = null; const realD = window.openWatchDetail, realP = window.requestPurchase;
+            window.openWatchDetail = it => { detail = it; }; window.requestPurchase = it => { purchase = it; };
+            const card = document.querySelector('.watch-card[data-action="watchDetail"]');
+            const quick = document.querySelector('[data-action="watchPurchase"]');
+            if (quick) quick.click();
+            if (card) card.click();
+            out.watch = { card: !!card, depoShown: !!card && card.textContent.includes('B1'), quickOnlyInner: !!purchase && purchase.id === 'c1', detailResolvedById: !!detail && detail.id === 'c1' && detail.marka === PAY.ent,
+                diag: { cardData: card && { ...card.dataset }, b1Len: (window.data.b1 || []).length, found: !!window.findItem('b1', 'c1'), detailType: detail === null ? 'null' : typeof detail } };
+            window.openWatchDetail = realD; window.requestPurchase = realP;
+
+            // Mahal başlığı, servis görüntüleme, satın alma rozeti (adım kişisi), şablon personel araması
+            window.data.locations = [{ id: 'l1', name: PAY.tag, code: PAY.attr, persons: [{ name: PAY.attr }] }];
+            window.renderLocationsTable();
+            window.data.serviceRecords = [{ id: 's1', urunAciklama: PAY.tag, originalData: { açıklama: PAY.tag }, hedef: PAY.attr, durum: 'Serviste / Yolda', not: PAY.tag, kaynakDepo: 'b1' }];
+            try { window.viewServiceItem('s1'); } catch (e) { out.serviceError = e.message; }
+            out.serviceAsText = (document.getElementById('serviceViewContent')?.textContent || '').includes('<img src=x');
+            window.data.purchaseOrders = [{ id: 'po-j2', urun: 'J2', evrakNo: 'E-1', durum: 'Onay Bekliyor', createdAt: Date.now(), workflow: { started: true, currentStep: 0, steps: [{ user: PAY.tag, status: 'pending' }] } }];
+            try { window.renderPurchaseModule(); window.renderServicesModule(); } catch (e) { out.purchaseError = e.message; }
+            out.badgeAsText = document.body.textContent.includes('<img src=x onerror="window.__xss=(window.__xss||0)+1"> Bekliyor');
+
+            window.data.personel = [{ id: 'p9', name: 'Qq ' + PAY.js }];
+            let added = null; const realAdd = window.addPersonnelToTemplate; window.addPersonnelToTemplate = (n, t, s) => { added = { n, t, s }; };
+            let box = document.getElementById('tplAuthResults');
+            const temp = !box; if (temp) { box = document.createElement('div'); box.id = 'tplAuthResults'; document.body.appendChild(box); }
+            window.searchPersonnelForTemplate('qq', 'auth');
+            const item = box.querySelector('[data-action="addPersonnel"]');
+            if (item) item.click();
+            out.templateSearch = { item: !!item, addedExact: !!added && added.n === 'Qq ' + PAY.js && added.t === 'auth' && added.s === undefined };
+            window.addPersonnelToTemplate = realAdd; if (temp) box.remove();
+
+            await sleep(300);
+            out.injectedImgs = document.querySelectorAll('img[src="x"]').length;
+            out.xssExecuted = window.__xss || 0;
+            return out;
+        }, PAY);
+        adminOut.pageErrors = errs;
+        await admin.browserContext().close();
+        return { index, admin: adminOut };
+    },
+
+    // Faz 4 · J3 — oturum ve vize (4.4): tek endAdminSession, sekmeye bağlı admin oturumu (AUTH-05), sanal "Admin"in kaldırılması
+    // (M9), admin.html kapısı (M8), kilitte signOut + veri akışının sürmesi (M10), parola geçiş kuralı (M11). Statik ve birim
+    // kontrolleri iki ortamda; gerçek admin oturumu gerektirenler yalnız --emu (gerçek projede admin kimlik bilgisi kullanılmaz).
+    async j3SessionVisa(page, browser) {
+        const src = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const out = {};
+        const idx = src('index.html'), adm = src('admin.html');
+        const inputTag = (html, id) => (html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`)) || [''])[0];
+        out.static = {
+            noMaxlength: [inputTag(idx, 'access-val-node'), inputTag(idx, 'maintenanceCode'), inputTag(adm, 'lock-val-node')].every(t => t && !/maxlength/.test(t)),
+            no5HaneText: !/5 haneli/.test(idx),
+            noVizeFlagReads: ['script.js', 'src/ui/ui-components.js', 'src/modules/auth-engine.js', 'src/services/firebase-handler.js'].every(f => !/getItem\(\s*['"]adminVizesi/.test(src(f))),
+            noVirtualAdmin: ['src/modules/auth-engine.js', 'admin.html', 'src/utils/alert.js', 'security.js'].every(f => !/name:\s*'Admin'/.test(src(f))),
+            loginAsAdminRemoved: !/window\.loginAsAdmin\s*=/.test(src('src/services/firebase-handler.js')),
+        };
+
+        // Birim: geçiş kuralı, 6-11 karakterin ağa gitmeden reddi, vize uzatma (T4), zamanlayıcının tek yola gitmesi
+        out.unit = await page.evaluate(async () => {
+            const S = window.SecurityConfig, Sess = window.AppModules.Session, o = {};
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const n = s => { const r = S.normalizeAdminPassword(s); return r.ok ? (r.legacy ? 'legacy:' + r.value : 'as-is') : (r.error ? 'min12' : 'invalid'); };
+            o.normalize = { five: n('12345'), six: n('abcdef'), eleven: n('x'.repeat(11)), twelve: n('x'.repeat(12)), four: n('1234'), empty: n('') };
+            const uid = window.userAuth && window.userAuth.uid;
+            const saved = { visa: localStorage.getItem('admin_auth'), end: S.endAdminSession };
+            o.midLength = { result: await S.authenticate('abcdefgh'), message: S.lastErrorMessage,
+                authUnchanged: !!window.userAuth && window.userAuth.uid === uid && window.userAuth.isAnonymous, visaWritten: Sess.getAdminVisaRemaining() !== null };
+            const ended = []; S.endAdminSession = async r => { ended.push(r); };
+            try {
+                localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 1000 }));
+                o.extendExpired = Sess.extendAdminVisa();
+                window.startSessionTimer();
+                o.timerOnExpired = { ended: ended.slice(), notRevived: Sess.getAdminVisaRemaining() < 0 };
+                Sess.grantAdminVisa();
+                const e0 = JSON.parse(localStorage.getItem('admin_auth')).expiry; await sleep(15);
+                window.startSessionTimer();
+                o.timerExtendsValid = JSON.parse(localStorage.getItem('admin_auth')).expiry > e0 && ended.length === 1;
+                const routed = []; S.endAdminSession = async r => { routed.push(r); };
+                const realAlert = window.showAppAlert; window.showAppAlert = () => {};
+                await window.logout('force_logout');
+                window.showAppAlert = realAlert;
+                o.logoutRoutesToEndAdminSession = routed;
+            } finally {
+                S.endAdminSession = saved.end;
+                clearTimeout(window.sessionTimer); clearTimeout(window.warningTimeout);
+                localStorage.removeItem('admin_auth'); if (saved.visa) localStorage.setItem('admin_auth', saved.visa);
+            }
+            const ev = new Event('paste', { cancelable: true }); document.getElementById('access-val-node').dispatchEvent(ev);
+            o.staffCodePasteBlocked = ev.defaultPrevented;
+            return o;
+        });
+
+        const base = page.url().split('/index.html')[0], q = EMU ? '?emu=1' : '';
+        const ctxErrors = [];
+        const lockState = p => p.evaluate(() => {
+            const m = document.getElementById('adminLockModal'), left = window.AppModules.Session.getAdminVisaRemaining();
+            return { locked: !!m && m.style.display === 'flex', title: (document.getElementById('adminLockTitle') || {}).textContent?.trim(),
+                isDbAdmin: window.isDbAdmin(), anon: !!(window.userAuth && window.userAuth.isAnonymous), visa: left === null ? null : left > 0 ? 'valid' : 'expired',
+                user: (window.getActiveUser() || {}).name || null,
+                fbSession: Object.keys(sessionStorage).some(k => k.startsWith('firebase:authUser:')), fbLocal: Object.keys(localStorage).some(k => k.startsWith('firebase:authUser:')) };
+        });
+        const waitFn = (p, fn, ms = 20000) => p.waitForFunction(fn, { timeout: ms, polling: 250 }).then(() => true, () => false);
+
+        // M9 (iki ortam): admin oturumu yokken vize + adminVizesi bayrağı → sanal "Admin" çizilmez, yetki verilmez
+        {
+            const ctx = await browser.createBrowserContext(), p = await ctx.newPage();
+            p.on('pageerror', e => ctxErrors.push(e.message));
+            await p.evaluateOnNewDocument(() => { localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })); sessionStorage.setItem('adminVizesi', 'true'); });
+            await p.goto(`${base}/index.html${q}`, { waitUntil: 'domcontentloaded' });
+            await waitFn(p, () => !!window.userAuth && window.isFirebaseLoaded === true);
+            await sleep(1000);
+            out.noVirtualAdminIndex = await p.evaluate(() => ({ user: window.getActiveUser(), navbar: !!document.getElementById('userDisplay'), checkIsAdmin: window.checkIsAdmin(),
+                loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none' }));
+
+            // M8 (iki ortam): geçerli vize ama bu sekmede Firebase admin oturumu yok → kilit kartı; paylaşılan vize silinmez
+            const a = await ctx.newPage(); a.on('pageerror', e => ctxErrors.push(e.message));
+            await a.goto(`${base}/admin.html${q}`, { waitUntil: 'domcontentloaded' });
+            await waitFn(a, () => document.getElementById('adminLockModal').style.display === 'flex');
+            out.adminGateNoSession = await lockState(a);
+            out.adminLockPasteAllowed = await a.evaluate(() => { const ev = new Event('paste', { cancelable: true }); document.getElementById('lock-val-node').dispatchEvent(ev); return !ev.defaultPrevented; });
+            await ctx.close();
+
+            // F5 + dolmuş vize (iki ortam): canlanmaz, endAdminSession('expired') → kilit kartı, vize silinir
+            const ctx2 = await browser.createBrowserContext(), e = await ctx2.newPage();
+            e.on('pageerror', x => ctxErrors.push(x.message));
+            await e.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 5000 })));
+            await e.goto(`${base}/admin.html${q}`, { waitUntil: 'domcontentloaded' });
+            await waitFn(e, () => document.getElementById('adminLockModal').style.display === 'flex' && !!window.userAuth);
+            await sleep(1500);
+            out.adminExpiredOnLoad = await lockState(e);
+            await ctx2.close();
+        }
+
+        if (!EMU) { out.emulator = 'skipped (gerçek admin oturumu yalnız --emu)'; out.pageErrors = ctxErrors; return out; }
+
+        const AUTH = 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        const LONG = 'emu-j3-uzun-parola';   // yalnız emülatör hesabı; koşu sonunda eski koda geri alınır
+        const emu = out.emu = {};
+        const ctx = await browser.createBrowserContext();
+        const open = async url => { const p = await ctx.newPage(); p.on('pageerror', x => ctxErrors.push(x.message)); p.on('dialog', d => d.dismiss()); await p.goto(url, { waitUntil: 'domcontentloaded' }); return p; };
+        const unlock = (p, pass) => p.evaluate(async pass => {
+            window._dx._b['lock-val-node'] = pass; await window.unlockAdmin();
+            const err = document.getElementById('lockErrorMsg');
+            return { error: err.style.display !== 'none' ? err.textContent : null };
+        }, pass);
+        const lockedAnon = p => waitFn(p, () => document.getElementById('adminLockModal').style.display === 'flex' && !!window.userAuth && window.userAuth.isAnonymous);
+        const restorePassword = p => p.evaluate(async (AUTH, LONG, CODE) => {
+            const sdk = await import(AUTH), auth = sdk.getAuth(window.firebaseApp);
+            if (!(auth.currentUser && !auth.currentUser.isAnonymous)) { if (!(await window.SecurityConfig.authenticate(LONG))) return 'not-needed-or-failed'; }
+            await sdk.updatePassword(auth.currentUser, '0' + CODE); return 'restored';
+        }, AUTH, LONG, EMU_ADMIN_CODE).catch(err => 'restore error: ' + err.message);
+        let a = null, rotated = false;
+        try {
+            // 1 · gerçek giriş yolu: index "Yönetici Paneli" → admin.html (aynı sekme)
+            a = await open(`${base}/index.html?emu=1`);
+            await waitFn(a, () => window.isFirebaseLoaded === true && !!window.userAuth);
+            const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await nav;
+            await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true);
+            emu.login = { path: await a.evaluate(() => location.pathname), ...(await lockState(a)) };
+
+            // 2 · "tarayıcı kapat-aç" eşdeğeri: aynı profilde YENİ sekme (sessionStorage taşınmaz; localStorage/IndexedDB paylaşılır)
+            const b = await open(`${base}/index.html?emu=1`);
+            await waitFn(b, () => !!window.userAuth && window.isFirebaseLoaded === true);
+            emu.newTabIndex = await b.evaluate(() => ({ anon: window.userAuth.isAnonymous, isDbAdmin: window.isDbAdmin(),
+                loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none' }));
+            const c = await open(`${base}/admin.html?emu=1`);
+            await waitFn(c, () => document.getElementById('adminLockModal').style.display === 'flex');
+            emu.newTabAdmin = await lockState(c);
+            await b.close(); await c.close();
+            emu.firstTabStillAdmin = await lockState(a);
+
+            // 3 · F5 aynı sekmede: sekmeye bağlı oturum korunur
+            await a.reload({ waitUntil: 'domcontentloaded' });
+            await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true);
+            emu.reloadSameTab = await lockState(a);
+
+            // 4 · vize dolumu (aralık kontrolü) → signOut → kilit kartı; kilitliyken etkinlik vizeyi canlandırmaz
+            await a.evaluate(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 1000 })));
+            emu.expiry = { reached: await lockedAnon(a), ...(await lockState(a)) };
+            await a.mouse.move(40, 40); await a.mouse.move(90, 120); await a.keyboard.press('Shift'); await sleep(2500);
+            emu.activityWhileLocked = await lockState(a);
+
+            // 5 · kilit açma: 6-11 karakter ağa gitmeden reddedilir; doğru kodla açılır ve canlı veri akmaya devam eder (M10)
+            emu.unlockMidLength = { ...(await unlock(a, 'abcdefgh')), ...(await lockState(a)) };
+            emu.unlock = await unlock(a, EMU_ADMIN_CODE);
+            await waitFn(a, () => window.isDbAdmin());
+            emu.afterUnlock = { ...(await lockState(a)), sync: await a.evaluate(() => window.getSyncHealth()) };
+            emu.liveDataAfterUnlock = await a.evaluate(async MARKER => {
+                const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+                const id = 'j3_live_' + Date.now(), ref = fsm.doc(window.fireDb, window.COLLECTION_ROOT, 'b1', 'items', id);
+                const until = async fn => { const t = Date.now(); while (Date.now() - t < 8000) { if (fn()) return true; await new Promise(r => setTimeout(r, 200)); } return false; };
+                await fsm.setDoc(ref, { id, ürün: 'J3 canlı ' + MARKER, adet: 1 });
+                const arrived = await until(() => (window.data.b1 || []).some(x => x.id === id));
+                await fsm.deleteDoc(ref);
+                const removed = await until(() => !(window.data.b1 || []).some(x => x.id === id));
+                return { arrived, removed };
+            }, MARKER);
+
+            // 6 · ≥12 karakterli parola (emülatör hesabında geçici rotasyon) + "Güvenli Çıkış" (signOut)
+            await a.evaluate(async (AUTH, LONG) => { const sdk = await import(AUTH); await sdk.updatePassword(sdk.getAuth(window.firebaseApp).currentUser, LONG); }, AUTH, LONG);
+            rotated = true;
+            await a.evaluate(() => { window.showCustomConfirm = async () => true; window.adminLogout(); });
+            emu.secureExit = { reached: await lockedAnon(a), ...(await lockState(a)) };
+            emu.unlockOldCodeAfterRotation = { ...(await unlock(a, EMU_ADMIN_CODE)), ...(await lockState(a)) };
+            emu.unlockLong = await unlock(a, LONG);
+            emu.unlockLongOk = await waitFn(a, () => window.isDbAdmin());
+            emu.passwordRestore = await restorePassword(a); rotated = emu.passwordRestore !== 'restored';
+
+            // 7 · F5 + dolmuş vize, admin token'ı canlıyken: vize canlanmaz, Firebase oturumu kapanır
+            await a.evaluate(() => { localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 1000 })); location.reload(); }).catch(() => {});
+            await sleep(1500);
+            emu.reloadExpired = { reached: await lockedAnon(a), ...(await lockState(a)) };
+
+            // 8 · "Oturumu Kapat" → index; anonim oturum yerel kalıcılıkta
+            await unlock(a, EMU_ADMIN_CODE);
+            await waitFn(a, () => window.isDbAdmin());
+            const nav2 = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+            await a.evaluate(() => { window.adminForceLogout(); });
+            await nav2;
+            await waitFn(a, () => !!window.userAuth && window.isFirebaseLoaded === true);
+            emu.logoutToIndex = { path: await a.evaluate(() => location.pathname), ...(await a.evaluate(() => ({ anon: window.userAuth.isAnonymous, user: window.getActiveUser(),
+                visa: window.AppModules.Session.getAdminVisaRemaining(), loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none',
+                fbSession: Object.keys(sessionStorage).some(k => k.startsWith('firebase:authUser:')), fbLocal: Object.keys(localStorage).some(k => k.startsWith('firebase:authUser:')) }))) };
+
+            // 9 · M9: J3 öncesi istemcinin bıraktığı KALICI admin oturumu (IndexedDB, vize/kimlik yok) → açılışta bayat → signOut
+            const d = await ctx.newPage(); d.on('pageerror', x => ctxErrors.push(x.message));
+            const cfg = await a.evaluate(() => window.firebaseApp.options);
+            await d.goto(`${base}/404.html`, { waitUntil: 'domcontentloaded' });
+            emu.legacySeed = await d.evaluate(async (cfg, AUTH, CODE) => {
+                const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+                const sdk = await import(AUTH), auth = sdk.getAuth(initializeApp(cfg));
+                sdk.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+                localStorage.removeItem('admin_auth'); localStorage.removeItem('activeUser');
+                // eski istemci: getAuth varsayılanı (IndexedDB, kalıcı), persistence ayarı yok
+                await sdk.signInWithEmailAndPassword(auth, 'admin@medipol.local', '0' + CODE);
+                return auth.currentUser.email;
+            }, cfg, AUTH, EMU_ADMIN_CODE);
+            await d.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+            await waitFn(d, () => !!window.userAuth && window.userAuth.isAnonymous && window.isFirebaseLoaded === true);
+            await sleep(1000);
+            emu.legacyPersistentAdmin = await d.evaluate(() => ({ anon: !!window.userAuth?.isAnonymous, isDbAdmin: window.isDbAdmin(), user: window.getActiveUser(),
+                navbar: !!document.getElementById('userDisplay'), loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none' }));
+        } finally {
+            if (rotated && a) emu.passwordRestoreFinally = await restorePassword(a);
+            await ctx.close();
+        }
+        out.pageErrors = ctxErrors;
+        return out;
+    },
+
+    // Faz 4 · J4 — self-approval iş kuralında (4.7 · EBYS-04, T6, M12), auditLogs (KJ-7, M14), rapor (EBYS-05), biyometrik
+    // yedek yolunun kapanması (4.5 · AUTH-03, M13). Onay yazmaları bellek içi / kayıtlı; günlük gerçek demoda bellekte, emülatörde
+    // gerçek yazılır ve admin olarak (başka bir sekmeden) geri okunur. Admin parola yeniden doğrulaması yalnız --emu.
+    async j4SelfApproval(page, browser) {
+        const src = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const TOKEN = 'J4-' + Date.now();
+        const out = {};
+        const sar = src('src/modules/self-approval-reporter.js');
+        out.static = {
+            noMonkeyPatch: !/originalConfirmRequest|originalApproveStep|_isSecured/.test(sar),
+            noSessionStorageLog: !/self_approval_audit_logs/.test(sar + src('src/utils/session-store.js')),
+            noFallbackPrompt: !/function _fallbackChallenge|\bprompt\(/.test(src('security-biometrics.js')),
+            guardInConfirmRequest: /guardSelfApproval/.test(src('script.js')),
+            guardInApproveStep: /guardSelfApproval/.test(src('src/modules/edm-workflow.js')),
+            backupLimitedToCollections: /_backupKeys/.test(src('src/modules/admin/admin-backup.js')),
+            reporterOnAdminPage: /self-approval-reporter\.js/.test(src('src/modules/admin/admin-main.js')),
+        };
+
+        // ── İki ortam: index, personel (anonim) oturumu ──
+        out.index = await page.evaluate(async TOKEN => {
+            const ft = window.__ft, o = {}, alerts = [];
+            const S = window.Schema;
+            const realAlert = window.showAppAlert, realModal = window.showRequestApprovalModal, realUpsert = window.upsertItem, realPrompt = window.prompt;
+            const orig = { po: window.data.purchaseOrders, req: window.data.requests };
+            window.showAppAlert = (m, t) => alerts.push(`${t}: ${m}`);
+            const audit = async () => ft.emulator ? null : window.__auditStub.splice(0);
+            try {
+                // Tek politika (Schema.isSelfApproval)
+                const me = { name: 'İsmail Kaya', code: '12345', id: 'p1' };
+                o.policy = {
+                    requestById: S.isSelfApproval({ actor: me, kind: 'request', record: { personelId: 'p1', personel: 'Başkası' } }),
+                    requestIdBeatsName: S.isSelfApproval({ actor: me, kind: 'request', record: { personelId: 'p2', personel: 'ismail kaya' } }),
+                    requestByNameTurkish: S.isSelfApproval({ actor: { name: 'İSMAİL  KAYA' }, kind: 'request', record: { personel: 'ismail kaya' } }),
+                    purchaseByCode: S.isSelfApproval({ actor: me, kind: 'purchase', record: { createdBy: '12345', createdByName: 'X' } }),
+                    purchaseByName: S.isSelfApproval({ actor: me, kind: 'purchase', record: { createdBy: 'unknown', talepEden: 'ismail kaya' } }),
+                    purchaseOther: S.isSelfApproval({ actor: me, kind: 'purchase', record: { createdBy: '99999', createdByName: 'Ali' } }),
+                };
+
+                // Personel kendi satın alma adımını onaylayamaz → engel + 'blocked', kayıt yazılmaz
+                const staff = { name: 'J4 Personel ' + ft.MARKER, code: '00004' };
+                window.setActiveUser(staff); window.currentUser = staff;
+                const po = { id: 'po_' + TOKEN, urun: TOKEN + ' Toner <b>', adet: 2, createdBy: staff.code, createdByName: staff.name, talepEden: staff.name, durum: 'Onay Bekliyor', akis: [],
+                    workflow: { id: 'wf_' + TOKEN, started: true, finished: false, currentStep: 0, currentState: 'initiation', history: [], steps: [{ user: staff.name, tip: 'Yönetici', status: 'pending' }] } };
+                window.data.purchaseOrders = [...(orig.po || []), po];
+                let upserts = 0; window.upsertItem = async () => { upserts++; return { written: 1 }; };
+                await window.approveStep(po.id);
+                o.staffOwnPurchase = { writes: upserts, stepStillPending: po.workflow.steps[0].status === 'pending', alert: alerts.splice(0).join(' | '), audit: await audit() };
+
+                // Personel kendi talebini onaylayamaz (onay penceresi hiç açılmaz); başkasının talebinde yönetici kapısı
+                let modals = 0; window.showRequestApprovalModal = async () => { modals++; return null; };
+                const rq = { id: 'rq_' + TOKEN, ürün: TOKEN + ' Mouse', adet: 1, personel: staff.name, durum: 'Beklemede' };
+                const other = { id: 'rq2_' + TOKEN, ürün: TOKEN + ' Klavye', adet: 1, personel: 'Başka Personel', durum: 'Beklemede' };
+                window.data.requests = [...(orig.req || []), rq, other];
+                await window.confirmRequest(rq.id);
+                o.staffOwnRequest = { modals, alert: alerts.splice(0).join(' | '), audit: await audit() };
+                await window.confirmRequest(other.id);
+                o.staffOthersRequest = { modals, alert: alerts.splice(0).join(' | '), audit: await audit() };
+
+                // Sarmalayıcı yok: window.confirmRequest / approveStep iş mantığının kendisi
+                o.noWrappers = window.confirmRequest._isSecured === undefined && window.approveStep._isSecured === undefined
+                    && /guardSelfApproval/.test(String(window.confirmRequest)) && /guardSelfApproval/.test(String(window.approveStep));
+
+                // M14: günlük uygulama koleksiyonu değil; saveData yazamaz
+                o.auditNotInCollections = !window.COLLECTIONS.includes('auditLogs');
+                o.saveDataRejectsAudit = await window.saveData('auditLogs', [{ id: 'x' }], { strict: false }).then(r => r === false, () => 'threw');
+
+                // 4.5 / M13: biyometrik kapalı, yedek prompt yok
+                let prompts = 0; window.prompt = () => { prompts++; return '12345'; };
+                o.biometric = { flag: window.AppModules.Session.ENABLE_BIOMETRIC_LOGIN, verify: await window.verifyBiometrics({ reason: 'test' }), prompts,
+                    helpersRemoved: typeof window.generateBiometricChallenge === 'undefined' && typeof window.authenticateWith2FA === 'undefined' };
+
+                // EBYS-05: ada göre değil oturuma göre — "Muhammed Cer" adlı personelde düğme yok
+                window.updateNavbarUI({ name: 'Muhammed Cer' });
+                o.reportButtonForNamedStaff = !!document.getElementById('btn-security-report');
+                alerts.length = 0;
+                await window.AppModules.SelfApproval.showReportModal();
+                o.reportRefusedForStaff = { modal: !!document.getElementById('self-approval-report-modal'), alert: alerts.splice(0).join(' | ') };
+            } finally {
+                window.showAppAlert = realAlert; window.showRequestApprovalModal = realModal; window.upsertItem = realUpsert; window.prompt = realPrompt;
+                window.data.purchaseOrders = orig.po; window.data.requests = orig.req;
+                document.getElementById('userDisplay')?.remove();
+            }
+            return o;
+        }, TOKEN);
+
+        if (!EMU) { out.emulator = 'skipped (admin parola doğrulaması ve günlüğün geri okunması yalnız --emu)'; return out; }
+
+        // ── Yalnız emülatör: admin kendi kaydı (index talep, admin.html satın alma), günlüğün kalıcılığı, rapor ──
+        const reauthFlow = async (p, fnName, arg, steps) => p.evaluate(async (fnName, arg, steps) => {
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const until = async (fn, ms = 8000) => { const t = Date.now(); while (Date.now() - t < ms) { if (fn()) return true; await sleep(100); } return false; };
+            const run = window[fnName](arg);
+            const log = [];
+            for (const st of steps) {
+                if (!(await until(() => !!document.getElementById('adminReauthModal')))) { log.push('no-modal'); break; }
+                if (st === 'cancel') { document.getElementById('adminReauthCancel').click(); log.push('cancelled'); continue; }
+                document.getElementById('adminReauthInput').value = st;
+                document.getElementById('adminReauthOk').click();
+                await until(() => !document.getElementById('adminReauthModal') || getComputedStyle(document.getElementById('adminReauthError')).display !== 'none');
+                const err = document.getElementById('adminReauthError');
+                log.push(document.getElementById('adminReauthModal') ? 'error: ' + err.textContent : 'closed');
+            }
+            await run;
+            return log;
+        }, fnName, arg, steps);
+
+        const emu = out.emu = {};
+        // 1 · index: admin kendi talebi → yanlış parola (ağda reddedilir) + vazgeç → 'cancelled'; ikinci deneme doğru → 'approved'
+        emu.indexAdminLogin = await page.evaluate(() => window.__ft.adminLogin());
+        emu.indexAdminRequest = await page.evaluate(async TOKEN => {
+            const ft = window.__ft, o = {}, alerts = [];
+            const realAlert = window.showAppAlert, realModal = window.showRequestApprovalModal, realApply = window.applyItemOps, origReq = window.data.requests;
+            const adminUser = { name: 'J4 Yönetici ' + ft.MARKER, code: 'ADMIN' };
+            window.setActiveUser(adminUser); window.currentUser = adminUser;
+            window.showAppAlert = (m, t) => alerts.push(`${t}: ${m}`);
+            window.showRequestApprovalModal = async () => ({ sn: 'SN-J4', source: null });
+            window.__j4Writes = 0; window.applyItemOps = async ops => { window.__j4Writes += ops.length; return { written: ops.length }; };
+            window.data.requests = [...(origReq || []), { id: 'rqa_' + TOKEN, ürün: TOKEN + ' Monitör', adet: 1, personel: adminUser.name, durum: 'Beklemede' }];
+            window.__j4Restore = () => { window.showAppAlert = realAlert; window.showRequestApprovalModal = realModal; window.applyItemOps = realApply; window.data.requests = origReq; };
+            window.__j4Alerts = alerts;
+            // navbar düğmesi admin oturumunda
+            window.updateNavbarUI(adminUser);
+            o.reportButton = !!document.getElementById('btn-security-report');
+            return o;
+        }, TOKEN);
+        emu.indexReauthCancel = await reauthFlow(page, 'confirmRequest', 'rqa_' + TOKEN, ['yanlis-parola-12345', 'cancel']);
+        emu.indexAfterCancel = await page.evaluate(() => ({ writes: window.__j4Writes, alert: window.__j4Alerts.splice(0).join(' | ') }));
+        emu.indexReauthOk = await reauthFlow(page, 'confirmRequest', 'rqa_' + TOKEN, ['emu01']);
+        emu.indexAfterOk = await page.evaluate(() => ({ writes: window.__j4Writes, alert: window.__j4Alerts.splice(0).join(' | ') }));
+        // tag'li metin günlüğe düşer (kural etiketi reddeder → "<" görsel eşdeğeriyle değişir)
+        emu.sanitizedWrite = await page.evaluate(TOKEN => window.appendAuditLog({ type: 'J4 test', refCol: 'requests', refId: 'x', item: '<img src=x> ' + TOKEN + ' etiket', qty: 1, actorName: 'J4', result: 'cancelled', reason: 'J4 sanitize testi' }), TOKEN);
+        // günlük değiştirilemez / silinemez (admin dahil)
+        emu.immutable = await page.evaluate(async id => {
+            const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+            const ref = fsm.doc(window.fireDb, window.COLLECTION_ROOT, 'auditLogs', 'items', id);
+            return { update: await fsm.updateDoc(ref, { result: 'approved' }).then(() => 'ALLOWED', e => e.code), delete: await fsm.deleteDoc(ref).then(() => 'ALLOWED', e => e.code) };
+        }, emu.sanitizedWrite.id);
+        await page.evaluate(() => { window.__j4Restore(); document.getElementById('userDisplay')?.remove(); });
+        emu.indexBackToAnonymous = await page.evaluate(() => window.__ft.backToAnonymous());
+
+        // 2 · admin.html (ayrı sekme / bağlam): giriş → kendi satın alma adımı → parola → 'approved'; rapor iki sayfanın kayıtlarını gösterir
+        const ctx = await browser.createBrowserContext();
+        const errs = [];
+        try {
+            const base = page.url().split('/index.html')[0];
+            const a = await ctx.newPage(); a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
+            await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+            await a.waitForFunction(() => window.isFirebaseLoaded === true && !!window.userAuth, { timeout: 20000 });
+            const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await nav;
+            await a.waitForFunction(() => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && window.approveStep, { timeout: 20000 });
+            emu.adminPage = await a.evaluate(TOKEN => {
+                const me = window.getActiveUser();
+                const po = { id: 'poa_' + TOKEN, urun: TOKEN + ' Yazıcı', adet: 1, createdBy: me.code, createdByName: me.name, talepEden: me.name, durum: 'Onay Bekliyor', akis: [],
+                    workflow: { id: 'wfa_' + TOKEN, started: true, finished: false, currentStep: 0, currentState: 'initiation', history: [], steps: [{ user: 'Başka Onaycı', tip: 'Yönetici', status: 'pending' }] } };
+                window.data.purchaseOrders = [...(window.data.purchaseOrders || []), po];
+                window.__j4Upserts = 0; window.upsertItem = async () => { window.__j4Upserts++; return { written: 1 }; };
+                window.__j4Alerts = []; window.showAppAlert = (m, t) => window.__j4Alerts.push(`${t}: ${m}`);
+                return { identity: me.name, reportButton: !!document.getElementById('btn-security-report') };
+            }, TOKEN);
+            emu.adminReauthOk = await reauthFlow(a, 'approveStep', 'poa_' + TOKEN, ['emu01']);
+            emu.adminAfterOk = await a.evaluate(TOKEN => ({ upserts: window.__j4Upserts, stepApproved: window.data.purchaseOrders.find(p => p.id === 'poa_' + TOKEN)?.workflow.steps[0].status, alert: window.__j4Alerts.splice(0).join(' | ') }), TOKEN);
+
+            // Rapor: düğme → tek seferlik okuma; bu koşunun kayıtları (index personel + index admin + admin.html) görünür
+            emu.report = await a.evaluate(async TOKEN => {
+                const sleep = ms => new Promise(r => setTimeout(r, ms));
+                document.getElementById('btn-security-report').click();
+                const t = Date.now(); while (Date.now() - t < 8000 && !document.querySelector('#sarContent[data-count]')) await sleep(150);
+                const rows = [...document.querySelectorAll('#self-approval-report-modal tbody tr')].map(tr => tr.textContent.replace(/\s+/g, ' ').trim()).filter(t => t.includes(TOKEN));
+                const logs = (await window.fetchAuditLogs(200)).filter(l => String(l.item || '').includes(TOKEN));
+                return {
+                    rows: rows.length,
+                    badges: [...new Set(rows.map(r => (r.match(/Engellendi|Onaylandı \(parola doğrulandı\)|Vazgeçildi \/ onay verilmedi/) || ['?'])[0]))],
+                    records: logs.map(l => ({ result: l.result, refCol: l.refCol, page: l.page, authKind: l.authKind, actor: (l.actorName || '').replace(/ __flowtest__/, ''), item: l.item.replace(TOKEN, 'T'), reason: l.reason, hasTs: !!(l.ts && l.ts.toDate), keys: Object.keys(l).filter(k => k !== '_docId').sort().join(',') })),
+                    injectedImgs: document.querySelectorAll('#self-approval-report-modal img').length,
+                };
+            }, TOKEN);
+        } finally {
+            await ctx.close();
+        }
+        out.pageErrors = errs;
+        return out;
+    },
+
     async hotfixLoginFocus(page, browser) {
         const url = page.url();
         const probe = async (beforeEnable) => {
@@ -2239,10 +2949,174 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 4 · J6 — J5'te sürümü sabitlenen / değişen ve SRI eklenen CDN kütüphaneleri iki sayfada gerçekten çalışıyor mu (Ek A:
+    // Excel, PDF raporu, grafikler, VIP sürükle-bırak, e-posta). Dosya indirilmez: çıktılar bellekte üretilir. Yazma yok.
+    async j6CdnLibraries(page, browser) {
+        const probe = () => (async () => {
+            const o = {};
+            o.globals = { XLSX: typeof window.XLSX, jsPDF: typeof (window.jspdf && window.jspdf.jsPDF), Chart: typeof window.Chart, LZString: typeof window.LZString,
+                emailjs: typeof window.emailjs, Sortable: typeof window.Sortable };
+            try {
+                const doc = new window.jspdf.jsPDF();
+                doc.autoTable({ head: [['Ürün', 'Adet']], body: [['Laptop', '2'], ['Mouse', '5']] });
+                o.pdfAutoTable = { bytes: doc.output('arraybuffer').byteLength, finalY: Math.round((doc.lastAutoTable || doc.autoTable.previous || {}).finalY || 0) };
+            } catch (e) { o.pdfAutoTable = 'ERR ' + e.message; }
+            try {
+                const wb = window.XLSX.utils.book_new();
+                window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet([{ ürün: 'Laptop', adet: 2 }]), 'Test');
+                o.xlsxBytes = window.XLSX.write(wb, { type: 'array', bookType: 'xlsx' }).byteLength;
+            } catch (e) { o.xlsxBytes = 'ERR ' + e.message; }
+            try { o.lzRoundTrip = window.LZString.decompressFromUTF16(window.LZString.compressToUTF16('envanter')) === 'envanter'; } catch (e) { o.lzRoundTrip = 'ERR ' + e.message; }
+            o.charts = window.Chart && window.Chart.instances ? Object.keys(window.Chart.instances).length : null;
+            o.fontAwesome = getComputedStyle(document.querySelector('.fas') || document.body, '::before').fontFamily || '';
+            o.fontAwesome = /Font Awesome/i.test(o.fontAwesome);
+            return o;
+        })();
+        const out = {};
+        out.index = await page.evaluate(probe);
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = [];
+        admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        out.admin = await admin.evaluate(probe);
+        out.admin.sortableGrid = await admin.evaluate(() => !!document.querySelector('.vip-grid, #vipGrid, [data-sortable]') || typeof window.Sortable === 'function');
+        out.adminPageErrors = errs;
+        await admin.browserContext().close();
+        return out;
+    },
+
+    // Faz 4 · J6 — Ek A'nın Faz 4'ün dokunduğu oturum / bakım / VIP maddeleri uçtan uca (önceki senaryolar bunları birim
+    // düzeyinde sınıyordu). İki ortam: gerçek personel girişi → modal + yazma → çıkış → tekrar giriş → zaman aşımı → tekrar
+    // giriş; mobil otomatik kart görünümü. Yalnız emülatör (kural 7: VIP komutları yalnız emülatörde): yönetici mesajı bir kez,
+    // force logout bir kez + tekrar giriş, bakım modu (personel kilitlenir / admin kilitlenmez / bakım ekranından admin girişi).
+    async j6EkASession(page, browser) {
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const TOKEN = 'J6-' + Date.now();
+        const base = page.url().split('/index.html')[0], q = EMU ? '?emu=1' : '';
+        // Gezinmeye dayanıklı bekleme (sayfa yeniden yüklenirken evaluate hata verebilir)
+        const settle = async (p, fn, ms = 25000, arg) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch (e) { } await sleep(300); } return false; };
+        const errs = [];
+        const open = async (ctx, url) => { const p = await ctx.newPage(); p.on('pageerror', e => errs.push(e.message)); p.on('dialog', d => d.dismiss()); await p.goto(url, { waitUntil: 'domcontentloaded' }); return p; };
+        const ready = p => settle(p, () => window.isFirebaseLoaded === true && !!window.userAuth && (window.data.personel || []).length > 0);
+        const staffLogin = (p, code) => p.evaluate(async code => {
+            window._dx._b['access-val-node'] = code; await window.handleLogin();
+            const inv = document.getElementById('inventory-screen');
+            return { loggedIn: document.body.classList.contains('logged-in'), loginHidden: getComputedStyle(document.getElementById('loginModal')).display === 'none',
+                unblurred: !inv.style.filter, user: (window.getActiveUser() || {}).name };
+        }, code);
+        const modalAndWrite = (p, MARKER) => p.evaluate(async MARKER => {
+            window.openRequestModal(false);
+            const modalOpens = getComputedStyle(document.getElementById('requestModal')).display !== 'none';
+            window.closeRequestModal();
+            const write = await window.appendItem('requests', { id: window.makeId(), ürün: 'J6 ' + MARKER, adet: 1, durum: 'Beklemede', personel: (window.getActiveUser() || {}).name }).then(() => 'ok', e => e.code || e.message);
+            return { modalOpens, write };
+        }, MARKER);
+        const loginScreen = p => p.evaluate(() => ({ loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none', activeUser: !!window.getActiveUser(), anon: !!(window.userAuth && window.userAuth.isAnonymous) }));
+
+        const out = {};
+        const sctx = await browser.createBrowserContext();
+        let s = await open(sctx, `${base}/index.html${q}`);
+        let staff = null;
+        try {
+            await ready(s);
+            staff = await s.evaluate(() => { const p = (window.data.personel || []).find(x => x && x.code && x.name && !/Muhammed Cer|^Admin$/.test(x.name)); return p ? { code: String(p.code), id: p.id != null ? String(p.id) : null, name: p.name } : null; });
+            if (!staff) return { skipped: 'personel kaydı yok' };
+            out.staff = staff.name;
+
+            // Ek A · Giriş/Oturum: giriş → modal + yazma → çıkış → tekrar giriş → modallar ve yazma
+            out.login = await staffLogin(s, staff.code);
+            out.afterLogin = await modalAndWrite(s, MARKER);
+            await s.evaluate(() => window.handleLogout('manual'));
+            out.logout = { reachedLogin: await settle(s, () => getComputedStyle(document.getElementById('loginModal')).display !== 'none' && window.isFirebaseLoaded === true), ...(await loginScreen(s)),
+                syncRunning: await s.evaluate(() => window.getSyncHealth().running) };
+            out.relogin = await staffLogin(s, staff.code);
+            out.afterRelogin = await modalAndWrite(s, MARKER);
+
+            // 3 dk zaman aşımı (süre kısaltılır) → giriş ekranı → tekrar giriş → modallar
+            await s.evaluate(() => { window.__j6Cfg = { ...window.SessionConfig }; window.SessionConfig.WAREHOUSE_TIME = 2500; window.SessionConfig.WARNING_BEFORE = 1000; window.startSessionTimer(); });
+            await sleep(4500);
+            out.timeout = await loginScreen(s);
+            await s.evaluate(() => Object.assign(window.SessionConfig, window.__j6Cfg));
+            out.timeoutRelogin = { ...(await staffLogin(s, staff.code)), ...(await modalAndWrite(s, MARKER)) };
+
+            // Mobil (≤768 px) otomatik kart görünümü
+            await s.setViewport({ width: 390, height: 844 });
+            await sleep(800);
+            out.mobileCards = await s.evaluate(() => { if (typeof window.switchTab === 'function') window.switchTab('b1'); return { active: !!(window._cardViewActive && window._cardViewActive.b1), visible: getComputedStyle(document.getElementById('cardViewB1')).display !== 'none' }; });
+            await s.setViewport({ width: 1440, height: 900 });
+
+            if (!EMU) { out.emulator = 'skipped (VIP komutları ve bakım modu yalnız --emu · kural 7)'; return out; }
+
+            // ── Yalnız emülatör: admin (ayrı bağlam, gerçek giriş yolu) ──
+            const actx = await browser.createBrowserContext();
+            try {
+                const a = await open(actx, `${base}/index.html?emu=1`);
+                await ready(a);
+                const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+                await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+                await nav;
+                await settle(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && typeof window.vipToggleKillSwitch === 'function');
+                const target = { id: staff.id || staff.code, name: staff.name, demo: false };
+
+                // Yönetici mesajı hedefe bir kez düşer (yeniden yüklemede tekrar gösterilmez)
+                await a.evaluate((target, TOKEN) => { _currentTargetUser = target; document.getElementById('uapSystemMessage').value = 'J6 mesaj ' + TOKEN; return window.vipSendSystemMessage(); }, target, TOKEN);
+                out.messageShown = await settle(s, t => document.body.innerText.includes(t), 10000, TOKEN);
+                await s.reload({ waitUntil: 'domcontentloaded' });
+                await ready(s); await sleep(4000);
+                out.messageNotRepeatedAfterReload = !(await s.evaluate(t => document.body.innerText.includes(t), TOKEN));
+
+                // Force logout: hedef bir kez çıkar, tekrar girebilir (yeniden atılmaz)
+                await staffLogin(s, staff.code);
+                await a.evaluate(target => { _currentTargetUser = target; return window.vipForceLogout(); }, target);
+                out.forceLogout = { kicked: await settle(s, () => getComputedStyle(document.getElementById('loginModal')).display !== 'none' && !window.getActiveUser(), 10000) };
+                // çıkış dinleyicileri yeniden başlatır; personel listesi gelene kadar giriş 'Veriler henüz hazır değil' der (bilinen davranış)
+                out.forceLogout.dataReadyAgain = await ready(s);
+                out.forceLogout.relogin = await staffLogin(s, staff.code);
+                await sleep(4000);
+                out.forceLogout.stillLoggedInAfter4s = await s.evaluate(() => !!window.getActiveUser() && document.body.classList.contains('logged-in'));
+                out.forceLogout.adminSelfTargetRefused = await a.evaluate(async () => { const me = window.getActiveUser(); _currentTargetUser = { id: me.code || me.name, name: me.name, demo: false }; const alerts = []; const real = window.showAppAlert; window.showAppAlert = (m) => alerts.push(m); await window.vipForceLogout(); window.showAppAlert = real; return { refused: alerts.some(m => /Kendi oturumunuzu/.test(m)), stillAdmin: window.isDbAdmin() }; });
+
+                // Bakım modu: personel bakım ekranına alınır, admin alınmaz; bakım ekranından admin girişi
+                await a.evaluate(() => { window.showCustomConfirm = async () => true; window.alert = () => { }; return window.vipToggleKillSwitch(); });
+                out.maintenance = {
+                    staffLocked: await settle(s, () => !!document.getElementById('maintenanceOverlay'), 20000),
+                    adminNotLocked: await a.evaluate(() => !document.getElementById('maintenanceOverlay') && window.isDbAdmin() && localStorage.getItem('system_maintenance_mode') !== 'true'),
+                };
+                await s.evaluate(code => { document.getElementById('maintenanceForm').style.display = 'block'; document.getElementById('maintenanceCode').value = code; window.adminBypassMaintenance(); }, EMU_ADMIN_CODE).catch(() => { });
+                out.maintenance.bypassToAdmin = await settle(s, () => location.pathname.endsWith('admin.html') && window.isDbAdmin && window.isDbAdmin() && !document.getElementById('maintenanceOverlay'), 25000);
+            } finally {
+                // bakım modunu her koşulda kapat (emülatör) ve ana test sayfasının yeniden yüklenmesini bekle
+                try {
+                    const a2 = (await actx.pages()).find(p => p.url().includes('admin.html'));
+                    if (a2) await a2.evaluate(async () => {
+                        const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+                        await fsm.setDoc(window.systemConfigRef('admin_settings'), { maintenance: false }, { merge: true });
+                    });
+                } catch (e) { out.maintenanceResetError = e.message; }
+                await actx.close();
+            }
+            // Bakım kapanınca personel ekranı normale döner (yeni oturum, bayrak yok)
+            const p2 = await open(sctx, `${base}/index.html?emu=1`);
+            await ready(p2); await sleep(1500);
+            out.maintenance = out.maintenance || {};
+            out.maintenance.normalAfterOff = await p2.evaluate(() => !document.getElementById('maintenanceOverlay') && localStorage.getItem('system_maintenance_mode') !== 'true');
+            // Ana test sayfası bakımda iki kez yeniden yüklendi → yardımcıları yeniden kur
+            out.mainPageRecovered = await settle(page, () => !document.getElementById('maintenanceOverlay') && window.isFirebaseLoaded === true && !!window.userAuth, 30000);
+            await installHelpers(page);
+        } finally {
+            await sctx.close();
+            out.pageErrors = errs;
+        }
+        return out;
+    },
 };
 
 (async () => {
-    const wanted = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(SCENARIOS);
+    const names = process.argv.slice(2).filter(a => !a.startsWith('--'));
+    const wanted = names.length ? names : Object.keys(SCENARIOS);
+    if (EMU) await fetch('http://127.0.0.1:8080/').catch(() => { throw new Error('Emülatör çalışmıyor: önce npm run emu'); });
     const server = await startServer();
     const browser = await puppeteer.launch({ headless: true, executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' });
     const page = await browser.newPage();
@@ -2251,7 +3125,7 @@ const SCENARIOS = {
     page.on('dialog', d => d.dismiss());
     let failed = false;
     try {
-        await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: 'domcontentloaded' });
+        await page.goto(`http://127.0.0.1:${PORT}/index.html${EMU ? '?emu=1' : ''}`, { waitUntil: 'domcontentloaded' });
         await new Promise(r => setTimeout(r, 7000));
         await installHelpers(page);
         const pre = await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
@@ -2269,6 +3143,10 @@ const SCENARIOS = {
             console.log(`\npost-cleanup removed: ${post}`);
         } catch (e) { console.log('cleanup error: ' + e.message); }
         console.log('pageerrors:', pageErrors);
+        await new Promise(r => setTimeout(r, 500));   // son ihlal raporlarının ulaşması için
+        const cs = csp.summary();
+        console.log(`csp violations: ${cs.count}${cs.count ? ' ' + JSON.stringify(cs.distinct) + ' ' + JSON.stringify(cs.samples, null, 1) : ''}`);
+        if (cs.count) failed = true;   // KJ-4: tam suite 0 ihlal
         await browser.close();
         server.close();
     }

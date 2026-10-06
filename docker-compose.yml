@@ -1,46 +1,33 @@
 # =============================================================================
-# Antigravity Frontend — Docker Compose (v3.1 ESM Frontend)
+# Medipol Envanter — Docker Compose (kılavuz: DOCKER_GUIDE.md)
 #
-# [WHY]: docker-compose.yml provides a declarative, reproducible way to run
-#         the container without memorizing long `docker run` commands.
-# [HOW]: Defines one service (antigravity-frontend), maps host:8080 to
-#         container:80, enforces restart policy, and attaches named volumes
-#         for Nginx logs so they are visible from the host.
+# [WHY]: Faz 4 · J5 — host portu 8080'di; Firestore emülatörüyle (8080) çakışıyordu. Sağlık kontrolü "localhost"u IPv6'ya
+#        çözebiliyordu (nginx yalnız IPv4 dinler).
+# [HOW]: Host portu HOST_PORT ile (varsayılan 8088). CSP_CONNECT_EXTRA yalnız yerel emülatörle geliştirmede doldurulur.
+# DİKKAT: Uygulama veritabanı kökünü ALAN ADINA göre seçer: localhost / 127.0.0.1 / "demo" içeren ad → inventory_demo,
+#         diğer her ad (sunucu IP'si dahil) → CANLI kök lifeserver_master. Bkz. DOCKER_GUIDE.md §0.
 # =============================================================================
 
 services:
-  antigravity-frontend:
+  envanter:
     build:
       context: .
       dockerfile: Dockerfile
-
-    container_name: antigravity-frontend
-
-    # Map host port 8080 → container port 80
-    # Access the app at: http://localhost:8080
+    image: medipol-envanter:${IMAGE_TAG:-local}
+    container_name: medipol-envanter
     ports:
-      - "8080:80"
-
-    # Automatically restart the container unless it was manually stopped
+      - "${HOST_PORT:-8088}:80"
+    environment:
+      CSP_CONNECT_EXTRA: "${CSP_CONNECT_EXTRA:-}"
     restart: unless-stopped
-
-    # Named volume for Nginx logs — persists logs across container restarts
-    # and makes them inspectable from the host at ./logs/nginx/
     volumes:
       - nginx_logs:/var/log/nginx
-
-    # Health check: ensures the container is actually serving requests
     healthcheck:
-      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/" ]
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80/" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
-
-    labels:
-      - "com.antigravity.service=frontend"
-      - "com.antigravity.version=3.1"
-      - "com.antigravity.env=production"
 
 volumes:
   nginx_logs:

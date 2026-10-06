@@ -10,6 +10,7 @@ import '../edm-workflow.js';
 import './admin-purchase-render.js';
 import './inventory-management.js';
 import './admin-router.js';
+import '../self-approval-reporter.js';   // J4: Güvenlik Raporu iki sayfada (EBYS-05)
 
 window.AppModules = window.AppModules || {};
 

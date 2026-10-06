@@ -1,0 +1,6 @@
+# Faz 4 · J5: Docker/nginx yapılandırması Linux konteynerinde okunur; Windows checkout'unda da LF kalsın.
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+.dockerignore text eol=lf
+nginx/** text eol=lf
+*.sh text eol=lf

@@ -64,7 +64,6 @@
         localStorage.removeItem('admin_auth');
         localStorage.removeItem('launchpadBypassed');
         sessionStorage.removeItem('adminVizesi');
-        sessionStorage.removeItem('self_approval_audit_logs');
         window.currentUser = null;
     }
 
@@ -78,10 +77,68 @@
         return !!(u && !u.isAnonymous && u.email === ADMIN_EMAIL);
     }
 
+    // [WHY]: Faz 4 · J1 (M1, M5) — Rules v2 personelin silme ve admin koleksiyonu yazmalarını reddediyor; birçok fonksiyon
+    //        yalnız arayüzde kapılıydı (konsoldan ya da kapısız bir düğmeden çağrılınca kural reddi genel hata olarak düşüyordu).
+    // [HOW]: Fonksiyonun başında tek kapı: admin oturumu değilse anlaşılır uyarı + false. İki sayfada da yüklü (auth-engine yalnız index'te).
+    function requireDbAdmin(action) {
+        const check = typeof window.isDbAdmin === 'function' ? window.isDbAdmin : isDbAdmin;   // tek tanım: window.isDbAdmin
+        if (check()) return true;
+        const msg = `🔒 ${action || 'Bu işlem'} yönetici oturumu gerektirir.`;
+        if (typeof window.showAppAlert === 'function') window.showAppAlert(msg, 'error');
+        return false;
+    }
+
+    // ─── Yönetici vizesi (localStorage.admin_auth) ────────────────────────────────────────────────
+    // [WHY]: Faz 4 · J3 (AUTH-06, T4) — vize biçimi 5 dosyada ayrı ayrı okunup yazılıyordu; timer.js süresi DOLMUŞ vizeyi
+    //        etkinlikle uzatıyordu (F5 / fare hareketi kilitli paneli canlandırıyordu).
+    // [HOW]: Biçimi yalnız bu dosya bilir. Vize yetki DEĞİLDİR (yetki = isDbAdmin); yalnız admin oturumunun süresidir.
+    const ADMIN_VISA_KEY = 'admin_auth';
+    const adminSessionMs = () => (window.SessionConfig && window.SessionConfig.ADMIN_LOCK_TIME) || 10 * 60 * 1000;
+
+    // Kalan süre (ms); vize yoksa ya da okunamıyorsa null. 0 veya negatif = süresi dolmuş.
+    function getAdminVisaRemaining() {
+        const raw = localStorage.getItem(ADMIN_VISA_KEY);
+        if (!raw) return null;
+        try {
+            const expiry = Number(JSON.parse(raw).expiry);
+            return Number.isFinite(expiry) ? expiry - Date.now() : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function hasValidAdminVisa() {
+        const left = getAdminVisaRemaining();
+        return left !== null && left > 0;
+    }
+
+    function grantAdminVisa() {
+        localStorage.setItem(ADMIN_VISA_KEY, JSON.stringify({ expiry: Date.now() + adminSessionMs() }));
+    }
+
+    // Yalnız GEÇERLİ vize uzar; süresi dolmuş ya da olmayan vize false döner (çağıran oturumu sonlandırır).
+    function extendAdminVisa(ms) {
+        if (!hasValidAdminVisa()) return false;
+        localStorage.setItem(ADMIN_VISA_KEY, JSON.stringify({ expiry: Date.now() + (ms || adminSessionMs()) }));
+        return true;
+    }
+
+    function clearAdminVisa() {
+        localStorage.removeItem(ADMIN_VISA_KEY);
+    }
+
+    // [WHY]: Faz 4 · J4 (4.5 · K2, AUTH-03) — biyometrik adım kayıt akışı olmadan çalışıyordu (bir cihaz sınıfında girişi
+    //        engelliyor, diğerlerinde her 5 karakteri kabul eden prompt'a düşüyordu). Bayrak auth-engine içinde ayrıca tanımlıydı.
+    // [HOW]: TEK bayrak burada; auth-engine ve security-biometrics buradan okur. Gerçek WebAuthn kaydı (K2-b) bu fazda yok —
+    //        sunucusuz ortamda yalnız bir UX kapısı olurdu (doğrulama sonucu istemcide, atlatılabilir).
+    const ENABLE_BIOMETRIC_LOGIN = false;
+
     const Session = {
-        getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin,
+        ENABLE_BIOMETRIC_LOGIN,
+        getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, requireDbAdmin,
         maskUserData, unmaskUserData, ADMIN_EMAIL,
-        get ADMIN_SESSION_MS() { return (window.SessionConfig && window.SessionConfig.ADMIN_LOCK_TIME) || 10 * 60 * 1000; },
+        getAdminVisaRemaining, hasValidAdminVisa, grantAdminVisa, extendAdminVisa, clearAdminVisa,
+        get ADMIN_SESSION_MS() { return adminSessionMs(); },
     };
 
     window.AppModules = window.AppModules || {};
@@ -91,4 +148,5 @@
     window.clearSession = clearSession;
     window.isAppLoggedIn = isAppLoggedIn;
     window.isDbAdmin = isDbAdmin;
+    window.requireDbAdmin = requireDbAdmin;
 })();

@@ -1,3 +1,9 @@
+// [WHY]: Faz 4 · J4 (M14) — denetim günlüğü (auditLogs) değiştirilemez olmalı; yedek dosyasındaki her anahtar geri yüklemede
+//        Firestore'a yazılıyordu (elle eklenmiş bir "auditLogs" dizisi günlüğe sahte kayıt taşıyabilirdi).
+// [HOW]: Yedek al / içe aktar / geri yükle yalnız uygulama koleksiyonlarını (firebase-handler COLLECTIONS) kapsar; günlük ve
+//        bilinmeyen anahtarlar atlanır. (saveData zaten yalnız COLLECTIONS'ı yazar.)
+const _backupKeys = obj => Object.keys(obj || {}).filter(k => (window.COLLECTIONS || []).includes(k));
+
 window.exportFirebaseBackup = async function() {
 
     if (!window.checkIsAdmin()) {
@@ -14,7 +20,7 @@ window.exportFirebaseBackup = async function() {
         };
 
         // tüm koleksiyonları al
-        Object.keys(window.data).forEach(key => {
+        _backupKeys(window.data).forEach(key => {
             backup.data[key] = window.data[key];
         });
 
@@ -68,7 +74,7 @@ window.importFirebaseBackup = async function(event) {
 
             if (!confirm("Tüm veriler geri yüklenecek. Emin misiniz?")) return;
 
-            Object.keys(backup.data).forEach(key => {
+            _backupKeys(backup.data).forEach(key => {
                 window.data[key] = backup.data[key];
             });
 
@@ -117,7 +123,7 @@ window.restoreFirebaseBackup = async function() {
 
         const data = window._backupTemp;
 
-        for (const key in data) {
+        for (const key of _backupKeys(data)) {
 
             const col = data[key];
 

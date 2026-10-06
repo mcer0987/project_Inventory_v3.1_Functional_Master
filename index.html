@@ -6,18 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Envanter Takip Sistemi</title>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js" integrity="sha384-0d+Gr7vM4Drod8E3hXKgciWJSWbjD/opKLLygI9ktiWbuvlDwQLzU46wJ9s5gsp7" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
     <!-- PDF -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" integrity="sha384-fCAW/rDWORTbQXSiB7mOg0QtQ5c+r0f544y6XoKjuVva0nMBlCpNUjiFeG5iMdS3" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3.12.1/dist/email.min.js" integrity="sha384-VDbnsk/qjpIVHPQMkJiROI+vW/7cw0k8TFYVLUabm7EWoLEDwcXh09XQ6gQ86Y0B" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script>
         (function () {
             emailjs.init("Wx26W2WPWjJaHu1yv");
@@ -25,7 +23,7 @@
     </script>
 
     <!-- FontAwesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha384-PPIZEGYM1v8zp5Py7UjFb79S58UeqCL9pYVnVPURKEqvioPROaVAJKKLzvH2rDnI" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="dark-theme.css">
@@ -188,7 +186,7 @@
                         <div id="maintenanceAdminBox" style="margin-top: 20px;">
                             <button onclick="document.getElementById('maintenanceForm').style.display='block'; this.style.display='none';" style="background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.2s;">🛡️ Yönetici Girişi</button>
                             <div id="maintenanceForm" style="display: none;">
-                                <input type="password" id="maintenanceCode" placeholder="Giriş Kodu" onkeypress="if(event.key === 'Enter') window.adminBypassMaintenance();" style="background: #1e293b; border: 1px solid #475569; color: white; padding: 10px; border-radius: 8px; font-size: 1rem; width: 180px; text-align: center; outline: none; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;" maxlength="5">
+                                <input type="password" id="maintenanceCode" placeholder="Yönetici parolası" autocomplete="current-password" onkeypress="if(event.key === 'Enter') window.adminBypassMaintenance();" style="background: #1e293b; border: 1px solid #475569; color: white; padding: 10px; border-radius: 8px; font-size: 1rem; width: 180px; text-align: center; outline: none; margin-bottom: 10px; display: block; margin-left: auto; margin-right: auto;">
                                 <button onclick="window.adminBypassMaintenance()" style="background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.2s;">Giriş Yap</button>
                             </div>
                         </div>
@@ -470,7 +468,7 @@
                 </button>
 
                 <label for="fileInput" class="uab-btn uab-btn-purple"
-                    onclick="if(validateAdminAction()) document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
+                    onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
                     <i class="fas fa-file-excel"></i> Import
                 </label>
 
@@ -551,7 +549,7 @@
                 </button>
 
                 <label for="fileInput" class="uab-btn uab-btn-purple"
-                    onclick="document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
+                    onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
                     <i class="fas fa-file-excel"></i> Import
                 </label>
             </div>
@@ -1203,12 +1201,12 @@
                 <div class="login-inner-body">
                     <div class="login-icon-box">📦</div>
                     <h2 id="loginModalTitle">Envanter Yönetimi</h2>
-                    <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Erişim sağlamak için 5 haneli
-                        kodu giriniz.</p>
+                    <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Erişim sağlamak için personel kodunuzu
+                        ya da yönetici parolasını giriniz.</p>
 
 <form id="loginForm" onsubmit="event.preventDefault(); handleLogin(event);" autocomplete="off">
                             <div class="modern-input-group">
-                                <input type="text" id="access-val-node" required maxlength="5" placeholder="•••••"
+                                <input type="text" id="access-val-node" required placeholder="Kod / parola"
                                     autocomplete="off">
                                 <script>
                                     // [R-IMM]

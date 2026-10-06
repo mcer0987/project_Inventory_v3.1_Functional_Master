@@ -1018,20 +1018,20 @@ window.renderCriticalStockTable = function () {
         return `
             <tr class="align-middle">
                 <td>
-                    <div class="fw-bold text-truncate" title="${data.name}">${data.name}</div>
-                    <small class="text-muted d-block">${data.location}</small>
+                    <div class="fw-bold text-truncate" title="${escapeHtml(data.name)}">${escapeHtml(data.name)}</div>
+                    <small class="text-muted d-block">${escapeHtml(data.location)}</small>
                 </td>
                 <td class="text-center">
-                    <span class="fw-bold ${data.mevcut <= 1 ? 'text-danger' : 'text-dark'}">${data.mevcut}</span>
-                    <span class="text-muted small">/ ${data.limit}</span>
+                    <span class="fw-bold ${data.mevcut <= 1 ? 'text-danger' : 'text-dark'}">${escapeHtml(data.mevcut)}</span>
+                    <span class="text-muted small">/ ${escapeHtml(data.limit)}</span>
                 </td>
-                <td><div class="d-grid"><div class="${statusClass}">${statusText}</div></div></td>
+                <td><div class="d-grid"><div class="${statusClass /* xss-ok: üç sabit sınıf */}">${statusText /* xss-ok: üç sabit metin */}</div></div></td>
                 <td class="text-end">
                     <div class="action-buttons">
                         <button class="btn-action btn-buy" title="Satın Al"><i class="fas fa-shopping-cart"></i></button>
                         <button class="btn-action btn-mail" title="Bildirim Gönder"><i class="fas fa-envelope"></i></button>
                         <button class="btn-action btn-passive" title="Pasif Yap"><i class="fas fa-eye-slash"></i></button>
-                        <button class="btn-action btn-danger" onclick="window.deleteCriticalGroup('${data.key}')" title="Ürünü Sil"><i class="fas fa-trash"></i></button>
+                        <button class="btn-action btn-danger" data-action="deleteCriticalGroup" data-key="${escapeHtml(data.key)}" title="Ürünü Sil"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
             </tr>`;
@@ -1041,6 +1041,8 @@ window.renderCriticalStockTable = function () {
     tableBody.innerHTML = rows.length
         ? rows.join('')
         : '<tr><td colspan="4" class="text-center p-4 text-muted">Stoklar ideal seviyede.</td></tr>';
+    // [WHY]: Faz 4 · J2 — grup anahtarı (ürün/tür/durum adlarından) onclick'e kaçışsız gömülüyordu. [HOW]: data-key + delegation.
+    window.bindActions(tableBody, { deleteCriticalGroup: el => window.deleteCriticalGroup(el.dataset.key) });
 };
 
 window.deleteCriticalGroup = async function (groupKey) {
@@ -1403,8 +1405,8 @@ window.updateProductTypeDropdowns = function () {
             const label = isDemirbas ? 'Demirbaş' : 'Sarf';
 
             // Senin orijinal yapın:
-            select.innerHTML += `<option value="${name}" data-is-demirbas="${isDemirbas}">
-                ${name} (${label})
+            select.innerHTML += `<option value="${escapeHtml(name)}" data-is-demirbas="${isDemirbas}">
+                ${escapeHtml(name)} (${label})
             </option>`;
         });
 
@@ -1442,9 +1444,10 @@ window.renderCustomWatchDashboard = function () {
 
     const watchedItems = [];
 
+    // Faz 4 · J2: kart depo bilgisini de taşır (bugüne kadar her kart "B1" gösteriyordu) — eylemler data-depo + data-id ile.
     ['b1', 'b2'].forEach(depo => {
         (window.data?.[depo] || []).forEach(item => {
-            if (item.isWatched) watchedItems.push(item);
+            if (item.isWatched) watchedItems.push({ ...item, __depo: depo });
         });
     });
 
@@ -1469,8 +1472,11 @@ window.renderCustomWatchDashboard = function () {
         const isLow = qty <= limit;
         const statusColor = isLow ? '#e74c3c' : '#2ecc71';
 
+        // [WHY]: Faz 4 · J2 — kaydın tamamı JSON olarak onclick'e gömülüyordu; yalnız '"' kaçırıldığı için "&quot;" içeren bir
+        //        alan JS dizgesinden çıkabiliyordu. [HOW]: data-depo + data-id; eylem kaydı id ile window.data'dan çözer.
+        const ref = `data-depo="${escapeHtml(item.__depo)}" data-id="${escapeHtml(item.id ?? '')}"`;
         html += `
-        <div class="watch-card" onclick="openWatchDetail(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+        <div class="watch-card" data-action="watchDetail" ${ref /* xss-ok: escapeHtml ile kurulmuş nitelikler */}>
 
             <div class="watch-header">
                 <div class="title">${escapeHtml(item.ürün)}</div>
@@ -1478,7 +1484,7 @@ window.renderCustomWatchDashboard = function () {
             </div>
 
             <div class="meta">
-                📦 ${item.depo || 'B1'} | 🏷 ${item.marka || '-'}
+                📦 ${escapeHtml(String(item.__depo).toUpperCase())} | 🏷 ${escapeHtml(item.marka || '-')}
             </div>
 
             <div class="progress-bar">
@@ -1495,8 +1501,8 @@ window.renderCustomWatchDashboard = function () {
 
             ${isLow ? `
                 <div class="quick-actions">
-                    <span onclick="event.stopPropagation(); requestPurchase(${JSON.stringify(item).replace(/"/g, '&quot;')})">📦 Talep Et</span>
-                    <span onclick="event.stopPropagation(); addToOrderList(${JSON.stringify(item).replace(/"/g, '&quot;')})">🛒 Sipariş</span>
+                    <span data-action="watchPurchase" ${ref /* xss-ok: escapeHtml ile kurulmuş nitelikler */}>📦 Talep Et</span>
+                    <span data-action="watchOrder" ${ref /* xss-ok: escapeHtml ile kurulmuş nitelikler */}>🛒 Sipariş</span>
                 </div>
                 ` : ''
             }
@@ -1506,6 +1512,13 @@ window.renderCustomWatchDashboard = function () {
     });
 
     cardContainer.innerHTML = html;
+    // İç içe eylemde yalnız en içteki çalışır (eski event.stopPropagation davranışı).
+    const watched = el => window.findItem(el.dataset.depo, el.dataset.id);
+    window.bindActions(cardContainer, {
+        watchDetail: el => window.openWatchDetail(watched(el)),
+        watchPurchase: el => window.requestPurchase(watched(el)),
+        watchOrder: el => window.addToOrderList(watched(el)),
+    });
 };
 
 // Grafik çizme fonksiyonu
@@ -1625,9 +1638,9 @@ window.updateSyncStatus = function () {
 window.adminLogout = async function () {
     const onay = await showCustomConfirm('Güvenli Çıkış', 'Admin oturumunu kilitlemek istediğinize emin misiniz?');
     if (onay) {
-        localStorage.removeItem('admin_auth');
-        const lockModal = document.getElementById('adminLockModal');
-        if (lockModal) lockModal.style.display = 'flex';
+        // [WHY]: Faz 4 · J3 (T3) — yalnız vize siliniyor, kilit kartı açılıyordu; Firebase admin oturumu kartın arkasında
+        //        (ve kalıcı oturumda) geçerli kalıyordu. Tek yol: clearSession → await signOut → onAppLogout → kilit kartı.
+        await window.SecurityConfig.endAdminSession('lock');
     }
 };
 
@@ -1804,7 +1817,7 @@ window.renderLocationsTable = function () {
                 <small class="text-muted ms-1">${escapeHtml(loc.corridor || '-')} Koridoru</small>
             </td>
             <td>
-                <div class="person-tag-container" title="${persons.map(p => p.name).join(', ')}">
+                <div class="person-tag-container" title="${escapeHtml(persons.map(p => p.name).join(', '))}">
                     ${visiblePersons.map(p => `<span class="badge bg-light text-dark border-0 person-tag">${escapeHtml(p.name)}</span>`).join('')}
                     ${hasMore ? `
                         <div class="person-tag-more">

@@ -1,33 +1,39 @@
 # =============================================================================
-# Antigravity Frontend — Production Dockerfile
-# Base: nginx:alpine (lightweight ~25MB, security-patched)
+# Medipol Envanter — üretim imajı (nginx, statik ESM ön yüz). Kılavuz: DOCKER_GUIDE.md
 #
-# [WHY]: Alpine-based Nginx has a minimal attack surface, ships with the latest
-#         security patches, and produces the smallest possible image footprint.
-# [HOW]: We copy the entire project into nginx's default web root, inject our
-#         custom nginx.conf, and expose port 80 for container-internal traffic.
-#         Port mapping (host:container) is handled in docker-compose.yml.
+# [WHY]: Faz 4 · J5 (SEC-03, OPS) — imaj "COPY ." ile proje kökünü kopyalıyordu: yedekler, betikler, belgeler ve yapılandırma
+#        web köküne giriyor, engelleri nginx regex sırası yüzünden aşılabiliyordu.
+# [HOW]: Yalnız uygulama dosyaları açıkça kopyalanır (.dockerignore beyaz liste). nginx yapılandırması parçalı (nginx/);
+#        güvenlik başlıkları açılışta şablondan üretilir. Taban imaj ARG ile sabitlenebilir:
+#        docker build --build-arg NGINX_IMAGE=nginx:1.30-alpine …  (05.10.2026: stable = 1.30.5)
 # =============================================================================
+ARG NGINX_IMAGE=nginx:stable-alpine
+FROM ${NGINX_IMAGE}
 
-FROM nginx:alpine
+# Şablon çıktısı conf.d yerine ayrı klasöre (ana yapılandırma conf.d'yi okumaz). CSP_CONNECT_EXTRA yalnız yerel geliştirme.
+ENV NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/generated \
+    CSP_CONNECT_EXTRA=""
 
-# Remove the default Nginx welcome page and config to avoid conflicts
-RUN rm -rf /usr/share/nginx/html/* \
-    && rm /etc/nginx/nginx.conf
+RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d \
+    && mkdir -p /etc/nginx/generated /etc/nginx/sites /etc/nginx/snippets
 
-# Copy the project source files into the Nginx web root.
-# .dockerignore will prevent node_modules, .firebase, .git, etc. from being
-# copied, keeping the image lean and clean.
-COPY . /usr/share/nginx/html
+COPY nginx/nginx.conf               /etc/nginx/nginx.conf
+COPY nginx/sites/                   /etc/nginx/sites/
+COPY nginx/snippets/                /etc/nginx/snippets/
+COPY nginx/templates/               /etc/nginx/templates/
 
-# Inject the production-ready custom Nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+# Uygulama: iki sayfa + 404, kök CSS/JS ve src/. Başka hiçbir şey web köküne girmez.
+COPY index.html admin.html 404.html /usr/share/nginx/html/
+COPY *.css *.js                     /usr/share/nginx/html/
+COPY src/                           /usr/share/nginx/html/src/
 
-# Verify the Nginx config is syntactically valid at build time (fast feedback)
-RUN nginx -t
+# Derleme anında doğrulama: şablon varsayılan değerle üretilir, yapılandırma sözdizimi denetlenir (çalışırken yeniden üretilir).
+RUN envsubst '${CSP_CONNECT_EXTRA}' < /etc/nginx/templates/security-headers.inc.template > /etc/nginx/generated/security-headers.inc \
+    && nginx -t
 
-# Expose port 80 (internal container port, mapped externally via compose)
-EXPOSE 80
+EXPOSE 80 443
 
-# Use the default nginx CMD (runs in foreground, required for Docker)
+LABEL org.opencontainers.image.title="medipol-envanter" \
+      org.opencontainers.image.description="Medipol Envanter Takip Sistemi — statik ön yüz (nginx)"
+
 CMD ["nginx", "-g", "daemon off;"]

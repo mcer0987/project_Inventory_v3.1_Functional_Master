@@ -1,58 +1,107 @@
 rules_version = '2';
+// =============================================================================
+// Rules v2 · Aşama A (Faz 4 · J1) — bugünkü anonim personel modeliyle uyumlu sıkılaştırma.
+// Kaynak: Master Plan Ek C/D + Faz 4 Uygulama Planı §4 · Testler: tests/rules/rules.test.mjs (npm run test:rules)
+// Bilinçli sınırlamalar (Aşama B · Faz 4B'de kapanır): personel kodları oturumlu herkese okunur; personelin
+// requests/purchaseOrders dokümanlarında sahiplik denetimi yok; kod girmemiş ziyaretçi = personel (ikisi de anonim).
+// DİKKAT: Kurallar proje geneli (canlı + demo). Yayın yalnız yeni istemciyle AYNI deploy'da (plan §8, M16).
+// =============================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 1. Fonksiyon: Kullanıcının geçerli bir oturumu var mı? (Anonim veya Custom Token)
-    function isAuthenticated() {
-      return request.auth != null;
-    }
+    function signedIn() { return request.auth != null; }
 
-    // 2. Fonksiyon: Kullanıcının oturumu "Admin" e-postasına mı ait?
-    // Not: Ücretsiz Spark planında kalmak için Custom Token iptal edildi, yerine sabit e-posta kullanılıyor.
+    // Admin = bilinen e-posta + e-posta/parola sağlayıcısı (anonim token'da e-posta iddiası geçmez).
     function isAdmin() {
-      return request.auth != null && request.auth.token.email == 'admin@medipol.local';
+      return signedIn()
+        && request.auth.token.get('email', '') == 'admin@medipol.local'
+        && request.auth.token.firebase.sign_in_provider == 'password';
     }
 
-    // ----------------------------------------------------
-    // CANLI KÖK (28.09.2026'dan itibaren): lifeserver_master
-    // Canlı site bu kökü kullanır; kurallar inventory_v2 / inventory_demo ile aynıdır.
-    // ----------------------------------------------------
-    match /lifeserver_master/{col}/{document=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin() || (isAuthenticated() && col in ['purchaseOrders', 'requests', 'tasks', 'assignments', 'serviceRecords']);
+    // T1: canlı kök lifeserver_master (28.09.2026'dan beri) + localhost/demo kökü. inventory_v2 aşağıda ayrı (KJ-2).
+    function validRoot(r) { return r in ['lifeserver_master', 'inventory_demo']; }
+
+    // firebase-handler COLLECTIONS + doğrudan erişilen system_config ve workflowTemplates. auditLogs ayrı blokta.
+    function knownCol(c) {
+      return c in ['b1', 'b2', 'b3', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords',
+                   'staff', 'units', 'locations', 'tasks', 'requests', 'assignments',
+                   'system_config', 'workflowTemplates'];
     }
 
-    // ----------------------------------------------------
-    // ESKİ CANLI MİMARİ: inventory_v2 (Subcollections) — canlı site artık kullanmıyor, veri korunuyor
-    // ----------------------------------------------------
-    match /inventory_v2/{col}/{document=**} {
-      // Bütün personeller veriyi görebilir
-      allow read: if isAuthenticated();
-      
-      // Admin her şeye yazabilir. Personeller yalnızca EBYS & Akış koleksiyonlarına (purchaseOrders, requests, tasks, vb.) yazabilir/geri çekebilir.
-      allow write: if isAdmin() || (isAuthenticated() && col in ['purchaseOrders', 'requests', 'tasks', 'assignments', 'serviceRecords']);
+    // Personelin (anonim oturum) yazabildiği iş akışı koleksiyonları. assignments/serviceRecords yalnız admin (T7).
+    function staffWritable(c) { return c in ['purchaseOrders', 'requests', 'tasks']; }
+
+    // RULE-05: bakım modu sunucu tarafında. Personel yazması başına +1 doküman okuması.
+    function maintenanceOn(r) {
+      let p = /databases/$(database)/documents/$(r)/system_config/items/admin_settings;
+      return exists(p) && get(p).data.get('maintenance', false) == true;
     }
 
-    // ----------------------------------------------------
-    // GLOBAL KILL SWITCH & AYARLAR (system_config)
-    // ----------------------------------------------------
-    match /system_config/{document=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+    // XSS savunma derinliği: "<harf", "</", "<!", "<?" reddedilir; "<5mm", "a < b" serbest (istemci: html.js hasTagLike).
+    // Yalnız üst seviye alanlar — iç içe diziler kurallarla denetlenemez; birincil savunma istemci kaçışı (escapeHtml).
+    function noTag(v) { return !(v is string) || !v.matches('(?s).*<[a-zA-Z/!?].*'); }
+
+    function textOk(c, d) {
+      return noTag(d.get('id', ''))
+        && (c != 'requests' || (
+             noTag(d.get('ürün', '')) && noTag(d.get('urun', '')) && noTag(d.get('not', ''))
+             && noTag(d.get('personel', '')) && noTag(d.get('talepTuru', '')) && noTag(d.get('oncelik', ''))))
+        && (c != 'tasks' || (
+             noTag(d.get('title', '')) && noTag(d.get('description', '')) && noTag(d.get('priority', ''))
+             && noTag(d.get('assigneeId', '')) && noTag(d.get('creatorId', ''))))
+        && (c != 'purchaseOrders' || (
+             noTag(d.get('urun', '')) && noTag(d.get('aciklama', '')) && noTag(d.get('talepEden', ''))
+             && noTag(d.get('birim', '')) && noTag(d.get('tur', '')) && noTag(d.get('evrakNo', ''))
+             && noTag(d.get('oncelik', '')) && noTag(d.get('createdByName', ''))));
     }
 
-    // ----------------------------------------------------
-    // ESKİ VE TEST MİMARİLERİ: ARŞİV KİLİDİ
-    // ----------------------------------------------------
-    // V1 (inventory) tamamen erişime kapatıldı.
+    // KJ-5: yalnız inventory_demo'da, akış testlerinin __flowtest__ işaretli dokümanlarının temizliği.
+    function marked(d, f) { return d.get(f, '') is string && d.get(f, '').matches('.*__flowtest__.*'); }
+    function isTestDoc(d) {
+      return marked(d, 'ürün') || marked(d, 'urun') || marked(d, 'not') || marked(d, 'sn') || marked(d, 'personel')
+          || marked(d, 'talepEden') || marked(d, 'aciklama') || marked(d, 'evrakNo') || marked(d, 'createdByName')
+          || marked(d, 'title') || marked(d, 'description') || marked(d, 'alanKisi') || marked(d, 'baslik')
+          || marked(d, 'name');
+    }
+
+    match /{root}/{col}/items/{docId} {
+      allow read:  if validRoot(root) && knownCol(col) && signedIn();
+
+      // Admin: tüm bilinen koleksiyonlar (system_config dahil); bakım modundan etkilenmez.
+      allow write: if validRoot(root) && knownCol(col) && isAdmin();
+
+      // Personel: yalnız iş akışı koleksiyonları, bakım kapalıyken, etiketsiz metinle.
+      allow create, update: if validRoot(root) && signedIn() && !isAdmin()
+        && staffWritable(col) && !maintenanceOn(root) && textOk(col, request.resource.data);
+
+      // Silme: personel yalnız görev; talepler, satın almalar, zimmet ve servis kayıtları admin'e ait.
+      allow delete: if validRoot(root) && signedIn() && col == 'tasks' && !maintenanceOn(root);
+      allow delete: if root == 'inventory_demo' && signedIn()
+        && col in ['requests', 'purchaseOrders', 'assignments', 'serviceRecords'] && resource != null && isTestDoc(resource.data);
+    }
+
+    // Denetim günlüğü (4.7 · KJ-7): yalnız ekleme, katı şema, sunucu saati, kendi uid'i; admin dahil kimse düzeltemez/silemez.
+    match /{root}/auditLogs/items/{logId} {
+      allow read: if validRoot(root) && isAdmin();
+      allow create: if validRoot(root) && signedIn()
+        && request.resource.data.keys().hasOnly(['id', 'type', 'refCol', 'refId', 'item', 'qty', 'actorName',
+             'actorPersonelId', 'uid', 'authKind', 'result', 'reason', 'page', 'ts'])
+        && request.resource.data.result in ['blocked', 'approved', 'cancelled']
+        && request.resource.data.ts == request.time
+        && request.resource.data.uid == request.auth.uid
+        && noTag(request.resource.data.get('item', '')) && noTag(request.resource.data.get('actorName', ''))
+        && noTag(request.resource.data.get('reason', '')) && noTag(request.resource.data.get('type', ''));
+      allow update, delete: if false;
+    }
+
+    // KJ-2: eski canlı kök (canlı site artık kullanmıyor, veri korunuyor) — yalnız admin (yedek / göç).
+    match /inventory_v2/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // V1 arşiv kilidi. Kök /system_config bloğu kaldırıldı (uygulama ${root}/system_config/items kullanıyor; RULE-04).
     match /inventory/{document=**} {
       allow read, write: if false;
     }
-    // v3.1 Ortam İzolasyonu: inventory_demo test ve geliştirme ortamı
-    match /inventory_demo/{col}/{document=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin() || (isAuthenticated() && col in ['purchaseOrders', 'requests', 'tasks', 'assignments', 'serviceRecords']);
-    }
-    
   }
 }

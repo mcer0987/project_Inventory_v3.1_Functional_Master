@@ -64,7 +64,7 @@
         div.className = `log-entry ${type}`;
         div.setAttribute('data-type', type);
         div.innerHTML = `
-            <i class="fas ${icons[type] || icons.info} log-icon"></i>
+            <i class="fas ${escapeHtml(icons[type] || icons.info)} log-icon"></i>
             <span class="timestamp">${time}</span>
             <span class="log-msg">${_escapeHtml(msg)}</span>
         `;
@@ -360,12 +360,12 @@
 
         container.innerHTML = knownItems.map(item => `
             <li class="debug-item">
-                <span class="debug-status">${statusIcons[item.status]}</span>
+                <span class="debug-status">${escapeHtml(statusIcons[item.status])}</span>
                 <div class="debug-info">
-                    <div class="debug-title">${item.title}</div>
-                    <div class="debug-desc">${item.desc}</div>
+                    <div class="debug-title">${escapeHtml(item.title)}</div>
+                    <div class="debug-desc">${escapeHtml(item.desc)}</div>
                 </div>
-                <span class="debug-badge ${item.status}">${item.badge}</span>
+                <span class="debug-badge ${escapeHtml(item.status)}">${escapeHtml(item.badge)}</span>
             </li>
         `).join('');
     }
@@ -1086,7 +1086,7 @@ function _openUserActivityPanel(userData) {
     if (nameEl) nameEl.textContent = userData.name + (userData.demo ? ' · DEMO' : '');
 
     const moduleEl = document.getElementById('uapUserModule');
-    if (moduleEl) moduleEl.innerHTML = '<i class="fas fa-cube me-1"></i>' + userData.module;
+    if (moduleEl) moduleEl.innerHTML = '<i class="fas fa-cube me-1"></i>' + escapeHtml(userData.module);
 
     // Ä°statistikler (mock + window.data analizi)
     const actionCount = _computeUserActionCount(userData.module);
@@ -1178,10 +1178,10 @@ function _renderActivityList(moduleName) {
         '<i class="fas fa-flask uap-activity-icon"></i><div>DEMO — örnek aktivite; gerçek oturum izlenmiyor</div></li>' +
         templates.map(function(t) {
         return '<li class="uap-activity-item">' +
-            '<i class="fas ' + t.icon + ' uap-activity-icon"></i>' +
+            '<i class="fas ' + escapeHtml(t.icon) + ' uap-activity-icon"></i>' +
             '<div>' +
-                '<div>' + t.text + '</div>' +
-                '<div class="uap-activity-time">' + fmtMin(t.min) + ' â€” az Ã¶nce</div>' +
+                '<div>' + escapeHtml(t.text) + '</div>' +
+                '<div class="uap-activity-time">' + escapeHtml(fmtMin(t.min)) + ' â€” az Ã¶nce</div>' +
             '</div>' +
         '</li>';
     }).join('');
@@ -1482,13 +1482,13 @@ function _renderHeatmap(data) {
         const ly         = labelR * Math.sin(midAngle);
         const colorCls   = _colorClass(s.intensity);
 
-        svgContent += '<path d="' + _arcPath(startAngle, endAngle) + '" class="hm-slice ' + colorCls + '">' +
-            '<title>' + s.label + ': ' + s.count + ' kayit (%' + Math.round(s.ratio * 100) + ')</title>' +
+        svgContent += '<path d="' + escapeHtml(_arcPath(startAngle, endAngle)) + '" class="hm-slice ' + escapeHtml(colorCls) + '">' +
+            '<title>' + escapeHtml(s.label) + ': ' + escapeHtml(s.count) + ' kayit (%' + Math.round(s.ratio * 100) + ')</title>' +
         '</path>';
 
         // Yeterince bÃ¼yÃ¼k dilimde etiket gÃ¶ster
         if (s.ratio > 0.08) {
-            svgContent += '<text class="hm-label" x="' + lx + '" y="' + ly + '">' + s.label + '</text>';
+            svgContent += '<text class="hm-label" x="' + lx + '" y="' + ly + '">' + escapeHtml(s.label) + '</text>';
         }
 
         startAngle = endAngle;
@@ -1496,7 +1496,7 @@ function _renderHeatmap(data) {
 
     // Merkez bilgi metni
     const totalCount = data.reduce(function(a, d) { return a + d.count; }, 0);
-    svgContent += '<text class="hm-center-text" x="0" y="-6">' + totalCount + '</text>';
+    svgContent += '<text class="hm-center-text" x="0" y="-6">' + escapeHtml(totalCount) + '</text>';
     svgContent += '<text class="hm-center-text" x="0" y="8">kayit</text>';
 
     svg.innerHTML = svgContent;

@@ -177,7 +177,7 @@ function _fillNamedSelect(select, items, placeholder, emptyText) {
     const current = select.value;
     const names = [...new Set(items.map(x => String((x && typeof x === 'object' ? (x.name || x.birimAdi) : x) || '').trim()).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, 'tr'));
-    select.innerHTML = (names.length ? `<option value="">${placeholder}</option>` : `<option value="">${emptyText}</option>`) +
+    select.innerHTML = (names.length ? `<option value="">${escapeHtml(placeholder)}</option>` : `<option value="">${escapeHtml(emptyText)}</option>`) +
         names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
     if (!current) return;
     if (!names.includes(current)) select.add(new Option(current, current));
@@ -194,11 +194,19 @@ function fillPurchaseSelects() {
 // -----------------------------
 // KAYDET
 // -----------------------------
+// [WHY]: Faz 4 · J1 (M3) — Rules v2 personelin satın alma metinlerinde etiket benzeri "<" ifadesini reddeder; ret dosyalar
+//        yüklendikten sonra genel hata olarak düşerdi. [HOW]: Kural denetlenen form alanları yüklemeden ÖNCE kontrol edilir.
+function _purchaseTextBlocked() {
+    const v = id => document.getElementById(id)?.value || '';
+    return typeof window.guardTagLike === 'function' && window.guardTagLike({ 'Ürün / Hizmet': v('purName'), 'Açıklama': v('purDesc') });
+}
+
 window.savePurchaseRequest = async function (e) {
     if (e) {
         e.preventDefault();
         e.stopPropagation();
     }
+    if (_purchaseTextBlocked()) return false;
     console.log("🚀 savePurchaseRequest tetiklendi...");
 
     const fileInput = document.getElementById("purchaseFile");
@@ -312,7 +320,10 @@ function getStatusBadge(item) {
     const steps = item.workflow?.steps || [];
     const currentStep = item.workflow?.currentStep || 0;
     const step = steps[currentStep];
-    return `<span class="badge-soft bg-warning text-dark"><i class="fas fa-clock me-1"></i> ${step?.user || "Sorumlu"} Bekliyor</span>`;
+    // [WHY]: Faz 4 · J2 (SEC-01) — adım kişisi personelin yazabildiği purchaseOrders.workflow.steps[] içinde; rozet admin'de
+    //        satın alma ve servis tablolarına basılıyordu (tıklamasız XSS). [HOW]: Ham alan burada kaçırılır; çağıranlar rozetin
+    //        kendisini (birleştirilmiş HTML) tekrar kaçırmaz (M7).
+    return `<span class="badge-soft bg-warning text-dark"><i class="fas fa-clock me-1"></i> ${escapeHtml(step?.user || "Sorumlu")} Bekliyor</span>`;
 }
 
 // KPI (Sayaçlar) → Dinamik + Minimal + Canlı
@@ -702,7 +713,7 @@ window.renderServicesModule = function () {
                 </td>
                 <td>
                     <div style="font-size:10px;color:#888;margin-bottom:3px;">🏢 ${escapeHtml(item.hedef || '-')}</div>
-                    <span style="background:${sc.bg};color:${sc.color};padding:2px 10px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">
+                    <span style="background:${escapeHtml(sc.bg)};color:${escapeHtml(sc.color)};padding:2px 10px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">
                         ${escapeHtml(item.durum || 'Serviste')}
                     </span>
                 </td>
@@ -820,9 +831,9 @@ window.viewServiceItem = function (serviceId) {
     const dem = record.isDemirbas === true || record.isDemirbas === 'true';
     const orig = record.originalData || {};
 
-    const _f = (label, value) => `
+    const _fieldHtml = (label, value) => `
         <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;">
-            <label style="display:block;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;margin-bottom:3px;">${label}</label>
+            <label style="display:block;font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;margin-bottom:3px;">${escapeHtml(label)}</label>
             <span style="font-size:13px;color:#2c3e50;font-weight:500;">${escapeHtml(value)}</span>
         </div>`;
 
@@ -848,20 +859,20 @@ window.viewServiceItem = function (serviceId) {
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-            ${_f('Hedef / Gönderilen', record.hedef || '-')}
-            ${_f('Kaynak Depo', (record.kaynakDepo || '-').toUpperCase())}
-            ${_f('Sevk Tarihi', record.sevkTarihi || '-')}
-            ${_f('Demirbaş', dem ? '✅ Evet' : '❌ Hayır')}
-            ${_f('Marka', record.marka || '-')}
-            ${_f('Seri No', record.sn || '-')}
-            ${_f('Envanter No', record.envanterNo || '-')}
-            ${_f('Adet', record.adet ?? orig.adet ?? '-')}
+            ${_fieldHtml('Hedef / Gönderilen', record.hedef || '-')}
+            ${_fieldHtml('Kaynak Depo', (record.kaynakDepo || '-').toUpperCase())}
+            ${_fieldHtml('Sevk Tarihi', record.sevkTarihi || '-')}
+            ${_fieldHtml('Demirbaş', dem ? '✅ Evet' : '❌ Hayır')}
+            ${_fieldHtml('Marka', record.marka || '-')}
+            ${_fieldHtml('Seri No', record.sn || '-')}
+            ${_fieldHtml('Envanter No', record.envanterNo || '-')}
+            ${_fieldHtml('Adet', record.adet ?? orig.adet ?? '-')}
         </div>
 
         <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:12px;">
             <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Güncel Durum</label>
             <div style="margin-top:6px;">
-                <span style="background:${sc.bg};color:${sc.color};padding:4px 14px;border-radius:20px;font-size:13px;font-weight:600;">
+                <span style="background:${escapeHtml(sc.bg)};color:${escapeHtml(sc.color)};padding:4px 14px;border-radius:20px;font-size:13px;font-weight:600;">
                     ${escapeHtml(record.durum || 'Serviste')}
                 </span>
             </div>
@@ -884,7 +895,7 @@ window.viewServiceItem = function (serviceId) {
         ${orig.açıklama ? `
         <div style="background:#f8f9fa;border-radius:8px;padding:12px;">
             <label style="font-size:10px;color:#999;text-transform:uppercase;font-weight:600;letter-spacing:0.5px;">Orijinal Açıklama</label>
-            <p style="margin:6px 0 0;color:#333;font-size:13px;">${orig.açıklama}</p>
+            <p style="margin:6px 0 0;color:#333;font-size:13px;">${escapeHtml(orig.açıklama)}</p>
         </div>` : ''}
     `;
 
@@ -895,6 +906,7 @@ window.viewServiceItem = function (serviceId) {
 // SERVİS DURUM GÜNCELLE
 // ─────────────────────────────────────────────────────────────
 window.updateServiceStatus = function (serviceId) {
+    if (!window.requireDbAdmin('Servis durumu güncelleme')) return;   // Faz 4 · J1 (M5): serviceRecords yalnız admin
     const record = _findService(serviceId);
     if (!record) return;
 
@@ -1377,6 +1389,7 @@ function _purWorkflowHTML(item) {
 // ─────────────────────────────────────────────────────────────
 window.updatePurchaseRequest = async function (e, id) {
     if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (_purchaseTextBlocked()) return;
 
     const item = _findPurchase(id);
     if (!item) { if (typeof showAppAlert === 'function') showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
@@ -1482,9 +1495,12 @@ window.deleteRequestFile = async function (requestId, fileIndex, fileRef) {
 window.deletePurchaseRequest = async function (id) {
     const item = _findPurchase(id);
     if (!item) return;
-    // Admin her talebi; sahibi yalnız akışı başlamamış talebini silebilir (EBYS-12).
-    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
-    if (!isAdmin && !(_isPurchaseOwner(item) && !item.workflow?.started)) { _denyManage(); return; }
+    // [WHY]: Faz 4 · J1 (M1) — Rules v2'de satın alma silme yalnız admin'e ait; sahibine tanınan "akışı başlamamışsa sil"
+    //        izni kuralla çelişiyordu (kayıt reddedilirdi). Personel talebini iptal edebilir (cancelPurchaseRequest).
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+        if (typeof showAppAlert === 'function') showAppAlert('🔒 Talep silme yöneticiye aittir; talebinizi "İptal Et" ile geri çekebilirsiniz.', 'error');
+        return;
+    }
 
     const onay = await showCustomConfirm(
         'Talebi Kalıcı Sil',

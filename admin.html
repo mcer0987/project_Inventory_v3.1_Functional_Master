@@ -5,14 +5,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard | Envanter Yönetimi</title>
+    <link rel="icon" href="data:,">
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js" integrity="sha384-0d+Gr7vM4Drod8E3hXKgciWJSWbjD/opKLLygI9ktiWbuvlDwQLzU46wJ9s5gsp7" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" integrity="sha384-fCAW/rDWORTbQXSiB7mOg0QtQ5c+r0f544y6XoKjuVva0nMBlCpNUjiFeG5iMdS3" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha384-PPIZEGYM1v8zp5Py7UjFb79S58UeqCL9pYVnVPURKEqvioPROaVAJKKLzvH2rDnI" crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="stylesheet" href="admin-add-style.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="dark-theme.css">
@@ -28,43 +29,51 @@
 
     <!-- VIP System Control & SortableJS -->
     <link rel="stylesheet" href="admin-system-control.css">
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js" integrity="sha384-DgmC6Xe2bSN2WjTDXzWYbUbxyhNP+NNkGDR/g78pCXV7E7rcVTGxVg0uIVCUUcBc" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
     <script type="module">
         // [WHY]: Query'li URL ikinci bir firebase-handler instance'ı yaratıyordu (ARC-02: çift dinleyici, 26 okuma).
         import { checkAdminAuth } from './src/services/firebase-handler.js';
 
+        // [WHY]: Faz 4 · J3 — kilit kartı tek yerden açılır; neden metni karta yazılır (süre doldu / kilitlendi / parola gerekli).
+        const LOCK_TEXT = {
+            lock:        ['Oturum Kilitlendi', 'Devam etmek için yönetici parolasını girin.'],
+            'not-admin': ['Yönetici Girişi Gerekli', 'Bu sekmede yönetici oturumu yok. Devam etmek için yönetici parolasını girin.'],
+            stale:       ['Oturum Sona Erdi', 'Yönetici oturumu geçersiz. Devam etmek için yönetici parolasını girin.'],
+        };
+        window.showAdminLock = function (reason) {
+            const lockModal = document.getElementById('adminLockModal');
+            if (!lockModal) return;
+            const [title, desc] = LOCK_TEXT[reason] || ['Oturum Süresi Doldu', 'Devam etmek için yönetici parolasını girin.'];
+            document.getElementById('adminLockTitle').textContent = title;
+            document.getElementById('adminLockDesc').textContent = desc;
+            document.getElementById('lockErrorMsg').style.display = 'none';
+            const wasOpen = lockModal.style.display === 'flex';
+            lockModal.style.setProperty('display', 'flex', 'important');
+            if (!wasOpen && reason === 'expired' && typeof window.showAppAlert === 'function') {
+                window.showAppAlert("Güvenlik nedeniyle oturum kapatıldı.", "info");
+            }
+        };
+
         checkAdminAuth();
 
         // Süreyi her saniye kontrol et
         setInterval(() => {
-            const authData = localStorage.getItem('admin_auth');
-            const now = new Date().getTime();
+            const S = window.SecurityConfig;
+            const lockModal = document.getElementById('adminLockModal');
+            const locked = lockModal && lockModal.style.display === 'flex';
+            const timeLeft = window.AppModules.Session.getAdminVisaRemaining();
 
-            if (authData) {
-                const auth = JSON.parse(authData);
-                const timeLeft = auth.expiry - now;
+            // 1. UYARI: Süre azalınca (örn. 1 dk kala) sarı barı göster
+            const warningDiv = document.getElementById('sessionWarning');
+            if (warningDiv) {
+                const warn = !locked && timeLeft !== null && timeLeft > 0 && timeLeft < (window.SessionConfig?.WARNING_BEFORE || 60000);
+                warningDiv.style.display = warn ? 'block' : 'none';
+            }
 
-                // 1. UYARI: Süre azalınca (örn. 1 dk kala) sarı barı göster
-                const warningDiv = document.getElementById('sessionWarning');
-                if (warningDiv) {
-                    if (timeLeft > 0 && timeLeft < (window.SessionConfig?.WARNING_BEFORE || 60000)) {
-                        warningDiv.style.display = 'block';
-                    } else {
-                        warningDiv.style.display = 'none';
-                    }
-                }
-
-                // 2. KİLİT: Süre dolduysa
-                if (timeLeft <= 0) {
-                    const lockModal = document.getElementById('adminLockModal');
-                    if (lockModal && lockModal.style.display !== 'flex') {
-                        lockModal.style.display = 'flex';
-                        if (typeof window.showAppAlert === 'function') {
-                            window.showAppAlert("Güvenlik nedeniyle oturum kapatıldı.", "info");
-                        }
-                    }
-                }
+            // 2. KİLİT: Süre dolduysa (ya da vize silindiyse) Firebase oturumu da kapatılır (T3) — tek yol: endAdminSession.
+            if (!locked && S && !S.isSignInPending() && (timeLeft === null || timeLeft <= 0)) {
+                S.endAdminSession('expired');
             }
         }, window.SessionConfig?.CHECK_INTERVAL || 1000);
 
@@ -72,34 +81,37 @@
         window.unlockAdmin = async function () {
             // [R-SYS]
             const pass = window._dx ? window._dx._g('lock-val-node') : document.getElementById('lock-val-node').value;
-            const isAuthenticated = await SecurityConfig.authenticate(pass);
+            const errorEl = document.getElementById('lockErrorMsg');
+            errorEl.style.display = 'none';
+            const isAuthenticated = await SecurityConfig.authenticate(pass);   // vizeyi de yazar (J3)
 
             if (isAuthenticated) {
-                const expiry = new Date().getTime() + window.AppModules.Session.ADMIN_SESSION_MS;
-                localStorage.setItem('admin_auth', JSON.stringify({ expiry: expiry }));
-
-                if (!window.getActiveUser()) window.setActiveUser({ name: 'Admin', role: 'admin' });
+                // Parola girildikten sonra kimlik atanır (personeldeki yönetici kaydı, yoksa "Yönetici").
+                if (!window.getActiveUser()) window.setActiveUser(SecurityConfig.resolveAdminIdentity());
+                window.currentUser = window.getActiveUser();
 
                 document.getElementById('adminLockModal').style.display = 'none';
                 if (window._dx) window._dx._r('lock-val-node');
+
+                // M10: kilitte signOut edildi; veri akışı yeni (admin) oturumla sürmeli.
+                if (typeof window.ensureRealtimeSync === 'function') window.ensureRealtimeSync();
+                if (typeof window.startSessionTimer === 'function') window.startSessionTimer();
             } else {
-                alert("Hatalı şifre!");
+                errorEl.textContent = SecurityConfig.lastErrorMessage || 'Hatalı şifre, tekrar deneyin.';
+                errorEl.style.display = 'block';
+                if (window._dx) window._dx._r('lock-val-node');
             }
         };
 
         // Oturumu tamamen kapatıp ana sayfaya döndüren fonksiyon
         // [WHY]: logout() admin.html'de kilit kartını yeniden gösteriyordu; "Oturumu Kapat" kullanıcıyı kartta bırakıyordu (AUTH-08).
-        window.adminForceLogout = async function () {
-            window.clearSession();
-            if (window.SecurityConfig && typeof window.SecurityConfig.logout === 'function') {
-                await window.SecurityConfig.logout();
-            }
-            window.location.replace('index.html');
+        window.adminForceLogout = function () {
+            return window.SecurityConfig.endAdminSession('logout');
         };
 
-        // [R-SYS] Init
+        // [R-SYS] Init — yönetici parola alanında yapıştırmaya izin (parola yöneticisi · SEC-02)
         window.addEventListener('load', () => {
-            if (window._dx) window._dx._s('lock-val-node');
+            if (window._dx) window._dx._s('lock-val-node', { allowPaste: true });
         });
     </script>
 
@@ -148,20 +160,20 @@
                 <i class="fas fa-lock"></i>
             </div>
 
-            <h2 style="margin:0 0 6px; font-size:1.25rem;
+            <h2 id="adminLockTitle" style="margin:0 0 6px; font-size:1.25rem;
                 color: var(--color-text, #e2e8f0); font-weight:700;">
                 Oturum Süresi Doldu
             </h2>
-            <p style="margin:0 0 24px; font-size:0.875rem;
+            <p id="adminLockDesc" style="margin:0 0 24px; font-size:0.875rem;
                 color: var(--color-text-muted, #94a3b8);">
-                Devam etmek için yönetici şifresini girin.
+                Devam etmek için yönetici parolasını girin.
             </p>
 
             <!-- Şifre input -->
             <div style="position:relative; margin-bottom:16px;">
                 <i class="fas fa-key" style="position:absolute;left:14px;top:50%;
                     transform:translateY(-50%); color:#64748b; font-size:13px;"></i>
-                <input type="text" id="lock-val-node" placeholder="••••••" style="width:100%; box-sizing:border-box;
+                <input type="text" id="lock-val-node" placeholder="Yönetici parolası" style="width:100%; box-sizing:border-box;
                         padding:12px 14px 12px 38px;
                         background: var(--color-surface-alt, #1a2535);
                         color: var(--color-text, #e2e8f0);
@@ -316,6 +328,11 @@
                         <i class="fas fa-home"></i>
                     </button>
                     <!-- [DECOMMISSIONED] Launchpad Go Button Removed -->
+                    <!-- Faz 4 · J4 (EBYS-05): self-approval denetim raporu (${ROOT}/auditLogs); rapor admin oturumu ister -->
+                    <button onclick="window.AppModules.SelfApproval.showReportModal()" class="btn-status-action" id="btn-security-report"
+                        title="Güvenlik Raporu (kendi kendini onaylama denetimi)">
+                        <i class="fas fa-shield-alt"></i>
+                    </button>
                     <button onclick="window.adminLogout()" class="btn-status-action logout" title="Güvenli Çıkış">
                         <i class="fas fa-power-off"></i>
                     </button>

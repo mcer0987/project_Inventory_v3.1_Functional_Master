@@ -1,56 +1,20 @@
 # =============================================================================
-# .dockerignore — Antigravity Frontend
-# Prevents large, unnecessary, or sensitive files from being sent to the
-# Docker build context (directly impacts build speed and image size).
+# .dockerignore — BEYAZ LİSTE (Faz 4 · J5)
+# [WHY]: Kara liste her yeni klasörde (backup_txt/, audits/, scratch/, belgeler, yapılandırma) güncellenmeyi unutuyordu.
+# [HOW]: Her şey dışlanır; yalnız imajın ihtiyaç duyduğu dosyalar geri alınır. Dockerfile de yalnız bunları açıkça kopyalar.
+#        Böylece yedekler, testler, denetim raporları, scratch/, Mimari belgeleri, firebase.json, firestore.rules, .git,
+#        node_modules ve *.md derleme bağlamına bile girmez.
 # =============================================================================
+*
 
-# Node.js dependencies (never needed in the final image)
-node_modules/
-package-lock.json
+# Uygulama
+!index.html
+!admin.html
+!404.html
+!*.css
+!*.js
+!src/
 
-# Firebase tooling & emulator cache
-.firebase/
-firebase-debug.log*
-
-# Environment & secrets — NEVER ship to an image
-.env
-.env.*
-
-# Version control
-.git/
-.gitignore
-
-# IDE and agent config directories
-.agents/
-.kilo/
-.lingma/
-.github/
-
-# Backup and dev-only directories
-backup/
-scratch/
-functions/
-
-# Puppeteer debug scripts
-puppeteer_debug.js
-
-# Build & temp artifacts
-*.log
-*.pid
-*.tgz
-.npm
-.eslintcache
-
-# Documentation
-*.md
-Modelfile
-Mimari ve Geliştirmeler/
-
-# Firebase Firestore rules are already blocked by nginx.conf,
-# but we exclude them from the image context entirely.
-firestore.rules
-.firebaserc
-
-# Docker files themselves (not needed inside the container)
-Dockerfile
-docker-compose.yml
+# nginx yapılandırması (web köküne değil /etc/nginx'e kopyalanır)
+!nginx/
+nginx/tls.conf.example
