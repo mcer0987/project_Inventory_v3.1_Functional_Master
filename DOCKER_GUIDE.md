@@ -334,3 +334,15 @@ Ayrıntılı yayın adımları Faz 4 kapanışındaki deploy runbook'undadır.
 | Emülatör açılmıyor (`java` hatası) | JDK 21 değil; `java -version` ve `JAVA_HOME` (§2) |
 | Uygulama beklenmedik şekilde **canlı** veriyi gösteriyor | Alan adı `localhost`/`demo` değil (§0) |
 | Admin girişi yeni sekmede parola istiyor | Beklenen davranış: admin oturumu sekmeye bağlıdır (Faz 4 · J3) |
+
+
+kısaca 3 adımda paketleme ve 2 adımda çalıştırma 
+
+1) taşınabilir tek bir "Container Paketi" haline getirmek için kendi bilgisayarında terminali açıp şu 3 komutu sırayla çalıştıracaksın: docker build -t medipol-envanter:v3.2 .
+2) Adım: Kutuyu Tek Bir Dosyaya Çevir (Save Et) : docker save medipol-envanter:v3.2 -o medipol-envanter-v3.2.tar
+3) dosyayı yedekle.
+Geriye doğru işlem, AYAĞA KALDIRMA:
+1) Dosyanın olduğu yerde terminali aç ve şunu yaz (Ekranda: Loaded image: medipol-envanter:v3.2 yazar. Docker imajı içine çeker).: docker load -i medipol-envanter-v3.2.tar
+2) Ayağa Kaldır: docker run -d --name envanter-app -p 8088:80 medipol-envanter:v3.2
+3) 👉 http://localhost:8088
+***İŞİN BİTTİĞİNDE DURDURMAK İSTERSEN : docker stop envanter-app && docker rm envanter-app
