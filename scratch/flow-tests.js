@@ -2949,6 +2949,130 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 4 · J6 — Ek A'nın Faz 4'ün dokunduğu oturum / bakım / VIP maddeleri uçtan uca (önceki senaryolar bunları birim
+    // düzeyinde sınıyordu). İki ortam: gerçek personel girişi → modal + yazma → çıkış → tekrar giriş → zaman aşımı → tekrar
+    // giriş; mobil otomatik kart görünümü. Yalnız emülatör (kural 7: VIP komutları yalnız emülatörde): yönetici mesajı bir kez,
+    // force logout bir kez + tekrar giriş, bakım modu (personel kilitlenir / admin kilitlenmez / bakım ekranından admin girişi).
+    async j6EkASession(page, browser) {
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const TOKEN = 'J6-' + Date.now();
+        const base = page.url().split('/index.html')[0], q = EMU ? '?emu=1' : '';
+        // Gezinmeye dayanıklı bekleme (sayfa yeniden yüklenirken evaluate hata verebilir)
+        const settle = async (p, fn, ms = 25000, arg) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch (e) { } await sleep(300); } return false; };
+        const errs = [];
+        const open = async (ctx, url) => { const p = await ctx.newPage(); p.on('pageerror', e => errs.push(e.message)); p.on('dialog', d => d.dismiss()); await p.goto(url, { waitUntil: 'domcontentloaded' }); return p; };
+        const ready = p => settle(p, () => window.isFirebaseLoaded === true && !!window.userAuth && (window.data.personel || []).length > 0);
+        const staffLogin = (p, code) => p.evaluate(async code => {
+            window._dx._b['access-val-node'] = code; await window.handleLogin();
+            const inv = document.getElementById('inventory-screen');
+            return { loggedIn: document.body.classList.contains('logged-in'), loginHidden: getComputedStyle(document.getElementById('loginModal')).display === 'none',
+                unblurred: !inv.style.filter, user: (window.getActiveUser() || {}).name };
+        }, code);
+        const modalAndWrite = (p, MARKER) => p.evaluate(async MARKER => {
+            window.openRequestModal(false);
+            const modalOpens = getComputedStyle(document.getElementById('requestModal')).display !== 'none';
+            window.closeRequestModal();
+            const write = await window.appendItem('requests', { id: window.makeId(), ürün: 'J6 ' + MARKER, adet: 1, durum: 'Beklemede', personel: (window.getActiveUser() || {}).name }).then(() => 'ok', e => e.code || e.message);
+            return { modalOpens, write };
+        }, MARKER);
+        const loginScreen = p => p.evaluate(() => ({ loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none', activeUser: !!window.getActiveUser(), anon: !!(window.userAuth && window.userAuth.isAnonymous) }));
+
+        const out = {};
+        const sctx = await browser.createBrowserContext();
+        let s = await open(sctx, `${base}/index.html${q}`);
+        let staff = null;
+        try {
+            await ready(s);
+            staff = await s.evaluate(() => { const p = (window.data.personel || []).find(x => x && x.code && x.name && !/Muhammed Cer|^Admin$/.test(x.name)); return p ? { code: String(p.code), id: p.id != null ? String(p.id) : null, name: p.name } : null; });
+            if (!staff) return { skipped: 'personel kaydı yok' };
+            out.staff = staff.name;
+
+            // Ek A · Giriş/Oturum: giriş → modal + yazma → çıkış → tekrar giriş → modallar ve yazma
+            out.login = await staffLogin(s, staff.code);
+            out.afterLogin = await modalAndWrite(s, MARKER);
+            await s.evaluate(() => window.handleLogout('manual'));
+            out.logout = { reachedLogin: await settle(s, () => getComputedStyle(document.getElementById('loginModal')).display !== 'none' && window.isFirebaseLoaded === true), ...(await loginScreen(s)),
+                syncRunning: await s.evaluate(() => window.getSyncHealth().running) };
+            out.relogin = await staffLogin(s, staff.code);
+            out.afterRelogin = await modalAndWrite(s, MARKER);
+
+            // 3 dk zaman aşımı (süre kısaltılır) → giriş ekranı → tekrar giriş → modallar
+            await s.evaluate(() => { window.__j6Cfg = { ...window.SessionConfig }; window.SessionConfig.WAREHOUSE_TIME = 2500; window.SessionConfig.WARNING_BEFORE = 1000; window.startSessionTimer(); });
+            await sleep(4500);
+            out.timeout = await loginScreen(s);
+            await s.evaluate(() => Object.assign(window.SessionConfig, window.__j6Cfg));
+            out.timeoutRelogin = { ...(await staffLogin(s, staff.code)), ...(await modalAndWrite(s, MARKER)) };
+
+            // Mobil (≤768 px) otomatik kart görünümü
+            await s.setViewport({ width: 390, height: 844 });
+            await sleep(800);
+            out.mobileCards = await s.evaluate(() => { if (typeof window.switchTab === 'function') window.switchTab('b1'); return { active: !!(window._cardViewActive && window._cardViewActive.b1), visible: getComputedStyle(document.getElementById('cardViewB1')).display !== 'none' }; });
+            await s.setViewport({ width: 1440, height: 900 });
+
+            if (!EMU) { out.emulator = 'skipped (VIP komutları ve bakım modu yalnız --emu · kural 7)'; return out; }
+
+            // ── Yalnız emülatör: admin (ayrı bağlam, gerçek giriş yolu) ──
+            const actx = await browser.createBrowserContext();
+            try {
+                const a = await open(actx, `${base}/index.html?emu=1`);
+                await ready(a);
+                const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+                await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+                await nav;
+                await settle(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && typeof window.vipToggleKillSwitch === 'function');
+                const target = { id: staff.id || staff.code, name: staff.name, demo: false };
+
+                // Yönetici mesajı hedefe bir kez düşer (yeniden yüklemede tekrar gösterilmez)
+                await a.evaluate((target, TOKEN) => { _currentTargetUser = target; document.getElementById('uapSystemMessage').value = 'J6 mesaj ' + TOKEN; return window.vipSendSystemMessage(); }, target, TOKEN);
+                out.messageShown = await settle(s, t => document.body.innerText.includes(t), 10000, TOKEN);
+                await s.reload({ waitUntil: 'domcontentloaded' });
+                await ready(s); await sleep(4000);
+                out.messageNotRepeatedAfterReload = !(await s.evaluate(t => document.body.innerText.includes(t), TOKEN));
+
+                // Force logout: hedef bir kez çıkar, tekrar girebilir (yeniden atılmaz)
+                await staffLogin(s, staff.code);
+                await a.evaluate(target => { _currentTargetUser = target; return window.vipForceLogout(); }, target);
+                out.forceLogout = { kicked: await settle(s, () => getComputedStyle(document.getElementById('loginModal')).display !== 'none' && !window.getActiveUser(), 10000) };
+                // çıkış dinleyicileri yeniden başlatır; personel listesi gelene kadar giriş 'Veriler henüz hazır değil' der (bilinen davranış)
+                out.forceLogout.dataReadyAgain = await ready(s);
+                out.forceLogout.relogin = await staffLogin(s, staff.code);
+                await sleep(4000);
+                out.forceLogout.stillLoggedInAfter4s = await s.evaluate(() => !!window.getActiveUser() && document.body.classList.contains('logged-in'));
+                out.forceLogout.adminSelfTargetRefused = await a.evaluate(async () => { const me = window.getActiveUser(); _currentTargetUser = { id: me.code || me.name, name: me.name, demo: false }; const alerts = []; const real = window.showAppAlert; window.showAppAlert = (m) => alerts.push(m); await window.vipForceLogout(); window.showAppAlert = real; return { refused: alerts.some(m => /Kendi oturumunuzu/.test(m)), stillAdmin: window.isDbAdmin() }; });
+
+                // Bakım modu: personel bakım ekranına alınır, admin alınmaz; bakım ekranından admin girişi
+                await a.evaluate(() => { window.showCustomConfirm = async () => true; window.alert = () => { }; return window.vipToggleKillSwitch(); });
+                out.maintenance = {
+                    staffLocked: await settle(s, () => !!document.getElementById('maintenanceOverlay'), 20000),
+                    adminNotLocked: await a.evaluate(() => !document.getElementById('maintenanceOverlay') && window.isDbAdmin() && localStorage.getItem('system_maintenance_mode') !== 'true'),
+                };
+                await s.evaluate(code => { document.getElementById('maintenanceForm').style.display = 'block'; document.getElementById('maintenanceCode').value = code; window.adminBypassMaintenance(); }, EMU_ADMIN_CODE).catch(() => { });
+                out.maintenance.bypassToAdmin = await settle(s, () => location.pathname.endsWith('admin.html') && window.isDbAdmin && window.isDbAdmin() && !document.getElementById('maintenanceOverlay'), 25000);
+            } finally {
+                // bakım modunu her koşulda kapat (emülatör) ve ana test sayfasının yeniden yüklenmesini bekle
+                try {
+                    const a2 = (await actx.pages()).find(p => p.url().includes('admin.html'));
+                    if (a2) await a2.evaluate(async () => {
+                        const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+                        await fsm.setDoc(window.systemConfigRef('admin_settings'), { maintenance: false }, { merge: true });
+                    });
+                } catch (e) { out.maintenanceResetError = e.message; }
+                await actx.close();
+            }
+            // Bakım kapanınca personel ekranı normale döner (yeni oturum, bayrak yok)
+            const p2 = await open(sctx, `${base}/index.html?emu=1`);
+            await ready(p2); await sleep(1500);
+            out.maintenance = out.maintenance || {};
+            out.maintenance.normalAfterOff = await p2.evaluate(() => !document.getElementById('maintenanceOverlay') && localStorage.getItem('system_maintenance_mode') !== 'true');
+            // Ana test sayfası bakımda iki kez yeniden yüklendi → yardımcıları yeniden kur
+            out.mainPageRecovered = await settle(page, () => !document.getElementById('maintenanceOverlay') && window.isFirebaseLoaded === true && !!window.userAuth, 30000);
+            await installHelpers(page);
+        } finally {
+            await sctx.close();
+            out.pageErrors = errs;
+        }
+        return out;
+    },
 };
 
 (async () => {

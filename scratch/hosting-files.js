@@ -1,0 +1,34 @@
+// [WHY]: Faz 4 · J6 (deploy runbook) — `firebase deploy --only hosting` git'teki dosyaları değil DİSKTEKİ klasörü yükler;
+//        firebase.json "ignore" listesine uymayan her dosya (yerel log, yedek, not) herkese açık yayınlanır (Faz 0'daki
+//        backup/functions sızıntısı böyle olmuştu).
+// [HOW]: firebase-tools'un kullandığı eşleştiriciyle (minimatch, dot:true) yayınlanacak dosyaları listeler; beklenen uygulama
+//        dosyaları dışında bir şey varsa çıkış kodu 1. Deploy'dan hemen önce çalıştırılır (runbook Adım 0).
+// Usage: node scratch/hosting-files.js
+const fs = require('fs');
+const path = require('path');
+const mm = require('minimatch');
+const match = mm.minimatch || mm;
+
+const ROOT = path.resolve(__dirname, '..');
+const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'));
+const ignore = cfg.hosting.ignore || [];
+const isIgnored = (rel, dir) => ignore.some(g => match(rel, g, { dot: true }) || (dir && match(rel + '/x', g, { dot: true })));
+
+const files = [];
+(function walk(abs, rel) {
+    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
+        const r = rel ? `${rel}/${e.name}` : e.name;
+        if (isIgnored(r, e.isDirectory())) continue;
+        if (e.isDirectory()) walk(path.join(abs, e.name), r); else files.push(r);
+    }
+})(ROOT, '');
+
+// Beklenen: iki sayfa + 404, kök CSS/JS, src/ altındaki JS. (Docker beyaz listesiyle aynı küme.)
+const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/.test(f) || /^src\/.+\.js$/.test(f);
+const unexpected = files.filter(f => !expected(f));
+console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length})`);
+if (unexpected.length) {
+    console.log('✖ Beklenmeyen dosyalar (firebase.json "ignore"a ekleyin ya da silin):\n  ' + unexpected.join('\n  '));
+    process.exit(1);
+}
+console.log('✔ Yalnız uygulama dosyaları yayınlanacak.');
