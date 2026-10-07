@@ -13,8 +13,8 @@ const PORT = 5594;
 const MARKER = '__flowtest__';
 // Faz 4 · J0: --emu → uygulama yerel emülatöre bağlanır (?emu=1). Önce `npm run emu` + `npm run emu:seed`.
 const EMU = process.argv.includes('--emu');
-// Yalnız emülatör Auth'unda geçerli sahte admin kodu (scratch/emu-seed.mjs ile aynı; gerçek parola DEĞİLDİR).
-const EMU_ADMIN_CODE = 'emu01';
+// Yalnız emülatör Auth'unda geçerli sahte admin parolası (scratch/emu-seed.mjs ile aynı; gerçek parola DEĞİLDİR; ≥12 karakter).
+const EMU_ADMIN_CODE = 'emu-yonetici-0001';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 const csp = CSP.createCollector();
@@ -71,6 +71,9 @@ async function installHelpers(page) {
                 try { return await fn(); } finally { window.isDbAdmin = real; }
             },
         };
+        // Faz 4 kapanışı: Rules v2 gerçek projede de yayında mı? (eski kök /system_config bloğu yalnız eski kurallarda vardı).
+        // Deploy'dan sonra "gerçek demo" modu artık eski kuralları varsayamaz; kurala bağlı beklentiler bu bayrağa göre dallanır.
+        window.__ft.rulesV2 = EMU || await fs.getDoc(fs.doc(window.fireDb, 'system_config', 'admin_settings')).then(() => false, e => e.code === 'permission-denied');
         // Faz 4 · J4: denetim günlüğü kalıcıdır ve kural gereği silinemez → gerçek demoda test kaydı YAZILMAZ; çağrılar bellekte
         // toplanır (alanlar yine sınanır). Emülatörde gerçek yazılır ve admin olarak geri okunur.
         if (!EMU) {
@@ -1486,6 +1489,11 @@ const SCENARIOS = {
             // J1: Rules v2 personelin etiketli yazmasını reddeder (savunma derinliği). Render kaçışını sınamak için yükler,
             // emülatörde etiket kuralına tabi olmayan admin oturumuyla yazılır (gerçek demoda eski kurallar anonime izin verir).
             let anonPayloadRejected = 'n/a (gerçek demo: eski kurallar)';
+            if (!ft.emulator && ft.rulesV2) {
+                // Gerçek demo + yayındaki Rules v2: yükü yazacak admin oturumu yok (kural 7.5) ve personel yazması reddedilmeli.
+                anonPayloadRejected = await window.appendItem('requests', { id: reqId + 1, ürün: P, personel: 'X ' + ft.MARKER }).then(() => 'ALLOWED', e => e.code);
+                return { skipped: 'gerçek demo, yayındaki Rules v2: etiketli yük yazılamaz; kaçışlı çizim j2XssSurfaces (iki ortam) ile sınanıyor', anonPayloadRejected };
+            }
             if (ft.emulator) {
                 anonPayloadRejected = await window.appendItem('requests', { id: reqId + 1, ürün: P, personel: 'X ' + ft.MARKER }).then(() => 'ALLOWED', e => e.code);
                 await ft.adminLogin();
@@ -1497,6 +1505,7 @@ const SCENARIOS = {
             if (ft.emulator) await ft.backToAnonymous();
             return { reqId, poId, anonPayloadRejected };
         });
+        if (ids.skipped) return ids;
 
         const admin = await (await browser.createBrowserContext()).newPage();
         const errs = [];
@@ -2619,7 +2628,7 @@ const SCENARIOS = {
         const restorePassword = p => p.evaluate(async (AUTH, LONG, CODE) => {
             const sdk = await import(AUTH), auth = sdk.getAuth(window.firebaseApp);
             if (!(auth.currentUser && !auth.currentUser.isAnonymous)) { if (!(await window.SecurityConfig.authenticate(LONG))) return 'not-needed-or-failed'; }
-            await sdk.updatePassword(auth.currentUser, '0' + CODE); return 'restored';
+            await sdk.updatePassword(auth.currentUser, CODE); return 'restored';
         }, AUTH, LONG, EMU_ADMIN_CODE).catch(err => 'restore error: ' + err.message);
         let a = null, rotated = false;
         try {
@@ -2706,7 +2715,7 @@ const SCENARIOS = {
                 sdk.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
                 localStorage.removeItem('admin_auth'); localStorage.removeItem('activeUser');
                 // eski istemci: getAuth varsayılanı (IndexedDB, kalıcı), persistence ayarı yok
-                await sdk.signInWithEmailAndPassword(auth, 'admin@medipol.local', '0' + CODE);
+                await sdk.signInWithEmailAndPassword(auth, 'admin@medipol.local', CODE);
                 return auth.currentUser.email;
             }, cfg, AUTH, EMU_ADMIN_CODE);
             await d.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
@@ -2850,7 +2859,7 @@ const SCENARIOS = {
         }, TOKEN);
         emu.indexReauthCancel = await reauthFlow(page, 'confirmRequest', 'rqa_' + TOKEN, ['yanlis-parola-12345', 'cancel']);
         emu.indexAfterCancel = await page.evaluate(() => ({ writes: window.__j4Writes, alert: window.__j4Alerts.splice(0).join(' | ') }));
-        emu.indexReauthOk = await reauthFlow(page, 'confirmRequest', 'rqa_' + TOKEN, ['emu01']);
+        emu.indexReauthOk = await reauthFlow(page, 'confirmRequest', 'rqa_' + TOKEN, [EMU_ADMIN_CODE]);
         emu.indexAfterOk = await page.evaluate(() => ({ writes: window.__j4Writes, alert: window.__j4Alerts.splice(0).join(' | ') }));
         // tag'li metin günlüğe düşer (kural etiketi reddeder → "<" görsel eşdeğeriyle değişir)
         emu.sanitizedWrite = await page.evaluate(TOKEN => window.appendAuditLog({ type: 'J4 test', refCol: 'requests', refId: 'x', item: '<img src=x> ' + TOKEN + ' etiket', qty: 1, actorName: 'J4', result: 'cancelled', reason: 'J4 sanitize testi' }), TOKEN);
@@ -2884,7 +2893,7 @@ const SCENARIOS = {
                 window.__j4Alerts = []; window.showAppAlert = (m, t) => window.__j4Alerts.push(`${t}: ${m}`);
                 return { identity: me.name, reportButton: !!document.getElementById('btn-security-report') };
             }, TOKEN);
-            emu.adminReauthOk = await reauthFlow(a, 'approveStep', 'poa_' + TOKEN, ['emu01']);
+            emu.adminReauthOk = await reauthFlow(a, 'approveStep', 'poa_' + TOKEN, [EMU_ADMIN_CODE]);
             emu.adminAfterOk = await a.evaluate(TOKEN => ({ upserts: window.__j4Upserts, stepApproved: window.data.purchaseOrders.find(p => p.id === 'poa_' + TOKEN)?.workflow.steps[0].status, alert: window.__j4Alerts.splice(0).join(' | ') }), TOKEN);
 
             // Rapor: düğme → tek seferlik okuma; bu koşunun kayıtları (index personel + index admin + admin.html) görünür
@@ -2946,6 +2955,86 @@ const SCENARIOS = {
         const c = await probe(async p => { await p.mouse.click(5, 5); });
         out.clickBeforeData = { dataWasLoaded: c.early.dataLoaded, active: c.active };
         await c.p.browserContext().close();
+        return out;
+    },
+
+    // Faz 4 kapanış hotfix'i (saha bulgusu 07.10.2026) — çıkıştan hemen sonra, F5'siz ve TEK tıklamayla yeniden giriş. Canlıdaki
+    // gecikmeyi taklit etmek için ağ yavaşlatılır (700 ms). Personel yolu ve mesaj görünürlüğü iki ortamda; admin yolları emülatörde.
+    async j6PostLogoutRelogin(page, browser) {
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const base = page.url().split('/index.html')[0], q = EMU ? '?emu=1' : '';
+        const settle = async (p, fn, ms = 25000, arg) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch (e) { } await sleep(200); } return false; };
+        const slow = async p => { const c = await p.target().createCDPSession(); await c.send('Network.emulateNetworkConditions', { offline: false, latency: 700, downloadThroughput: 250 * 1024, uploadThroughput: 120 * 1024 }); };
+        const statusVisible = p => p.evaluate(() => { const el = document.getElementById('loginStatus'); return { visible: !!el && getComputedStyle(el).display !== 'none' && el.offsetParent !== null, text: el ? el.innerText.trim() : null }; });
+        const errs = [], out = {};
+        const open = async (ctx, url) => { const p = await ctx.newPage(); p.on('pageerror', e => errs.push(e.message)); p.on('dialog', d => d.dismiss()); await p.goto(url, { waitUntil: 'domcontentloaded' }); return p; };
+        const staffOnce = (p, code) => p.evaluate(async code => {
+            window._dx._b['access-val-node'] = code;
+            const t = Date.now(); let sawWaiting = false;
+            const watch = setInterval(() => { const el = document.getElementById('loginStatus'); if (el && /hazırlanıyor/.test(el.innerText) && getComputedStyle(el).display !== 'none') sawWaiting = true; }, 50);
+            await window.handleLogin();   // TEK tıklama
+            clearInterval(watch);
+            return { ok: document.body.classList.contains('logged-in') && !!window.getActiveUser(), ms: Date.now() - t, sawWaitingMessage: sawWaiting };
+        }, code);
+
+        // ── İki ortam: mesaj görünürlüğü + personel yolu ──
+        const ctx = await browser.createBrowserContext();
+        try {
+            const p = await open(ctx, `${base}/index.html${q}`);
+            await settle(p, () => window.isFirebaseLoaded === true && (window.data.personel || []).length > 0);
+            await sleep(4800);   // "Sistem Hazır" mesajının gizlendiği an geçti
+            out.wrongCodeAfter4s = await p.evaluate(async () => { window._dx._b['access-val-node'] = '00000x'; await window.handleLogin(); return null; }).then(() => statusVisible(p));
+            const code = await p.evaluate(() => { const x = (window.data.personel || []).find(p => p.code && p.name && !/Muhammed Cer|^Admin$/.test(p.name)); return x && String(x.code); });
+            out.doubleClick = await p.evaluate(async code => {
+                window._dx._b['access-val-node'] = code; let n = 0; const real = window.setActiveUser; window.setActiveUser = u => { n++; return real(u); };
+                await Promise.all([window.handleLogin(), window.handleLogin()]); window.setActiveUser = real; return { setActiveUserCalls: n, loggedIn: !!window.getActiveUser() };
+            }, code);
+            await slow(p);
+            await p.evaluate(() => window.handleLogout('manual'));
+            out.staffRelogin = await staffOnce(p, code);   // çıkışın hemen ardından, F5'siz, tek tıklama
+            out.staffRelogin.afterVisible = await statusVisible(p);
+            await p.evaluate(() => window.handleLogout('manual'));
+            out.oldFiveDigitAdminCode = await p.evaluate(async () => { window._dx._b['access-val-node'] = '12345'; const a = []; const r = window.showAppAlert; window.showAppAlert = (m, t) => a.push(m); await window.checkAdminAndGo(); window.showAppAlert = r; return { alert: a.join(' | '), isDbAdmin: window.isDbAdmin() }; });
+        } finally { await ctx.close(); }
+
+        if (!EMU) { out.emulator = 'skipped (admin yolları yalnız --emu)'; out.pageErrors = errs; return out; }
+
+        // ── Emülatör: admin yolları, yavaş ağda, tek tıklama ──
+        const adminCtx = await browser.createBrowserContext();
+        try {
+            const a = await open(adminCtx, `${base}/index.html?emu=1`);
+            const adminFromIndex = async (label) => {
+                const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).then(() => true, () => false);
+                await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);   // TEK tıklama, beklemeden
+                const navigated = await nav;
+                const admin = navigated && await settle(a, () => location.pathname.endsWith('admin.html') && window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true, 25000);
+                const st = await a.evaluate(() => ({ path: location.pathname, isDbAdmin: window.isDbAdmin(), anon: !!(window.userAuth && window.userAuth.isAnonymous), locked: document.getElementById('adminLockModal')?.style.display === 'flex' })).catch(e => ({ err: e.message }));
+                out[label] = { navigated, admin, ...st };
+            };
+            await settle(a, () => window.isFirebaseLoaded === true);
+            await adminFromIndex('adminFirstLogin');
+            await slow(a);
+            // (a) admin.html "Oturumu Kapat" → index → hemen admin girişi
+            const navOut = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
+            await a.evaluate(() => { window.adminForceLogout(); });
+            await navOut;
+            await settle(a, () => typeof window.checkAdminAndGo === 'function' && !!window._dx, 20000);
+            await adminFromIndex('afterLogoutButtonImmediateAdmin');
+            // (b) kilit ("Güvenli Çıkış") → hemen kilit açma
+            await a.evaluate(() => { window.showCustomConfirm = async () => true; window.adminLogout(); });
+            await settle(a, () => document.getElementById('adminLockModal').style.display === 'flex', 15000);
+            out.lockImmediateUnlock = await a.evaluate(async code => { window._dx._b['lock-val-node'] = code; await window.unlockAdmin(); return null; }, EMU_ADMIN_CODE)
+                .then(() => settle(a, () => window.isDbAdmin() && document.getElementById('adminLockModal').style.display !== 'flex', 20000))
+                .then(async ok => ({ ok, ...(await a.evaluate(() => ({ isDbAdmin: window.isDbAdmin(), anon: !!window.userAuth?.isAnonymous, sync: window.getSyncHealth() }))) }));
+            // (c) index'te admin iken navbar "Çıkış Yap" (yumuşak sıfırlama) → hemen admin girişi
+            const navHome = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 });
+            await a.evaluate(() => { window.location.href = 'index.html'; });
+            await navHome;
+            await settle(a, () => window.isDbAdmin && window.isDbAdmin() && !!document.getElementById('userDisplay'), 25000);
+            await a.evaluate(() => window.handleLogout('manual'));
+            await adminFromIndex('indexLogoutImmediateAdmin');
+        } finally { await adminCtx.close(); }
+        out.pageErrors = errs;
         return out;
     },
 
