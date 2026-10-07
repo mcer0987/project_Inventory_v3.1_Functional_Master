@@ -11,17 +11,24 @@ const SecurityConfig = {
     _signInPending: false,
     _ending: null,
 
-    // [WHY]: Faz 4 · J3 (SEC-02 arayüz, M11) — Firebase en az 6 karakter istediği için 5 haneli koda "0" ekleniyordu; arayüz de
-    //        5 karakterle sınırlıydı. Parola ≥12 karaktere döndürülecek, ama Auth proje genelidir: yeni parola deploy günü
-    //        verilir (T14), o güne kadar bugünkü 5 haneli kod çalışmaya devam etmeli.
-    // [HOW]: 5 karakter → eski "0"+kod biçimi (geçiş dalı; sahibinin rotasyon teyidinden sonra Faz 4 kapanış hotfix'inde
-    //        kalkar) · ≥12 → olduğu gibi · 6-11 → ağa gitmeden ret ("en az 12 karakter") · diğerleri → hatalı parola.
+    // [WHY]: Faz 4 · J3 (SEC-02, M11) — eski 5 haneli kod "0" ön ekiyle Firebase'e gidiyordu. Parola deploy günü ≥12 karaktere
+    //        döndürüldü (sahibinin teyidi, 07.10.2026); geçiş dalı Faz 4 kapanış hotfix'inde kaldırıldı.
+    // [HOW]: ≥12 → olduğu gibi · daha kısa her giriş ağa gitmeden ret ("en az 12 karakter"; eski 5 haneli kodu deneyen yönetici
+    //        neden reddedildiğini görür) · boş → hatalı parola.
     normalizeAdminPassword(raw) {
         const pw = raw == null ? '' : String(raw);
-        if (pw.length === 5) return { ok: true, value: '0' + pw, legacy: true };
-        if (pw.length >= this.MIN_PASSWORD_LENGTH) return { ok: true, value: pw, legacy: false };
-        if (pw.length > 5) return { ok: false, error: `Yönetici parolası en az ${this.MIN_PASSWORD_LENGTH} karakter olmalıdır.` };
+        if (pw.length >= this.MIN_PASSWORD_LENGTH) return { ok: true, value: pw };
+        if (pw.length > 0) return { ok: false, error: `Yönetici parolası en az ${this.MIN_PASSWORD_LENGTH} karakter olmalıdır.` };
         return { ok: false, error: null };
+    },
+
+    // [WHY]: Faz 4 kapanış hotfix'i (saha bulgusu, 07.10.2026) — çıkıştan hemen sonra (F5'siz) yeni anonim oturum henüz yoldayken
+    //        yapılan admin girişi, kalıcılık değişimi ve iki oturum işlemiyle yarışabiliyordu (anonim yanıt admin oturumunun üstüne
+    //        yazılabilir). Canlıda ağ gecikmesi bu pencereyi saniyelere uzatıyordu.
+    // [HOW]: Oturum durumu yerleşene kadar (Firebase'den bir kullanıcı — anonim ya da değil — gelene kadar) beklenir; en fazla ms.
+    async waitForAuthSettled(ms = 10000) {
+        if (window.userAuth || typeof window.whenAuthReady !== 'function') return !!window.userAuth;
+        return Promise.race([window.whenAuthReady().then(() => true), new Promise(r => setTimeout(() => r(false), ms))]);
     },
 
     async _auth() {
@@ -44,6 +51,7 @@ const SecurityConfig = {
         this._signInPending = true;
         let auth = null, sdk = null;
         try {
+            await this.waitForAuthSettled();   // yoldaki anonim oturumla yarışmasın (kapanış hotfix'i)
             ({ sdk, auth } = await this._auth());
 
             // Görünmez E-posta İllüzyonu (Firebase Console'dan bu e-postayı ve şifresini oluşturmalısınız)
@@ -72,7 +80,7 @@ const SecurityConfig = {
     // [WHY]: Faz 4 · J4 (KJ-3, M13) — admin kendi talebini/adımını onaylarken "biyometrik imza" isteniyordu; cihazda donanım
     //        yoksa her 5 karakteri kabul eden bir prompt'a düşüyordu (fiilen doğrulama yoktu).
     // [HOW]: Açık admin oturumunda parola yeniden doğrulanır (reauthenticateWithCredential). Oturum değişmez; yanlış parola
-    //        yalnız false döner. Geçiş kuralı girişle aynı (normalizeAdminPassword).
+    //        yalnız false döner. Parola kuralı girişle aynı (normalizeAdminPassword).
     async reauthenticateAdmin(password) {
         this.lastErrorMessage = null;
         const norm = this.normalizeAdminPassword(password);

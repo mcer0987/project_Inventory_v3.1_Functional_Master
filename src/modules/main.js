@@ -41,7 +41,7 @@ window.addEventListener('onAppLogout', (e) => {
     if (userDisplay) userDisplay.remove();
 
     const statusDiv = document.getElementById('loginStatus');
-    if (statusDiv) statusDiv.innerHTML = '';
+    if (statusDiv) { statusDiv.innerHTML = ''; delete statusDiv.dataset.loginMsg; }
 
     const codeInput = document.getElementById('access-val-node');
     if (codeInput) {
