@@ -329,6 +329,40 @@ export const checkAuth = function () {
 window.checkAuth = checkAuth;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Giriş durumu ve hazır olma (Faz 4 kapanış hotfix'i · saha bulgusu 07.10.2026)
+// ─────────────────────────────────────────────────────────────────────────────
+// [WHY]: Çıkıştan hemen sonra (F5'siz) giriş "takılıyordu": (1) #loginStatus sayfa açılışından 4 sn sonra gizleniyor ve bir daha
+//        görünür yapılmıyordu — "Veriler henüz hazır değil" ve "Hatalı Giriş Kodu" mesajları görünmez kutuya yazılıyordu;
+//        (2) çıkışla başlayan anonim oturum + veri yenilemesi (canlıda birkaç saniye) bitmeden yapılan giriş beklemek yerine
+//        reddediliyordu.
+// [HOW]: Mesajlar her zaman görünür yazılır (bekleyen gizleme iptal edilir). Giriş, oturum ve personel listesi hazır olana kadar
+//        "Oturum hazırlanıyor" diyerek bekler ve kendiliğinden devam eder; çift tıklama tek giriş sayılır.
+function setLoginStatus(html) {
+    const el = document.getElementById('loginStatus');
+    if (!el) return;
+    clearTimeout(window._loginStatusHideTimer);
+    el.style.display = '';
+    el.innerHTML = html;
+    if (html) el.dataset.loginMsg = '1'; else delete el.dataset.loginMsg;   // firebase-handler bu mesajın üstüne "Sistem Hazır" yazmaz
+}
+
+const LOGIN_READY_TIMEOUT_MS = 15000;
+const isLoginReady = () => !!window.userAuth && window.isFirebaseLoaded === true && !!(window.data && window.data.personel);
+async function waitForLoginReady() {
+    if (isLoginReady()) return true;
+    setLoginStatus("<span style='color:var(--warning-color)'>⏳ Oturum hazırlanıyor, lütfen bekleyin…</span>");
+    const t = Date.now();
+    while (Date.now() - t < LOGIN_READY_TIMEOUT_MS) {
+        await new Promise(r => setTimeout(r, 150));
+        if (isLoginReady()) { setLoginStatus(''); return true; }
+    }
+    setLoginStatus("<span style='color:var(--danger-color)'>⚠️ Sunucuya bağlanılamadı. Bağlantınızı kontrol edip tekrar deneyin.</span>");
+    return false;
+}
+
+let _loginInFlight = false;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // handleLogin
 // ─────────────────────────────────────────────────────────────────────────────
 /**
@@ -336,26 +370,30 @@ window.checkAuth = checkAuth;
  * @param {Event} event - Form submit eventi
  *
  * [WHY]: Personel girişi. Admin girişi ayrı akıştadır (checkAdminAndGo).
- * [HOW]: 5 haneli kod personel listesinde aranır; bulunursa Session Store'a yazılır.
+ * [HOW]: Kod personel listesinde aranır; bulunursa Session Store'a yazılır. Oturum/veri hazır değilse beklenir.
  *        Biyometrik adım ENABLE_BIOMETRIC_LOGIN ile kontrol edilir.
  */
 export const handleLogin = async function (event) {
     if (event) { event.preventDefault(); event.stopPropagation(); }
 
-    const statusDiv = document.getElementById('loginStatus');
     const codeInput = document.getElementById('access-val-node');
     const loginModal = document.getElementById('loginModal');
 
     // [R-SYS]: Güvenli kod maskeleyiciden değeri al; yoksa input'tan oku.
     const code = window._dx ? window._dx._g('access-val-node') : (codeInput ? codeInput.value.trim() : '');
 
-    // GÜVENLİK KONTROLÜ: Veriler yüklenmeden giriş yaptırma
-    if (!window.isFirebaseLoaded || !window.data || !window.data.personel) {
-        if (statusDiv) {
-            statusDiv.innerHTML = "<span style='color:var(--warning-color)'>⏳ Veriler henüz hazır değil, bekleyin...</span>";
-        }
-        return;
+    // GÜVENLİK KONTROLÜ: Veriler yüklenmeden giriş yaptırma — reddetmek yerine hazır olmasını bekle (kapanış hotfix'i)
+    if (_loginInFlight) return;
+    _loginInFlight = true;
+    try {
+        if (!(await waitForLoginReady())) return;
+        await completeStaffLogin(code, { codeInput, loginModal });
+    } finally {
+        _loginInFlight = false;
     }
+};
+
+async function completeStaffLogin(code, { codeInput, loginModal }) {
 
     // [WHY]: Her personel girişi admin hesabına bir parola denemesi yapıyordu (AUTH-04).
     // [HOW]: Bu form yalnız personel kodunu doğrular; admin girişi yalnız "Yönetici Paneli" (checkAdminAndGo) akışındadır.
@@ -366,9 +404,7 @@ export const handleLogin = async function (event) {
         if (ENABLE_BIOMETRIC_LOGIN) {
             if (typeof window.verifyBiometrics !== 'function') {
                 console.error('[auth-engine] Biometric module not loaded!');
-                if (statusDiv) {
-                    statusDiv.innerHTML = "<span style='color:var(--danger-color)'>❌ Güvenlik modülü yüklenemedi!</span>";
-                }
+                setLoginStatus("<span style='color:var(--danger-color)'>❌ Güvenlik modülü yüklenemedi!</span>");
                 return;
             }
 
@@ -382,9 +418,7 @@ export const handleLogin = async function (event) {
             }
 
             if (!biometricSuccess) {
-                if (statusDiv) {
-                    statusDiv.innerHTML = "<span style='color:var(--danger-color)'>❌ Biyometrik doğrulama başarısız!</span>";
-                }
+                setLoginStatus("<span style='color:var(--danger-color)'>❌ Biyometrik doğrulama başarısız!</span>");
                 if (codeInput) {
                     codeInput.value = '';
                     codeInput.focus();
@@ -405,6 +439,7 @@ export const handleLogin = async function (event) {
 
         // ─── BAŞARILI GİRİŞ (KOD + BIYOMETRIK) ───
         window.setActiveUser(user);
+        setLoginStatus('');
 
         document.body.classList.add('logged-in');
 
@@ -445,19 +480,18 @@ export const handleLogin = async function (event) {
         }
     } else {
         // ─── HATALI GİRİŞ ─── Modalı ASLA kapatma
-        if (statusDiv) {
-            statusDiv.innerHTML = "<span style='color:var(--danger-color); font-weight:bold;'>❌ Hatalı Giriş Kodu!</span>";
-        }
+        setLoginStatus("<span style='color:var(--danger-color); font-weight:bold;'>❌ Hatalı Giriş Kodu!</span>");
         if (codeInput) {
             // Hafif sarsılma animasyonu (shake feedback)
             codeInput.style.transform = 'translateX(10px)';
             setTimeout(() => codeInput.style.transform = 'translateX(-10px)', 50);
             setTimeout(() => codeInput.style.transform = 'translateX(0)', 100);
             codeInput.value = '';
+            if (window._dx) window._dx._r('access-val-node');
             codeInput.focus();
         }
     }
-};
+}
 
 // [COMPATIBILITY_BRIDGE]: index.html'deki login formu onsubmit="window.handleLogin(event)" çağırır.
 window.handleLogin = handleLogin;
@@ -479,10 +513,21 @@ export const checkAdminAndGo = async function () {
     const code = window._dx ? window._dx._g('access-val-node') : (codeInput ? codeInput.value.trim() : '');
 
     if (!code) return;
+    if (_loginInFlight) return;
+    _loginInFlight = true;
+    try {
+        // Kapanış hotfix'i: çıkıştan hemen sonra oturum ve personel listesi (yönetici kimliği için) hazır olana kadar beklenir.
+        if (!(await waitForLoginReady())) return;
+        await completeAdminLogin(code);
+    } finally {
+        _loginInFlight = false;
+    }
+};
 
+async function completeAdminLogin(code) {
     // [WHY]: Frontend hash kaldırıldı. Backend (Firebase Admin SDK) onayı zorunludur.
     // [HOW]: window.SecurityConfig lazy-resolve — security.js bu nesneyi window'a atar.
-    // J3: authenticate parolayı geçiş kuralına göre biçimler (5 hane → eski kod, ≥12 → parola) ve vizeyi oturumla birlikte yazar.
+    // J3: authenticate parolayı denetler (≥12 karakter) ve vizeyi oturumla birlikte yazar.
     const isAdminPass = await window.SecurityConfig.authenticate(code);
 
     if (isAdminPass) {
@@ -516,7 +561,7 @@ export const checkAdminAndGo = async function () {
             window.showAppAlert(window.SecurityConfig.lastErrorMessage || 'Admin yetkisi yok', 'danger');
         }
     }
-};
+}
 
 // [COMPATIBILITY_BRIDGE]: HTML onclick ile çağrılabilir.
 window.checkAdminAndGo = checkAdminAndGo;

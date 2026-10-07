@@ -454,12 +454,15 @@ window.startRealtimeSync = function () {
             if (colName === 'personel' && items.length >= 0) {
                 window.isFirebaseLoaded = true;
 
-                if (statusDiv) {
-                    // [WHY]: Increase sync status visibility duration so the user can easily notice the change.
-                    // [HOW]: Change setTimeout delay from 1500ms to 4000ms.
+                // Faz 4 kapanış hotfix'i: "Sistem Hazır" yalnız senkronun ilk yüklemesinde ve giriş mesajı yokken; gizleme
+                // zamanlayıcısı kayıtlı (auth-engine setLoginStatus iptal eder). Eskiden her personel güncellemesi kutuyu yeniden
+                // yazıp 4 sn sonra kalıcı olarak gizliyordu — sonraki giriş mesajları görünmüyordu.
+                if (statusDiv && isInitialLoad && statusDiv.dataset.loginMsg !== '1') {
+                    statusDiv.style.display = '';
                     statusDiv.innerHTML = '✅ Sistem Hazır.';
                     statusDiv.style.color = "#27ae60";
-                    setTimeout(() => { statusDiv.style.display = 'none'; }, 4000);
+                    clearTimeout(window._loginStatusHideTimer);
+                    window._loginStatusHideTimer = setTimeout(() => { statusDiv.style.display = 'none'; }, 4000);
                 }
 
                 if (loginInput) {

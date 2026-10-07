@@ -20,6 +20,8 @@ Her tur sonunda güncellenir. Ham kanıtlar `scratch/baseline/<klasör>/` altın
 
 Deploy günü kapananlar: M16 (kurallar + istemci tek komut), M17 / T14 (parola ≥12), SEC-05 paneli (EmailJS). Aşama B (RULE-02 kalanı, AUTH-07/09) Faz 4B'de.
 
+**Deploy sonrası (07.10.2026 · kapanış hotfix'i):** Rules v2 canlıda — gerçek projede eski kök `system_config` okuması ve personelin etiketli yazması reddediliyor. Akış **42/42 + 42/42** (yeni: `j6PostLogoutRelogin` — çıkış sonrası tek tıklamayla giriş, görünür giriş mesajları), kural matrisi 72/72, xss-lint 0, CSP 0, smoke `2026-10-07T06-39-58_p4-hotfix` / `…06-40-24_p4-hotfix_emu`. 5 haneli parola geçiş dalı kaldırıldı (M11 kapandı).
+
 ## Firestore kural matrisi (`npm run test:rules`)
 | Tur | Kurallar | Senaryo | ✔ | ✖ | Kanıt |
 |---|---|---|---|---|---|
@@ -56,7 +58,7 @@ Yayındaki kuralların 28 açığı (özet): oturumlu herkes talep/satın alma s
 | J3 | gerçek demo / emülatör (Rules v2) | 38/38 · 38/38 | 0 | aynı; admin.html oturumsuz açılışta kilit kartı — `2026-10-05T08-23-05_p4-j3`, `2026-10-05T08-22-34_p4-j3_emu` |
 
 ## Oturum ve vize (J3 · `j3SessionVisa`)
-Gerçek admin oturumu gerektiren adımlar yalnız emülatörde (sahte `emu01` hesabı; ≥12 karakter testi için parola geçici olarak değiştirilir ve koşu sonunda geri alınır). Gerçek projede admin kimlik bilgisi kullanılmaz.
+Gerçek admin oturumu gerektiren adımlar yalnız emülatörde (sahte `emu-yonetici-0001` hesabı; ≥12 karakter testi için parola geçici olarak değiştirilir ve koşu sonunda geri alınır). Gerçek projede admin kimlik bilgisi kullanılmaz.
 
 | Kontrol | Gerçek demo | Emülatör |
 |---|---|---|

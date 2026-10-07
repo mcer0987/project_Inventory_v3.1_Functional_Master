@@ -23,7 +23,7 @@ Ham kanıtlar (smoke raporları, ekran görüntüleri, kural testi çıktıları
 | 2 | **Canlı kök `lifeserver_master` ve eski `inventory_v2` test edilmez.** Gerçek projede yalnız `inventory_demo` okunur/yazılır | Canlı veri |
 | 3 | **Kural değişikliği önce emülatörde.** Firestore kuralları proje genelidir: "demo için" yapılan bir yayın canlıyı da değiştirir | KJ-1 (Faz 4) |
 | 4 | Kurallar ve istemci **aynı deploy komutunda** yayınlanır (`firebase deploy --only firestore:rules,hosting`); deploy yalnız sahibinin açık onayıyla | Maskeleme çifti M16 |
-| 5 | Gerçek parola, hash, token hiçbir betiğe, loga, rapora yazılmaz. Emülatörde yalnız sahte admin hesabı kullanılır (kod `emu01`, yalnız emülatör Auth'unda geçerli) | Yürütme protokolü §7.5 |
+| 5 | Gerçek parola, hash, token hiçbir betiğe, loga, rapora yazılmaz. Emülatörde yalnız sahte admin hesabı kullanılır (parola `emu-yonetici-0001`, yalnız emülatör Auth'unda geçerli) | Yürütme protokolü §7.5 |
 | 6 | Test kayıtları `__flowtest__` işareti taşır; demo kökünde yalnız işaretli kayıtlar personel oturumuyla silinebilir (KJ-5) ve her koşudan sonra temizlik artığı **0** olmalıdır | Demo verisinin korunması |
 | 7 | Kill switch, force logout ve sistem mesajı yalnız emülatörde ya da `inventory_demo`'da denenir (system_config artık köke göre ayrık; RULE-04) | Canlı kullanıcılar |
 | 8 | Toplu veri değiştiren her işlemden önce DB snapshot; işlem önizleme + onay ile | Anayasa §6 |
@@ -57,7 +57,7 @@ Ayrıntı ve kanıt bağlantıları: [test-baselines/faz4-guvenlik-baseline.md](
 | Oturum ve vize (`j3SessionVisa`) — admin oturumu sekmeye bağlı, kilitte/çıkışta signOut, sanal "Admin" yok, dolmuş vize canlanmıyor | tümü ✔ (emülatör: gerçek admin yolu; gerçek demo: oturumsuz kapı + birim) | J3 |
 | Self-approval (`j4SelfApproval`) — personel engeli + `blocked`, admin parola doğrulaması + `approved`/`cancelled`, günlük değişmez, rapor iki sayfada | tümü ✔ (gerçek demoda günlük yazılmaz, bellekte sınanır) | J4 |
 | Biyometrik yedek yol (her 5 karakteri kabul eden prompt) | kaldırıldı; `verifyBiometrics` bayrak kapalıyken `false` | J4 |
-| Akış suite'i — gerçek demo / emülatör | **41/41** · **41/41** (FAILED 0, pageerror 0, artık 0) | J6 |
+| Akış suite'i — gerçek demo (yayındaki Rules v2) / emülatör | **42/42** · **42/42** (FAILED 0, pageerror 0, artık 0) | kapanış hotfix'i |
 | CSP (firebase.json = nginx) — akış suite'i + smoke, iki ortam | **0 ihlal**; pozitif kontrol: izinsiz istek engelleniyor ✔ | J6 |
 | Hosting'e gidecek dosyalar (`node scratch/hosting-files.js`) | 47 uygulama dosyası (Docker ile aynı); J6'da `firestore-debug.log` sızıntısı kapatıldı | J6 |
 | Docker konteyneri (`scratch/docker-check.js`) — başlıklar, engeller (17 yol 404), JS/CSS no-cache + ETag 304, iki sayfada 0 CSP ihlali | ✔ (üretim ve emülatör modu) | J5 |

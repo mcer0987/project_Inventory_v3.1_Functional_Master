@@ -16,10 +16,10 @@ const SOURCE_ROOT = 'inventory_demo';
 const PROJECT_ID = 'medipol-inventory-v3';
 const EMU = { host: '127.0.0.1', firestore: 8080, auth: 9099 };
 
-// Yalnız emülatörde geçerli sahte admin (gerçek parola DEĞİLDİR). Giriş ekranına EMU_ADMIN_CODE yazılır;
-// security.js başına "0" ekler. Aynı sabit scratch/flow-tests.js'te (EMU_ADMIN_CODE) kullanılır.
+// Yalnız emülatörde geçerli sahte admin parolası (gerçek parola DEĞİLDİR; ≥12 karakter — Faz 4 kapanışında 5 haneli geçiş
+// dalı kaldırıldı). Giriş ekranına olduğu gibi yazılır. Aynı sabit scratch/flow-tests.js'te (EMU_ADMIN_CODE) kullanılır.
 const EMU_ADMIN_EMAIL = 'admin@medipol.local';
-const EMU_ADMIN_CODE = 'emu01';
+const EMU_ADMIN_CODE = 'emu-yonetici-0001';
 
 function parseConfig() {
     const block = HANDLER.match(/const firebaseConfig = \{([\s\S]*?)\};/);
@@ -93,9 +93,9 @@ async function push() {
 
     await authEmu(`/emulator/v1/projects/${PROJECT_ID}/accounts`, { method: 'DELETE' });
     await authEmu(`/identitytoolkit.googleapis.com/v1/accounts:signUp?key=emu`, {
-        method: 'POST', body: JSON.stringify({ email: EMU_ADMIN_EMAIL, password: '0' + EMU_ADMIN_CODE, returnSecureToken: true }),
+        method: 'POST', body: JSON.stringify({ email: EMU_ADMIN_EMAIL, password: EMU_ADMIN_CODE, returnSecureToken: true }),
     });
-    console.log(`✔ emülatör tohumlandı (${dump.pulledAt} kopyası) · EMU admin kodu: ${EMU_ADMIN_CODE}`);
+    console.log(`✔ emülatör tohumlandı (${dump.pulledAt} kopyası) · EMU admin parolası: ${EMU_ADMIN_CODE}`);
     process.exit(0);
 }
 
