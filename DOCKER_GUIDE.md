@@ -69,7 +69,7 @@ npm run emu
 
 # İlk kez: gerçek inventory_demo'nun salt-okunur kopyasını çek, emülatöre yükle (sahte admin hesabı da açılır)
 npm run emu:pull              # yalnız inventory_demo okunur; canlı köke hiç dokunulmaz
-npm run emu:seed              # emülatöre yazar; admin kodu: emu01 (YALNIZ emülatörde geçerli)
+npm run emu:seed              # emülatöre yazar; admin parolası: emu-yonetici-0001 (YALNIZ emülatörde geçerli)
 
 node scratch/smoke-test.js deneme --emu     # index/admin yükleme + CSP ihlal sayısı. Beklenen: pageerror 0, CSP ihlali 0
 npm run flow -- --emu                       # uçtan uca akışlar. Beklenen: FAILED yok, csp violations: 0
@@ -77,7 +77,7 @@ npm run flow -- --emu                       # uçtan uca akışlar. Beklenen: FA
 
 Emülatör çalışırken uygulama tarayıcıda: `http://127.0.0.1:<port>/index.html?emu=1`. Konsolda `🚀 ACTIVE DATABASE ROOT: inventory_demo @ EMULATOR` görünmelidir. Ayrıntılı test kuralları: `audits/README.md`.
 
-> Gerçek parola, token veya hash hiçbir betiğe, loga ya da bu belgeye yazılmaz. Emülatörde yalnız `emu01` sahte hesabı kullanılır.
+> Gerçek parola, token veya hash hiçbir betiğe, loga ya da bu belgeye yazılmaz. Emülatörde yalnız `emu-yonetici-0001` sahte hesabı kullanılır.
 
 ---
 
@@ -208,7 +208,7 @@ docker run -d --name medipol-envanter-dev -p 8088:80 \
   medipol-envanter:1.0.0
 # ya da: CSP_CONNECT_EXTRA="http://127.0.0.1:8080 http://127.0.0.1:9099" docker compose up -d --build
 
-# Tarayıcı: http://localhost:8088/index.html?emu=1   (admin kodu: emu01)
+# Tarayıcı: http://localhost:8088/index.html?emu=1   (admin parolası: emu-yonetici-0001)
 node scratch/docker-check.js http://localhost:8088 --emu   # emülatöre bağlandı, CSP ihlali 0
 ```
 

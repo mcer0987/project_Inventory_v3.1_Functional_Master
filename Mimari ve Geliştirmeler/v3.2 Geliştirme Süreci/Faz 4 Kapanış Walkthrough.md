@@ -120,7 +120,7 @@ Senaryo adları `scratch/flow-tests.js`'tedir.
 | Madde | Durum | Kanıt |
 |---|---|---|
 | Personel kodla giriş (biyometriksiz / Windows Hello) | ✔ + 👤 | `j6EkASession.login` (gerçek `handleLogin`); biyometrik adım kapalı (`j4.biometric`) → iki cihaz sınıfında aynı kod yolu. Hello'lu bir cihazda bir kez giriş: 👤 |
-| Hatalı kod → mesaj, modal kapanmaz | 👤 | Faz 4'te değişmedi |
+| Hatalı kod → mesaj, modal kapanmaz | ✔ | `j6PostLogoutRelogin.wrongCodeAfter4s` — **kapanış hotfix'inde bulundu ve düzeltildi**: mesaj sayfa açılışından 4 sn sonra görünmüyordu (§13) |
 | Sayfa yenileme (K5); kilitli bulanık ekran yok | ◐ | `j3.noVirtualAdminIndex` (yenilemede giriş ekranı, sanal kimlik yok); bulanıklık 👤 |
 | Çıkış → login → tekrar giriş → canlı veri, yazma, **tüm modallar** | ✔ | `j6EkASession.logout/relogin/afterRelogin` (modal açılıyor, yazma `ok`, senkron çalışıyor) |
 | 3 dk zaman aşımı → tekrar giriş → modallar | ✔ | `j6EkASession.timeout/timeoutRelogin` (süre kısaltılarak, gerçek zamanlayıcı) |
@@ -187,9 +187,9 @@ Senaryo adları `scratch/flow-tests.js`'tedir.
 | *(Faz 4 ek)* CSP ihlali 0 | ✔ | Akış 41/41 ×2 ve smoke ×2: 0 ihlal, pozitif kontrol ✔; konteyner `docker-check` ✔ |
 
 **Sayım (39 Ek A maddesi + 2 Faz 4 eki = 41):**
-- Otomatik, tam: **24** madde — ✔ 18, ✔ᴱ 6.
+- Otomatik, tam: **25** madde — ✔ 19, ✔ᴱ 6 (kapanış hotfix'iyle +1).
 - Otomatik ama kısmi: **14** madde (◐).
-- Yalnız elle: **3** madde.
+- Yalnız elle: **2** madde.
 
 Faz 4'ün kodunu değiştirdiği maddeler otomatik ve yeşil. Tek istisna **yedek al / yükle**: J4'te koleksiyon kısıtı (M14) eklendi; bu kısıt yalnız statik olarak denetleniyor. Gerçek yedek, deploy günü canlıda alınıp içeriği doğrulanıyor (runbook Adım 1).
 
@@ -236,7 +236,6 @@ Elle kalanlar Faz 4'te kodu değişmeyen ekran etkileşimleri. Kütüphane sür�
 ## 9. Sahibinin elle doğrulaması (merge öncesi, localhost veya önizleme kanalı — ~15 dk)
 
 Faz 4'te kodu değişmeyen ama Ek A'da yer alan ekran etkileşimleri. Her biri bir kez:
-1. Hatalı personel kodu → kırmızı "Hatalı Giriş Kodu", modal açık kalır.
 2. B1'de arama + sıralama + "Daha fazla yükle"; ikinci sekmeden bir ürünün adedini değiştirin → ilk sekmede sayfa ve sıralama korunur.
 3. B1 durum filtresi (aktif / hepsi / pasif); kart görünümü düğmesi; FAB ve Bottom Sheet; ESC.
 4. Excel dışa aktar + içe aktar; PDF rapor (index ve admin Zimmet sekmesi).
@@ -271,7 +270,7 @@ Sorun çıkarsa ajana bildirin; merge ve deploy bekler.
 | Konu | Nerede |
 |---|---|
 | Deploy (M16, M17, T14) | Runbook — sahibinin onayıyla |
-| 5 haneli parola geçiş dalının kaldırılması | Faz 4 kapanış hotfix'i, rotasyon teyidinden sonra |
+| 5 haneli parola geçiş dalının kaldırılması | ✔ Kapanış hotfix'i (§13) |
 | RULE-02 kalanı, AUTH-07/09 (personel başına hesap, kodların okunamaz olması, anonim auth'un kapanması) | **Faz 4B** (J7–J10), deploy + 1 hafta saha gözleminden sonra |
 | `'unsafe-inline'` (92 `jsArg`'li satır içi handler) | Faz 6 (KJ-6) |
 | SEC-07 (giriş kodunu konsola yazan log) | Faz 6 |
@@ -289,3 +288,66 @@ Sorun çıkarsa ajana bildirin; merge ve deploy bekler.
   - J5: CSP altında testin kendi `eval`'i.
   - J6: Hosting ignore'una uymayan emülatör günlüğü (`firestore-debug.log`) — deploy'da herkese açık yayınlanacaktı.
 - **Gerçek demo ile emülatör iki farklı soruyu cevaplıyor.** Gerçek demo "yeni istemci eski kurallarla çalışıyor mu" (deploy sırasındaki ara durum); emülatör "yeni istemci yeni kurallarla çalışıyor mu". İkisi de her turda yeşil kaldı.
+
+## 13. Deploy sonrası — Faz 4 kapanış hotfix'i (07.10.2026)
+
+**Deploy (sahibi, 06–07.10.2026):** Runbook Adım 1–4 canlıda uygulandı:
+- snapshot alındı;
+- 47 dosya + Rules v2 tek komutla yayınlandı;
+- admin parolası ≥12 karaktere döndü; eski 5 haneli kod reddediliyor.
+
+Canlı doğrulamanın tüm maddeleri ✔:
+- CSP/SRI uyarısı 0;
+- personel talebi;
+- kodsuz silme `permission-denied`;
+- admin onay/silme;
+- Güvenlik Raporu;
+- tarayıcı kapat-aç.
+
+Hotfix'in test koşusu da gerçek projede Rules v2'yi bağımsız olarak doğruladı:
+- eski kök `system_config` okuması → `permission-denied`;
+- personelin etiketli yazması → `forbidden`.
+
+**Saha bulgusu:** çıkıştan hemen sonra, F5'siz yeniden giriş takılıyor; F5 düzeltiyor.
+
+**Kök neden.** Emülatörde 700 ms ağ gecikmesiyle yeniden üretildi; düzeltme öncesi kodla kırmızı, sonrası yeşil.
+1. **Görünmeyen mesaj.** `#loginStatus` sayfa açılışından 4 sn sonra `display:none` yapılıyor ve bir daha görünür yapılmıyordu. Bu yüzden şu mesajlar **görünmez kutuya** yazılıyordu: çıkış sonrası "Veriler henüz hazır değil" ve her durumda "❌ Hatalı Giriş Kodu!". Kullanıcı "Giriş"e basıp hiçbir şey görmüyordu. Ek A'da elle doğrulamaya bırakılan "hatalı kod mesajı görünür" maddesi de aslında bozukmuş.
+2. **Bekleme yerine ret.** Çıkışın başlattığı anonim oturum + veri yenilemesi canlıda birkaç saniye sürüyor; bu süre dolmadan gelen giriş reddediliyordu.
+3. **Teorik yarış (önleyici).** Admin girişi, yoldaki anonim oturumla aynı anda kalıcılık/oturum değiştirebiliyordu.
+
+**Düzeltme:**
+- `auth-engine.js`:
+  - giriş mesajları her zaman görünür (`setLoginStatus`);
+  - personel ve admin girişi, oturum ve personel listesi hazır olana kadar "⏳ Oturum hazırlanıyor" diyerek **bekleyip kendiliğinden devam eder** (en fazla 15 sn, sonra açık hata);
+  - çift tıklama tek giriş sayılır.
+- `security.js`: `authenticate`, yoldaki anonim oturum yerleşmeden kalıcılık değiştirmez (`waitForAuthSettled`). Kilit açma ve bakım ekranından giriş de bu yoldan geçer.
+- `firebase-handler.js`: "Sistem Hazır" yalnız ilk yüklemede gösterilir ve bir giriş mesajının üstüne yazılmaz.
+- `main.js`: çıkışta mesaj durumu sıfırlanır.
+
+**5 haneli geçiş dalı (M11) kaldırıldı:**
+- Yalnız ≥12 karakter kabul ediliyor.
+- Daha kısa her giriş ağa gitmeden "Yönetici parolası en az 12 karakter olmalıdır" ile reddediliyor; eski kodu deneyen yönetici nedenini görür.
+- Emülatördeki sahte admin hesabı da ≥12 karaktere taşındı (`emu-yonetici-0001`, yalnız emülatör).
+
+**Test ve kanıt:**
+- **Yeni senaryo `j6PostLogoutRelogin`** (yavaş ağ, tek tıklama):
+  - Düzeltme öncesi kod: mesaj görünmüyor, personel 0 ms'de reddediliyor, çift tıklama iki kez giriş yapıyor.
+  - Düzeltme sonrası:
+    - personel ~3,2 sn bekleyip kendiliğinden giriyor;
+    - üç admin yolu tek tıklamayla admin oluyor: "Oturumu Kapat" → index, kilit → hemen aç, index'te çıkış;
+    - 4 sn sonrası hatalı kod mesajı görünüyor;
+    - eski 5 haneli kod reddediliyor.
+- **Test ortamı varsayımı güncellendi.** Gerçek demo artık yayındaki Rules v2'ye karşı koşuyor; yardımcılar canlı kuralları yokluyor (`ft.rulesV2`). `xssAdminPanel` gerçek demoda yükün kural tarafından reddedildiğini doğruluyor: yükü yazacak admin oturumu yok; kaçışlı çizim `j2XssSurfaces` ile iki ortamda sınanıyor.
+- **Sonuçlar:**
+
+  | Kontrol | Sonuç |
+  |---|---|
+  | Akış suite'i | **42/42** gerçek demoda, **42/42** emülatörde; FAILED 0, pageerror 0, artık 0, CSP ihlali 0 |
+  | Kural matrisi | 72/72 |
+  | xss-lint | izinsiz 0 (öz-test 17/17) |
+  | Smoke (iki ortam) | pageerror 0, console.error 0, CSP pozitif kontrol ✔ |
+  | Hosting | 47 dosya |
+
+- **Regresyon:** önceki 40 senaryonun çıktısı birebir aynı. Farklar yalnız beklenenler: parola kuralı tablosu ve gerçek demoda canlı Rules v2'nin görünmesi.
+
+**Öneri (uygulanmadı):** index'teki ortak giriş alanı, personel kodu için yapıştırmayı engelliyor. Bu yüzden ≥12 karakterli rastgele yönetici parolası parola yöneticisinden yapıştırılamıyor, yalnız elle yazılabiliyor. Kilit kartında yapıştırma açık. Index alanında da açılması istenirse tek satırlık bir değişiklik.
