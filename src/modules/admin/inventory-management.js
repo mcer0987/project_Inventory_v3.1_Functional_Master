@@ -266,6 +266,18 @@ window.inventoryManagementModule = {
                     <i class="fas fa-undo"></i> Zimmetten Düş
                   </button>`;
 
+      // Faz 5 · K1 (5.1 · ZIM-04): resmi zimmet tutanağı — personelId'si çözülebilen kayıtlarda (b3 ve eşlenmiş eski
+      // talepler). Kişinin ÜZERİNDEKİ TÜM zimmetlerini basar (bu satırla sınırlı değil; AssignmentService.getPersonInventory
+      // ile aynı küme), "Zimmetten Düş" gibi satır başına değil kişi başına bir işlemdir.
+      const pdfBtn = a.personelId
+        ? `<button onclick="window.generatePersonnelZimmetPDF(${jsArg(String(a.personelId))})"
+                    title="Bu personelin resmi zimmet tutanağını indir"
+                    style="padding:5px 10px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; border-radius:8px; cursor:pointer; font-size:11px; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:4px; transition:0.2s;"
+                    onmouseover="this.style.background='#e0e7ff'" onmouseout="this.style.background='#eef2ff'">
+                    <i class="fas fa-file-pdf"></i> Tutanak
+                  </button>`
+        : '';
+
       // [G] Seri No veya Envanter No varsa Cihaz Geçmişi butonu (3.9c: servis/sevk dahil birleşik geçmiş)
       const deviceId = [a.sn, a.envanterNo].find(v => v && v !== '-' && !String(v).includes(','));
       const historyBtn = deviceId
@@ -307,6 +319,7 @@ window.inventoryManagementModule = {
               <td style="padding:12px 16px; text-align:center;">
                 <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                   ${actionBtn}
+                  ${pdfBtn}
                   ${historyBtn}
                 </div>
               </td>

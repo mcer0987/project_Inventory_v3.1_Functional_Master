@@ -1830,6 +1830,109 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 5 · K1 (5.1 · ZIM-04): zimmet tutanağı PDF motoru — gerçek jsPDF + AutoTable + gömülü Türkçe (Roboto) fontla,
+    // iki sayfada da (personel butonu / admin satır butonu). doc.save() stub'lanır (gerçek indirme tetiklenmez).
+    async k1ZimmetPdf(page, browser) {
+        const pdfProbe = async () => {
+            const CODE = 'K1PDF-GIZLI-KOD';
+            const orig = { b3: window.data.b3, req: window.data.requests, per: window.data.personel };
+            window.data.personel = [
+                { id: 'k1pdf_p', name: 'Şükrü İğdeli', code: CODE, birim: 'Radyoloji' },
+                { id: 'k1pdf_bos', name: 'Boş Kişi', code: 'OTHER-CODE' },
+            ];
+            window.data.requests = [];
+            window.data.b3 = [
+                window.Schema.buildB3Entry({ id: 95001, tip: 'zimmet', adet: 1, urunAciklama: 'Latitude 5440', urunTuru: 'Dizüstü Bilgisayar', marka: 'Dell', isDemirbas: true, sn: 'PDFSN1', envanterNo: 'PDFENV1', alanKisi: 'Şükrü İğdeli', personelId: 'k1pdf_p', tarih: '01.10.2026', onaylayan: 'K1 Admin' }),
+                window.Schema.buildB3Entry({ id: 95002, tip: 'cikis', adet: 3, urunAciklama: 'Toner', alanKisi: 'Şükrü İğdeli', personelId: 'k1pdf_p' }),
+            ];
+
+            // jsPDF her 'new jsPDF()' çağrısında API yöntemlerini (save dahil) instance'a KENDİ ÖZELLİĞİ olarak kopyalar;
+            // jsPDF.prototype.save'i stub'lamak yeni örnekleri etkilemez — kaynak jsPDF.API.save'dir (ikisi ayrı nesne).
+            const JsPDFCtor = window.jspdf.jsPDF;
+            const origSave = JsPDFCtor.API.save;
+            const saves = [];
+            JsPDFCtor.API.save = function (filename) {
+                saves.push({ filename, pages: this.internal.getNumberOfPages(), fonts: Object.keys(this.getFontList()) });
+                return this;
+            };
+            const alerts = [];
+            const origAlert = window.showAppAlert;
+            window.showAppAlert = (msg, type) => alerts.push({ msg, type });
+
+            try {
+                await window.generatePersonnelZimmetPDF('k1pdf_p');           // 1 geçerli kalem (95002 'cikis' sayılmaz) → PDF
+                await window.generateZimmetPDF(95002);                        // tekil çıkış hareketi → PDF üretilir
+                await window.generatePersonnelZimmetPDF('k1pdf_bos');         // 0 kalem → uyarı, save yok
+                await window.generatePersonnelZimmetPDF('yok-kisi');          // bulunamadı → hata, save yok
+                await window.generateZimmetPDF('yok-b3');                     // bulunamadı → hata, save yok
+
+                // Çok kalemli belge: imza bloğu taşarsa yeni sayfa açma + "Sayfa X / Y" regresyonu
+                await window.AppModules.ZimmetPdf.ensureZimmetFonts();
+                const bigRows = Array.from({ length: 40 }, (_, i) => ({
+                    sira: i + 1, kayitId: String(9000 + i), kaynak: 'b3', envanterNo: 'E' + i, sn: 'S' + i,
+                    urunTuru: 'Tür', urunAciklama: 'Ürün ' + i, marka: 'Marka', model: 'Model', adet: 1, isDemirbas: true,
+                    tarih: '01.10.2026', teslimTarihi: '01.10.2026', talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeTarihi: '-',
+                    talepNo: '-', zimmetleyen: { ad: 'Admin', tarih: '01.10.2026' }, not: '-', durum: 'aktif', iadeEdildiTarihi: '-',
+                }));
+                const bigDoc = {
+                    sema: 'zimmet-belge/1',
+                    belge: { tur: 'personel-zimmet', belgeNo: 'ZT-TEST-BIG', olusturmaTarihi: '01.10.2026 10:00', duzenleyen: 'Test Admin', talepNolari: [], teslimEdenler: ['Admin'] },
+                    personel: { id: 'k1pdf_p', adSoyad: 'Şükrü İğdeli', birim: 'Radyoloji' },
+                    kalemler: bigRows,
+                    ozet: { kalemSayisi: 40, toplamAdet: 40, demirbasAdet: 40, sarfAdet: 0, geciciZimmet: 0, teslimBekleyen: 0 },
+                };
+                const bigPdf = window.AppModules.ZimmetPdf.renderZimmetTutanagi(bigDoc, 'DEMİRBAŞ VE MALZEME ZİMMET TUTANAĞI');
+
+                return {
+                    saves: saves.map(s => ({ filename: s.filename, pages: s.pages, hasRoboto: s.fonts.includes('Roboto') })),
+                    alertTypes: alerts.map(a => a.type),
+                    codeLeakInFilenames: saves.some(s => s.filename.includes(CODE)),
+                    bigDocPages: bigPdf.internal.getNumberOfPages(),
+                };
+            } finally {
+                JsPDFCtor.API.save = origSave;
+                window.showAppAlert = origAlert;
+                window.data.b3 = orig.b3; window.data.requests = orig.req; window.data.personel = orig.per;
+            }
+        };
+
+        const buttonProbe = () => {
+            const btn = [...document.querySelectorAll('#personnelInventoryTab button')].find(b => /Zimmet Tutana/.test(b.textContent));
+            return { found: !!btn, callsFn: btn ? /generatePersonnelZimmetPDF/.test(btn.getAttribute('onclick') || '') : false };
+        };
+
+        const expect = r => JSON.stringify(r.saves.map(s => s.pages > 0 && s.hasRoboto)) === JSON.stringify([true, true])
+            && r.saves.length === 2 && !r.codeLeakInFilenames
+            && JSON.stringify(r.alertTypes) === JSON.stringify(['warning', 'error', 'error'])
+            && r.bigDocPages >= 2;
+
+        const out = { index: await page.evaluate(pdfProbe), indexButton: await page.evaluate(buttonProbe) };
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 6000));
+        try {
+            out.admin = await admin.evaluate(pdfProbe);
+            out.adminButton = await admin.evaluate(() => {
+                const orig = window.data.b3;
+                window.data.b3 = [window.Schema.buildB3Entry({ id: 95901, tip: 'zimmet', adet: 1, urunAciklama: 'Admin Satır Testi', alanKisi: 'Şükrü İğdeli', personelId: 'k1pdf_row' })];
+                window.inventoryManagementModule.renderAdminInventoryTab();   // #invTableBody iskeleti bu çağrıyla kurulur
+                const btn = [...document.querySelectorAll('#invTableBody button')].find(b => /Tutanak/.test(b.textContent));
+                const result = { found: !!btn, callsFn: btn ? btn.getAttribute('onclick') : null };
+                window.data.b3 = orig;
+                return result;
+            });
+        } finally { out.adminPageErrors = errs; await admin.browserContext().close(); }
+
+        out.ok = expect(out.index) && expect(out.admin) && out.indexButton.found && out.indexButton.callsFn
+            && out.adminButton.found && /generatePersonnelZimmetPDF\("k1pdf_row"\)/.test(out.adminButton.callsFn || '')
+            && errs.length === 0;
+        if (!out.ok) throw new Error('K1 zimmet PDF motoru beklendiği gibi çalışmadı: ' + JSON.stringify(out));
+        return out;
+    },
+
     // H4 · 3.6 VIP Şema Göçü: gerçek demo b3'ünde SALT OKUNUR önizleme; yazma yolu stub ile (yedek önce, 400'lük parçalar,
     // sözleşme dışı kayda dokunulmaz, tekrar çalıştırma 0 kayıt, personel oturumu reddedilir). Firestore'a yazılmaz.
     async h4SchemaMigration(page, browser) {
