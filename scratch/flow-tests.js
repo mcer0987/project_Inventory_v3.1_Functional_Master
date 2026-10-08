@@ -1779,6 +1779,57 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 5 · K1: zimmet belgesi veri motoru iki sayfada da yüklü; tutanak kalemleri = Kişi Envanterim; çıktı saf JSON,
+    // oturum kodu sızmaz; b3 satır belgesi aynı sözleşmede. Firestore'a yazmaz (bellek içi fikstür, sonra geri alınır).
+    async k1ZimmetData(page, browser) {
+        const probe = () => {
+            const A = window.AssignmentService, d = window.data, CODE = 'K1-GIZLI-KOD';
+            const orig = { b3: d.b3, req: d.requests, per: d.personel };
+            d.personel = [{ id: 'k1_p', name: 'Şükrü İğdeli', code: CODE, birim: 'Radyoloji' }];
+            d.requests = [{ id: 9101, ürün: 'Talep Ürünü', personel: 'Şükrü İğdeli', personelId: 'k1_p', durum: 'completed', approvedBy: 'Talep Onaylayan', approvedAt: '01.10.2026 09:00' }];
+            d.b3 = [
+                window.Schema.buildB3Entry({ id: 9001, tip: 'zimmet', adet: 1, urunAciklama: 'Latitude 5440', urunTuru: 'Dizüstü Bilgisayar', marka: 'Dell', isDemirbas: true, sn: 'K1SN1', envanterNo: 'K1ENV1', alanKisi: 'Şükrü İğdeli', personelId: 'k1_p', tarih: '01.10.2026', onaylayan: 'K1 Admin' }),
+                window.Schema.buildB3Entry({ id: 9002, tip: 'zimmet', adet: 1, urunAciklama: 'Talep Ürünü', alanKisi: 'Şükrü İğdeli', personelId: 'k1_p', requestId: 9101, tarih: '01.10.2026' }),
+                { ...window.Schema.buildB3Entry({ id: 9003, tip: 'zimmet', adet: 1, urunAciklama: 'İade', alanKisi: 'Şükrü İğdeli', personelId: 'k1_p' }), iadeEdildi: true },
+                window.Schema.buildB3Entry({ id: 9004, tip: 'cikis', adet: 2, urunAciklama: 'Toner', alanKisi: 'Şükrü İğdeli', personelId: 'k1_p' }),
+            ];
+            try {
+                const doc = A.generatePersonnelZimmetData('k1_p');
+                const row = A.generateB3MovementData(9004);
+                const json = JSON.stringify([doc, row]);
+                const keysOk = r => JSON.stringify(Object.keys(r).sort()) === JSON.stringify([...A.ZIMMET_KALEM_KEYS].sort());
+                return {
+                    exported: typeof A.generatePersonnelZimmetData === 'function' && typeof A.generateB3MovementData === 'function',
+                    sema: doc.sema,
+                    kalemler: doc.kalemler.map(k => `${k.kayitId}|${k.sn}|${k.envanterNo}|${k.marka}|${k.model}|${k.zimmetleyen.ad}`),
+                    sameAsPersonInventory: JSON.stringify(doc.kalemler.map(k => k.kayitId).sort()) === JSON.stringify(A.getPersonInventory(d.personel[0]).map(a => String(a.id)).sort()),
+                    personel: doc.personel,
+                    belgeNo: /^ZT-\d{8}-[0-9A-Z]{7}$/.test(doc.belge.belgeNo),
+                    contract: doc.kalemler.every(keysOk) && row.kalemler.every(keysOk),
+                    pureJson: JSON.stringify(JSON.parse(json)) === json,
+                    codeLeak: json.includes(CODE),
+                    movement: `${row.belge.tur}|${row.kalemler[0].durum}|${row.kalemler[0].adet}|${row.hareket.stokDisi}`,
+                    unknown: A.generatePersonnelZimmetData('yok') === null && A.generateB3MovementData('yok') === null,
+                };
+            } finally { d.b3 = orig.b3; d.requests = orig.req; d.personel = orig.per; }
+        };
+        const expect = r => r.exported && r.sema === 'zimmet-belge/1' && r.sameAsPersonInventory && r.belgeNo && r.contract && r.pureJson
+            && !r.codeLeak && r.unknown && r.movement === 'cikis|cikis|2|true'
+            && JSON.stringify(r.kalemler) === JSON.stringify(['9001|K1SN1|K1ENV1|Dell|Latitude 5440|K1 Admin', '9002|-|-|-|Talep Ürünü|Talep Onaylayan'])
+            && JSON.stringify(r.personel) === JSON.stringify({ id: 'k1_p', adSoyad: 'Şükrü İğdeli', birim: 'Radyoloji' });
+
+        const out = { index: await page.evaluate(probe) };
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 6000));
+        try { out.admin = await admin.evaluate(probe); } finally { out.adminPageErrors = errs; await admin.browserContext().close(); }
+        out.ok = expect(out.index) && expect(out.admin) && errs.length === 0;
+        if (!out.ok) throw new Error('K1 zimmet verisi beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
     // H4 · 3.6 VIP Şema Göçü: gerçek demo b3'ünde SALT OKUNUR önizleme; yazma yolu stub ile (yedek önce, 400'lük parçalar,
     // sözleşme dışı kayda dokunulmaz, tekrar çalıştırma 0 kayıt, personel oturumu reddedilir). Firestore'a yazılmaz.
     async h4SchemaMigration(page, browser) {

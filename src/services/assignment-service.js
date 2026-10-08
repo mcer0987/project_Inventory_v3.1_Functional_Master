@@ -195,10 +195,194 @@
         return events.sort((a, b) => (a.ts || 0) - (b.ts || 0));
     }
 
+    // ─── Faz 5 · K1 · Resmi zimmet belgesi veri motoru (5.1 · ZIM-04) ───
+    // [WHY]: pdf-generator.js tek bir b3 satırından form basıyor, teslim edeni o an oturumdaki kullanıcı sanıyor ve "Model"
+    //        kolonuna ürün türünü yazıyordu; kişinin üzerindeki zimmetlerin toplu tutanağı hiç yoktu. PDF katmanı veriyi
+    //        kendisi toplarsa Kişi Envanterim ile tutanak yine farklı kurallarla okunur (3.7'de kapatılan sorun geri gelir).
+    // [HOW]: Veri burada, tasarım pdf-generator.js'te. generatePersonnelZimmetData = Kişi Envanterim'in kendisi
+    //        (getPersonInventory: aktif + teslim alınmış) + kanonik cihaz kimlikleri + zimmetleyen yönetici. Çıktı salt veridir:
+    //        JSON'a çevrilebilir, window.data'ya referans taşımaz, personelin oturum kodu (code) asla girmez. Sözleşme:
+    //        ZIMMET_BELGE_SEMA; metin alanları her zaman boş olmayan string ('-' = bilinmiyor), adet sayı, isDemirbas boolean.
+    //        Belge no aynı gün aynı kalem kümesi için aynıdır (yeniden basım aynı numarayı taşır).
+    const ZIMMET_BELGE_SEMA = 'zimmet-belge/1';
+    const ZIMMET_KALEM_KEYS = Object.freeze([
+        'sira', 'kayitId', 'kaynak', 'envanterNo', 'sn', 'urunTuru', 'urunAciklama', 'marka', 'model', 'adet', 'isDemirbas',
+        'tarih', 'teslimTarihi', 'talepTuru', 'oncelik', 'iadeTarihi', 'talepNo', 'zimmetleyen', 'not',
+        'durum', 'iadeEdildiTarihi',
+    ]);
+
+    const blank = v => v === undefined || v === null || String(v).trim() === '' || String(v).trim() === '-';
+    const txt = (...vals) => { const v = vals.find(x => !blank(x)); return v === undefined ? '-' : String(v).trim(); };
+
+    function findPerson(personelId) {
+        if (blank(personelId)) return null;
+        return personList().find(p => p && p.id != null && String(p.id) === String(personelId)) || null;
+    }
+    // Belgeye giden kişi bloğu. code (oturum kodu) bilinçli olarak yok.
+    function personBlock(p, fallbackName) {
+        return {
+            id: p && p.id != null ? String(p.id) : '-',
+            adSoyad: txt(p && (p.name || p.adSoyad), fallbackName),
+            birim: txt(p && (p.birim || p.unit || p.department || p.bolum || p.departman || p.birimAdi)),
+        };
+    }
+
+    const istFmt = new Intl.DateTimeFormat('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    function stamp(now) {
+        const d = now instanceof Date ? now : new Date(now ?? Date.now());
+        const parts = Object.fromEntries(istFmt.formatToParts(d).map(x => [x.type, x.value]));
+        return { text: `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute}`, ymd: `${parts.year}${parts.month}${parts.day}` };
+    }
+    // FNV-1a (32 bit) — belge no'nun kısa, deterministik soneki; güvenlik amaçlı değil.
+    function shortHash(s) {
+        let h = 0x811c9dc5;
+        for (const ch of String(s)) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+        return h.toString(36).toUpperCase().padStart(7, '0');
+    }
+
+    // Zimmetleyen yönetici: kanonik onaylayan → eski approvedBy → bağlı talebin onaylayanı → eski onay notundaki "Onaylayan: X".
+    function issuerOf(raw, req, fallbackDate) {
+        const fromNote = String((raw && (raw.not ?? raw.note)) || '').match(/Onaylayan:\s*([^·]+)/);
+        return {
+            ad: txt(raw && raw.onaylayan, raw && raw.approvedBy, req && req.approvedBy, fromNote && fromNote[1]),
+            tarih: txt(raw && raw.approvedAt, req && req.approvedAt, fallbackDate),
+        };
+    }
+
+    // Tek belge satırı. src: getAssignments() öğesi ya da normalizeB3 görünümünden kurulan eşdeğeri (+ raw, req).
+    function belgeRow(src, sira) {
+        const raw = src.raw || {};
+        const req = src.req || null;
+        // Talep kaynaklı eski kayıtta ürün bilgisi onayda seçilen stok kaleminden tamamlanır (tür/marka/model).
+        const productId = !blank(src.productId) ? src.productId : (req ? req.stockProductId : raw.stockProductId);
+        const found = S().findStock(productId, src.depo || (req ? req.stockRepo : raw.stockRepo));
+        const stock = found ? S().normalizeStock(found.product, found.col) : null;
+        const urunAciklama = txt(src.urunAciklama, stock && stock.ad);
+        return {
+            sira,
+            kayitId: String(src.id),
+            kaynak: src.kaynak,
+            envanterNo: txt(src.envanterNo),
+            sn: txt(src.sn),
+            urunTuru: txt(src.urunTuru, stock && stock.tur),
+            urunAciklama,
+            marka: txt(src.marka, stock && stock.marka),
+            // Ayrı model alanı yalnız bazı eski kayıtlarda var; sistemde "Ürün Adı / Model" tek alandır.
+            model: txt(raw.model, found && found.product.model, urunAciklama),
+            adet: Number(src.adet) || 1,
+            // kayıtta yazılıysa o (yazma anı kararı); eski talepte bilinmiyorsa (null) stok kaleminin türünden
+            isDemirbas: typeof src.isDemirbas === 'boolean' ? src.isDemirbas : !!(stock && stock.isDemirbas),
+            tarih: txt(src.tarih),
+            teslimTarihi: txt(src.teslimTarihi, src.tarih),
+            talepTuru: txt(src.talepTuru),
+            oncelik: txt(src.oncelik),
+            iadeTarihi: txt(src.iadeTarihi),
+            talepNo: blank(src.requestId) ? '-' : String(src.requestId),
+            zimmetleyen: issuerOf(raw, req, src.tarih),
+            not: txt(src.not),
+            durum: src.durum || (src.iadeEdildi ? 'iade' : 'aktif'),   // 'aktif' | 'iade' | 'cikis' (envanter çıkışı)
+            iadeEdildiTarihi: txt(src.iadeEdildiTarihi),
+        };
+    }
+
+    function envelope({ tur, prefix, person, fallbackName, rows, now, duzenleyen, extra }) {
+        const st = stamp(now);
+        const uniq = list => [...new Set(list.filter(v => v !== '-'))];
+        const adetOf = pred => rows.filter(pred).reduce((s, r) => s + r.adet, 0);
+        const personel = personBlock(person, fallbackName);
+        return {
+            sema: ZIMMET_BELGE_SEMA,
+            belge: {
+                tur,
+                belgeNo: `${prefix}-${st.ymd}-${shortHash([personel.id, personel.adSoyad, ...rows.map(r => r.kayitId).sort()].join('|'))}`,
+                olusturmaTarihi: st.text,
+                duzenleyen: txt(duzenleyen, window.currentUser && window.currentUser.name),
+                talepNolari: uniq(rows.map(r => r.talepNo)),
+                teslimEdenler: uniq(rows.map(r => r.zimmetleyen.ad)),
+            },
+            personel,
+            kalemler: rows,
+            ozet: {
+                kalemSayisi: rows.length,
+                toplamAdet: adetOf(() => true),
+                demirbasAdet: adetOf(r => r.isDemirbas),
+                sarfAdet: adetOf(r => !r.isDemirbas),
+                geciciZimmet: rows.filter(r => /geçici/i.test(r.talepTuru)).length,
+                ...extra,
+            },
+        };
+    }
+
+    /**
+     * Personelin resmi zimmet tutanağı verisi: üzerindeki aktif (iade edilmemiş) ve teslim alınmış zimmetler — Kişi
+     * Envanterim ile birebir aynı küme — zimmet tarihine göre eskiden yeniye.
+     * @param {string|number} personelId  personel koleksiyonundaki id
+     * @param {{now?: Date|number, duzenleyen?: string}} [opts]  now: belge tarihi (varsayılan şimdi); duzenleyen: belgeyi
+     *        basan yönetici (varsayılan oturumdaki kullanıcı)
+     * @returns {null | {sema:string, belge:object, personel:{id,adSoyad,birim}, kalemler:object[], ozet:object}}
+     *          personel bulunamazsa null. ozet.teslimBekleyen: onaylanmış ama henüz "Teslim Aldım" denmemiş kalem sayısı
+     *          (tutanağa girmez, bilgi amaçlı).
+     */
+    function generatePersonnelZimmetData(personelId, opts = {}) {
+        const person = findPerson(personelId);
+        if (!person) return null;
+        const reqById = new Map(((window.data && window.data.requests) || []).filter(Boolean).map(r => [String(r.id), r]));
+        const mine = getAssignments().filter(a => !a.iadeEdildi && matchesPerson(a, person));
+        const rows = mine.filter(a => a.teslimAlindi)
+            .sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.id).localeCompare(String(b.id)))
+            .map((a, i) => belgeRow({
+                id: a.id, kaynak: a._source, sn: a.sn, envanterNo: a.envanterNo,
+                urunTuru: a.urunTuru, urunAciklama: a.urun, marka: a.marka, adet: a.adet,
+                isDemirbas: a._source === 'request' && a.rawRef && a.rawRef.isDemirbas == null ? null : a.isDemirbas,
+                tarih: a.tarih, teslimTarihi: a.teslimTarihi, talepTuru: a.talepTuru, oncelik: a.oncelik, iadeTarihi: a.iadeTarihi,
+                requestId: a.requestId, productId: a.productId, depo: a.depo, not: a.not,
+                iadeEdildi: false, iadeEdildiTarihi: null,
+                raw: a.rawRef, req: a.requestId != null ? reqById.get(String(a.requestId)) : null,
+            }, i + 1));
+        return envelope({
+            tur: 'personel-zimmet', prefix: 'ZT', person, rows, now: opts.now, duzenleyen: opts.duzenleyen,
+            extra: { teslimBekleyen: mine.filter(a => !a.teslimAlindi).length },
+        });
+    }
+
+    /**
+     * Tek b3 hareketinin (zimmet ya da envanter çıkışı) belge verisi — satır PDF'i için, aynı sözleşmeyle (tek kalem).
+     * Kayıt hangi şemayla yazılmış olursa olsun normalizeB3 görünümünden okunur; iade edilmiş zimmet de basılabilir
+     * (kalem.durum 'iade'). Ek alan: hareket {tip, kaynakDepo, rafNo, sutun, stokDisi, iadeDepo}.
+     * @param {string|number} b3Id
+     * @param {{now?: Date|number, duzenleyen?: string}} [opts]
+     * @returns {null | object} kayıt bulunamazsa null
+     */
+    function generateB3MovementData(b3Id, opts = {}) {
+        const item = ((window.data && window.data.b3) || []).find(x => x && String(x.id) === String(b3Id));
+        const n = item && S().normalizeB3(item);
+        if (!n) return null;
+        const req = n.requestId != null ? ((window.data && window.data.requests) || []).find(r => r && String(r.id) === String(n.requestId)) : null;
+        const person = findPerson(n.personelId || (req && req.personelId) || resolvePersonelId(n.alanKisi));
+        const row = belgeRow({
+            id: n.id, kaynak: 'b3', sn: n.sn, envanterNo: n.envanterNo,
+            urunTuru: n.urunTuru, urunAciklama: n.urunAciklama, marka: n.marka, adet: n.adet, isDemirbas: n.isDemirbas,
+            tarih: n.tarih, teslimTarihi: req && req.teslimTarihi, talepTuru: n.talepTuru, oncelik: n.oncelik, iadeTarihi: n.iadeTarihi,
+            requestId: n.requestId, productId: n.productId, depo: n.stokDisi ? null : n.kaynakDepo, not: n.not,
+            iadeEdildi: n.iadeEdildi, iadeEdildiTarihi: n.iadeEdildiTarihi, durum: n.tip === 'zimmet' ? null : 'cikis',
+            raw: item, req,
+        }, 1);
+        const doc = envelope({
+            tur: n.tip === 'zimmet' ? 'zimmet' : 'cikis', prefix: 'HT', person, fallbackName: n.alanKisi, rows: [row],
+            now: opts.now, duzenleyen: opts.duzenleyen, extra: {},
+        });
+        doc.hareket = {
+            tip: n.tip, kaynakDepo: txt(n.kaynakDepo), rafNo: txt(n.rafNo), sutun: txt(n.sutun), stokDisi: n.stokDisi,
+            iadeDepo: txt(n.iadeDepo),
+        };
+        return doc;
+    }
+
     const AssignmentService = {
         getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId,
         activeDeviceUses, checkDeviceIds, isOpenService, serviceRecordsFor, getDeviceHistory,
         invalidateDeviceUses, usesStats,
+        generatePersonnelZimmetData, generateB3MovementData, ZIMMET_BELGE_SEMA, ZIMMET_KALEM_KEYS,
     };
     window.AppModules = window.AppModules || {};
     window.AppModules.Assignments = AssignmentService;
