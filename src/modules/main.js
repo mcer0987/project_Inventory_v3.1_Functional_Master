@@ -120,8 +120,15 @@ window.addEventListener('onInventoryDataUpdated', (e) => {
                         window.AppModules.Table.patchDOMForCollection(colName, e.detail.changes);
                     }
                 } else {
+                    // [WHY] (Faz 5 · K2 · INV-05): "sadece değişti" olmayan her canlı güncelleme (ekleme/silme/karışık
+                    //        parti) tam yeniden çizim tetikliyordu; renderTable(depo) customLimit vermeden çağrılınca
+                    //        _currentPage=1'e sıfırlanıyor, kullanıcının "Daha Fazla Yükle" ile açtığı sayfalar kapanıyordu.
+                    // [HOW]: Mevcut sayfa kadar satırı (currentPage × pageSize) customLimit olarak geçiriz; renderTable
+                    //        bu durumda _currentPage'i SIFIRLAMAZ (bkz. table-engine.js renderTable: "if (!customLimit)").
+                    //        Arama kutusu doluysa renderTable zaten searchTable'a devrediyor (customLimit yok sayılır).
                     if (window.AppModules.Table && typeof window.AppModules.Table.renderTable === 'function') {
-                        window.AppModules.Table.renderTable(colName);
+                        const preserveLimit = (window.currentPage || 1) * (window.pageSize || 25);
+                        window.AppModules.Table.renderTable(colName, false, preserveLimit);
                     }
                 }
             }

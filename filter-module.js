@@ -37,6 +37,16 @@
         initFilterListener();
     }
 
+    // [WHY] (Faz 5 · K2 · INV-07): Tam eşleşme ("durum === 'pasif'") "Tükendi / Pasif" gibi bileşik durum metinlerini
+    //       yakalamıyordu (computeStockPatch bu metni STOCK_AUTO_EMPTY olarak yazar); o ürünler "Sadece Aktifler"
+    //       filtresinde görünmeye devam ediyordu.
+    // [HOW]: Alt dize eşleşmesi ("pasif" geçen her durum metni pasif sayılır). table-engine.js da aynı fonksiyonu
+    //        (satır/kart stil işaretlemesi ve patchDOMForCollection'ın filtre-uyumlu gizleme kararı için) kullanır —
+    //        tek kaynak, iki yerde ayrı ayrı tanım kalmasın.
+    window.isPassiveStatus = function (status) {
+        return String(status || "").trim().toLocaleLowerCase("tr-TR").includes("pasif");
+    };
+
     // [WHY]: window.data.b1 verisini değiştirmeden (mutation yapmadan) sadece görünüm ve arama için pasifleri elemeyi sağlar.
     // [HOW]: getProcessedData tarafından çağrılır. Filtre Sadece Aktifler ise 'pasif' durumlu olanları eler. Ürünlerin __index koruması aynen kalır.
     window.getFilteredB1Data = function (depo, dataArray) {
@@ -52,13 +62,13 @@
         }
 
         return dataArray.filter(item => {
-            const status = (item.durumu || item.status || "").trim().toLocaleLowerCase("tr-TR");
+            const passive = window.isPassiveStatus(item.durumu || item.status);
             if (filterVal === "active") {
                 // Sadece Aktifler: Durumu 'pasif' olmayan her şey
-                return status !== "pasif";
+                return !passive;
             } else if (filterVal === "passive") {
                 // Sadece Pasifler: Sadece durumu 'pasif' olanlar
-                return status === "pasif";
+                return passive;
             }
             return true;
         });

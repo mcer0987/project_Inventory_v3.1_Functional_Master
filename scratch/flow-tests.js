@@ -84,6 +84,157 @@ async function installHelpers(page) {
     }, MARKER, EMU, EMU_ADMIN_CODE);
 }
 
+// Faz 5 · K2 (5.8 · B1/B2 şema sözleşmesi) — b1WriteContract/b2WriteContract'ın içinde page.evaluate(fn, repo) ile
+// çalışır (bkz. b3WriteContract deseni). saveProduct (ekleme/düzenleme), confirmTransfer'ın internal (tam + kısmi,
+// INV-06) ve scrap (hurda, 5.10) kollarını GERÇEK UI fonksiyonlarıyla sürer; yalnız atomik yazıcılar (appendItem,
+// updateItem, applyItemOps, runStockOps) yakalayıcıyla değiştirilir, Firestore'a gitmez. Üretilen her b1/b2/b3 kaydı
+// Schema.validateB1/validateB2/validateB3'ten geçirilip özetlenir.
+async function _stockContractBody(repo) {
+    const other = repo === 'b1' ? 'b2' : 'b1';
+    const demirbasType = repo === 'b2';   // b1 örneği sarf, b2 örneği demirbaş — iki kol da ayrı ayrı kanıtlanır
+    const orig = {
+        items: window.data[repo], otherItems: window.data[other], personel: window.data.personel, service: window.data.serviceRecords,
+        append: window.appendItem, update: window.updateItem, apply: window.applyItemOps, ops: window.runStockOps,
+        adm: window.isDbAdmin, chk: window.checkIsAdmin, valid: window.validateAdminAction,
+        alert: window.showAppAlert, confirm: window.showCustomConfirm,
+    };
+    window.isDbAdmin = () => true; window.checkIsAdmin = () => true; window.validateAdminAction = () => true;
+    window.showAppAlert = () => {}; window.showCustomConfirm = async () => true;
+
+    // 'stock' ayrı tutulur: runStockOps'un stok deltası (ör. scrap/hurda) {op,col,...} şeklinde bir 'write' değildir —
+    // writes dizisinden ayrı, doğrudan {col,id,delta} olarak gelir (bkz. confirmTransfer'ın scrap kolu).
+    const captured = { b1: [], b2: [], b3: [], serviceRecords: [], stock: [] };
+    const capture = ops => (ops || []).forEach(o => { if (captured[o.col]) captured[o.col].push(o); });
+    window.appendItem = async (col, item) => { capture([{ op: 'set', col, item }]); return { written: 1, ids: [item && item.id] }; };
+    window.updateItem = async (col, id, fields) => { capture([{ op: 'update', col, id, fields }]); return { written: 1, ids: [id] }; };
+    window.applyItemOps = async ops => { capture(ops); return { written: (ops || []).length, ids: (ops || []).map(o => (o.item && o.item.id) || o.id) }; };
+    window.runStockOps = async arg => {
+        capture(arg.writes || []);
+        captured.stock.push(...(arg.stock || []));
+        return { stock: (arg.stock || []).map(s => ({ col: s.col, id: s.id, name: s.id, before: 9, after: 9 + (s.delta || 0) })) };
+    };
+    const takeAll = () => {
+        const snap = { b1: [...captured.b1], b2: [...captured.b2], b3: [...captured.b3], serviceRecords: [...captured.serviceRecords], stock: [...captured.stock] };
+        captured.b1 = []; captured.b2 = []; captured.b3 = []; captured.serviceRecords = []; captured.stock = [];
+        return snap;
+    };
+
+    const baseItem = (id, adet) => {
+        const it = {
+            id, sütun: 'S-1', raf: 'R-1', tür: demirbasType ? 'Dizüstü Bilgisayar' : 'Kablo',
+            ürün: demirbasType ? 'Test Laptop' : 'Test Kablo', marka: 'Acme', adet,
+            durumu: 'Kullanıma Hazır', açıklama: '', isDemirbas: demirbasType, lastUpdate: Date.now(),
+        };
+        if (repo === 'b2') it.status = 'Kullanıma Hazır';
+        return it;
+    };
+    window.data[repo] = [baseItem(`${repo}_src1`, 10), baseItem(`${repo}_src2`, 1)];
+    window.data[other] = [];
+    window.data.personel = [];
+    // b1 (sarf, kimliksiz): productId eşleşmesi yeter, kapanmalı. b2 (demirbaş): checkDeviceIds zaten "serviste olan
+    // cihaz tekrar çıkışa verilemez" dediği için scrap formuna GİRİLECEK SN'le aynı açık kayıt asla oluşamaz — burada
+    // kasıtlı olarak İLGİSİZ bir SN'le (aynı ürün hattının başka bir birimi) seçiciliği kanıtlanır: kapanmamalı.
+    window.data.serviceRecords = [{ id: 'svc_k2', kapandi: false, productId: `${repo}_src1`, sn: demirbasType ? 'OTHER-SN-999' : '-', envanterNo: '-', gecmis: [] }];
+
+    const o = {};
+    try {
+        // 1) saveProduct — yeni kayıt (appendItem → 'set')
+        const form = document.getElementById('productForm');
+        form.dataset.editRepo = repo; form.dataset.editId = '';
+        ['prodColumn', 'prodShelf'].forEach(id => { document.getElementById(id).innerHTML = '<option>S-1</option>'; document.getElementById(id).value = 'S-1'; });
+        document.getElementById('prodType').innerHTML = `<option value="${demirbasType ? 'Dizüstü Bilgisayar' : 'Kablo'}">x</option>`;
+        document.getElementById('prodType').value = demirbasType ? 'Dizüstü Bilgisayar' : 'Kablo';
+        document.getElementById('prodName').value = 'Yeni Ürün ' + repo;
+        document.getElementById('prodBrand').value = 'Acme';
+        document.getElementById('prodQty').value = '4';
+        document.getElementById('prodStatus').value = 'Kullanıma Hazır';
+        document.getElementById('prodDesc').value = '';
+        document.getElementById('isDemirbas').checked = demirbasType;
+        await window.saveProduct(new Event('submit'));
+        o.addNew = takeAll()[repo];
+
+        // 2) saveProduct — var olan kaydı düzenleme (updateItem → 'update', yalnız bilinen alan adı denetlenir)
+        form.dataset.editId = `${repo}_src1`;
+        document.getElementById('prodQty').value = '11';
+        await window.saveProduct(new Event('submit'));
+        o.editExisting = takeAll()[repo];
+        form.dataset.editId = '';
+
+        // 3) confirmTransfer — internal TAM taşıma (adet = stok tamamı): eski davranış korunur (id hedefte aynen yaşar)
+        window.openTransferModal(repo, `${repo}_src2`);
+        document.getElementById('transTarget').value = JSON.stringify({ name: other.toUpperCase() + ' Depo', type: 'internal', key: other });
+        window.handleTransferTargetChange({ value: document.getElementById('transTarget').value });
+        document.getElementById('transNewCol').value = 'S-2'; document.getElementById('transNewShelf').value = 'R-2';
+        document.getElementById('transQty').value = '1';
+        document.getElementById('transNote').value = 'tam taşıma testi';
+        await window.confirmTransfer();
+        o.internalFullMove = takeAll();
+
+        // 4) confirmTransfer — internal KISMİ taşıma (adet < stok, Faz 5 · K2 · INV-06): kaynakta update, hedefte YENİ id
+        window.openTransferModal(repo, `${repo}_src1`);
+        document.getElementById('transTarget').value = JSON.stringify({ name: other.toUpperCase() + ' Depo', type: 'internal', key: other });
+        window.handleTransferTargetChange({ value: document.getElementById('transTarget').value });
+        document.getElementById('transNewCol').value = 'S-3'; document.getElementById('transNewShelf').value = 'R-3';
+        document.getElementById('transQty').value = '4';
+        document.getElementById('transNote').value = 'kısmi taşıma testi';
+        await window.confirmTransfer();
+        o.internalPartial = takeAll();
+
+        // 5) confirmTransfer — scrap/hurda (Faz 5 · K2 · 5.10): kalan stoktan kısmi adet, b3 'hurda' kaydı, açık servis kaydı kapanır
+        const remainingId = `${repo}_src1`;
+        const remainingQty = (window.data[repo].find(x => x.id === remainingId) || {}).adet || 1;
+        const scrapQty = Math.min(2, remainingQty);
+        window.openTransferModal(repo, remainingId);
+        document.getElementById('transTarget').value = JSON.stringify({ name: 'Hurda / Atık', type: 'scrap' });
+        window.handleTransferTargetChange({ value: document.getElementById('transTarget').value });
+        document.getElementById('transQty').value = String(scrapQty);
+        window.syncTransferDevices();
+        if (demirbasType) {
+            [...document.querySelectorAll('#transDeviceIds .dev-ids-row')].forEach((row, i) => { row.querySelector('.dev-sn').value = 'K2HRD-' + i; });
+        }
+        document.getElementById('transNote').value = 'arızalı, hurdaya ayrıldı (K2 testi)';
+        await window.confirmTransfer();
+        o.scrap = takeAll();
+    } finally {
+        Object.assign(window, {
+            appendItem: orig.append, updateItem: orig.update, applyItemOps: orig.apply, runStockOps: orig.ops,
+            isDbAdmin: orig.adm, checkIsAdmin: orig.chk, validateAdminAction: orig.valid, showAppAlert: orig.alert, showCustomConfirm: orig.confirm,
+        });
+        window.data[repo] = orig.items; window.data[other] = orig.otherItems; window.data.personel = orig.personel; window.data.serviceRecords = orig.service;
+    }
+
+    const S = window.Schema;
+    const validator = repo === 'b1' ? S.validateB1 : S.validateB2;
+    const otherValidator = other === 'b1' ? S.validateB1 : S.validateB2;
+    const KEYS = repo === 'b1' ? S.B1_KEYS : S.B2_KEYS;
+    const errorsOf = (list, v) => list.map(w => v(w.op === 'set' ? w.item : w.fields)).flat();
+    const knownKeysOnly = list => list.every(w => Object.keys(w.op === 'set' ? w.item : w.fields).every(k => KEYS.includes(k)));
+
+    return {
+        addNew: { ops: o.addNew.map(w => w.op), errors: errorsOf(o.addNew, validator), exactKeys: o.addNew.every(w => Object.keys(w.item).sort().join(',') === [...KEYS].sort().join(',')) },
+        editExisting: { ops: o.editExisting.map(w => w.op), knownKeysOnly: knownKeysOnly(o.editExisting) },
+        internalFullMove: {
+            sourceOps: o.internalFullMove[repo].map(w => w.op),
+            targetErrors: o.internalFullMove[other].filter(w => w.op === 'set').map(w => otherValidator(w.item)).flat(),
+            sameId: (o.internalFullMove[other][0] || {}).item && o.internalFullMove[other][0].item.id === `${repo}_src2`,
+        },
+        internalPartial: {
+            sourceOp: (o.internalPartial[repo][0] || {}).op,
+            sourceFieldsKnownOnly: o.internalPartial[repo].every(w => Object.keys(w.fields || {}).every(k => KEYS.includes(k))),
+            targetErrors: o.internalPartial[other].filter(w => w.op === 'set').map(w => otherValidator(w.item)).flat(),
+            newIdDiffers: !!(o.internalPartial[other][0] || {}).item && o.internalPartial[other][0].item.id !== `${repo}_src1`,
+        },
+        scrap: {
+            // Hurda stoğu applyItemOps'un 'writes' dizisiyle değil runStockOps'un ayrı 'stock' deltasıyla düşer (bkz. confirmTransfer).
+            stockDelta: (o.scrap.stock[0] || {}),
+            b3Count: o.scrap.b3.length,
+            b3Errors: o.scrap.b3.map(w => S.validateB3(w.item)).flat(),
+            b3Tips: [...new Set(o.scrap.b3.map(w => w.item.tip))],
+            serviceClosed: o.scrap.serviceRecords.length > 0 && o.scrap.serviceRecords.every(w => w.op === 'update' && w.fields.kapandi === true),
+        },
+    };
+}
+
 const SCENARIOS = {
     // C1 · ITSM-01
     async saveRequest(page) {
@@ -1930,6 +2081,107 @@ const SCENARIOS = {
             && out.adminButton.found && /generatePersonnelZimmetPDF\("k1pdf_row"\)/.test(out.adminButton.callsFn || '')
             && errs.length === 0;
         if (!out.ok) throw new Error('K1 zimmet PDF motoru beklendiği gibi çalışmadı: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 5 · K2 (5.8): B1 şema sözleşmesi — sarf örneği (isDemirbas:false). _stockContractBody ortak sürücüyü kullanır.
+    async b1WriteContract(page) {
+        const out = await page.evaluate(_stockContractBody, 'b1');
+        const noErr = x => x.length === 0;
+        out.ok = out.addNew.exactKeys && noErr(out.addNew.errors)
+            && JSON.stringify(out.editExisting.ops) === JSON.stringify(['update']) && out.editExisting.knownKeysOnly
+            && JSON.stringify(out.internalFullMove.sourceOps) === JSON.stringify(['delete']) && noErr(out.internalFullMove.targetErrors) && out.internalFullMove.sameId
+            && out.internalPartial.sourceOp === 'update' && out.internalPartial.sourceFieldsKnownOnly && noErr(out.internalPartial.targetErrors) && out.internalPartial.newIdDiffers
+            && out.scrap.stockDelta.col === 'b1' && out.scrap.stockDelta.delta === -2 && out.scrap.b3Count === 1 && noErr(out.scrap.b3Errors)
+            && JSON.stringify(out.scrap.b3Tips) === JSON.stringify(['hurda']) && out.scrap.serviceClosed;
+        if (!out.ok) throw new Error('b1WriteContract beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 5 · K2 (5.8): B2 şema sözleşmesi — demirbaş örneği (isDemirbas:true, status+durumu birlikte, cihaz kimlikli hurda).
+    async b2WriteContract(page) {
+        const out = await page.evaluate(_stockContractBody, 'b2');
+        const noErr = x => x.length === 0;
+        out.ok = out.addNew.exactKeys && noErr(out.addNew.errors)
+            && JSON.stringify(out.editExisting.ops) === JSON.stringify(['update']) && out.editExisting.knownKeysOnly
+            && JSON.stringify(out.internalFullMove.sourceOps) === JSON.stringify(['delete']) && noErr(out.internalFullMove.targetErrors) && out.internalFullMove.sameId
+            && out.internalPartial.sourceOp === 'update' && out.internalPartial.sourceFieldsKnownOnly && noErr(out.internalPartial.targetErrors) && out.internalPartial.newIdDiffers
+            // demirbaş: scrapQty=2 → her cihaz için adet 1 olan ayrı birer b3 hurda kaydı; ilgisiz SN'li açık servis
+            // kaydı (başka bir cihaz) kapanmamalı — eşleşme productId'ye değil cihaz kimliğine göredir
+            && out.scrap.stockDelta.col === 'b2' && out.scrap.stockDelta.delta === -2 && out.scrap.b3Count === 2 && noErr(out.scrap.b3Errors)
+            && JSON.stringify(out.scrap.b3Tips) === JSON.stringify(['hurda']) && !out.scrap.serviceClosed;
+        if (!out.ok) throw new Error('b2WriteContract beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 5 · K2 (5.8 · INV-05/INV-07): B1 tablosunda sayfalama + durum filtresi kararlılığı. Gerçek main.js olay
+    // yöneticisini (onInventoryDataUpdated) ve gerçek table-engine.js render/patch yollarını sürer.
+    async k2TableUx(page) {
+        const out = await page.evaluate(() => {
+            const T = window.AppModules.Table;
+            const orig = {
+                b1: window.data.b1,
+                filterVal: document.getElementById('b1StatusFilter').value,
+                searchVal: document.getElementById('searchB1').value,
+                firstRendered: window._firstDataRendered,
+            };
+            const o = {};
+            try {
+                document.getElementById('b1StatusFilter').value = 'active';
+                document.getElementById('searchB1').value = '';
+                window.data.b1 = Array.from({ length: 60 }, (_, i) => ({
+                    id: 'k2tbl_' + i, ürün: 'K2 Ürün ' + i, tür: 'Test', raf: 'R', sütun: 'S',
+                    marka: 'X', adet: 5, durumu: 'Kullanıma Hazır', açıklama: '', isDemirbas: false, lastUpdate: Date.now(),
+                }));
+                window._firstDataRendered = true;   // main.js'in "ilk yükleme" dalını atlaması için (switchTab tetiklemesin)
+
+                // 1) Tam çizim (sayfa 1) + "Daha Fazla Yükle" ile sayfa 2
+                T.renderTable('b1');
+                o.page1Rows = document.querySelectorAll('#tableB1 tbody tr').length;
+                document.getElementById('loadMoreBtn')?.click();
+                o.page2Rows = document.querySelectorAll('#tableB1 tbody tr').length;
+
+                // 2) Canlı "tam yeniden çizim" güncellemesi (isPatch:false, main.js'in gerçek olay yöneticisi üzerinden) →
+                //    sayfa 2'de açılan satırlar KORUNMALI (Faz 5 öncesi: _currentPage=1'e sıfırlanıp 25'e düşerdi).
+                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'b1', isPatch: false, changes: [] } }));
+                o.rowsAfterLiveUpdate = document.querySelectorAll('#tableB1 tbody tr').length;
+
+                // 3) Bileşik durum metni ("Tükendi / Pasif") artık tam eşleşme değil alt dize eşleşmesiyle elenir
+                window.data.b1[0].durumu = 'Tükendi / Pasif';
+                T.renderTable('b1');
+                o.compoundPassiveHiddenByFullRender = !document.querySelector('tr[data-depo="b1"][data-id="k2tbl_0"]');
+
+                // 4) patchDOMForCollection artık aktif filtreye göre satırı KALDIRIR (eskiden yalnız stilini değiştirirdi,
+                //    satır DOM'da "hayalet" kalırdı). Hâlâ görünür bir satır (k2tbl_5) seçilip patch'le Pasif yapılır.
+                o.visibleBeforePatch = !!document.querySelector('tr[data-depo="b1"][data-id="k2tbl_5"]');
+                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', {
+                    detail: { collection: 'b1', isPatch: true, changes: [{ id: 'k2tbl_5', data: { durumu: 'Tükendi / Pasif', adet: 0 } }] },
+                }));
+                o.removedByPatchUnderActiveFilter = !document.querySelector('tr[data-depo="b1"][data-id="k2tbl_5"]');
+
+                // 5) Regresyon: filtre "Tümü" iken patch satırı KALDIRMAZ, yalnız stilini günceller
+                document.getElementById('b1StatusFilter').value = 'all';
+                T.renderTable('b1');
+                o.visibleUnderAllFilter = !!document.querySelector('tr[data-depo="b1"][data-id="k2tbl_6"]');
+                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', {
+                    detail: { collection: 'b1', isPatch: true, changes: [{ id: 'k2tbl_6', data: { durumu: 'Pasif', adet: 0 } }] },
+                }));
+                const row6 = document.querySelector('tr[data-depo="b1"][data-id="k2tbl_6"]');
+                o.keptUnderAllFilterButStyled = !!row6 && row6.classList.contains('passive-row');
+            } finally {
+                window.data.b1 = orig.b1;
+                document.getElementById('b1StatusFilter').value = orig.filterVal;
+                document.getElementById('searchB1').value = orig.searchVal;
+                window._firstDataRendered = orig.firstRendered;
+                T.renderTable('b1');
+            }
+            return o;
+        });
+        out.ok = out.page1Rows === 25 && out.page2Rows === 50 && out.rowsAfterLiveUpdate === 50
+            && out.compoundPassiveHiddenByFullRender === true
+            && out.visibleBeforePatch === true && out.removedByPatchUnderActiveFilter === true
+            && out.visibleUnderAllFilter === true && out.keptUnderAllFilterButStyled === true;
+        if (!out.ok) throw new Error('k2TableUx beklenen sözleşmede değil: ' + JSON.stringify(out));
         return out;
     },
 

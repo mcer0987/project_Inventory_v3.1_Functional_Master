@@ -720,14 +720,20 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
         }
         const deletes = [...mirrorById.keys()].filter(k => !keep.has(k));
 
-        // Faz 3.5 · b3 muhafızı: yeni b3 dokümanı tam sözleşmeden geçer; var olan (eski biçimli olabilir) dokümanda yalnız
-        // yeni eklenen alan adları denetlenir (değişikliğe eski alan adı giremez). İhlalde hiçbir koleksiyon yazılmaz.
-        if (colName === 'b3') {
-            const guard = _b3GuardError(writes.map(w => {
+        // Faz 3.5/K2 · şema muhafızı (b3, b1, b2): yeni doküman tam sözleşmeden geçer; var olan (eski biçimli olabilir)
+        // dokümanda yalnız yeni eklenen alan adları denetlenir (değişikliğe eski alan adı giremez). İhlalde hiçbir
+        // koleksiyon yazılmaz.
+        // [K2 istisnası]: b1/b2 için bu eski toplu yol (CSV/Excel içe aktarma, tür adı toplu değişikliği gibi) hâlâ
+        // kanonik olmayan ("rafNo" gibi fazladan alan, isDemirbas eksik) kayıtlar üretebiliyor; tam 'set' sözleşmesi
+        // burada zorlanırsa bu akışlar kırılır. Yeni atomik yol (applyItemOps/runStockOps — confirmTransfer, hurda,
+        // saveAssignment vb.) tam sözleşmeyi zaten zorunlu kılıyor; bu eski yolda b1/b2 için yalnız eski alan adı
+        // denetimi yapılır (b3 tam sözleşmesi aynen korunur).
+        if (colName === 'b3' || colName === 'b1' || colName === 'b2') {
+            const guard = _schemaGuardError(writes.map(w => {
                 const prev = mirrorById.get(w.key);
-                if (!prev) return { op: 'set', col: 'b3', id: w.key, data: w.data };
-                const added = Object.fromEntries(Object.entries(w.data).filter(([k]) => !(k in prev)));
-                return { op: 'update', col: 'b3', id: w.key, data: added };
+                if (!prev && colName === 'b3') return { op: 'set', col: colName, id: w.key, data: w.data };
+                const added = prev ? Object.fromEntries(Object.entries(w.data).filter(([k]) => !(k in prev))) : w.data;
+                return { op: 'update', col: colName, id: w.key, data: added };
             }), opts);
             if (guard) return fail(guard.code, guard.message, guard.details);
         }
@@ -824,13 +830,39 @@ function _b3Violation(p, opts = {}) {
     const bad = Object.keys(p.data || {}).filter(k => !S.B3_KEYS.includes(k));
     return bad.length ? bad.map(k => (S.B3_LEGACY_KEYS.includes(k) ? `eski alan: ${k}` : `bilinmeyen alan: ${k}`)) : null;
 }
-function _b3GuardError(prepared, opts) {
+// ─── Faz 5 · K2 · B1/B2 çalışma zamanı muhafızı (5.8) ─────────────────────────────────────────────
+// [WHY]: B3'teki aynı sorun b1/b2'de de vardı — hiçbir yazma yolu Schema.validateB1/B2'den geçmiyordu; sevk/transfer ve
+//        hurda akışları (K2) yeni kod ekledikçe şema dağınıklığı büyüyecekti.
+// [HOW]: _b3Violation ile birebir aynı iki aşamalı desen ('set' → tam sözleşme, 'update' → yalnız bilinen alan adı).
+//        planStockOps'un KENDİ hesapladığı stok deltası (patch/full) bu guard'ın kapsamı DIŞINDA kalır — tıpkı B3 guard'ının
+//        da yalnız çağıranın `writes` dizisini denetleyip stok deltasını denetlemediği gibi (bkz. runStockOps).
+function _stockViolation(p, opts = {}) {
+    if (p.op === 'delete') return null;
+    const S = window.Schema;
+    const isB1 = p.col === 'b1';
+    if (!S || typeof S[isB1 ? 'validateB1' : 'validateB2'] !== 'function') return ['şema modülü (schema.js) yüklenmemiş'];
+    const KEYS = isB1 ? S.B1_KEYS : S.B2_KEYS;
+    const LEGACY_KEYS = isB1 ? S.B1_LEGACY_KEYS : S.B2_LEGACY_KEYS;
+    if (p.op === 'set') {
+        const errors = (isB1 ? S.validateB1 : S.validateB2)(p.data, { legacy: opts.stockLegacy === true });
+        return errors.length ? errors : null;
+    }
+    const bad = Object.keys(p.data || {}).filter(k => !KEYS.includes(k));
+    return bad.length ? bad.map(k => (LEGACY_KEYS.includes(k) ? `eski alan: ${k}` : `bilinmeyen alan: ${k}`)) : null;
+}
+
+function _schemaViolation(p, opts) {
+    if (p.col === 'b3') return _b3Violation(p, opts);
+    if (p.col === 'b1' || p.col === 'b2') return _stockViolation(p, opts);
+    return null;
+}
+function _schemaGuardError(prepared, opts) {
     for (const p of prepared) {
-        const errors = _b3Violation(p, opts);
+        const errors = _schemaViolation(p, opts);
         if (errors) {
             return new SaveDataError('schema-violation',
-                `b3 kaydı şema sözleşmesine uymuyor (${p.op} ${p.id}): ${errors.slice(0, 3).join('; ')}${errors.length > 3 ? ` (+${errors.length - 3})` : ''}`,
-                { collection: 'b3', id: p.id, op: p.op, errors });
+                `${p.col} kaydı şema sözleşmesine uymuyor (${p.op} ${p.id}): ${errors.slice(0, 3).join('; ')}${errors.length > 3 ? ` (+${errors.length - 3})` : ''}`,
+                { collection: p.col, id: p.id, op: p.op, errors });
         }
     }
     return null;
@@ -885,7 +917,7 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
         }
     }
     if (prepared.length > 490) return fail('invalid-argument', `Tek atomik işlemde en fazla 490 doküman yazılabilir (${prepared.length}).`);
-    const guard = _b3GuardError(prepared, opts);   // Faz 3.5: b3 sözleşmesi — ihlalde batch'in hiçbir parçası yazılmaz
+    const guard = _schemaGuardError(prepared, opts);   // Faz 3.5/K2: b3/b1/b2 sözleşmesi — ihlalde batch'in hiçbir parçası yazılmaz
     if (guard) return fail(guard.code, guard.message, guard.details);
     if (_maintenanceBlocksWrite()) {
         _announceDenied('maintenance', MAINTENANCE_WRITE_MESSAGE);
@@ -1172,7 +1204,7 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
         } else return fail('invalid-argument', `Bilinmeyen işlem: "${o.op}"`);
     }
     if (stockByKey.size + prepared.length === 0) return fail('invalid-argument', 'En az bir işlem gerekli.');
-    const guard = _b3GuardError(prepared, opts);   // Faz 3.5: b3 sözleşmesi — ihlalde transaction hiç başlamaz (stok da değişmez)
+    const guard = _schemaGuardError(prepared, opts);   // Faz 3.5/K2: b3/b1/b2 sözleşmesi — ihlalde transaction hiç başlamaz (stok da değişmez)
     if (guard) return fail(guard.code, guard.message, guard.details);
 
     let stockResults;

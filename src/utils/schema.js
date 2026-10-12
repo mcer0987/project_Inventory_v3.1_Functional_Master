@@ -29,7 +29,8 @@
     //        eksik türü/rafı ürünü iki depoda da arayarak tamamlar. validateB3() sözleşme testinin ve göçün ölçütüdür.
     const B3_SCHEMA_VERSION = 2;
     const STOK_DISI = 'stok-disi';
-    const B3_TIP = Object.freeze({ CIKIS: 'cikis', ZIMMET: 'zimmet' });
+    // Faz 5 · K2 (5.10): 'hurda' — demirbaş/sarf kaleminin resmi hurdaya ayırma hareketi (bkz. buildB3Entry/normalizeB3).
+    const B3_TIP = Object.freeze({ CIKIS: 'cikis', ZIMMET: 'zimmet', HURDA: 'hurda' });
     const B3_KEYS = Object.freeze([
         'id', 'sema', 'tip', 'kaynakDepo', 'productId', 'requestId',
         'rafNo', 'sutun', 'urunTuru', 'urunAciklama', 'marka', 'adet', 'sn', 'envanterNo',
@@ -118,10 +119,11 @@
     function buildB3Entry(o) {
         const v = o.product ? normalizeStock(o.product, o.col) : null;
         const zimmet = o.tip === B3_TIP.ZIMMET;
+        const hurda = o.tip === B3_TIP.HURDA;
         return {
             id: o.id ?? makeId(),
             sema: B3_SCHEMA_VERSION,
-            tip: zimmet ? B3_TIP.ZIMMET : B3_TIP.CIKIS,
+            tip: zimmet ? B3_TIP.ZIMMET : (hurda ? B3_TIP.HURDA : B3_TIP.CIKIS),
             kaynakDepo: v ? o.col : STOK_DISI,
             productId: v ? v.id : null,
             requestId: o.requestId ?? null,
@@ -162,7 +164,7 @@
         const v = found ? normalizeStock(found.product, found.col) : null;
         const hasZimmetMarks = pick(item.talepTuru, item.oncelik) !== undefined
             || (item.requestId !== undefined && item.requestId !== null);
-        const tip = item.tip === B3_TIP.CIKIS || item.tip === B3_TIP.ZIMMET ? item.tip : (hasZimmetMarks ? B3_TIP.ZIMMET : B3_TIP.CIKIS);
+        const tip = [B3_TIP.CIKIS, B3_TIP.ZIMMET, B3_TIP.HURDA].includes(item.tip) ? item.tip : (hasZimmetMarks ? B3_TIP.ZIMMET : B3_TIP.CIKIS);
         const zimmet = tip === B3_TIP.ZIMMET;
         return {
             id: item.id,
@@ -218,7 +220,7 @@
         B3_KEYS.forEach(k => { if (!Object.prototype.hasOwnProperty.call(e, k) || e[k] === undefined) errors.push(`eksik alan: ${k}`); });
         B3_LEGACY_KEYS.forEach(k => { if (Object.prototype.hasOwnProperty.call(e, k)) errors.push(`eski alan: ${k}`); });
         if (e.sema !== B3_SCHEMA_VERSION) errors.push('sema != 2');
-        if (![B3_TIP.CIKIS, B3_TIP.ZIMMET].includes(e.tip)) errors.push(`geçersiz tip: ${e.tip}`);
+        if (![B3_TIP.CIKIS, B3_TIP.ZIMMET, B3_TIP.HURDA].includes(e.tip)) errors.push(`geçersiz tip: ${e.tip}`);
         const unknownDepot = opts.legacy === true && e.kaynakDepo === null;
         if (!unknownDepot && !['b1', 'b2', STOK_DISI].includes(e.kaynakDepo)) errors.push(`geçersiz kaynakDepo: ${e.kaynakDepo}`);
         if (!unknownDepot && (e.kaynakDepo === STOK_DISI) !== (e.productId === null)) errors.push('productId / kaynakDepo uyumsuz');
@@ -232,6 +234,43 @@
         }
         return errors;
     }
+
+    // ─── 5.8 · B1/B2 şema sözleşmesi (Faz 5 · K2 · INV-05/06/07 desteği) ────────────────────────────────────────
+    // [WHY]: B3'te 3.6'da kapatılan dağınıklığın aynısı b1/b2'de de var: b2 hem 'durumu' hem 'status' yazıyor, bazı eski
+    //        kayıtlar İngilizce takma adlarla (name/type/shelf/qty) gelmiş, hiçbir yazma yolu doğrulanmıyordu. Sevk/transfer
+    //        ve hurda akışları (K2) yeni kod yazdıkça aynı dağınıklık büyüyecekti.
+    // [HOW]: B3'teki sözleşme modeliyle aynı desen: *_KEYS kanonik alan listesi, *_LEGACY_KEYS eski takma adlar,
+    //        validateB1/validateB2 'set' (tam kayıt, hepsi zorunlu) ve 'update' (yalnız bilinen alan adı, firebase-handler'da
+    //        kullanılır) ayrımıyla. B3'ten farklı olarak 'sema' alanı yok (b1/b2 hiç taşımadı, şimdi eklemek gereksiz kayma
+    //        yaratır); içerik denetimi de B3 kadar katı değil — yalnız tip/şekil denetlenir, iş kuralı (ad boş olamaz, adet
+    //        negatif olamaz vb.) dışında alanların boş olması geçerlidir (ör. marka, durumu boş string olabilir — mevcut
+    //        davranış, bkz. computeStockPatch'in STOCK_AUTO_READY listesindeki '').
+    const B1_KEYS = Object.freeze(['id', 'sütun', 'raf', 'tür', 'ürün', 'marka', 'adet', 'durumu', 'açıklama', 'isDemirbas', 'lastUpdate']);
+    const B1_LEGACY_KEYS = Object.freeze(['name', 'type', 'shelf', 'qty', 'status']);
+    // B2 hem 'durumu' hem 'status' yazar (saveProduct her ikisini de set eder); bu yüzden B2_KEYS'te ikisi de zorunlu.
+    const B2_KEYS = Object.freeze(['id', 'sütun', 'raf', 'tür', 'ürün', 'marka', 'adet', 'durumu', 'status', 'açıklama', 'isDemirbas', 'lastUpdate']);
+    const B2_LEGACY_KEYS = Object.freeze(['name', 'type', 'shelf', 'qty']);
+
+    function _validateStock(e, KEYS, LEGACY_KEYS, opts) {
+        const errors = [];
+        if (!e || typeof e !== 'object') return ['kayıt yok'];
+        if (opts.legacy !== true) {
+            KEYS.forEach(k => { if (!Object.prototype.hasOwnProperty.call(e, k) || e[k] === undefined) errors.push(`eksik alan: ${k}`); });
+        }
+        LEGACY_KEYS.forEach(k => { if (Object.prototype.hasOwnProperty.call(e, k)) errors.push(`eski alan: ${k}`); });
+        if ('ürün' in e && isBlank(e.ürün)) errors.push('ürün adı boş olamaz');
+        if ('adet' in e && (!Number.isInteger(e.adet) || e.adet < 0)) errors.push(`geçersiz adet: ${e.adet}`);
+        if ('isDemirbas' in e && typeof e.isDemirbas !== 'boolean') errors.push('isDemirbas boolean değil');
+        if ('lastUpdate' in e && typeof e.lastUpdate !== 'number') errors.push('lastUpdate sayı değil');
+        ['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status'].forEach(k => {
+            if (k in e && typeof e[k] !== 'string') errors.push(`${k} string değil`);
+        });
+        return errors;
+    }
+    // set (tam kayıt) → KEYS'in tamamı zorunlu; update çağıranları (firebase-handler) ayrıca "yalnız bilinen alan adı"
+    // denetimini kendisi yapar (B3 guard'ıyla aynı iki aşamalı desen, bkz. _b3Violation / applyItemOps).
+    function validateB1(e, opts = {}) { return _validateStock(e, B1_KEYS, B1_LEGACY_KEYS, opts); }
+    function validateB2(e, opts = {}) { return _validateStock(e, B2_KEYS, B2_LEGACY_KEYS, opts); }
 
     // ─── 3.9a · Cihaz kimliği (Seri No / Envanter No) ───
     // Karşılaştırma anahtarı: boşluksuz, büyük harf; '-' ve boş yok sayılır. Eski kayıtlarda virgülle birleşmiş SN'ler ayrılır.
@@ -334,6 +373,7 @@
         makeId, normName, idToTs, isDemirbas, normalizeStock, findStock, isSelfApproval,
         B3_SCHEMA_VERSION, B3_KEYS, B3_LEGACY_KEYS, B3_TIP, STOK_DISI,
         buildB3Entry, normalizeB3, toCanonicalB3, validateB3,
+        B1_KEYS, B1_LEGACY_KEYS, B2_KEYS, B2_LEGACY_KEYS, validateB1, validateB2,
         requestStatus, normalizeRequest,
         normDeviceId, deviceKeys, validateDeviceIds,
     };

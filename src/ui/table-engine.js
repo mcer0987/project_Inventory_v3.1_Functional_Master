@@ -79,7 +79,7 @@ function _buildRowHtml(depo, item, realIndex) {
     const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
     const qtyHtml = _buildQtyDisplay(itemQty, updateDate);
     const innerHtml = _buildRowInnerHtml(depo, item, realIndex, qtyHtml);
-    const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+    const isPassive = window.isPassiveStatus ? window.isPassiveStatus(item.durumu || item.status) : (item.durumu === 'Pasif' || item.status === 'Pasif');
     const rowClass = isPassive ? 'passive-row' : '';
     const safeName = escapeHtml(item.ürün || item.name || '-');
 
@@ -96,11 +96,15 @@ function _buildRowHtml(depo, item, realIndex) {
             </tr>`;
 }
 
-function _renderLoadMoreButton(depo) {
+// [WHY] (Faz 5 · K2 · INV-07): totalCount window.data[depo].length (FİLTRESİZ ham uzunluk) kullanıyordu; gösterilen
+//       satırlar ise getProcessedData'nın (b1'de filtreli) sonucuydu. Pasif karışık bir listede buton yanlış
+//       görünüyor/kayboluyordu (filtrelenmiş toplam sayfa boyutunu geçmese de ham sayı geçtiği için buton kalıyordu).
+// [HOW]: Çağıran (renderTable), zaten hesapladığı filtreli allData.length'i buraya verir; tekrar hesaplanmaz.
+function _renderLoadMoreButton(depo, filteredCount) {
     let loadMoreBtn = document.getElementById('loadMoreBtn');
     if (loadMoreBtn) loadMoreBtn.remove();
 
-    const totalCount = (window.data && window.data[depo]) ? window.data[depo].length : 0;
+    const totalCount = filteredCount ?? ((window.data && window.data[depo]) ? window.data[depo].length : 0);
 
     if (totalCount > _currentPage * PAGE_SIZE) {
         loadMoreBtn = document.createElement('button');
@@ -241,7 +245,7 @@ export const renderTable = function (depo, append = false, customLimit = null) {
         tbody.innerHTML = rowsHtml.join('');
     }
 
-    _renderLoadMoreButton(depo);
+    _renderLoadMoreButton(depo, allData.length);
 
     if (typeof window.setupRowSelection === 'function') {
         window.setupRowSelection(tableContainer);
@@ -335,7 +339,7 @@ export const renderCardSearchResults = function (depo, results) {
         if (realIndex === -1) return '';
 
         const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
-        const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+        const isPassive = window.isPassiveStatus ? window.isPassiveStatus(item.durumu || item.status) : (item.durumu === 'Pasif' || item.status === 'Pasif');
         const isWatched = item.isWatched;
         const qtyClass = itemQty === 0 ? 'qty-zero' : (itemQty <= 3 ? 'qty-low' : 'qty-ok');
         const safeName = escapeHtml(item.ürün || item.name || '-');
@@ -428,7 +432,7 @@ export const renderMobileCards = function (depo) {
 
         const itemsHtml = items.map(item => {
             const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
-            const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+            const isPassive = window.isPassiveStatus ? window.isPassiveStatus(item.durumu || item.status) : (item.durumu === 'Pasif' || item.status === 'Pasif');
             const isWatched = item.isWatched;
             const qtyClass = itemQty === 0 ? 'qty-zero' : (itemQty <= 3 ? 'qty-low' : 'qty-ok');
             const safeDepo = escapeHtml(depo);
@@ -553,6 +557,22 @@ AUTO_CARD_MQ.addEventListener('change', () => {
 });
 _detectAndApplyCardView();
 
+// [WHY] (Faz 5 · K2 · INV-07): Canlı bir "sadece değiştirildi" güncellemesi patchDOMForCollection ile satır bazında
+//       yama yapıyordu, ama hiç aktif durum filtresine (b1StatusFilter) bakmıyordu — bir ürün patch sırasında Pasif'e
+//       düşünce "Sadece Aktifler" görünümünde satır DOM'da kalıyordu (yalnız stili değişiyordu); tam yeniden çizimde
+//       (renderTable) ise doğru elenip "kaybolmuş" gibi görünüyordu (DATA-05, INV-07).
+// [HOW]: Durum metni değiştiğinde, b1 için aktif filtreye göre satırın/kartın artık görünür olup olmayacağı yeniden
+//        hesaplanır; filtre dışına düşüyorsa DOM'dan kaldırılır (tam renderTable ile tutarlı); düşmüyorsa eskisi gibi
+//        hücreler/stil güncellenir. Diğer depolar (b2) ve filtre 'all' iken hiçbir satır kaldırılmaz.
+function _passiveFilterExcludes(colName, isPassive) {
+    if (colName !== 'b1') return false;
+    const filterEl = document.getElementById('b1StatusFilter');
+    const filterVal = filterEl ? filterEl.value : 'active';
+    if (filterVal === 'active') return isPassive;
+    if (filterVal === 'passive') return !isPassive;
+    return false;
+}
+
 export const patchDOMForCollection = function (colName, changes) {
     if (!changes || changes.length === 0) return;
 
@@ -561,24 +581,30 @@ export const patchDOMForCollection = function (colName, changes) {
         const data = change.data;
         const itemQty = data.adet !== undefined ? data.adet : (data.qty || 0);
         const itemStatus = data.durumu || data.status || '-';
-        const isPassive = (itemStatus === 'Pasif');
+        const isPassive = window.isPassiveStatus ? window.isPassiveStatus(itemStatus) : (itemStatus === 'Pasif');
+        const hideNow = _passiveFilterExcludes(colName, isPassive);
 
         const rowEl = document.querySelector(`tr[data-depo="${colName}"][data-id="${id}"]`);
         if (rowEl) {
-            const qtyCell = rowEl.querySelector('.js-qty-cell');
-            const statusCell = rowEl.querySelector('.js-status-cell');
-
-            if (qtyCell) qtyCell.textContent = itemQty;
-            if (statusCell) statusCell.textContent = itemStatus;
-
-            if (isPassive) {
-                rowEl.classList.add('passive-row');
+            if (hideNow) {
+                rowEl.remove();
             } else {
-                rowEl.classList.remove('passive-row');
+                const qtyCell = rowEl.querySelector('.js-qty-cell');
+                const statusCell = rowEl.querySelector('.js-status-cell');
+
+                if (qtyCell) qtyCell.textContent = itemQty;
+                if (statusCell) statusCell.textContent = itemStatus;
+
+                if (isPassive) {
+                    rowEl.classList.add('passive-row');
+                } else {
+                    rowEl.classList.remove('passive-row');
+                }
             }
         }
 
         const cardEl = document.querySelector(`div.product-card-item[data-depo="${colName}"][data-id="${id}"]`);
+        if (cardEl && hideNow) { cardEl.remove(); return; }
         if (cardEl) {
             const qtyBadge = cardEl.querySelector('.js-qty-cell');
             const statusTag = cardEl.querySelector('.js-status-cell');

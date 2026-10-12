@@ -173,7 +173,9 @@
             const n = S().normalizeB3(b);
             if (!n || !hits(n, keys)) return;
             const zimmet = n.tip === 'zimmet';
-            events.push({ ts: n.ts || tsOfText(n.tarih), tarih: n.tarih, tur: zimmet ? '📌 Zimmet' : '📤 Envanter çıkışı', kisi: n.alanKisi, urun: n.urunAciklama, yer: n.stokDisi ? 'Stok dışı' : (n.kaynakDepo || '-').toUpperCase(), not: n.not });
+            // Faz 5 · K2 (5.10): hurda hareketi de b3'te yaşar (tip:'hurda') — cihaz geçmişinde ayrı etiketle gösterilir.
+            const hareketTur = zimmet ? '📌 Zimmet' : (n.tip === 'hurda' ? '♻️ Hurdaya Ayrıldı' : '📤 Envanter çıkışı');
+            events.push({ ts: n.ts || tsOfText(n.tarih), tarih: n.tarih, tur: hareketTur, kisi: n.alanKisi, urun: n.urunAciklama, yer: n.stokDisi ? 'Stok dışı' : (n.kaynakDepo || '-').toUpperCase(), not: n.not });
             if (zimmet && n.iadeEdildi) events.push({ ts: (tsOfText(n.iadeEdildiTarihi) || n.ts) + 1, tarih: n.iadeEdildiTarihi || '-', tur: '✅ İade', kisi: n.alanKisi, urun: n.urunAciklama, yer: n.iadeDepo ? String(n.iadeDepo).toUpperCase() : 'Depoya iade edilmedi', not: '-' });
         });
         (data.assignments || []).forEach(a => {

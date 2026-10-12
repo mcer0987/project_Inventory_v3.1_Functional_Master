@@ -336,12 +336,16 @@ export const UIComponents = {
         } else {
             internalDiv.style.display = 'none';
         }
+        // Faz 5 · K2 (5.8/5.10 · INV-06): adet alanı artık internal (B1↔B2) ve scrap (Hurda/Atık) hedeflerinde de
+        // gösterilir — internal'de kısmi adet taşıma, scrap'te kaç adedin hurdaya ayrılacağı için.
         const dispatchEl = document.getElementById('transDispatchOptions');
-        if (dispatchEl) dispatchEl.style.display = (targetData.type === 'external' || targetData.type === 'service') ? 'block' : 'none';
+        if (dispatchEl) dispatchEl.style.display = ['external', 'service', 'internal', 'scrap'].includes(targetData.type) ? 'block' : 'none';
         this.syncTransferDevices();
     },
 
-    // Servis/dış sevkte demirbaş: adet kadar cihaz kimliği; girilen kimliklerin önceki servis kayıtları listelenir (3.9a/c).
+    // Servis/dış sevk/hurdada demirbaş: adet kadar cihaz kimliği; girilen kimliklerin önceki servis kayıtları listelenir
+    // (3.9a/c). İç transfer (B1↔B2) kasıtlı olarak kimlik istemez — sahibinin kararı (Faz 5 Orkestrasyon §5.8): B1/B2
+    // taşıma bir konum değişikliğidir, cihaz kimliği zaten B3/servis kayıtlarında tutulur.
     syncTransferDevices() {
         const box = document.getElementById('transDeviceIds');
         const hint = document.getElementById('transServiceHistory');
@@ -349,7 +353,7 @@ export const UIComponents = {
             .find(x => x && String(x.id) === String(document.getElementById('transIndex')?.value));
         let target = {};
         try { target = JSON.parse(document.getElementById('transTarget')?.value || '{}'); } catch (e) { target = {}; }
-        const dispatch = target.type === 'external' || target.type === 'service';
+        const dispatch = target.type === 'external' || target.type === 'service' || target.type === 'scrap';
         if (!box || !window.DeviceIds) return;
         if (item && dispatch && window.Schema.isDemirbas(item)) {
             window.DeviceIds.render(box, Number(document.getElementById('transQty')?.value) || 1, {
@@ -401,15 +405,43 @@ export const UIComponents = {
 
         let ops, message, messageType;
         if (targetData.type === 'internal') {
-            const newItem    = { ...originalItem };
-            newItem.sütun    = document.getElementById('transNewCol')?.value;
-            newItem.raf      = document.getElementById('transNewShelf')?.value;
-            newItem.açıklama = sevkNotu ? sevkNotu : (originalItem.açıklama || '');
-            ops = [
-                { op: 'set', col: targetData.key, item: newItem },
-                { op: 'delete', col: sourceRepo, id: originalItem.id }
-            ];
-            message = 'Ürün Sevk/Transfer talebi sağlandı'; messageType = 'success';
+            // [WHY] (Faz 5 · K2 · 5.8 · INV-06): Kalemin TAMAMI taşınmak zorundaydı (37 adetlik satırdan 1 tanesi B2'ye
+            //        gidecekse bile 37'si gidiyordu); id de aynen kopyalandığı için her alan (ör. stokOncekiDurum gibi
+            //        eski/ geçici alanlar) hedefe sessizce taşınıyor, B2'nin ayrıca tuttuğu 'status' alanı kaynakta
+            //        yoksa hedefte de oluşmuyordu (B1/B2 şema sözleşmesini ihlal ederdi).
+            // [HOW]: Seçilen adet < mevcut stok ise kaynaktan yalnız o kadarı düşülür (update), hedefte YENİ id'li bir
+            //        kayıt açılır (adet = seçilen). Adet tüm stoksa eski davranış korunur (kaynak silinir, aynı id
+            //        hedefte yaşar). Hedef kaydı her zaman sıfırdan, yalnız kanonik alanlarla kurulur (durumu/status
+            //        tutarlı, B1_KEYS/B2_KEYS guard'ından geçer) — demirbaş kimlik istenmez (konum değişikliği, §5.8).
+            const qty = Number(document.getElementById('transQty')?.value);
+            const stockQty = parseInt(originalItem.adet ?? originalItem.qty ?? 0, 10) || 0;
+            if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Taşınacak adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+            if (qty > stockQty) { showAppAlert(`Stokta ${stockQty} adet var; ${qty} adet taşınamaz.`, 'warning'); return; }
+            const now = Date.now();
+            const statusVal = String(originalItem.durumu ?? originalItem.status ?? '');
+            const fullMove = qty === stockQty;
+            const targetItem = {
+                id: fullMove ? originalItem.id : `${targetData.key}_${window.makeId()}`,
+                sütun: document.getElementById('transNewCol')?.value || '',
+                raf: document.getElementById('transNewShelf')?.value || '',
+                tür: originalItem.tür || originalItem.type || '',
+                ürün: originalItem.ürün || originalItem.name || '',
+                marka: originalItem.marka || '',
+                adet: qty,
+                durumu: statusVal,
+                açıklama: sevkNotu || originalItem.açıklama || '',
+                isDemirbas: window.Schema.isDemirbas(originalItem),
+                lastUpdate: now,
+            };
+            if (targetData.key === 'b2') targetItem.status = statusVal;
+            ops = fullMove
+                ? [ { op: 'set', col: targetData.key, item: targetItem }, { op: 'delete', col: sourceRepo, id: originalItem.id } ]
+                : [ { op: 'set', col: targetData.key, item: targetItem },
+                    { op: 'update', col: sourceRepo, id: originalItem.id, fields: { adet: stockQty - qty, lastUpdate: now } } ];
+            message = fullMove
+                ? 'Ürün Sevk/Transfer talebi sağlandı'
+                : `${qty} adet ${targetData.name} birimine taşındı; ${stockQty - qty} adet kaynakta bırakıldı.`;
+            messageType = 'success';
         } else if (targetData.type === 'external' || targetData.type === 'service') {
             // [WHY] (3.9): Sevk satırın TAMAMINI depodan siliyordu (37 adetlik satırdan 1 cihaz sevk edilince 37'si gidiyordu),
             //        seri no sorulmuyordu ve servis kaydı dönüşte silindiği için cihazın servis geçmişi kalmıyordu.
@@ -452,6 +484,54 @@ export const UIComponents = {
                 return;
             }
             if (typeof showAppAlert === 'function') showAppAlert(`${qty} adet ${targetData.name} birimine sevk edildi (${units.length} servis kaydı). Servis paneline işlendi.`, 'info');
+            UIComponents.closeTransferModal();
+            if (typeof window.renderTable === 'function') window.renderTable(sourceRepo);
+            if (typeof window.renderPurchaseModule === 'function') window.renderPurchaseModule();
+            return;
+        } else if (targetData.type === 'scrap') {
+            // [WHY] (Faz 5 · K2 · 5.10): "Hurda / Atık" hedefi sevk listesinde duruyordu ama hiç uygulanmamıştı — seçilince
+            //        her zaman "Geçersiz hedef." hatası verip hiçbir şey yazmıyordu (H4'te tespit, Faz 5'e ertelendi).
+            // [HOW]: external/service ile aynı desen: yalnız seçilen adet düşülür, demirbaşta adet kadar kimlik zorunlu ve
+            //        cihaz başına kanonik b3 hurda kaydı (tip:'hurda'); varsa bu ürün/cihaza ait AÇIK servis kaydı da aynı
+            //        transaction'da kapatılır. Stok düşümü + b3 kayıtları + servis kapatma TEK transaction (runStockOps):
+            //        ya hepsi ya hiçbiri — stoktan düşüp kaydı yazamama riski yok.
+            const qty = Number(document.getElementById('transQty')?.value);
+            const stockQty = parseInt(originalItem.adet ?? originalItem.qty ?? 0, 10) || 0;
+            if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Hurdaya ayrılacak adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+            if (qty > stockQty) { showAppAlert(`Stokta ${stockQty} adet var; ${qty} adet hurdaya ayrılamaz.`, 'warning'); return; }
+            const demirbas = window.Schema.isDemirbas(originalItem);
+            const chk = window.AssignmentService.checkDeviceIds({ demirbas, qty, ids: window.DeviceIds.read(document.getElementById('transDeviceIds')) });
+            if (!chk.ok) { showAppAlert(chk.errors[0], 'warning'); return; }
+            const confirmed = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('Hurdaya Ayır', `${qty} adet "${originalItem.ürün || originalItem.name}" kalıcı olarak hurdaya ayrılacak. Bu işlem geri alınamaz. Onaylıyor musunuz?`)
+                : window.confirm('Hurdaya ayırma işlemi geri alınamaz. Emin misiniz?');
+            if (!confirmed) return;
+            const now = typeof getTurkiyeSaati === 'function' ? getTurkiyeSaati() : new Date().toLocaleString('tr-TR');
+            const yapan = window.currentUser?.name || window.getActiveUser?.()?.name || 'Admin';
+            const units = demirbas ? chk.ids.map(d => ({ adet: 1, sn: d.sn, envanterNo: d.envanterNo })) : [{ adet: qty, sn: '-', envanterNo: '-' }];
+            const b3Writes = units.map(u => ({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+                tip: 'hurda', product: originalItem, col: sourceRepo, adet: u.adet, sn: u.sn, envanterNo: u.envanterNo,
+                not: sevkNotu, alanKisi: yapan, tarih: now, isDemirbas: demirbas,
+            }) }));
+            // Bu ürüne/cihaza ait açık (kapandi:false) servis kaydı varsa, hurdaya ayırmayla birlikte aynı transaction'da kapat.
+            const openServiceWrites = (window.data.serviceRecords || [])
+                .filter(r => r && r.kapandi !== true && String(r.productId) === String(originalItem.id)
+                    && (!demirbas || units.some(u => (u.sn !== '-' && u.sn === r.sn) || (u.envanterNo !== '-' && u.envanterNo === r.envanterNo))))
+                .map(r => ({ op: 'update', col: 'serviceRecords', id: r.id, fields: {
+                    kapandi: true, durum: 'Hurdaya Ayrıldı', donusTarihi: now,
+                    gecmis: [...(Array.isArray(r.gecmis) ? r.gecmis : []), { ts: Date.now(), tarih: now, durum: 'Hurdaya Ayrıldı', not: sevkNotu, yapan }],
+                } }));
+            try {
+                await window.runStockOps({ stock: [{ col: sourceRepo, id: originalItem.id, delta: -qty }], writes: [...b3Writes, ...openServiceWrites] },
+                    { forbiddenMessage: 'Hurdaya ayırma işlemi yalnızca sistem yöneticisi tarafından yapılabilir.' });
+            } catch (e) {
+                if (typeof showAppAlert === 'function') showAppAlert(`Hurdaya ayırma kaydedilemedi; ürün yerinde bırakıldı. ${e.message || ''}`, 'error');
+                return;
+            }
+            if (typeof showAppAlert === 'function') {
+                const closedMsg = openServiceWrites.length ? `, ${openServiceWrites.length} açık servis kaydı kapatıldı` : '';
+                showAppAlert(`${qty} adet "${originalItem.ürün || originalItem.name}" hurdaya ayrıldı (${units.length} kayıt)${closedMsg}.`, 'info');
+            }
             UIComponents.closeTransferModal();
             if (typeof window.renderTable === 'function') window.renderTable(sourceRepo);
             if (typeof window.renderPurchaseModule === 'function') window.renderPurchaseModule();
