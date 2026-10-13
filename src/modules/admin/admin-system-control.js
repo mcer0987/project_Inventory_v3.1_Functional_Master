@@ -929,49 +929,33 @@
         }
     };
 
-    // showAdminTab interceptor â€” VIP sekmesi aÃ§Ä±ldÄ±ÄŸÄ±nda baÅŸlat
-    function _hookShowAdminTab() {
-        // showAdminTab henÃ¼z tanÄ±mlÄ± deÄŸilse tekrar dene
-        if (typeof window.showAdminTab !== 'function') {
-            setTimeout(_hookShowAdminTab, 200);
-            return;
+    // Faz 5 · K3 (5.7 · ARC-07): showAdminTab'ı sarmalayan eski monkey-patch + 200ms'lik retry döngüsü kaldırıldı.
+    // script.js'te her zaman hazır olan merkezi kanca siciline (AppModules.AdminTabs) kaydolunuyor — her sekme
+    // değişiminde (tabId ne olursa olsun) çalışır, VIP sekmesine giriş/çıkışı kendi içinde ayırt eder.
+    window.AppModules.AdminTabs.onAny(function (tabId) {
+        // ── VIP Portal Modu ──
+        const sidebar = document.querySelector('.sidebar');
+        const mainContent = document.querySelector('.main-content');
+        const isVip = (tabId === 'systemControlTab');
+
+        if (isVip) {
+            // VIP dünyasına geçiş
+            if (sidebar) sidebar.classList.add('vip-active');
+            if (mainContent) mainContent.classList.add('vip-bg');
+            document.body.classList.add('vip-portal-active');
+
+            // [WHY]: Yerel _initVipPanel çağrılıyordu; window._initVipPanel sarmalayıcı zinciri (buton durumları, radar
+            //        tıklamaları) hiç çalışmıyordu, aktivite paneli / mesaj / oturum sonlandırma ulaşılamazdı (VIP-04).
+            requestAnimationFrame(() => {
+                setTimeout(() => window._initVipPanel(), 50);
+            });
+        } else {
+            // Normal dünyaya dönüş
+            if (sidebar) sidebar.classList.remove('vip-active');
+            if (mainContent) mainContent.classList.remove('vip-bg');
+            document.body.classList.remove('vip-portal-active');
         }
-
-        const originalFn = window.showAdminTab;
-        window.showAdminTab = function (tabId) {
-            originalFn.call(this, tabId);
-
-            // â”€â”€ VIP Portal Modu â”€â”€
-            const sidebar = document.querySelector('.sidebar');
-            const mainContent = document.querySelector('.main-content');
-            const isVip = (tabId === 'systemControlTab');
-
-            if (isVip) {
-                // VIP dÃ¼nyasÄ±na geÃ§iÅŸ
-                if (sidebar) sidebar.classList.add('vip-active');
-                if (mainContent) mainContent.classList.add('vip-bg');
-                document.body.classList.add('vip-portal-active');
-
-                // [WHY]: Yerel _initVipPanel çağrılıyordu; window._initVipPanel sarmalayıcı zinciri (buton durumları, radar
-                //        tıklamaları) hiç çalışmıyordu, aktivite paneli / mesaj / oturum sonlandırma ulaşılamazdı (VIP-04).
-                requestAnimationFrame(() => {
-                    setTimeout(() => window._initVipPanel(), 50);
-                });
-            } else {
-                // Normal dÃ¼nyaya dÃ¶nÃ¼ÅŸ
-                if (sidebar) sidebar.classList.remove('vip-active');
-                if (mainContent) mainContent.classList.remove('vip-bg');
-                document.body.classList.remove('vip-portal-active');
-            }
-        };
-    }
-
-    // DOMContentLoaded'da kancayÄ± kur
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _hookShowAdminTab);
-    } else {
-        _hookShowAdminTab();
-    }
+    });
     // [WHY]: God-Eye v2 fonksiyonlari IIFE disinda tanimli.
     // [HOW]: _appendLog ve _initVipPanel global scope icin expose ediliyor.
     window._appendLog    = _appendLog;

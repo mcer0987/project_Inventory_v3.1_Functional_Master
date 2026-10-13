@@ -211,7 +211,7 @@ window.saveUnitData = async function () {
 
 window.deleteUnit = async function (unitId) {
     if (!window.requireDbAdmin('Birim silme')) return;
-    const unit =(window.data.units || []).find(u => u && typeof u === 'object' && String(u.id) === String(unitId));
+    const unit = (window.data.units || []).find(u => u && typeof u === 'object' && String(u.id) === String(unitId));
     if (!unit) { _unitAlert('Birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     const ok = typeof showCustomConfirm === 'function'
         ? await showCustomConfirm('Birimi Sil', `"${_unitName(unit)}" birimi silinecek. Emin misiniz?`)
@@ -338,7 +338,7 @@ window.toggleWorkflowMethod = function (method) {
         WorkflowState.tempManualSteps = [];
         WorkflowState.tempTplSteps = [];
         WorkflowState.tempTplAuth = [];
-        
+
         window.addManualStep();
         return;
     }
@@ -1000,8 +1000,10 @@ window.approveStep = async function (id) {
 
         // [WHY]: Faz 4 · J4 (EBYS-04, M12) — kendi satın alma talebinin adımını onaylama kontrolü yalnız index'teki
         //        sarmalayıcıdaydı (admin.html'de ve doğrudan çağrıda yoktu). Personel → engel + 'blocked'; admin → parola.
-        guard = await window.SecurityConfig.guardSelfApproval({ kind: 'purchase', record: item, refCol: 'purchaseOrders',
-            type: 'Satın Alma Onayı', item: item.urun || item.ürünAdi || item.baslik || item.evrakNo, qty: Number(item.adet || item.miktar) || 1 });
+        guard = await window.SecurityConfig.guardSelfApproval({
+            kind: 'purchase', record: item, refCol: 'purchaseOrders',
+            type: 'Satın Alma Onayı', item: item.urun || item.ürünAdi || item.baslik || item.evrakNo, qty: Number(item.adet || item.miktar) || 1
+        });
         if (!guard.allowed) return;
         _beginMutation(lockKey, item);
 
@@ -1587,18 +1589,18 @@ window.searchPersonnelForTemplate = function (query, type, stepIndex = null) {
     // [WHY]: The dropdown closes too fast on input blur, blocking mouse clicks from registering.
     // [HOW]: Track hover state on the dropdown container, and defer hiding on input blur
     //        using setTimeout, keeping it open if the user's cursor is currently inside.
-    const inputEl = type === 'auth' 
-        ? document.getElementById('tplAuthSearch') 
+    const inputEl = type === 'auth'
+        ? document.getElementById('tplAuthSearch')
         : document.querySelector(`input[onkeyup*="window.searchPersonnelForTemplate(this.value, 'step', ${stepIndex})"]`);
 
     if (resDiv && !resDiv.dataset.hoverWired) {
         resDiv.dataset.hoverWired = "true";
         resDiv.dataset.isHovered = "false";
-        
+
         resDiv.addEventListener('mouseenter', () => {
             resDiv.dataset.isHovered = "true";
         });
-        
+
         resDiv.addEventListener('mouseleave', () => {
             resDiv.dataset.isHovered = "false";
             // If input is not focused anymore, we can close the dropdown safely
@@ -2299,7 +2301,7 @@ window.renderTemplateList = function () {
 
     // window.templates dizisindeki verileri kullanıyoruz
     const templates = window.templates || [];
-    const html = templates.length === 0 
+    const html = templates.length === 0
         ? '<tr><td colspan="4" class="text-center p-4 text-muted">Henüz şablon tanımlanmadı.</td></tr>'
         : templates.map(tpl => `
         <tr>
@@ -2413,10 +2415,10 @@ window.deleteWorkflowTemplate = async function (id) {
     try {
         const db = getFirestore();
         const activeRoot = window.AppEnv?.COLLECTION_ROOT || window.COLLECTION_ROOT || "lifeserver_master";
-        
+
         // [BUGFIX]: Delete template directly from COLLECTION_ROOT subcollection to prevent permission error
         await deleteDoc(doc(db, activeRoot, "workflowTemplates", "items", id));
-        
+
         if (typeof showAppAlert === 'function') {
             showAppAlert("Şablon başarıyla silindi.", "success");
         }
@@ -2427,14 +2429,9 @@ window.deleteWorkflowTemplate = async function (id) {
 };
 window.deleteTemplate = window.deleteWorkflowTemplate;
 
-// Admin Tab değişiminde render'ı tetikle
-const originalShowAdminTab = window.showAdminTab;
-window.showAdminTab = function (tabId) {
-    if (typeof originalShowAdminTab === 'function') originalShowAdminTab(tabId);
-    if (tabId === 'workflowTemplatesTab') {
-        window.renderWorkflowTemplates();
-    }
-};
+// Faz 5 · K3 (5.7 · ARC-07): showAdminTab'ı sarmalayan eski monkey-patch kaldırıldı; merkezi kanca siciline
+// (AppModules.AdminTabs, script.js) kaydolunuyor — admin tab değişince render tetiklenir.
+window.AppModules.AdminTabs.onShow('workflowTemplatesTab', () => window.renderWorkflowTemplates());
 // 👉 modal içinde step’leri göster
 window.previewTemplate = function (templateId) {
     const tpl = window.data.workflowTemplates.find(t => t.id === templateId);

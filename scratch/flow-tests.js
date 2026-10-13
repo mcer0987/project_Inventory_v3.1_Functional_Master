@@ -2185,6 +2185,119 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 5 · K3: Özel İzleme Paneli onarımı (ADM-05), Hızlı Personel/Ürün Ekleme (5.2 · ZIM-05), merkezi
+    // AppModules.AdminTabs kanca sicili (5.7 · ARC-07). Tamamı admin.html üzerinde, gerçek fonksiyonlarla.
+    async k3AdminTabHooks(page, browser) {
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        let out;
+        try {
+            out = await admin.evaluate(async () => {
+                const o = {};
+                const orig = {
+                    b1: window.data.b1, b2: window.data.b2, personel: window.data.personel, types: window.data.productTypes,
+                    append: window.appendItem, isDbAdmin: window.isDbAdmin, checkIsAdmin: window.checkIsAdmin, alert: window.showAppAlert,
+                };
+                window.isDbAdmin = () => true; window.checkIsAdmin = () => true; window.showAppAlert = () => {};
+                // appendItem gerçek applyItemOps'un _applyLocal'ını taklit eder: window.data[col]'a id'li kayıt eklenir.
+                const captured = []; let idSeq = 0;
+                window.appendItem = async (col, item) => {
+                    const withId = { ...item, id: item.id ?? ('k3test_' + (++idSeq)) };
+                    captured.push({ col, item: withId });
+                    (window.data[col] = window.data[col] || []).unshift(withId);
+                    return { written: 1, ids: [withId.id] };
+                };
+
+                try {
+                    // ── ADM-05: renderCustomWatchDashboard ikinci (ve sonraki) çağrıda da çiziyor mu? ──
+                    window.data.b1 = [{ id: 'k3w_1', ürün: 'K3 İzlenen Ürün', marka: 'X', adet: 2, limit: 5, isWatched: true }];
+                    window.data.b2 = [];
+                    window.renderCustomWatchDashboard();
+                    o.tableExistsAfterFirstRender = !!document.getElementById('customWatchTable');
+                    o.cardAfterFirst = !!document.querySelector('#watchCardsContainer .watch-card');
+                    window.data.b1[0].ürün = 'K3 İzlenen Ürün (Güncellendi)';
+                    window.renderCustomWatchDashboard();   // eskiden burada table silindiği için ikinci çağrı hiçbir şey yapmazdı
+                    o.tableExistsAfterSecondRender = !!document.getElementById('customWatchTable');
+                    o.cardUpdatedAfterSecond = (document.querySelector('#watchCardsContainer .watch-card .title')?.textContent || '').includes('Güncellendi');
+
+                    // ── ARC-07: merkezi kanca sicili gerçekten çalışıyor mu? ──
+                    o.hasAdminTabsApi = !!(window.AppModules?.AdminTabs?.onShow && window.AppModules?.AdminTabs?.onAny);
+                    let invHookFired = false;
+                    window.AppModules.AdminTabs.onShow('inventoryManagementTab', () => { invHookFired = true; });
+                    let wfRendered = false;
+                    const origWf = window.renderWorkflowTemplates;
+                    window.renderWorkflowTemplates = function (...a) { wfRendered = true; return origWf.apply(this, a); };
+                    let invRendered = false;
+                    const origInv = window.inventoryManagementModule.renderAdminInventoryTab;
+                    window.inventoryManagementModule.renderAdminInventoryTab = function (...a) { invRendered = true; return origInv.apply(this, a); };
+
+                    window.showAdminTab('inventoryManagementTab');
+                    await new Promise(r => setTimeout(r, 30));
+                    o.inventoryTabHookFired = invRendered && invHookFired;
+                    window.showAdminTab('workflowTemplatesTab');
+                    o.workflowTabHookFired = wfRendered;
+                    window.showAdminTab('systemControlTab');
+                    o.vipActiveClassAdded = document.querySelector('.sidebar')?.classList.contains('vip-active') ?? null;
+                    window.showAdminTab('dashboard-content');
+                    o.vipActiveClassRemoved = !(document.querySelector('.sidebar')?.classList.contains('vip-active'));
+
+                    window.inventoryManagementModule.renderAdminInventoryTab = origInv;
+                    window.renderWorkflowTemplates = origWf;
+
+                    // ── ZIM-05: hızlı ekleme butonları gerçekten kayıt oluşturup dropdown'ı tazeliyor mu? ──
+                    window.data.personel = [];
+                    window.data.productTypes = [{ name: 'K3 Demirbaş Tür', isDemirbas: true }, { name: 'K3 Sarf Tür', isDemirbas: false }];
+                    window.inventoryManagementModule.openAssignModal();
+
+                    window.inventoryManagementModule.quickAddPersonnel();
+                    o.personnelModalOpened = document.getElementById('quickPersonnelModal')?.style.display === 'flex';
+                    document.getElementById('qpName').value = 'K3 Test Personel';
+                    await window.inventoryManagementModule._saveQuickPersonnel();
+                    o.personnelCreated = captured.some(c => c.col === 'personel' && c.item.name === 'K3 Test Personel');
+                    const selPersonVal = document.getElementById('assignPersonnel')?.value;
+                    o.personnelAutoSelected = !!selPersonVal && window.data.personel.some(p => String(p.id) === selPersonVal && p.name === 'K3 Test Personel');
+
+                    window.inventoryManagementModule.quickAddProduct();
+                    o.productModalOpened = document.getElementById('quickProductModal')?.style.display === 'flex';
+                    o.productTypeOptionsOnlyDemirbas = [...document.querySelectorAll('#qpType option')].every(opt => opt.value === 'K3 Demirbaş Tür');
+                    document.getElementById('qpType').value = 'K3 Demirbaş Tür';
+                    document.getElementById('qpName2').value = 'K3 Test Ürün';
+                    document.getElementById('qpQty').value = '3';
+                    await window.inventoryManagementModule._saveQuickProduct();
+                    const createdProduct = captured.find(c => c.col === 'b1' && c.item.ürün === 'K3 Test Ürün');
+                    o.productCreated = !!createdProduct;
+                    o.productIsDemirbas = createdProduct?.item.isDemirbas === true;
+                    o.productSchemaErrors = createdProduct ? window.Schema.validateB1(createdProduct.item) : ['kayıt yok'];
+                    const prodRowVal = document.querySelector('#assignRowsContainer .assign-product-sel')?.value;
+                    o.productRowAutoSelected = !!createdProduct && prodRowVal === createdProduct.item.id;
+                } finally {
+                    Object.assign(window, { appendItem: orig.append, isDbAdmin: orig.isDbAdmin, checkIsAdmin: orig.checkIsAdmin, showAppAlert: orig.alert });
+                    window.data.b1 = orig.b1; window.data.b2 = orig.b2; window.data.personel = orig.personel; window.data.productTypes = orig.types;
+                    window.inventoryManagementModule.closeAssignModal();
+                    window.inventoryManagementModule.closeQuickPersonnelModal?.();
+                    window.inventoryManagementModule.closeQuickProductModal?.();
+                }
+                return o;
+            });
+        } finally {
+            out = out || {};
+            out.adminPageErrors = errs;
+            await admin.browserContext().close();
+        }
+        out.ok = out.tableExistsAfterFirstRender && out.cardAfterFirst && out.tableExistsAfterSecondRender && out.cardUpdatedAfterSecond
+            && out.hasAdminTabsApi && out.inventoryTabHookFired && out.workflowTabHookFired
+            && out.vipActiveClassAdded === true && out.vipActiveClassRemoved === true
+            && out.personnelModalOpened && out.personnelCreated && out.personnelAutoSelected
+            && out.productModalOpened && out.productTypeOptionsOnlyDemirbas && out.productCreated && out.productIsDemirbas
+            && (out.productSchemaErrors || []).length === 0 && out.productRowAutoSelected
+            && out.adminPageErrors.length === 0;
+        if (!out.ok) throw new Error('k3AdminTabHooks beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
     // H4 · 3.6 VIP Şema Göçü: gerçek demo b3'ünde SALT OKUNUR önizleme; yazma yolu stub ile (yedek önce, 400'lük parçalar,
     // sözleşme dışı kayda dokunulmaz, tekrar çalıştırma 0 kayıt, personel oturumu reddedilir). Firestore'a yazılmaz.
     async h4SchemaMigration(page, browser) {
