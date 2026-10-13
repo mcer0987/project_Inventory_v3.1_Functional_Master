@@ -2298,6 +2298,140 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 5 · K3 (5.3 · ADM-06 + 5.5 · VIP-08): birleşik yedekleme servisi (iki sayfada aynı kanonik biçim, ortam denetimi,
+    // önizlemeli onay, başarısızlıkta bellek geri dönüşü) ve VIP sağlık döngüsünün yalnız VIP sekmesi görünürken çalışması.
+    // İndirme (_download) ve yazma (saveData) yakalanır; Firestore'a hiçbir şey yazılmaz.
+    async k3BackupAndVipLoop(page, browser) {
+        const out = {};
+        // index.html: UAB "Yedek Al" de aynı kanonik biçimi üretir
+        out.index = await page.evaluate(() => {
+            const S = window.BackupService, orig = { dl: S && S._download, chk: window.checkIsAdmin, alert: window.showAppAlert };
+            if (!S) return { loaded: false };
+            let file = null;
+            S._download = (name, json) => { file = { name, json }; };
+            window.checkIsAdmin = () => true; window.showAppAlert = () => {};
+            try { window.exportFirebaseBackup(); } finally { S._download = orig.dl; window.checkIsAdmin = orig.chk; window.showAppAlert = orig.alert; }
+            const b = file ? JSON.parse(file.json) : {};
+            return { loaded: true, name: file && file.name, version: b.version, root: b.root, source: b.source,
+                     keysOk: Object.keys(b.data || {}).every(k => window.COLLECTIONS.includes(k)), envelope: Object.keys(b).sort().join(',') };
+        });
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        try {
+            out.admin = await admin.evaluate(async () => {
+                const o = {}, S = window.BackupService;
+                o.loaded = !!S;
+                o.vipRestoreInjected = !!document.getElementById('vipRestoreBtn') && !!document.getElementById('vipRestoreInput');
+                const orig = { dl: S._download, save: window.saveData, adm: window.isDbAdmin, conf: window.showCustomConfirm, alert: window.showAppAlert, data: window.data, reload: S.reloadAfterRestore };
+                const alerts = [], saves = [], confirms = [];
+                let answer = true, saveFails = false;
+                let vipFile = null;
+                S._download = (name, json) => { vipFile = { name, json }; };
+                S.reloadAfterRestore = false;
+                window.showAppAlert = (m, t) => alerts.push(t);
+                window.isDbAdmin = () => true;
+                window.showCustomConfirm = async (title, node, opts) => { confirms.push({ text: node.textContent, confirmText: opts && opts.confirmText }); return answer; };
+                window.saveData = async (obj, opts) => { if (saveFails) throw new Error('schema-violation (test)'); saves.push({ b1: obj.b1, opts }); return { ok: true }; };
+                const root = window.COLLECTION_ROOT;
+                const canon = (r, b1) => JSON.stringify({ version: '3.2', root: r, timestamp: '2026-10-13T00:00:00Z', source: 'vip', data: { b1 } });
+                try {
+                    // VIP "1-Tık DB Snapshot" → kanonik yedek
+                    window.vipBackupDatabase();
+                    const vb = vipFile ? JSON.parse(vipFile.json) : {};   // dosya içeriği rapora girmez (seed'deki kodlar dahil)
+                    o.vipExport = { version: vb.version, root: vb.root, source: vb.source, envelope: Object.keys(vb).sort().join(','),
+                                    noAuditLogs: !('auditLogs' in (vb.data || {})), keysOk: Object.keys(vb.data || {}).every(k => window.COLLECTIONS.includes(k)) };
+
+                    // 1) farklı ortamın yedeği → engellenir, onay bile sorulmaz, yazma yok
+                    o.wrongRoot = (await S.restoreFromText(canon(root === 'inventory_demo' ? 'lifeserver_master' : 'inventory_demo', [{ id: 'x' }]))).status;
+                    o.wrongRootNoConfirm = confirms.length === 0 && saves.length === 0;
+                    // 2) geçersiz dosya
+                    o.invalid = (await S.restoreFromText('{bozuk json')).status;
+                    // 3) doğru ortam, kullanıcı vazgeçer → yazma yok
+                    answer = false;
+                    o.cancelled = (await S.restoreFromText(canon(root, [{ id: 'k3bk_1', ürün: 'Yedek Ürün' }]))).status;
+                    o.cancelNoWrite = saves.length === 0;
+                    o.previewText = confirms[0] && confirms[0].text;
+                    // 4) doğru ortam, onay → saveData tek çağrı, yedekteki b1 + bilinçli seçenekler
+                    answer = true;
+                    const restored = await S.restoreFromText(canon(root, [{ id: 'k3bk_1', ürün: 'Yedek Ürün' }]));
+                    o.restored = restored.status;
+                    o.restoreWrite = saves.length === 1 && saves[0].b1.length === 1 && saves[0].b1[0].id === 'k3bk_1'
+                        && saves[0].opts.allowBulkDelete === true && saves[0].opts.b3Legacy === true;
+                    o.summaryB1 = (restored.summary || []).find(s => s.col === 'b1');
+                    // 5) eski VIP ham dökümü → doğrulanmamış uyarısı + ayrı onay metni
+                    const before = confirms.length;
+                    o.legacy = (await S.restoreFromText(JSON.stringify({ b1: [{ id: 'old1' }], auditLogs: [{ id: 'a' }] }))).status;
+                    o.legacyPreview = confirms[before] && { verifiedWarn: /ortam bilgisi yok/i.test(confirms[before].text), auditSkipped: /auditLogs/.test(confirms[before].text), confirmText: confirms[before].confirmText };
+                    // 6) yazma başarısız → bellek eski hâline döner
+                    saveFails = true;
+                    const dataBefore = window.data;
+                    o.failed = (await S.restoreFromText(canon(root, [{ id: 'k3bk_2' }]))).status;
+                    o.memoryRolledBack = window.data === dataBefore;
+                    saveFails = false;
+                    // 7) admin olmayan oturum → hiçbir şey sorulmaz
+                    window.isDbAdmin = () => false;
+                    const c0 = confirms.length;
+                    o.forbidden = (await S.restoreFromText(canon(root, [{ id: 'x' }]))).status;
+                    o.forbiddenNoConfirm = confirms.length === c0;
+                } finally {
+                    S._download = orig.dl; S.reloadAfterRestore = orig.reload;
+                    Object.assign(window, { saveData: orig.save, isDbAdmin: orig.adm, showCustomConfirm: orig.conf, showAppAlert: orig.alert });
+                    window.data = orig.data;
+                }
+
+                // ── VIP-08: sağlık döngüsü yalnız VIP sekmesi görünürken ──
+                const H = window.AppModules.VipHealth, wait = ms => new Promise(r => setTimeout(r, ms));
+                o.vip = { api: !!H, idleBeforeOpen: H && !H.isRunning() };
+                window.showAdminTab('systemControlTab'); await wait(1600);
+                o.vip.runningInVip = H.isRunning();
+                const t1 = H.ticks(); o.vip.ticksInVip = t1 > 0;
+                window.showAdminTab('dashboard-content'); await wait(50);
+                o.vip.stoppedAfterLeave = !H.isRunning();
+                const t2 = H.ticks(); await wait(2200);
+                o.vip.noTicksWhileAway = H.ticks() === t2;
+                window.showAdminTab('systemControlTab'); await wait(400);
+                o.vip.restartedOnReturn = H.isRunning();
+                // tarayıcı sekmesi arka plana → durur; öne → yeniden başlar
+                Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+                document.dispatchEvent(new Event('visibilitychange'));
+                o.vip.stoppedWhenHidden = !H.isRunning();
+                Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+                document.dispatchEvent(new Event('visibilitychange'));
+                o.vip.resumedWhenVisible = H.isRunning();
+                delete document.hidden;
+                window.showAdminTab('dashboard-content'); await wait(50);
+                o.vip.finalStopped = !H.isRunning();
+                return o;
+            });
+        } finally {
+            out.adminPageErrors = errs;
+            await admin.browserContext().close();
+        }
+
+        const a = out.admin || {}, v = a.vip || {};
+        const canonEnv = 'data,root,source,timestamp,version';
+        out.ok = out.index.loaded && out.index.version === '3.2' && out.index.root === 'inventory_demo' && out.index.source === 'admin'
+            && out.index.envelope === canonEnv && out.index.keysOk
+            && a.loaded && a.vipRestoreInjected
+            && a.vipExport.version === '3.2' && a.vipExport.root === 'inventory_demo' && a.vipExport.source === 'vip'
+            && a.vipExport.envelope === canonEnv && a.vipExport.noAuditLogs && a.vipExport.keysOk
+            && a.wrongRoot === 'wrong-root' && a.wrongRootNoConfirm && a.invalid === 'invalid'
+            && a.cancelled === 'cancelled' && a.cancelNoWrite && /Ortam eşleşiyor/.test(a.previewText || '') && /Silinecek/.test(a.previewText || '')
+            && a.restored === 'restored' && a.restoreWrite && a.summaryB1 && a.summaryB1.backup === 1
+            && a.legacy === 'restored' && a.legacyPreview && a.legacyPreview.verifiedWarn && a.legacyPreview.auditSkipped
+            && /Doğrulanmamış/.test(a.legacyPreview.confirmText || '')
+            && a.failed === 'failed' && a.memoryRolledBack && a.forbidden === 'forbidden' && a.forbiddenNoConfirm
+            && v.api && v.idleBeforeOpen && v.runningInVip && v.ticksInVip && v.stoppedAfterLeave && v.noTicksWhileAway
+            && v.restartedOnReturn && v.stoppedWhenHidden && v.resumedWhenVisible && v.finalStopped
+            && out.adminPageErrors.length === 0;
+        if (!out.ok) throw new Error('k3BackupAndVipLoop beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
     // H4 · 3.6 VIP Şema Göçü: gerçek demo b3'ünde SALT OKUNUR önizleme; yazma yolu stub ile (yedek önce, 400'lük parçalar,
     // sözleşme dışı kayda dokunulmaz, tekrar çalıştırma 0 kayıt, personel oturumu reddedilir). Firestore'a yazılmaz.
     async h4SchemaMigration(page, browser) {

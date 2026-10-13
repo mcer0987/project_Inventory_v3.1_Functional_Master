@@ -595,6 +595,37 @@
     let _healthInterval = null;
     let _sessionInterval = null;
 
+    // [WHY] (Faz 5 · K3 · 5.5 · VIP-08): Sağlık/oturum döngüsü (_updateSystemHealth + _updateSessionInfo, saniyede bir DOM
+    //        yazımı ve performance.memory okuması) VIP sekmesi bir kez açılınca sayfa kapanana kadar çalışıyordu — kullanıcı
+    //        başka sekmeye geçse, tarayıcı sekmesi arka plana alınsa da. Görünmeyen öğelere sonsuz CPU/DOM işi.
+    // [HOW]: Döngü yalnız VIP sekmesi (#systemControlTab) görünür VE tarayıcı sekmesi ön plandayken çalışır. Sekmeden çıkınca
+    //        (AdminTabs.onAny) ve sayfa gizlenince (visibilitychange) clearInterval; geri dönünce tek tazeleme + yeniden başlatma.
+    //        _startHealthLoop idempotent (ikinci interval asla açılmaz). Teşhis: AppModules.VipHealth.{isRunning, ticks}.
+    let _healthTicks = 0;
+    function _isVipTabVisible() {
+        const tab = document.getElementById('systemControlTab');
+        return !!tab && tab.style.display !== 'none' && !document.hidden;
+    }
+    function _startHealthLoop() {
+        if (_healthInterval !== null || !_isVipTabVisible()) return;
+        _healthInterval = setInterval(() => {
+            _healthTicks++;
+            _updateSystemHealth();
+            _updateSessionInfo();
+        }, 1000);
+    }
+    function _stopHealthLoop() {
+        if (_healthInterval === null) return;
+        clearInterval(_healthInterval);
+        _healthInterval = null;
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) { _stopHealthLoop(); return; }
+        if (_vipInitialized && _isVipTabVisible()) { _updateSystemHealth(); _updateSessionInfo(); _startHealthLoop(); }
+    });
+    window.AppModules = window.AppModules || {};
+    window.AppModules.VipHealth = { isRunning: () => _healthInterval !== null, ticks: () => _healthTicks };
+
     function _initVipPanel() {
         if (_vipInitialized) {
             // Zaten baÅŸlatÄ±lmÄ±ÅŸ, sadece gÃ¼ncelle
@@ -602,6 +633,7 @@
             _updateSystemHealth();
             _updateSessionInfo();
             _renderDebugPanel();
+            _startHealthLoop();   // VIP-08: sekmeye geri dönüşte döngü yeniden başlar
             return;
         }
 
@@ -617,10 +649,7 @@
         _updateSessionInfo();
 
         // Periyodik gÃ¼ncellemeler
-        _healthInterval = setInterval(() => {
-            _updateSystemHealth();
-            _updateSessionInfo();
-        }, 1000);
+        _startHealthLoop();   // VIP-08: yalnız VIP sekmesi görünürken (bkz. _startHealthLoop)
 
         // VIP terminal aÃ§Ä±lÄ±ÅŸ mesajÄ±
         setTimeout(() => {
@@ -640,25 +669,16 @@
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     // 1-TÄ±k VeritabanÄ± YedeÄŸi
+    // [WHY] (Faz 5 · K3 · 5.3 · ADM-06): Bu düğme window.data'nın ham dökümünü (sarmalayıcısız, ortam bilgisiz; auditLogs gibi
+    //        uygulama dışı anahtarlar dahil) indiriyordu — index'teki "Yedek Al"dan farklı bir biçim.
+    // [HOW]: Birleşik yedekleme servisine (admin-backup.js, BackupService) devredilir: kanonik { version:'3.2', root, timestamp, data }.
     window.vipBackupDatabase = function() {
         try {
-            const dataToBackup = window.data || {};
-            const jsonStr = JSON.stringify(dataToBackup, null, 2);
-            const blob = new Blob([jsonStr], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement("a");
-            a.href = url;
-            const dateStr = new Date().toISOString().split('T')[0];
-            a.download = `ITSM_Backup_${dateStr}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            _appendLog('success', ['ğŸ’¾ VeritabanÄ± yedeÄŸi baÅŸarÄ±yla indirildi.']);
+            if (!window.BackupService) throw new Error('yedekleme servisi yüklenmedi');
+            const b = window.BackupService.exportBackup({ source: 'vip' });
+            _appendLog('success', [`💾 Kanonik yedek indirildi (v${b.version} · ${b.root} · ${Object.keys(b.data).length} koleksiyon).`]);
         } catch (error) {
-            _appendLog('error', ['ğŸ’¾ Yedekleme sÄ±rasÄ±nda hata oluÅŸtu: ' + error.message]);
+            _appendLog('error', ['💾 Yedekleme sırasında hata oluştu: ' + error.message]);
         }
     };
 
@@ -954,6 +974,7 @@
             if (sidebar) sidebar.classList.remove('vip-active');
             if (mainContent) mainContent.classList.remove('vip-bg');
             document.body.classList.remove('vip-portal-active');
+            _stopHealthLoop();   // VIP-08: VIP sekmesi kapanınca sağlık döngüsü durur
         }
     });
     // [WHY]: God-Eye v2 fonksiyonlari IIFE disinda tanimli.

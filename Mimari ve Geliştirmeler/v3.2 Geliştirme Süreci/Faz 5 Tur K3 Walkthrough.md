@@ -86,3 +86,56 @@ doğrular.
    kayıt oluşturun — modalın kapanıp ilgili alanın (personel/ürün) otomatik seçili geldiğini doğrulayın.
 3. Sırasıyla Envanter Yönetimi, Workflow Şablonları ve VIP (Sistem Kontrolü) sekmelerine geçin; her birinin kendi
    içeriğini doğru render ettiğini, VIP sekmesinden çıkınca sayfanın normal temaya döndüğünü doğrulayın.
+
+---
+
+# K3 — Motor Ayağı: Birleşik Yedekleme (5.3 · ADM-06) ve VIP Döngüsü (5.5 · VIP-08)
+
+## 4. Birleşik Yedekleme Servisi (ADM-06)
+**Önceki durum:** İki araç, iki biçim. index.html "Yedek Al" `{timestamp, version:'1.0', data}` yazıyordu; VIP "1-Tık DB
+Snapshot" ise `window.data`'nın sarmalayıcısız ham dökümünü (auditLogs gibi uygulama dışı anahtarlar dahil) indiriyordu.
+Hiçbiri hangi ortamdan alındığını yazmıyordu; içe aktarma tek bir `confirm()` ile, neyin değişeceğini göstermeden demo
+yedeğini canlı köke basabiliyordu. Ayrıca şema muhafızını atlayıp doğrudan `setDoc` yazan ölü bir `restoreFirebaseBackup`
+vardı (`_backupTemp` hiçbir yerde atanmıyordu) — kaldırıldı.
+
+**Şimdi:** `src/modules/admin/admin-backup.js` tek servis (`window.BackupService` / `AppModules.Backup`), iki sayfada
+(index'te klasik script, admin'de `admin-main.js` içe aktarması):
+- **Tek kanonik biçim:** `{ version: '3.2', root, timestamp, source, data }` — `data` yalnız `COLLECTIONS`.
+  "Yedek Al" (`source:'admin'`) ve VIP snapshot (`source:'vip'`) aynı fonksiyondan geçer.
+- **Geri yükleme sırası:** (1) ayrıştır — eski `v1.0` sarmalı ve VIP ham dökümü de tanınır, uygulama dışı anahtarlar
+  atlanır ve bildirilir; (2) **ortam denetimi** — kanonik yedeğin `root`'u aktif köke eşit değilse **reddedilir**, onay
+  bile sorulmaz; root'suz eski yedek yalnız "ortam doğrulanamadı" uyarısı ve ayrı onay düğmesiyle
+  ("Doğrulanmamış Yedeği Geri Yükle"); (3) **önizleme** — koleksiyon bazında yedekte / şu an / eklenecek / silinecek
+  tablosu ve kalıcı silme uyarısı (DOM düğümü olarak kurulur, innerHTML yok); (4) onaylanırsa `saveData` tek yoldan yazar
+  (şema muhafızı dahil; eski b3 kayıtları için göçteki `b3Legacy` gevşekliği); başarısızsa `window.data` eski hâline
+  döner ve hata mesajı gösterilir.
+- Geri yükleme Firebase admin oturumu ister (`requireDbAdmin`).
+- VIP panelinde snapshot düğmesinin yanına çalışma zamanında **"Yedekten Geri Yükle"** düğmesi eklenir (admin.html'e
+  işaretleme eklenmedi).
+
+## 5. VIP Sağlık Döngüsü (VIP-08)
+`_initVipPanel` 1 sn'lik `setInterval`'i (bellek okuma + DOM yazımı) bir kez başlatıyor ve sayfa kapanana kadar
+durdurmuyordu — VIP sekmesinden çıkılsa, tarayıcı sekmesi arka plana alınsa da. Artık döngü yalnız **#systemControlTab
+görünür VE sayfa ön plandayken** çalışır:
+- Sekmeden çıkınca `AdminTabs.onAny` kancasında `clearInterval`; geri dönünce yeniden başlar.
+- `visibilitychange`: sayfa gizlenince durur, öne gelince tek tazeleme + yeniden başlatma.
+- `_startHealthLoop` idempotent (ikinci interval açılmaz). Teşhis: `AppModules.VipHealth.{isRunning(), ticks()}`.
+
+## Test Sonuçları (K3 bütünü)
+| Suite | Sonuç |
+|---|---|
+| `npm run test:unit` | ✅ 28/28 (yeni `tests/unit/backup.test.mjs`: 6 test — biçim, eski biçimler, geçersiz girdi, ortam denetimi, önizleme sayıları) |
+| `npm run test:rules` | ✅ 72/72 |
+| `flow-tests.js --emu` (49 senaryo, yeni: `k3BackupAndVipLoop`) | ✅ 49/49, exit 0, 0 sayfa hatası, 0 CSP ihlali |
+| `npm run lint:xss` | ✅ 0 izinsiz sink |
+
+`k3BackupAndVipLoop` iki sayfada aynı biçimi; farklı ortam yedeğinin onay sorulmadan reddedildiğini; vazgeçince hiçbir
+şey yazılmadığını; onayda tek `saveData` çağrısını; eski biçimde doğrulanmamış uyarısını; yazma başarısızlığında bellek
+geri dönüşünü; admin olmayan oturumun engellendiğini ve VIP döngüsünün açılış → çıkış → dönüş → arka plan → ön plan
+geçişlerinde doğru çalışıp durduğunu (sekme dışındayken 2 sn boyunca sıfır tik) doğrular.
+
+## Sahibinin Doğrulama Adımları (motor ayağı)
+1. VIP → "1-Tık DB Snapshot": inen dosyanın `"version": "3.2"` ve `"root"` alanı taşıdığını doğrulayın.
+2. VIP → "Yedekten Geri Yükle" ile o dosyayı seçin: önizleme tablosunu görüp **Vazgeç**'e basın — hiçbir şey değişmemeli.
+3. Dosyadaki `root` değerini elle başka bir köke değiştirip tekrar deneyin — "Farklı ortama geri yükleme engellendi" uyarısı.
+4. VIP sekmesini açıp başka bir sekmeye geçin: Görev Yöneticisi / DevTools Performance'ta saniyelik işin durduğunu görün.
