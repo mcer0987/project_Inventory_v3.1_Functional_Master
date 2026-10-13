@@ -285,14 +285,14 @@ window.renderAdminRequestTable = function () {
         tableBody.innerHTML += `
             <tr class="align-middle">
                 <td class="ps-3">
-                    <div style="font-size: 11px; color: #94a3b8; font-weight: 500;">${esc(req.tarih || '-')}</div>
+                    <div style="font-size: 11px; color: var(--color-text-muted); font-weight: 500;">${esc(req.tarih || '-')}</div>
                 </td>
                 <td>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b;">${esc(req.personel || '-')}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: var(--color-text);">${esc(req.personel || '-')}</div>
                 </td>
                 <td>
-                    <div style="font-weight: 600; font-size: 14px; color: #0f172a;">${esc(req.ürün || '-')}</div>
-                    <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                    <div style="font-weight: 600; font-size: 14px; color: var(--color-text);">${esc(req.ürün || '-')}</div>
+                    <div style="font-size: 11px; color: var(--color-text-muted); margin-top: 2px;">
                         <i class="fas fa-layer-group me-1"></i> ${esc(req.adet || 1)} Adet
                     </div>
                 </td>
@@ -300,7 +300,7 @@ window.renderAdminRequestTable = function () {
                     ${badgeHTML}
                 </td>
                 <td class="text-end pe-3">
-                    <div class="d-flex justify-content-end gap-2">
+                    <div class="d-flex justify-content-end gap-2" style="flex-wrap: wrap; row-gap: 6px;">
                         ${isPending ? `
                             <button onclick="window.confirmRequest(${jsArg(req.id)})" class="p-btn-icon play" title="Onayla">
                                 <i class="fas fa-check"></i>

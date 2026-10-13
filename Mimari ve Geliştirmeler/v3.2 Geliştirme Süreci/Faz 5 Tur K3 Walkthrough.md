@@ -139,3 +139,66 @@ geçişlerinde doğru çalışıp durduğunu (sekme dışındayken 2 sn boyunca 
 2. VIP → "Yedekten Geri Yükle" ile o dosyayı seçin: önizleme tablosunu görüp **Vazgeç**'e basın — hiçbir şey değişmemeli.
 3. Dosyadaki `root` değerini elle başka bir köke değiştirip tekrar deneyin — "Farklı ortama geri yükleme engellendi" uyarısı.
 4. VIP sekmesini açıp başka bir sekmeye geçin: Görev Yöneticisi / DevTools Performance'ta saniyelik işin durduğunu görün.
+
+---
+
+# K3 — Kapanış Öncesi Saha Talepleri (Tur K3.5)
+
+K4 kapanışından önce sahada tespit edilen son kullanıcı/görsel pürüzleri giderir. Yeni bir faz açılmadı; bu bölüm
+K3'ün devamıdır.
+
+## 6. Mojibake / Türkçe Karakter Temizliği (VIP-09)
+`admin-system-control.js` bir noktada iki AYRI eski kod sayfasıyla (Windows-1252 ve saf Latin-1/ISO-8859-1) bozulmuştu
+— 191 satırda Türkçe harf, emoji ve bölüm ayracı (`═`/`─`) karakterleri "Ã§", "Ä±", "â€”", "ğŸ’¾" gibi okunamaz dizilere
+dönüşmüştü. Düzeltme üç aşamalı yapıldı: (1) win1252 tersine çevirme ile güvenli şekilde kurtarılabilen 131 satır
+otomatik düzeltildi — yalnız dönüşüm sonrası hâlâ geçersiz/kontrol karakteri kalmayan satırlar kabul edildi, böylece
+zaten doğru olan Türkçe harfler (Ö, Ü gibi) yanlışlıkla bozulmadı; (2) tekrar eden bölüm ayraçları (`═`, `─`) ayrı bir
+geçişle, birim sayısı korunarak gerçek karakterlerle değiştirildi (win1252'nin bazı baytları atanmamış bıraktığı için
+tek geçişte düzelmiyordu); (3) geri kalan ~16 satır (emoji + Türkçe harf karışımı, iki kodlamanın çakıştığı yerler) bu
+dosyanın kendi içeriğinden (Sistem Terminali, Sağlık Monitörü, Debug Paneli, Platform & Donanım widget'ları) bilinen
+doğru metinle elle değiştirildi. Dosya **UTF-8 (BOM'suz)** olarak kaydedildi ve doğrulandı; sözdizimi ve tüm akış/kural
+testleri yeşil kalmaya devam ediyor (yalnız yorum/log metni değişti, hiçbir mantık dokunulmadı).
+
+## 7. Sidebar Menü Sadeleştirmesi
+"📄 Akış Şablonları" sidebar butonu kaldırıldı — aynı özellik zaten **Tanımlar > İş Akışı Şablonları** alt sekmesinde
+(`switchDefTab('workflows')`, `renderTemplateList()`) mevcut; iki ayrı erişim yolu (ve iki ayrı tablo) kafa karıştırıyordu.
+Yalnız sidebar köprüsü kaldırıldı; `workflowTemplatesTab` div'i ve `edm-workflow.js`'teki `AdminTabs.onShow` kancası
+dokunulmadan bırakıldı (artık erişilemez ama zararsız — kapsam dışı bir yeniden yapılandırma gerektirmiyordu).
+
+## 8. Operasyon Merkezi: Yeniden Adlandırma, Taşma ve Dark Mode Onarımı
+- **Ad:** "Ürün Türü Ayarları" → **"Operasyon Merkezi"** (sidebar butonu, tab başlığı, bağlamsal ipucu metni) — tab'ın
+  gerçek içeriği (ürün türü yönetimi + bekleyen talepler + çıkış analiz grafikleri) adın ima ettiğinden çok daha
+  geniş olduğu için ad artık kapsamı yansıtıyor.
+- **Taşma:** "📨 Bekleyen Envanter Talepleri" tablosu, global `table-layout: fixed` kuralı yüzünden dar ekranda İşlem
+  sütunundaki iki sabit genişlikli ikon butonunu sıkıştırıp taşırıyordu. Bu tabloya ÖZEL `table-layout: auto` (sütunlar
+  içeriğe göre genişler) + İşlem başlığına `min-width: 92px` eklendi; buton grubu artık `flex-wrap: wrap` ile çok dar
+  genişlikte taşmak yerine alt alta diziliyor. `table-responsive` sarmalayıcı hâlâ son çare olarak duruyor.
+- **Dark mode:** Personel ve Ürün hücrelerindeki satır içi sabit koyu renkler (`#1e293b`, `#0f172a`) proje genelinde
+  zaten kullanılan `var(--color-text)`/`var(--color-text-muted)` değişkenleriyle değiştirildi — dark temada artık
+  doğru kontrastla (açık renk) gösteriliyor; `dark-theme.css` bu değişkenleri zaten tanımlıyordu, yeni bir kural
+  eklemeye gerek kalmadı.
+
+## 9. Gelecek Widget Yer Tutucuları
+Operasyon Merkezi'ne, ileride gerçek verilerle dolacak 3 placeholder kart eklendi: **"Yakında: Aktif Zimmet & İade
+Takibi"**, **"Yakında: Hurda & Servis Radarı"**, **"Yakında: Kritik Sipariş İhtiyacı"**. Grid'e uyumlu (`flex-wrap`),
+pulse (ikon etrafında genişleyen halka) ve glow (üst gradyan parıltısı) animasyonlu; stil tamamen `admin.html`'e gömülü
+tek bir `<style>` bloğunda (`future-widget-*` sınıfları) — paylaşılan `style.css`/`admin-add-style.css` dosyalarına
+dokunulmadı. `[data-theme="dark"]` için ayrı arka plan/kenarlık tanımlı.
+
+## Test Sonuçları (K3.5)
+| Suite | Sonuç |
+|---|---|
+| `npm run test:unit` | ✅ 28/28 (değişmedi — bu tur yalnız metin/görsel) |
+| `npm run test:rules` | ✅ 72/72 |
+| `flow-tests.js --emu` (49 senaryo) | ✅ 49/49, exit 0, 0 sayfa hatası, 0 CSP ihlali (sidebar/tab değişiklikleri
+  `k3AdminTabHooks`'u kırmadı — o senaryo `showAdminTab()`'ı programatik çağırıyor, kaldırılan butona tıklamıyor) |
+| `npm run lint:xss` | ✅ 0 izinsiz sink (41 dosya, 194 sink — yeni placeholder kartları dahil) |
+
+## Sahibinin Doğrulama Adımları (K3.5)
+1. Admin panelini açın: sidebar'da artık ayrı bir "Akış Şablonları" butonu yok; "🎛️ Operasyon Merkezi" butonuna basın.
+2. Operasyon Merkezi'nde "📨 Bekleyen Envanter Talepleri" tablosunu dar bir pencere genişliğinde (ör. tarayıcıyı
+   küçültüp) kontrol edin — Onayla/Reddet butonları artık taşmıyor.
+3. Koyu temaya geçin: Personel ve Ürün hücrelerindeki metnin artık okunaklı (açık renk) olduğunu doğrulayın.
+4. Operasyon Merkezi'nin altında 3 "Yakında" kartını görün; hafif pulse/glow animasyonlarını gözlemleyin.
+5. VIP panelindeki Sistem Terminali, Sağlık Monitörü, Debug Paneli ve Platform & Donanım widget'larında artık hiçbir
+   bozuk karakter ("Ã§" vb.) kalmadığını doğrulayın.
