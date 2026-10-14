@@ -60,8 +60,8 @@ const SystemTips = {
     'dashboard-content': 'Yönetici panelinden genel istatistiklere, stok özetlerine ve sistem ayarlarına ulaşabilirsiniz.',
     adminPanel: 'Yönetici panelinden genel istatistiklere, stok özetlerine ve sistem ayarlarına ulaşabilirsiniz.',
 
-    // ── ADMIN: ÜRÜN TİPLERİ ────────────────────────────────
-    productTypeSettings: 'Ürün türlerini ve kategorilerini buradan tanımlayabilirsiniz. Yeni türler ekleyerek envanter sınıflandırmasını genişletebilirsiniz.',
+    // ── ADMIN: OPERASYON MERKEZİ ───────────────────────────
+    productTypeSettings: 'Ürün türü tanımlarını, bekleyen envanter taleplerini ve çıkış analiz grafiklerini tek ekrandan yönetin.',
 
     // ── ADMIN: İŞ AKIŞI ŞABLONLARI ─────────────────────────
     workflowTemplatesTab: 'Talep iş akışı şablonlarını buradan oluşturabilir ve düzenleyebilirsiniz. Her şablon, onay adımlarını belirler.',

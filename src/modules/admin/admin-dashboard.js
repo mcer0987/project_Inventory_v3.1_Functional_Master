@@ -285,14 +285,14 @@ window.renderAdminRequestTable = function () {
         tableBody.innerHTML += `
             <tr class="align-middle">
                 <td class="ps-3">
-                    <div style="font-size: 11px; color: #94a3b8; font-weight: 500;">${esc(req.tarih || '-')}</div>
+                    <div style="font-size: 11px; color: var(--color-text-muted); font-weight: 500;">${esc(req.tarih || '-')}</div>
                 </td>
                 <td>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b;">${esc(req.personel || '-')}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: var(--color-text);">${esc(req.personel || '-')}</div>
                 </td>
                 <td>
-                    <div style="font-weight: 600; font-size: 14px; color: #0f172a;">${esc(req.ürün || '-')}</div>
-                    <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                    <div style="font-weight: 600; font-size: 14px; color: var(--color-text);">${esc(req.ürün || '-')}</div>
+                    <div style="font-size: 11px; color: var(--color-text-muted); margin-top: 2px;">
                         <i class="fas fa-layer-group me-1"></i> ${esc(req.adet || 1)} Adet
                     </div>
                 </td>
@@ -300,7 +300,7 @@ window.renderAdminRequestTable = function () {
                     ${badgeHTML}
                 </td>
                 <td class="text-end pe-3">
-                    <div class="d-flex justify-content-end gap-2">
+                    <div class="d-flex justify-content-end gap-2" style="flex-wrap: wrap; row-gap: 6px;">
                         ${isPending ? `
                             <button onclick="window.confirmRequest(${jsArg(req.id)})" class="p-btn-icon play" title="Onayla">
                                 <i class="fas fa-check"></i>
@@ -1161,6 +1161,9 @@ window.showAdminTab = function (tabId) {
     if (typeof window.TipManager === 'object' && typeof window.TipManager.showTipForTab === 'function') {
         window.TipManager.showTipForTab(tabId);
     }
+
+    // Faz 5 · K3 (5.7 · ARC-07): merkezi kanca sicili — başka modüller showAdminTab'ı artık sarmalamıyor, buraya kaydoluyor.
+    if (window.AppModules?.AdminTabs) window.AppModules.AdminTabs.dispatch(tabId);
 };
 
 // --- DASHBOARD GRAFİKLERİ ---
@@ -1436,11 +1439,26 @@ window.syncProductTypesToProducts = async function (oldName, newName) {
 };
 
 // "Özel Takip" Dashboard'u
+// [WHY] (Faz 5 · K3 · ADM-05): Kart tasarımı için `table.parentElement.innerHTML` yazılıyordu; tablonun EBEVEYNİ
+//        tabloyu da İÇERDİĞİ için bu, #customWatchTable'ın kendisini DOM'dan siliyordu. İlk çizimden sonra
+//        `querySelector('#customWatchTable')` hep null dönüyor, fonksiyon ikinci çağrıdan itibaren `if (!table) return`
+//        ile sessizce hiçbir şey yapmadan çıkıyordu — panel renderDashboardStats her tetiklendiğinde (her b1/b2
+//        güncellemesinde) bir daha asla yenilenmiyordu.
+// [HOW]: Tabloyu SİLMEK yerine yalnız bir kez gizle (display:none) ve kart konteynerini tablonun kendi ebeveyninin
+//        İÇİNE, tablonun yanına (sibling) kalıcı bir karkas olarak ekle. Sonraki her çağrı yalnız bu konteynerin
+//        içeriğini değiştirir; DOM iskeleti (tablo dahil) bir daha asla silinmez.
 window.renderCustomWatchDashboard = function () {
     const table = document.querySelector('#customWatchTable');
     if (!table) return;
-    const container = table.parentElement;
-    if (!container) return;
+
+    let cardContainer = document.getElementById('watchCardsContainer');
+    if (!cardContainer) {
+        table.style.display = 'none';
+        cardContainer = document.createElement('div');
+        cardContainer.id = 'watchCardsContainer';
+        cardContainer.className = 'watch-grid';
+        table.insertAdjacentElement('afterend', cardContainer);
+    }
 
     const watchedItems = [];
 
@@ -1451,16 +1469,10 @@ window.renderCustomWatchDashboard = function () {
         });
     });
 
-    container.innerHTML = `
-        <div id="watchCardsContainer" class="watch-grid">
-            ${watchedItems.length === 0
-            ? '<div class="empty-state">İzlenen ürün bulunamadı.</div>'
-            : ''
-        }
-        </div>
-    `;
-
-    const cardContainer = document.getElementById('watchCardsContainer');
+    if (watchedItems.length === 0) {
+        cardContainer.innerHTML = '<div class="empty-state">İzlenen ürün bulunamadı.</div>';
+        return;
+    }
 
     let html = "";
 

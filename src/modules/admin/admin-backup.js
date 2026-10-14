@@ -1,155 +1,239 @@
-// [WHY]: Faz 4 · J4 (M14) — denetim günlüğü (auditLogs) değiştirilemez olmalı; yedek dosyasındaki her anahtar geri yüklemede
-//        Firestore'a yazılıyordu (elle eklenmiş bir "auditLogs" dizisi günlüğe sahte kayıt taşıyabilirdi).
-// [HOW]: Yedek al / içe aktar / geri yükle yalnız uygulama koleksiyonlarını (firebase-handler COLLECTIONS) kapsar; günlük ve
-//        bilinmeyen anahtarlar atlanır. (saveData zaten yalnız COLLECTIONS'ı yazar.)
-const _backupKeys = obj => Object.keys(obj || {}).filter(k => (window.COLLECTIONS || []).includes(k));
+/**
+ * modules/admin/admin-backup.js — Birleşik Yedekleme Servisi (Faz 5 · K3 · 5.3 · ADM-06)
+ * index.html'de klasik script, admin.html'de admin-main.js'ten içe aktarılır (her iki bağlamda çalışır; global sızdırmaz).
+ *
+ * [WHY]: İki ayrı yedek aracı iki ayrı biçim üretiyordu: index'teki "Yedek Al" {timestamp, version:'1.0', data} yazıyor,
+ *        VIP "1-Tık DB Snapshot" ise window.data'nın ham dökümünü (sarmalayıcısız; auditLogs gibi uygulama dışı anahtarlar
+ *        dahil) indiriyordu. Hiçbiri hangi ortamdan (canlı lifeserver_master / demo inventory_demo) alındığını yazmıyordu;
+ *        içe aktarma tek bir confirm() ile, neyin değişeceği gösterilmeden, demo yedeğini canlıya basabiliyordu. Ölü bir
+ *        restoreFirebaseBackup da şema muhafızını atlayıp doğrudan setDoc yazıyordu (_backupTemp hiç atanmıyordu).
+ * [HOW]: Tek kanonik biçim: { version: '3.2', root, timestamp, source, data }. data yalnız uygulama koleksiyonlarını
+ *        (firebase-handler COLLECTIONS) taşır — auditLogs ve bilinmeyen anahtarlar asla yedeğe girmez/geri yüklenmez (J4 · M14).
+ *        Geri yükleme: (1) ayrıştır + eski biçimleri tanı (v1.0 sarmalı, VIP ham dökümü), (2) ortam denetimi: kanonik yedeğin
+ *        root'u aktif köke eşit değilse REDDEDİLİR; root'suz eski biçim yalnız ayrı bir "ortam doğrulanamadı" uyarısıyla,
+ *        (3) koleksiyon bazında önizleme (yedekte / şu an / eklenecek / silinecek) onay diyaloğunda gösterilir,
+ *        (4) onaylanırsa saveData tek yoldan yazar (şema muhafızı dahil); başarısızsa bellek eski hâline döner.
+ *        Saf fonksiyonlar (parseBackup, diffSummary, checkRoot) window'a dokunmaz → tests/unit/backup.test.mjs.
+ */
+(function () {
+    const BACKUP_VERSION = '3.2';
 
-window.exportFirebaseBackup = async function() {
+    const appCollections = () => (window.COLLECTIONS || []);
+    const clone = v => JSON.parse(JSON.stringify(v));
+    const notify = (msg, type) => { if (typeof window.showAppAlert === 'function') window.showAppAlert(msg, type); else alert(msg); };
 
-    if (!window.checkIsAdmin()) {
-        alert("Sadece admin yedek alabilir");
-        return;
+    // ─── Saf yardımcılar ───────────────────────────────────────────────────────────────────────────────
+
+    /** Kanonik yedek nesnesi. data yalnız `collections` listesindeki ve dizi olan anahtarları taşır. */
+    function buildBackup({ data, root, collections, source = 'admin', now = new Date() }) {
+        const out = { version: BACKUP_VERSION, root: root || null, timestamp: now.toISOString(), source, data: {} };
+        collections.forEach(k => { if (Array.isArray(data && data[k])) out.data[k] = clone(data[k]); });
+        return out;
     }
 
-    try {
+    /**
+     * Yedek metnini/nesnesini kanonik biçime ayrıştırır. Tanınan biçimler:
+     *   'canonical'  → { version:'3.2', root, timestamp, data }
+     *   'legacy-v1'  → { version:'1.0', timestamp, data }        (eski "Yedek Al")
+     *   'legacy-raw' → { b1:[…], b2:[…], … }                      (eski VIP "1-Tık DB Snapshot", sarmalayıcısız)
+     * @returns {{ok:boolean, errors:string[], warnings:string[], format?:string, backup?:object}}
+     */
+    function parseBackup(input, { collections }) {
+        const errors = [], warnings = [];
+        let obj = input;
+        if (typeof input === 'string') {
+            try { obj = JSON.parse(input); } catch (e) { return { ok: false, errors: ['Dosya geçerli bir JSON değil.'], warnings }; }
+        }
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, errors: ['Yedek bir JSON nesnesi olmalı.'], warnings };
+
+        let format, raw;
+        if (obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)) {
+            format = obj.version === BACKUP_VERSION ? 'canonical' : 'legacy-v1';
+            raw = obj.data;
+            if (format === 'canonical' && !obj.root) errors.push('Kanonik yedekte ortam (root) bilgisi yok.');
+        } else if (collections.some(k => Array.isArray(obj[k]))) {
+            format = 'legacy-raw';
+            raw = obj;
+        } else {
+            return { ok: false, errors: ['Tanınan bir yedek biçimi değil (data alanı ya da uygulama koleksiyonu yok).'], warnings };
+        }
+
+        const data = {};
+        Object.keys(raw).forEach(k => {
+            if (!collections.includes(k)) { warnings.push(`"${k}" uygulama koleksiyonu değil; atlandı.`); return; }
+            if (!Array.isArray(raw[k])) { errors.push(`"${k}" bir dizi değil.`); return; }
+            const items = raw[k].filter(it => it && typeof it === 'object' && !Array.isArray(it));
+            if (items.length !== raw[k].length) warnings.push(`"${k}": ${raw[k].length - items.length} geçersiz (nesne olmayan) kayıt atlandı.`);
+            data[k] = items;
+        });
+        if (!Object.keys(data).length && !errors.length) errors.push('Yedekte geri yüklenecek uygulama koleksiyonu yok.');
+        if (format !== 'canonical') warnings.push('Eski biçimli yedek: hangi ortamdan alındığı doğrulanamıyor.');
 
         const backup = {
-            timestamp: new Date().toISOString(),
-            version: "1.0",
-            data: {}
+            version: format === 'canonical' ? BACKUP_VERSION : String(obj.version || 'ham'),
+            root: format === 'canonical' ? obj.root : null,
+            timestamp: obj.timestamp || null,
+            source: obj.source || null,
+            data,
         };
-
-        // tüm koleksiyonları al
-        _backupKeys(window.data).forEach(key => {
-            backup.data[key] = window.data[key];
-        });
-
-        const json = JSON.stringify(backup, null, 2);
-
-        const blob = new Blob([json], { type: "application/json" });
-
-        const url = URL.createObjectURL(blob);
-
-        const a = document.createElement("a");
-        a.href = url;
-
-        const date = new Date().toISOString().slice(0,19).replace(/:/g,"-");
-
-        a.download = `firebase-backup-${date}.json`;
-
-        document.body.appendChild(a);
-        a.click();
-
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        console.log("✅ Firebase backup indirildi");
-        showAppAlert("Firebase yedeği indirildi", "success");
-
-    } catch (err) {
-        console.error("Backup error:", err);
-        showAppAlert("Yedek alınamadı", "danger");
+        return { ok: errors.length === 0, errors, warnings, format, backup };
     }
-};
 
-window.importFirebaseBackup = async function(event) {
-
-    if (!window.checkIsAdmin()) return;
-
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = async function(e) {
-
-        try {
-
-            const backup = JSON.parse(e.target.result);
-
-            if (!backup.data) {
-                alert("Geçersiz backup dosyası");
-                return;
-            }
-
-            if (!confirm("Tüm veriler geri yüklenecek. Emin misiniz?")) return;
-
-            _backupKeys(backup.data).forEach(key => {
-                window.data[key] = backup.data[key];
-            });
-
-            // Kullanıcı onaylı tam geri yükleme: yedekte olmayan kayıtlar silinir, bu yüzden toplu silme kilidi bilinçli
-            // olarak açılır (Faz 3.1). Kayıt başarısızsa "geri yüklendi" denmez.
-            if (typeof window.saveData === 'function') {
-                const res = await window.writeOk(window.saveData(window.data, { allowBulkDelete: true }));
-                if (res === false) { showAppAlert("Yedek geri yüklenemedi; hiçbir değişiklik yazılmadı.", "error"); return; }
-            }
-
-            showAppAlert("Yedek geri yüklendi", "success");
-
-            setTimeout(()=> location.reload(), 800);
-
-        } catch (err) {
-            console.error(err);
-            alert("Backup yüklenemedi");
+    /** Ortam denetimi: kanonik yedeğin kökü aktif köke eşit olmalı; kökü olmayan eski yedek "doğrulanamadı" (engel değil). */
+    function checkRoot(backup, activeRoot) {
+        if (!backup.root) return { ok: true, verified: false, reason: `Yedekte ortam bilgisi yok; aktif ortam "${activeRoot}".` };
+        if (backup.root !== activeRoot) {
+            return { ok: false, verified: true, reason: `Bu yedek "${backup.root}" ortamından alınmış; aktif ortam "${activeRoot}". Farklı ortama geri yükleme engellendi.` };
         }
+        return { ok: true, verified: true, reason: `Ortam eşleşiyor ("${activeRoot}").` };
+    }
 
+    /** Koleksiyon bazında önizleme: yedekteki kayıt sayısı, şu anki sayı, eklenecek ve silinecek id sayısı. */
+    function diffSummary(backup, currentData) {
+        return Object.keys(backup.data).map(col => {
+            const next = backup.data[col];
+            const cur = (currentData && Array.isArray(currentData[col])) ? currentData[col] : [];
+            const curIds = new Set(cur.map(x => String(x && x.id)));
+            const nextIds = new Set(next.map(x => String(x && x.id)));
+            return {
+                col, backup: next.length, current: cur.length,
+                added: [...nextIds].filter(id => !curIds.has(id)).length,
+                removed: [...curIds].filter(id => !nextIds.has(id)).length,
+            };
+        });
+    }
+
+    // ─── Tarayıcı tarafı ───────────────────────────────────────────────────────────────────────────────
+
+    // Test kancası: flow-tests indirme yerine yakalar (BackupService._download değiştirilebilir).
+    function download(filename, json) {
+        const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    /** Kanonik yedeği indirir; yedeği döndürür. source: 'admin' (index "Yedek Al") | 'vip' (VIP snapshot). */
+    function exportBackup({ source = 'admin' } = {}) {
+        const backup = buildBackup({ data: window.data, root: window.COLLECTION_ROOT, collections: appCollections(), source });
+        const stamp = backup.timestamp.slice(0, 19).replace(/:/g, '-');
+        Service._download(`medipol-yedek-v${BACKUP_VERSION}-${backup.root || 'bilinmiyor'}-${stamp}.json`, JSON.stringify(backup, null, 2));
+        return backup;
+    }
+
+    // Önizleme DOM düğümü olarak kurulur (showCustomConfirm Node kabul eder) — innerHTML yok, metin kaçışı gerekmez.
+    function previewNode(parsed, rootCheck, summary) {
+        const wrap = document.createElement('div');
+        const line = (text, style) => { const p = document.createElement('div'); p.textContent = text; if (style) p.style.cssText = style; wrap.appendChild(p); return p; };
+        const b = parsed.backup;
+        line(`Biçim: ${parsed.format === 'canonical' ? 'Kanonik v' + b.version : 'Eski biçim (' + b.version + ')'}`);
+        line(`Yedek tarihi: ${b.timestamp || 'bilinmiyor'}${b.source ? ' · kaynak: ' + b.source : ''}`);
+        line(rootCheck.reason, rootCheck.verified ? 'color:#16a34a; font-weight:600;' : 'color:#d97706; font-weight:700;');
+        const table = document.createElement('table');
+        table.style.cssText = 'width:100%; border-collapse:collapse; margin:10px 0; font-size:12px; text-align:left;';
+        const row = (cells, head) => {
+            const tr = document.createElement('tr');
+            cells.forEach(c => { const td = document.createElement(head ? 'th' : 'td'); td.textContent = String(c); td.style.cssText = 'padding:3px 6px; border-bottom:1px solid #e2e8f0;'; tr.appendChild(td); });
+            table.appendChild(tr);
+        };
+        row(['Koleksiyon', 'Yedekte', 'Şu an', 'Eklenecek', 'Silinecek'], true);
+        summary.forEach(s => row([s.col, s.backup, s.current, s.added, s.removed]));
+        wrap.appendChild(table);
+        parsed.warnings.forEach(w => line('⚠ ' + w, 'color:#d97706; font-size:12px;'));
+        const totalRemoved = summary.reduce((n, s) => n + s.removed, 0);
+        line(`Yedekte olmayan ${totalRemoved} kayıt KALICI olarak silinecek. Bu işlem geri alınamaz.`, 'color:#dc2626; font-weight:700; margin-top:8px;');
+        return wrap;
+    }
+
+    /**
+     * Yedek metnini doğrular, ortamı denetler, önizleme onayı alır ve geri yükler.
+     * @returns {Promise<{status:'forbidden'|'invalid'|'wrong-root'|'cancelled'|'failed'|'restored', message?:string, summary?:object[]}>}
+     */
+    async function restoreFromText(text) {
+        if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Yedekten geri yükleme')) return { status: 'forbidden' };
+        const parsed = parseBackup(text, { collections: appCollections() });
+        if (!parsed.ok) { notify('Yedek dosyası geçersiz: ' + parsed.errors[0], 'error'); return { status: 'invalid', message: parsed.errors[0] }; }
+
+        const activeRoot = window.COLLECTION_ROOT;
+        const rootCheck = checkRoot(parsed.backup, activeRoot);
+        if (!rootCheck.ok) { notify(rootCheck.reason, 'error'); return { status: 'wrong-root', message: rootCheck.reason }; }
+
+        const summary = diffSummary(parsed.backup, window.data);
+        const ok = typeof window.showCustomConfirm === 'function'
+            ? await window.showCustomConfirm('Yedekten Geri Yükle — Önizleme', previewNode(parsed, rootCheck, summary),
+                { confirmText: rootCheck.verified ? 'Geri Yükle' : 'Doğrulanmamış Yedeği Geri Yükle', danger: true })
+            : window.confirm('Yedek geri yüklenecek; yedekte olmayan kayıtlar silinecek. Emin misiniz?');
+        if (ok !== true) return { status: 'cancelled', summary };
+
+        // Yalnız yedekte bulunan koleksiyonlar değişir; diğerleri olduğu gibi kalır (saveData değişmeyeni yazmaz).
+        const prev = window.data;
+        const next = { ...prev };
+        Object.keys(parsed.backup.data).forEach(k => { next[k] = clone(parsed.backup.data[k]); });
+        try {
+            // Kullanıcı onaylı tam geri yükleme: toplu silme kilidi bilinçli açılır (Faz 3.1); eski yedeklerdeki b3
+            // kayıtlarına göçteki gevşeklik tanınır (b3Legacy) — şema muhafızı yine çalışır.
+            await window.saveData(next, { allowBulkDelete: true, b3Legacy: true });
+        } catch (e) {
+            window.data = prev;
+            const message = (e && e.message) || 'bilinmeyen hata';
+            notify('Yedek geri yüklenemedi; hiçbir değişiklik yazılmadı. ' + message, 'error');
+            return { status: 'failed', message, summary };
+        }
+        notify('Yedek geri yüklendi', 'success');
+        if (Service.reloadAfterRestore) setTimeout(() => location.reload(), 800);
+        return { status: 'restored', summary };
+    }
+
+    const Service = {
+        BACKUP_VERSION, buildBackup, parseBackup, checkRoot, diffSummary,
+        exportBackup, restoreFromText, _download: download, reloadAfterRestore: true,
+    };
+    window.AppModules = window.AppModules || {};
+    window.AppModules.Backup = Service;
+    window.BackupService = Service;
+
+    // ─── Eski giriş noktaları (index.html UAB düğmeleri) → tek servis ──────────────────────────────────
+    window.exportFirebaseBackup = function () {
+        if (typeof window.checkIsAdmin === 'function' && !window.checkIsAdmin()) { notify('Sadece admin yedek alabilir', 'error'); return; }
+        try {
+            const b = exportBackup({ source: 'admin' });
+            notify(`Yedek indirildi (v${b.version}, ${b.root})`, 'success');
+        } catch (err) {
+            console.error('Backup error:', err);
+            notify('Yedek alınamadı', 'error');
+        }
     };
 
-    reader.readAsText(file);
-};
+    window.importFirebaseBackup = function (event) {
+        const input = event && event.target;
+        const file = input && input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = e => { restoreFromText(e.target.result).catch(err => { console.error(err); notify('Yedek yüklenemedi', 'error'); }); };
+        reader.readAsText(file);
+        input.value = '';   // aynı dosya ikinci kez seçilebilsin
+    };
 
-// [WHY]: Database version 2 uses a sub-collection schema (inventory_v2/{colName}/items/{id}) to avoid the 1MB Firestore document limit.
-// [HOW]: Updated restoreFirebaseBackup to write each item to doc(window.fireDb, COLLECTION_ROOT, key, "items", id) instead of the root collection path.
-// [ENV_GUARD] restoreFirebaseBackup artık window.COLLECTION_ROOT'u devralır.
-//             Bu, firebase-handler.js'nin yükleme anında belirlediği ortamı (localhost=demo, prod=v2)
-//             backup geri yükleme işlemine de uygular. localhost'tan yanlışlıkla
-//             production'a restore yapılması artık imkânsızdır.
-window.restoreFirebaseBackup = async function() {
-
-    if (!window.checkIsAdmin?.()) return;
-
-    if (!window._backupTemp) {
-        alert("Önce backup yükle");
-        return;
+    // ─── admin.html VIP paneli: snapshot düğmesinin yanına "Yedekten Geri Yükle" (aynı servis) ──────────
+    // admin.html'e işaretleme eklenmez; düğme VIP "1-Tık DB Snapshot" düğmesinin yanına çalışma zamanında yerleştirilir.
+    function injectVipRestore() {
+        const snapBtn = document.querySelector('button[onclick*="vipBackupDatabase"]');
+        if (!snapBtn || document.getElementById('vipRestoreBtn')) return;
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = '.json'; input.id = 'vipRestoreInput'; input.style.display = 'none';
+        input.addEventListener('change', window.importFirebaseBackup);
+        const btn = snapBtn.cloneNode(false);
+        btn.id = 'vipRestoreBtn';
+        btn.removeAttribute('onclick');
+        btn.style.color = 'var(--vip-warning, #f59e0b)';
+        btn.style.borderColor = 'var(--vip-warning, #f59e0b)';
+        btn.style.background = 'rgba(245,158,11,0.1)';
+        const icon = document.createElement('i'); icon.className = 'fas fa-undo me-2';
+        btn.append(icon, 'Yedekten Geri Yükle');
+        btn.addEventListener('click', () => input.click());
+        snapBtn.after(btn, input);
     }
-
-    if (!confirm("TÜM VERİLER ÜZERİNE YAZILACAK. Emin misin?"))
-        return;
-
-    try {
-
-        const { collection, doc, setDoc } = window.FirebaseModules;
-
-        const data = window._backupTemp;
-
-        for (const key of _backupKeys(data)) {
-
-            const col = data[key];
-
-            if (!Array.isArray(col)) continue;
-
-            for (const item of col) {
-
-                const id = item.id || crypto.randomUUID();
-
-                // [ENV_GUARD] Aktif ortam root'una yazılır; doğrudan "inventory_v2" yerine
-                // window.COLLECTION_ROOT kullanılır. Fallback: COLLECTION_ROOT henüz yüklenmemişse
-                // "inventory_v2" güvenli varsayılan olarak kullanılır.
-                const activeRoot = window.COLLECTION_ROOT || "inventory_v2";
-                await setDoc(
-                    doc(window.fireDb, activeRoot, key, "items", id),
-                    item
-                );
-            }
-        }
-
-        showAppAlert("Backup geri yüklendi", "success");
-
-    } catch(err) {
-
-        console.error(err);
-        showAppAlert("Restore hatası", "danger");
-
-    }
-};
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', injectVipRestore);
+    else injectVipRestore();
+})();

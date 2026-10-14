@@ -84,6 +84,157 @@ async function installHelpers(page) {
     }, MARKER, EMU, EMU_ADMIN_CODE);
 }
 
+// Faz 5 · K2 (5.8 · B1/B2 şema sözleşmesi) — b1WriteContract/b2WriteContract'ın içinde page.evaluate(fn, repo) ile
+// çalışır (bkz. b3WriteContract deseni). saveProduct (ekleme/düzenleme), confirmTransfer'ın internal (tam + kısmi,
+// INV-06) ve scrap (hurda, 5.10) kollarını GERÇEK UI fonksiyonlarıyla sürer; yalnız atomik yazıcılar (appendItem,
+// updateItem, applyItemOps, runStockOps) yakalayıcıyla değiştirilir, Firestore'a gitmez. Üretilen her b1/b2/b3 kaydı
+// Schema.validateB1/validateB2/validateB3'ten geçirilip özetlenir.
+async function _stockContractBody(repo) {
+    const other = repo === 'b1' ? 'b2' : 'b1';
+    const demirbasType = repo === 'b2';   // b1 örneği sarf, b2 örneği demirbaş — iki kol da ayrı ayrı kanıtlanır
+    const orig = {
+        items: window.data[repo], otherItems: window.data[other], personel: window.data.personel, service: window.data.serviceRecords,
+        append: window.appendItem, update: window.updateItem, apply: window.applyItemOps, ops: window.runStockOps,
+        adm: window.isDbAdmin, chk: window.checkIsAdmin, valid: window.validateAdminAction,
+        alert: window.showAppAlert, confirm: window.showCustomConfirm,
+    };
+    window.isDbAdmin = () => true; window.checkIsAdmin = () => true; window.validateAdminAction = () => true;
+    window.showAppAlert = () => {}; window.showCustomConfirm = async () => true;
+
+    // 'stock' ayrı tutulur: runStockOps'un stok deltası (ör. scrap/hurda) {op,col,...} şeklinde bir 'write' değildir —
+    // writes dizisinden ayrı, doğrudan {col,id,delta} olarak gelir (bkz. confirmTransfer'ın scrap kolu).
+    const captured = { b1: [], b2: [], b3: [], serviceRecords: [], stock: [] };
+    const capture = ops => (ops || []).forEach(o => { if (captured[o.col]) captured[o.col].push(o); });
+    window.appendItem = async (col, item) => { capture([{ op: 'set', col, item }]); return { written: 1, ids: [item && item.id] }; };
+    window.updateItem = async (col, id, fields) => { capture([{ op: 'update', col, id, fields }]); return { written: 1, ids: [id] }; };
+    window.applyItemOps = async ops => { capture(ops); return { written: (ops || []).length, ids: (ops || []).map(o => (o.item && o.item.id) || o.id) }; };
+    window.runStockOps = async arg => {
+        capture(arg.writes || []);
+        captured.stock.push(...(arg.stock || []));
+        return { stock: (arg.stock || []).map(s => ({ col: s.col, id: s.id, name: s.id, before: 9, after: 9 + (s.delta || 0) })) };
+    };
+    const takeAll = () => {
+        const snap = { b1: [...captured.b1], b2: [...captured.b2], b3: [...captured.b3], serviceRecords: [...captured.serviceRecords], stock: [...captured.stock] };
+        captured.b1 = []; captured.b2 = []; captured.b3 = []; captured.serviceRecords = []; captured.stock = [];
+        return snap;
+    };
+
+    const baseItem = (id, adet) => {
+        const it = {
+            id, sütun: 'S-1', raf: 'R-1', tür: demirbasType ? 'Dizüstü Bilgisayar' : 'Kablo',
+            ürün: demirbasType ? 'Test Laptop' : 'Test Kablo', marka: 'Acme', adet,
+            durumu: 'Kullanıma Hazır', açıklama: '', isDemirbas: demirbasType, lastUpdate: Date.now(),
+        };
+        if (repo === 'b2') it.status = 'Kullanıma Hazır';
+        return it;
+    };
+    window.data[repo] = [baseItem(`${repo}_src1`, 10), baseItem(`${repo}_src2`, 1)];
+    window.data[other] = [];
+    window.data.personel = [];
+    // b1 (sarf, kimliksiz): productId eşleşmesi yeter, kapanmalı. b2 (demirbaş): checkDeviceIds zaten "serviste olan
+    // cihaz tekrar çıkışa verilemez" dediği için scrap formuna GİRİLECEK SN'le aynı açık kayıt asla oluşamaz — burada
+    // kasıtlı olarak İLGİSİZ bir SN'le (aynı ürün hattının başka bir birimi) seçiciliği kanıtlanır: kapanmamalı.
+    window.data.serviceRecords = [{ id: 'svc_k2', kapandi: false, productId: `${repo}_src1`, sn: demirbasType ? 'OTHER-SN-999' : '-', envanterNo: '-', gecmis: [] }];
+
+    const o = {};
+    try {
+        // 1) saveProduct — yeni kayıt (appendItem → 'set')
+        const form = document.getElementById('productForm');
+        form.dataset.editRepo = repo; form.dataset.editId = '';
+        ['prodColumn', 'prodShelf'].forEach(id => { document.getElementById(id).innerHTML = '<option>S-1</option>'; document.getElementById(id).value = 'S-1'; });
+        document.getElementById('prodType').innerHTML = `<option value="${demirbasType ? 'Dizüstü Bilgisayar' : 'Kablo'}">x</option>`;
+        document.getElementById('prodType').value = demirbasType ? 'Dizüstü Bilgisayar' : 'Kablo';
+        document.getElementById('prodName').value = 'Yeni Ürün ' + repo;
+        document.getElementById('prodBrand').value = 'Acme';
+        document.getElementById('prodQty').value = '4';
+        document.getElementById('prodStatus').value = 'Kullanıma Hazır';
+        document.getElementById('prodDesc').value = '';
+        document.getElementById('isDemirbas').checked = demirbasType;
+        await window.saveProduct(new Event('submit'));
+        o.addNew = takeAll()[repo];
+
+        // 2) saveProduct — var olan kaydı düzenleme (updateItem → 'update', yalnız bilinen alan adı denetlenir)
+        form.dataset.editId = `${repo}_src1`;
+        document.getElementById('prodQty').value = '11';
+        await window.saveProduct(new Event('submit'));
+        o.editExisting = takeAll()[repo];
+        form.dataset.editId = '';
+
+        // 3) confirmTransfer — internal TAM taşıma (adet = stok tamamı): eski davranış korunur (id hedefte aynen yaşar)
+        window.openTransferModal(repo, `${repo}_src2`);
+        document.getElementById('transTarget').value = JSON.stringify({ name: other.toUpperCase() + ' Depo', type: 'internal', key: other });
+        window.handleTransferTargetChange({ value: document.getElementById('transTarget').value });
+        document.getElementById('transNewCol').value = 'S-2'; document.getElementById('transNewShelf').value = 'R-2';
+        document.getElementById('transQty').value = '1';
+        document.getElementById('transNote').value = 'tam taşıma testi';
+        await window.confirmTransfer();
+        o.internalFullMove = takeAll();
+
+        // 4) confirmTransfer — internal KISMİ taşıma (adet < stok, Faz 5 · K2 · INV-06): kaynakta update, hedefte YENİ id
+        window.openTransferModal(repo, `${repo}_src1`);
+        document.getElementById('transTarget').value = JSON.stringify({ name: other.toUpperCase() + ' Depo', type: 'internal', key: other });
+        window.handleTransferTargetChange({ value: document.getElementById('transTarget').value });
+        document.getElementById('transNewCol').value = 'S-3'; document.getElementById('transNewShelf').value = 'R-3';
+        document.getElementById('transQty').value = '4';
+        document.getElementById('transNote').value = 'kısmi taşıma testi';
+        await window.confirmTransfer();
+        o.internalPartial = takeAll();
+
+        // 5) confirmTransfer — scrap/hurda (Faz 5 · K2 · 5.10): kalan stoktan kısmi adet, b3 'hurda' kaydı, açık servis kaydı kapanır
+        const remainingId = `${repo}_src1`;
+        const remainingQty = (window.data[repo].find(x => x.id === remainingId) || {}).adet || 1;
+        const scrapQty = Math.min(2, remainingQty);
+        window.openTransferModal(repo, remainingId);
+        document.getElementById('transTarget').value = JSON.stringify({ name: 'Hurda / Atık', type: 'scrap' });
+        window.handleTransferTargetChange({ value: document.getElementById('transTarget').value });
+        document.getElementById('transQty').value = String(scrapQty);
+        window.syncTransferDevices();
+        if (demirbasType) {
+            [...document.querySelectorAll('#transDeviceIds .dev-ids-row')].forEach((row, i) => { row.querySelector('.dev-sn').value = 'K2HRD-' + i; });
+        }
+        document.getElementById('transNote').value = 'arızalı, hurdaya ayrıldı (K2 testi)';
+        await window.confirmTransfer();
+        o.scrap = takeAll();
+    } finally {
+        Object.assign(window, {
+            appendItem: orig.append, updateItem: orig.update, applyItemOps: orig.apply, runStockOps: orig.ops,
+            isDbAdmin: orig.adm, checkIsAdmin: orig.chk, validateAdminAction: orig.valid, showAppAlert: orig.alert, showCustomConfirm: orig.confirm,
+        });
+        window.data[repo] = orig.items; window.data[other] = orig.otherItems; window.data.personel = orig.personel; window.data.serviceRecords = orig.service;
+    }
+
+    const S = window.Schema;
+    const validator = repo === 'b1' ? S.validateB1 : S.validateB2;
+    const otherValidator = other === 'b1' ? S.validateB1 : S.validateB2;
+    const KEYS = repo === 'b1' ? S.B1_KEYS : S.B2_KEYS;
+    const errorsOf = (list, v) => list.map(w => v(w.op === 'set' ? w.item : w.fields)).flat();
+    const knownKeysOnly = list => list.every(w => Object.keys(w.op === 'set' ? w.item : w.fields).every(k => KEYS.includes(k)));
+
+    return {
+        addNew: { ops: o.addNew.map(w => w.op), errors: errorsOf(o.addNew, validator), exactKeys: o.addNew.every(w => Object.keys(w.item).sort().join(',') === [...KEYS].sort().join(',')) },
+        editExisting: { ops: o.editExisting.map(w => w.op), knownKeysOnly: knownKeysOnly(o.editExisting) },
+        internalFullMove: {
+            sourceOps: o.internalFullMove[repo].map(w => w.op),
+            targetErrors: o.internalFullMove[other].filter(w => w.op === 'set').map(w => otherValidator(w.item)).flat(),
+            sameId: (o.internalFullMove[other][0] || {}).item && o.internalFullMove[other][0].item.id === `${repo}_src2`,
+        },
+        internalPartial: {
+            sourceOp: (o.internalPartial[repo][0] || {}).op,
+            sourceFieldsKnownOnly: o.internalPartial[repo].every(w => Object.keys(w.fields || {}).every(k => KEYS.includes(k))),
+            targetErrors: o.internalPartial[other].filter(w => w.op === 'set').map(w => otherValidator(w.item)).flat(),
+            newIdDiffers: !!(o.internalPartial[other][0] || {}).item && o.internalPartial[other][0].item.id !== `${repo}_src1`,
+        },
+        scrap: {
+            // Hurda stoğu applyItemOps'un 'writes' dizisiyle değil runStockOps'un ayrı 'stock' deltasıyla düşer (bkz. confirmTransfer).
+            stockDelta: (o.scrap.stock[0] || {}),
+            b3Count: o.scrap.b3.length,
+            b3Errors: o.scrap.b3.map(w => S.validateB3(w.item)).flat(),
+            b3Tips: [...new Set(o.scrap.b3.map(w => w.item.tip))],
+            serviceClosed: o.scrap.serviceRecords.length > 0 && o.scrap.serviceRecords.every(w => w.op === 'update' && w.fields.kapandi === true),
+        },
+    };
+}
+
 const SCENARIOS = {
     // C1 · ITSM-01
     async saveRequest(page) {
@@ -1776,6 +1927,508 @@ const SCENARIOS = {
         });
         out.adminPageErrors = errs;
         await admin.browserContext().close();
+        return out;
+    },
+
+    // Faz 5 · K1: zimmet belgesi veri motoru iki sayfada da yüklü; tutanak kalemleri = Kişi Envanterim; çıktı saf JSON,
+    // oturum kodu sızmaz; b3 satır belgesi aynı sözleşmede. Firestore'a yazmaz (bellek içi fikstür, sonra geri alınır).
+    async k1ZimmetData(page, browser) {
+        const probe = () => {
+            const A = window.AssignmentService, d = window.data, CODE = 'K1-GIZLI-KOD';
+            const orig = { b3: d.b3, req: d.requests, per: d.personel };
+            d.personel = [{ id: 'k1_p', name: 'Şükrü İğdeli', code: CODE, birim: 'Radyoloji' }];
+            d.requests = [{ id: 9101, ürün: 'Talep Ürünü', personel: 'Şükrü İğdeli', personelId: 'k1_p', durum: 'completed', approvedBy: 'Talep Onaylayan', approvedAt: '01.10.2026 09:00' }];
+            d.b3 = [
+                window.Schema.buildB3Entry({ id: 9001, tip: 'zimmet', adet: 1, urunAciklama: 'Latitude 5440', urunTuru: 'Dizüstü Bilgisayar', marka: 'Dell', isDemirbas: true, sn: 'K1SN1', envanterNo: 'K1ENV1', alanKisi: 'Şükrü İğdeli', personelId: 'k1_p', tarih: '01.10.2026', onaylayan: 'K1 Admin' }),
+                window.Schema.buildB3Entry({ id: 9002, tip: 'zimmet', adet: 1, urunAciklama: 'Talep Ürünü', alanKisi: 'Şükrü İğdeli', personelId: 'k1_p', requestId: 9101, tarih: '01.10.2026' }),
+                { ...window.Schema.buildB3Entry({ id: 9003, tip: 'zimmet', adet: 1, urunAciklama: 'İade', alanKisi: 'Şükrü İğdeli', personelId: 'k1_p' }), iadeEdildi: true },
+                window.Schema.buildB3Entry({ id: 9004, tip: 'cikis', adet: 2, urunAciklama: 'Toner', alanKisi: 'Şükrü İğdeli', personelId: 'k1_p' }),
+            ];
+            try {
+                const doc = A.generatePersonnelZimmetData('k1_p');
+                const row = A.generateB3MovementData(9004);
+                const json = JSON.stringify([doc, row]);
+                const keysOk = r => JSON.stringify(Object.keys(r).sort()) === JSON.stringify([...A.ZIMMET_KALEM_KEYS].sort());
+                return {
+                    exported: typeof A.generatePersonnelZimmetData === 'function' && typeof A.generateB3MovementData === 'function',
+                    sema: doc.sema,
+                    kalemler: doc.kalemler.map(k => `${k.kayitId}|${k.sn}|${k.envanterNo}|${k.marka}|${k.model}|${k.zimmetleyen.ad}`),
+                    sameAsPersonInventory: JSON.stringify(doc.kalemler.map(k => k.kayitId).sort()) === JSON.stringify(A.getPersonInventory(d.personel[0]).map(a => String(a.id)).sort()),
+                    personel: doc.personel,
+                    belgeNo: /^ZT-\d{8}-[0-9A-Z]{7}$/.test(doc.belge.belgeNo),
+                    contract: doc.kalemler.every(keysOk) && row.kalemler.every(keysOk),
+                    pureJson: JSON.stringify(JSON.parse(json)) === json,
+                    codeLeak: json.includes(CODE),
+                    movement: `${row.belge.tur}|${row.kalemler[0].durum}|${row.kalemler[0].adet}|${row.hareket.stokDisi}`,
+                    unknown: A.generatePersonnelZimmetData('yok') === null && A.generateB3MovementData('yok') === null,
+                };
+            } finally { d.b3 = orig.b3; d.requests = orig.req; d.personel = orig.per; }
+        };
+        const expect = r => r.exported && r.sema === 'zimmet-belge/1' && r.sameAsPersonInventory && r.belgeNo && r.contract && r.pureJson
+            && !r.codeLeak && r.unknown && r.movement === 'cikis|cikis|2|true'
+            && JSON.stringify(r.kalemler) === JSON.stringify(['9001|K1SN1|K1ENV1|Dell|Latitude 5440|K1 Admin', '9002|-|-|-|Talep Ürünü|Talep Onaylayan'])
+            && JSON.stringify(r.personel) === JSON.stringify({ id: 'k1_p', adSoyad: 'Şükrü İğdeli', birim: 'Radyoloji' });
+
+        const out = { index: await page.evaluate(probe) };
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 6000));
+        try { out.admin = await admin.evaluate(probe); } finally { out.adminPageErrors = errs; await admin.browserContext().close(); }
+        out.ok = expect(out.index) && expect(out.admin) && errs.length === 0;
+        if (!out.ok) throw new Error('K1 zimmet verisi beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 5 · K1 (5.1 · ZIM-04): zimmet tutanağı PDF motoru — gerçek jsPDF + AutoTable + gömülü Türkçe (Roboto) fontla,
+    // iki sayfada da (personel butonu / admin satır butonu). doc.save() stub'lanır (gerçek indirme tetiklenmez).
+    async k1ZimmetPdf(page, browser) {
+        const pdfProbe = async () => {
+            const CODE = 'K1PDF-GIZLI-KOD';
+            const orig = { b3: window.data.b3, req: window.data.requests, per: window.data.personel };
+            window.data.personel = [
+                { id: 'k1pdf_p', name: 'Şükrü İğdeli', code: CODE, birim: 'Radyoloji' },
+                { id: 'k1pdf_bos', name: 'Boş Kişi', code: 'OTHER-CODE' },
+            ];
+            window.data.requests = [];
+            window.data.b3 = [
+                window.Schema.buildB3Entry({ id: 95001, tip: 'zimmet', adet: 1, urunAciklama: 'Latitude 5440', urunTuru: 'Dizüstü Bilgisayar', marka: 'Dell', isDemirbas: true, sn: 'PDFSN1', envanterNo: 'PDFENV1', alanKisi: 'Şükrü İğdeli', personelId: 'k1pdf_p', tarih: '01.10.2026', onaylayan: 'K1 Admin' }),
+                window.Schema.buildB3Entry({ id: 95002, tip: 'cikis', adet: 3, urunAciklama: 'Toner', alanKisi: 'Şükrü İğdeli', personelId: 'k1pdf_p' }),
+            ];
+
+            // jsPDF her 'new jsPDF()' çağrısında API yöntemlerini (save dahil) instance'a KENDİ ÖZELLİĞİ olarak kopyalar;
+            // jsPDF.prototype.save'i stub'lamak yeni örnekleri etkilemez — kaynak jsPDF.API.save'dir (ikisi ayrı nesne).
+            const JsPDFCtor = window.jspdf.jsPDF;
+            const origSave = JsPDFCtor.API.save;
+            const saves = [];
+            JsPDFCtor.API.save = function (filename) {
+                saves.push({ filename, pages: this.internal.getNumberOfPages(), fonts: Object.keys(this.getFontList()) });
+                return this;
+            };
+            const alerts = [];
+            const origAlert = window.showAppAlert;
+            window.showAppAlert = (msg, type) => alerts.push({ msg, type });
+
+            try {
+                await window.generatePersonnelZimmetPDF('k1pdf_p');           // 1 geçerli kalem (95002 'cikis' sayılmaz) → PDF
+                await window.generateZimmetPDF(95002);                        // tekil çıkış hareketi → PDF üretilir
+                await window.generatePersonnelZimmetPDF('k1pdf_bos');         // 0 kalem → uyarı, save yok
+                await window.generatePersonnelZimmetPDF('yok-kisi');          // bulunamadı → hata, save yok
+                await window.generateZimmetPDF('yok-b3');                     // bulunamadı → hata, save yok
+
+                // Çok kalemli belge: imza bloğu taşarsa yeni sayfa açma + "Sayfa X / Y" regresyonu
+                await window.AppModules.ZimmetPdf.ensureZimmetFonts();
+                const bigRows = Array.from({ length: 40 }, (_, i) => ({
+                    sira: i + 1, kayitId: String(9000 + i), kaynak: 'b3', envanterNo: 'E' + i, sn: 'S' + i,
+                    urunTuru: 'Tür', urunAciklama: 'Ürün ' + i, marka: 'Marka', model: 'Model', adet: 1, isDemirbas: true,
+                    tarih: '01.10.2026', teslimTarihi: '01.10.2026', talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeTarihi: '-',
+                    talepNo: '-', zimmetleyen: { ad: 'Admin', tarih: '01.10.2026' }, not: '-', durum: 'aktif', iadeEdildiTarihi: '-',
+                }));
+                const bigDoc = {
+                    sema: 'zimmet-belge/1',
+                    belge: { tur: 'personel-zimmet', belgeNo: 'ZT-TEST-BIG', olusturmaTarihi: '01.10.2026 10:00', duzenleyen: 'Test Admin', talepNolari: [], teslimEdenler: ['Admin'] },
+                    personel: { id: 'k1pdf_p', adSoyad: 'Şükrü İğdeli', birim: 'Radyoloji' },
+                    kalemler: bigRows,
+                    ozet: { kalemSayisi: 40, toplamAdet: 40, demirbasAdet: 40, sarfAdet: 0, geciciZimmet: 0, teslimBekleyen: 0 },
+                };
+                const bigPdf = window.AppModules.ZimmetPdf.renderZimmetTutanagi(bigDoc, 'DEMİRBAŞ VE MALZEME ZİMMET TUTANAĞI');
+
+                return {
+                    saves: saves.map(s => ({ filename: s.filename, pages: s.pages, hasRoboto: s.fonts.includes('Roboto') })),
+                    alertTypes: alerts.map(a => a.type),
+                    codeLeakInFilenames: saves.some(s => s.filename.includes(CODE)),
+                    bigDocPages: bigPdf.internal.getNumberOfPages(),
+                };
+            } finally {
+                JsPDFCtor.API.save = origSave;
+                window.showAppAlert = origAlert;
+                window.data.b3 = orig.b3; window.data.requests = orig.req; window.data.personel = orig.per;
+            }
+        };
+
+        const buttonProbe = () => {
+            const btn = [...document.querySelectorAll('#personnelInventoryTab button')].find(b => /Zimmet Tutana/.test(b.textContent));
+            return { found: !!btn, callsFn: btn ? /generatePersonnelZimmetPDF/.test(btn.getAttribute('onclick') || '') : false };
+        };
+
+        const expect = r => JSON.stringify(r.saves.map(s => s.pages > 0 && s.hasRoboto)) === JSON.stringify([true, true])
+            && r.saves.length === 2 && !r.codeLeakInFilenames
+            && JSON.stringify(r.alertTypes) === JSON.stringify(['warning', 'error', 'error'])
+            && r.bigDocPages >= 2;
+
+        const out = { index: await page.evaluate(pdfProbe), indexButton: await page.evaluate(buttonProbe) };
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message));
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 6000));
+        try {
+            out.admin = await admin.evaluate(pdfProbe);
+            out.adminButton = await admin.evaluate(() => {
+                const orig = window.data.b3;
+                window.data.b3 = [window.Schema.buildB3Entry({ id: 95901, tip: 'zimmet', adet: 1, urunAciklama: 'Admin Satır Testi', alanKisi: 'Şükrü İğdeli', personelId: 'k1pdf_row' })];
+                window.inventoryManagementModule.renderAdminInventoryTab();   // #invTableBody iskeleti bu çağrıyla kurulur
+                const btn = [...document.querySelectorAll('#invTableBody button')].find(b => /Tutanak/.test(b.textContent));
+                const result = { found: !!btn, callsFn: btn ? btn.getAttribute('onclick') : null };
+                window.data.b3 = orig;
+                return result;
+            });
+        } finally { out.adminPageErrors = errs; await admin.browserContext().close(); }
+
+        out.ok = expect(out.index) && expect(out.admin) && out.indexButton.found && out.indexButton.callsFn
+            && out.adminButton.found && /generatePersonnelZimmetPDF\("k1pdf_row"\)/.test(out.adminButton.callsFn || '')
+            && errs.length === 0;
+        if (!out.ok) throw new Error('K1 zimmet PDF motoru beklendiği gibi çalışmadı: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 5 · K2 (5.8): B1 şema sözleşmesi — sarf örneği (isDemirbas:false). _stockContractBody ortak sürücüyü kullanır.
+    async b1WriteContract(page) {
+        const out = await page.evaluate(_stockContractBody, 'b1');
+        const noErr = x => x.length === 0;
+        out.ok = out.addNew.exactKeys && noErr(out.addNew.errors)
+            && JSON.stringify(out.editExisting.ops) === JSON.stringify(['update']) && out.editExisting.knownKeysOnly
+            && JSON.stringify(out.internalFullMove.sourceOps) === JSON.stringify(['delete']) && noErr(out.internalFullMove.targetErrors) && out.internalFullMove.sameId
+            && out.internalPartial.sourceOp === 'update' && out.internalPartial.sourceFieldsKnownOnly && noErr(out.internalPartial.targetErrors) && out.internalPartial.newIdDiffers
+            && out.scrap.stockDelta.col === 'b1' && out.scrap.stockDelta.delta === -2 && out.scrap.b3Count === 1 && noErr(out.scrap.b3Errors)
+            && JSON.stringify(out.scrap.b3Tips) === JSON.stringify(['hurda']) && out.scrap.serviceClosed;
+        if (!out.ok) throw new Error('b1WriteContract beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 5 · K2 (5.8): B2 şema sözleşmesi — demirbaş örneği (isDemirbas:true, status+durumu birlikte, cihaz kimlikli hurda).
+    async b2WriteContract(page) {
+        const out = await page.evaluate(_stockContractBody, 'b2');
+        const noErr = x => x.length === 0;
+        out.ok = out.addNew.exactKeys && noErr(out.addNew.errors)
+            && JSON.stringify(out.editExisting.ops) === JSON.stringify(['update']) && out.editExisting.knownKeysOnly
+            && JSON.stringify(out.internalFullMove.sourceOps) === JSON.stringify(['delete']) && noErr(out.internalFullMove.targetErrors) && out.internalFullMove.sameId
+            && out.internalPartial.sourceOp === 'update' && out.internalPartial.sourceFieldsKnownOnly && noErr(out.internalPartial.targetErrors) && out.internalPartial.newIdDiffers
+            // demirbaş: scrapQty=2 → her cihaz için adet 1 olan ayrı birer b3 hurda kaydı; ilgisiz SN'li açık servis
+            // kaydı (başka bir cihaz) kapanmamalı — eşleşme productId'ye değil cihaz kimliğine göredir
+            && out.scrap.stockDelta.col === 'b2' && out.scrap.stockDelta.delta === -2 && out.scrap.b3Count === 2 && noErr(out.scrap.b3Errors)
+            && JSON.stringify(out.scrap.b3Tips) === JSON.stringify(['hurda']) && !out.scrap.serviceClosed;
+        if (!out.ok) throw new Error('b2WriteContract beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 5 · K2 (5.8 · INV-05/INV-07): B1 tablosunda sayfalama + durum filtresi kararlılığı. Gerçek main.js olay
+    // yöneticisini (onInventoryDataUpdated) ve gerçek table-engine.js render/patch yollarını sürer.
+    async k2TableUx(page) {
+        const out = await page.evaluate(() => {
+            const T = window.AppModules.Table;
+            const orig = {
+                b1: window.data.b1,
+                filterVal: document.getElementById('b1StatusFilter').value,
+                searchVal: document.getElementById('searchB1').value,
+                firstRendered: window._firstDataRendered,
+            };
+            const o = {};
+            try {
+                document.getElementById('b1StatusFilter').value = 'active';
+                document.getElementById('searchB1').value = '';
+                window.data.b1 = Array.from({ length: 60 }, (_, i) => ({
+                    id: 'k2tbl_' + i, ürün: 'K2 Ürün ' + i, tür: 'Test', raf: 'R', sütun: 'S',
+                    marka: 'X', adet: 5, durumu: 'Kullanıma Hazır', açıklama: '', isDemirbas: false, lastUpdate: Date.now(),
+                }));
+                window._firstDataRendered = true;   // main.js'in "ilk yükleme" dalını atlaması için (switchTab tetiklemesin)
+
+                // 1) Tam çizim (sayfa 1) + "Daha Fazla Yükle" ile sayfa 2
+                T.renderTable('b1');
+                o.page1Rows = document.querySelectorAll('#tableB1 tbody tr').length;
+                document.getElementById('loadMoreBtn')?.click();
+                o.page2Rows = document.querySelectorAll('#tableB1 tbody tr').length;
+
+                // 2) Canlı "tam yeniden çizim" güncellemesi (isPatch:false, main.js'in gerçek olay yöneticisi üzerinden) →
+                //    sayfa 2'de açılan satırlar KORUNMALI (Faz 5 öncesi: _currentPage=1'e sıfırlanıp 25'e düşerdi).
+                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'b1', isPatch: false, changes: [] } }));
+                o.rowsAfterLiveUpdate = document.querySelectorAll('#tableB1 tbody tr').length;
+
+                // 3) Bileşik durum metni ("Tükendi / Pasif") artık tam eşleşme değil alt dize eşleşmesiyle elenir
+                window.data.b1[0].durumu = 'Tükendi / Pasif';
+                T.renderTable('b1');
+                o.compoundPassiveHiddenByFullRender = !document.querySelector('tr[data-depo="b1"][data-id="k2tbl_0"]');
+
+                // 4) patchDOMForCollection artık aktif filtreye göre satırı KALDIRIR (eskiden yalnız stilini değiştirirdi,
+                //    satır DOM'da "hayalet" kalırdı). Hâlâ görünür bir satır (k2tbl_5) seçilip patch'le Pasif yapılır.
+                o.visibleBeforePatch = !!document.querySelector('tr[data-depo="b1"][data-id="k2tbl_5"]');
+                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', {
+                    detail: { collection: 'b1', isPatch: true, changes: [{ id: 'k2tbl_5', data: { durumu: 'Tükendi / Pasif', adet: 0 } }] },
+                }));
+                o.removedByPatchUnderActiveFilter = !document.querySelector('tr[data-depo="b1"][data-id="k2tbl_5"]');
+
+                // 5) Regresyon: filtre "Tümü" iken patch satırı KALDIRMAZ, yalnız stilini günceller
+                document.getElementById('b1StatusFilter').value = 'all';
+                T.renderTable('b1');
+                o.visibleUnderAllFilter = !!document.querySelector('tr[data-depo="b1"][data-id="k2tbl_6"]');
+                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', {
+                    detail: { collection: 'b1', isPatch: true, changes: [{ id: 'k2tbl_6', data: { durumu: 'Pasif', adet: 0 } }] },
+                }));
+                const row6 = document.querySelector('tr[data-depo="b1"][data-id="k2tbl_6"]');
+                o.keptUnderAllFilterButStyled = !!row6 && row6.classList.contains('passive-row');
+            } finally {
+                window.data.b1 = orig.b1;
+                document.getElementById('b1StatusFilter').value = orig.filterVal;
+                document.getElementById('searchB1').value = orig.searchVal;
+                window._firstDataRendered = orig.firstRendered;
+                T.renderTable('b1');
+            }
+            return o;
+        });
+        out.ok = out.page1Rows === 25 && out.page2Rows === 50 && out.rowsAfterLiveUpdate === 50
+            && out.compoundPassiveHiddenByFullRender === true
+            && out.visibleBeforePatch === true && out.removedByPatchUnderActiveFilter === true
+            && out.visibleUnderAllFilter === true && out.keptUnderAllFilterButStyled === true;
+        if (!out.ok) throw new Error('k2TableUx beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 5 · K3: Özel İzleme Paneli onarımı (ADM-05), Hızlı Personel/Ürün Ekleme (5.2 · ZIM-05), merkezi
+    // AppModules.AdminTabs kanca sicili (5.7 · ARC-07). Tamamı admin.html üzerinde, gerçek fonksiyonlarla.
+    async k3AdminTabHooks(page, browser) {
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        let out;
+        try {
+            out = await admin.evaluate(async () => {
+                const o = {};
+                const orig = {
+                    b1: window.data.b1, b2: window.data.b2, personel: window.data.personel, types: window.data.productTypes,
+                    append: window.appendItem, isDbAdmin: window.isDbAdmin, checkIsAdmin: window.checkIsAdmin, alert: window.showAppAlert,
+                };
+                window.isDbAdmin = () => true; window.checkIsAdmin = () => true; window.showAppAlert = () => {};
+                // appendItem gerçek applyItemOps'un _applyLocal'ını taklit eder: window.data[col]'a id'li kayıt eklenir.
+                const captured = []; let idSeq = 0;
+                window.appendItem = async (col, item) => {
+                    const withId = { ...item, id: item.id ?? ('k3test_' + (++idSeq)) };
+                    captured.push({ col, item: withId });
+                    (window.data[col] = window.data[col] || []).unshift(withId);
+                    return { written: 1, ids: [withId.id] };
+                };
+
+                try {
+                    // ── ADM-05: renderCustomWatchDashboard ikinci (ve sonraki) çağrıda da çiziyor mu? ──
+                    window.data.b1 = [{ id: 'k3w_1', ürün: 'K3 İzlenen Ürün', marka: 'X', adet: 2, limit: 5, isWatched: true }];
+                    window.data.b2 = [];
+                    window.renderCustomWatchDashboard();
+                    o.tableExistsAfterFirstRender = !!document.getElementById('customWatchTable');
+                    o.cardAfterFirst = !!document.querySelector('#watchCardsContainer .watch-card');
+                    window.data.b1[0].ürün = 'K3 İzlenen Ürün (Güncellendi)';
+                    window.renderCustomWatchDashboard();   // eskiden burada table silindiği için ikinci çağrı hiçbir şey yapmazdı
+                    o.tableExistsAfterSecondRender = !!document.getElementById('customWatchTable');
+                    o.cardUpdatedAfterSecond = (document.querySelector('#watchCardsContainer .watch-card .title')?.textContent || '').includes('Güncellendi');
+
+                    // ── ARC-07: merkezi kanca sicili gerçekten çalışıyor mu? ──
+                    o.hasAdminTabsApi = !!(window.AppModules?.AdminTabs?.onShow && window.AppModules?.AdminTabs?.onAny);
+                    let invHookFired = false;
+                    window.AppModules.AdminTabs.onShow('inventoryManagementTab', () => { invHookFired = true; });
+                    let wfRendered = false;
+                    const origWf = window.renderWorkflowTemplates;
+                    window.renderWorkflowTemplates = function (...a) { wfRendered = true; return origWf.apply(this, a); };
+                    let invRendered = false;
+                    const origInv = window.inventoryManagementModule.renderAdminInventoryTab;
+                    window.inventoryManagementModule.renderAdminInventoryTab = function (...a) { invRendered = true; return origInv.apply(this, a); };
+
+                    window.showAdminTab('inventoryManagementTab');
+                    await new Promise(r => setTimeout(r, 30));
+                    o.inventoryTabHookFired = invRendered && invHookFired;
+                    window.showAdminTab('workflowTemplatesTab');
+                    o.workflowTabHookFired = wfRendered;
+                    window.showAdminTab('systemControlTab');
+                    o.vipActiveClassAdded = document.querySelector('.sidebar')?.classList.contains('vip-active') ?? null;
+                    window.showAdminTab('dashboard-content');
+                    o.vipActiveClassRemoved = !(document.querySelector('.sidebar')?.classList.contains('vip-active'));
+
+                    window.inventoryManagementModule.renderAdminInventoryTab = origInv;
+                    window.renderWorkflowTemplates = origWf;
+
+                    // ── ZIM-05: hızlı ekleme butonları gerçekten kayıt oluşturup dropdown'ı tazeliyor mu? ──
+                    window.data.personel = [];
+                    window.data.productTypes = [{ name: 'K3 Demirbaş Tür', isDemirbas: true }, { name: 'K3 Sarf Tür', isDemirbas: false }];
+                    window.inventoryManagementModule.openAssignModal();
+
+                    window.inventoryManagementModule.quickAddPersonnel();
+                    o.personnelModalOpened = document.getElementById('quickPersonnelModal')?.style.display === 'flex';
+                    document.getElementById('qpName').value = 'K3 Test Personel';
+                    await window.inventoryManagementModule._saveQuickPersonnel();
+                    o.personnelCreated = captured.some(c => c.col === 'personel' && c.item.name === 'K3 Test Personel');
+                    const selPersonVal = document.getElementById('assignPersonnel')?.value;
+                    o.personnelAutoSelected = !!selPersonVal && window.data.personel.some(p => String(p.id) === selPersonVal && p.name === 'K3 Test Personel');
+
+                    window.inventoryManagementModule.quickAddProduct();
+                    o.productModalOpened = document.getElementById('quickProductModal')?.style.display === 'flex';
+                    o.productTypeOptionsOnlyDemirbas = [...document.querySelectorAll('#qpType option')].every(opt => opt.value === 'K3 Demirbaş Tür');
+                    document.getElementById('qpType').value = 'K3 Demirbaş Tür';
+                    document.getElementById('qpName2').value = 'K3 Test Ürün';
+                    document.getElementById('qpQty').value = '3';
+                    await window.inventoryManagementModule._saveQuickProduct();
+                    const createdProduct = captured.find(c => c.col === 'b1' && c.item.ürün === 'K3 Test Ürün');
+                    o.productCreated = !!createdProduct;
+                    o.productIsDemirbas = createdProduct?.item.isDemirbas === true;
+                    o.productSchemaErrors = createdProduct ? window.Schema.validateB1(createdProduct.item) : ['kayıt yok'];
+                    const prodRowVal = document.querySelector('#assignRowsContainer .assign-product-sel')?.value;
+                    o.productRowAutoSelected = !!createdProduct && prodRowVal === createdProduct.item.id;
+                } finally {
+                    Object.assign(window, { appendItem: orig.append, isDbAdmin: orig.isDbAdmin, checkIsAdmin: orig.checkIsAdmin, showAppAlert: orig.alert });
+                    window.data.b1 = orig.b1; window.data.b2 = orig.b2; window.data.personel = orig.personel; window.data.productTypes = orig.types;
+                    window.inventoryManagementModule.closeAssignModal();
+                    window.inventoryManagementModule.closeQuickPersonnelModal?.();
+                    window.inventoryManagementModule.closeQuickProductModal?.();
+                }
+                return o;
+            });
+        } finally {
+            out = out || {};
+            out.adminPageErrors = errs;
+            await admin.browserContext().close();
+        }
+        out.ok = out.tableExistsAfterFirstRender && out.cardAfterFirst && out.tableExistsAfterSecondRender && out.cardUpdatedAfterSecond
+            && out.hasAdminTabsApi && out.inventoryTabHookFired && out.workflowTabHookFired
+            && out.vipActiveClassAdded === true && out.vipActiveClassRemoved === true
+            && out.personnelModalOpened && out.personnelCreated && out.personnelAutoSelected
+            && out.productModalOpened && out.productTypeOptionsOnlyDemirbas && out.productCreated && out.productIsDemirbas
+            && (out.productSchemaErrors || []).length === 0 && out.productRowAutoSelected
+            && out.adminPageErrors.length === 0;
+        if (!out.ok) throw new Error('k3AdminTabHooks beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 5 · K3 (5.3 · ADM-06 + 5.5 · VIP-08): birleşik yedekleme servisi (iki sayfada aynı kanonik biçim, ortam denetimi,
+    // önizlemeli onay, başarısızlıkta bellek geri dönüşü) ve VIP sağlık döngüsünün yalnız VIP sekmesi görünürken çalışması.
+    // İndirme (_download) ve yazma (saveData) yakalanır; Firestore'a hiçbir şey yazılmaz.
+    async k3BackupAndVipLoop(page, browser) {
+        const out = {};
+        // index.html: UAB "Yedek Al" de aynı kanonik biçimi üretir
+        out.index = await page.evaluate(() => {
+            const S = window.BackupService, orig = { dl: S && S._download, chk: window.checkIsAdmin, alert: window.showAppAlert };
+            if (!S) return { loaded: false };
+            let file = null;
+            S._download = (name, json) => { file = { name, json }; };
+            window.checkIsAdmin = () => true; window.showAppAlert = () => {};
+            try { window.exportFirebaseBackup(); } finally { S._download = orig.dl; window.checkIsAdmin = orig.chk; window.showAppAlert = orig.alert; }
+            const b = file ? JSON.parse(file.json) : {};
+            return { loaded: true, name: file && file.name, version: b.version, root: b.root, source: b.source,
+                     keysOk: Object.keys(b.data || {}).every(k => window.COLLECTIONS.includes(k)), envelope: Object.keys(b).sort().join(',') };
+        });
+
+        const admin = await (await browser.createBrowserContext()).newPage();
+        const errs = []; admin.on('pageerror', e => errs.push(e.message)); admin.on('dialog', d => d.dismiss());
+        await admin.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+        await admin.goto(page.url().replace('index.html', 'admin.html'), { waitUntil: 'domcontentloaded' });
+        await new Promise(r => setTimeout(r, 9000));
+        try {
+            out.admin = await admin.evaluate(async () => {
+                const o = {}, S = window.BackupService;
+                o.loaded = !!S;
+                o.vipRestoreInjected = !!document.getElementById('vipRestoreBtn') && !!document.getElementById('vipRestoreInput');
+                const orig = { dl: S._download, save: window.saveData, adm: window.isDbAdmin, conf: window.showCustomConfirm, alert: window.showAppAlert, data: window.data, reload: S.reloadAfterRestore };
+                const alerts = [], saves = [], confirms = [];
+                let answer = true, saveFails = false;
+                let vipFile = null;
+                S._download = (name, json) => { vipFile = { name, json }; };
+                S.reloadAfterRestore = false;
+                window.showAppAlert = (m, t) => alerts.push(t);
+                window.isDbAdmin = () => true;
+                window.showCustomConfirm = async (title, node, opts) => { confirms.push({ text: node.textContent, confirmText: opts && opts.confirmText }); return answer; };
+                window.saveData = async (obj, opts) => { if (saveFails) throw new Error('schema-violation (test)'); saves.push({ b1: obj.b1, opts }); return { ok: true }; };
+                const root = window.COLLECTION_ROOT;
+                const canon = (r, b1) => JSON.stringify({ version: '3.2', root: r, timestamp: '2026-10-13T00:00:00Z', source: 'vip', data: { b1 } });
+                try {
+                    // VIP "1-Tık DB Snapshot" → kanonik yedek
+                    window.vipBackupDatabase();
+                    const vb = vipFile ? JSON.parse(vipFile.json) : {};   // dosya içeriği rapora girmez (seed'deki kodlar dahil)
+                    o.vipExport = { version: vb.version, root: vb.root, source: vb.source, envelope: Object.keys(vb).sort().join(','),
+                                    noAuditLogs: !('auditLogs' in (vb.data || {})), keysOk: Object.keys(vb.data || {}).every(k => window.COLLECTIONS.includes(k)) };
+
+                    // 1) farklı ortamın yedeği → engellenir, onay bile sorulmaz, yazma yok
+                    o.wrongRoot = (await S.restoreFromText(canon(root === 'inventory_demo' ? 'lifeserver_master' : 'inventory_demo', [{ id: 'x' }]))).status;
+                    o.wrongRootNoConfirm = confirms.length === 0 && saves.length === 0;
+                    // 2) geçersiz dosya
+                    o.invalid = (await S.restoreFromText('{bozuk json')).status;
+                    // 3) doğru ortam, kullanıcı vazgeçer → yazma yok
+                    answer = false;
+                    o.cancelled = (await S.restoreFromText(canon(root, [{ id: 'k3bk_1', ürün: 'Yedek Ürün' }]))).status;
+                    o.cancelNoWrite = saves.length === 0;
+                    o.previewText = confirms[0] && confirms[0].text;
+                    // 4) doğru ortam, onay → saveData tek çağrı, yedekteki b1 + bilinçli seçenekler
+                    answer = true;
+                    const restored = await S.restoreFromText(canon(root, [{ id: 'k3bk_1', ürün: 'Yedek Ürün' }]));
+                    o.restored = restored.status;
+                    o.restoreWrite = saves.length === 1 && saves[0].b1.length === 1 && saves[0].b1[0].id === 'k3bk_1'
+                        && saves[0].opts.allowBulkDelete === true && saves[0].opts.b3Legacy === true;
+                    o.summaryB1 = (restored.summary || []).find(s => s.col === 'b1');
+                    // 5) eski VIP ham dökümü → doğrulanmamış uyarısı + ayrı onay metni
+                    const before = confirms.length;
+                    o.legacy = (await S.restoreFromText(JSON.stringify({ b1: [{ id: 'old1' }], auditLogs: [{ id: 'a' }] }))).status;
+                    o.legacyPreview = confirms[before] && { verifiedWarn: /ortam bilgisi yok/i.test(confirms[before].text), auditSkipped: /auditLogs/.test(confirms[before].text), confirmText: confirms[before].confirmText };
+                    // 6) yazma başarısız → bellek eski hâline döner
+                    saveFails = true;
+                    const dataBefore = window.data;
+                    o.failed = (await S.restoreFromText(canon(root, [{ id: 'k3bk_2' }]))).status;
+                    o.memoryRolledBack = window.data === dataBefore;
+                    saveFails = false;
+                    // 7) admin olmayan oturum → hiçbir şey sorulmaz
+                    window.isDbAdmin = () => false;
+                    const c0 = confirms.length;
+                    o.forbidden = (await S.restoreFromText(canon(root, [{ id: 'x' }]))).status;
+                    o.forbiddenNoConfirm = confirms.length === c0;
+                } finally {
+                    S._download = orig.dl; S.reloadAfterRestore = orig.reload;
+                    Object.assign(window, { saveData: orig.save, isDbAdmin: orig.adm, showCustomConfirm: orig.conf, showAppAlert: orig.alert });
+                    window.data = orig.data;
+                }
+
+                // ── VIP-08: sağlık döngüsü yalnız VIP sekmesi görünürken ──
+                const H = window.AppModules.VipHealth, wait = ms => new Promise(r => setTimeout(r, ms));
+                o.vip = { api: !!H, idleBeforeOpen: H && !H.isRunning() };
+                window.showAdminTab('systemControlTab'); await wait(1600);
+                o.vip.runningInVip = H.isRunning();
+                const t1 = H.ticks(); o.vip.ticksInVip = t1 > 0;
+                window.showAdminTab('dashboard-content'); await wait(50);
+                o.vip.stoppedAfterLeave = !H.isRunning();
+                const t2 = H.ticks(); await wait(2200);
+                o.vip.noTicksWhileAway = H.ticks() === t2;
+                window.showAdminTab('systemControlTab'); await wait(400);
+                o.vip.restartedOnReturn = H.isRunning();
+                // tarayıcı sekmesi arka plana → durur; öne → yeniden başlar
+                Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+                document.dispatchEvent(new Event('visibilitychange'));
+                o.vip.stoppedWhenHidden = !H.isRunning();
+                Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+                document.dispatchEvent(new Event('visibilitychange'));
+                o.vip.resumedWhenVisible = H.isRunning();
+                delete document.hidden;
+                window.showAdminTab('dashboard-content'); await wait(50);
+                o.vip.finalStopped = !H.isRunning();
+                return o;
+            });
+        } finally {
+            out.adminPageErrors = errs;
+            await admin.browserContext().close();
+        }
+
+        const a = out.admin || {}, v = a.vip || {};
+        const canonEnv = 'data,root,source,timestamp,version';
+        out.ok = out.index.loaded && out.index.version === '3.2' && out.index.root === 'inventory_demo' && out.index.source === 'admin'
+            && out.index.envelope === canonEnv && out.index.keysOk
+            && a.loaded && a.vipRestoreInjected
+            && a.vipExport.version === '3.2' && a.vipExport.root === 'inventory_demo' && a.vipExport.source === 'vip'
+            && a.vipExport.envelope === canonEnv && a.vipExport.noAuditLogs && a.vipExport.keysOk
+            && a.wrongRoot === 'wrong-root' && a.wrongRootNoConfirm && a.invalid === 'invalid'
+            && a.cancelled === 'cancelled' && a.cancelNoWrite && /Ortam eşleşiyor/.test(a.previewText || '') && /Silinecek/.test(a.previewText || '')
+            && a.restored === 'restored' && a.restoreWrite && a.summaryB1 && a.summaryB1.backup === 1
+            && a.legacy === 'restored' && a.legacyPreview && a.legacyPreview.verifiedWarn && a.legacyPreview.auditSkipped
+            && /Doğrulanmamış/.test(a.legacyPreview.confirmText || '')
+            && a.failed === 'failed' && a.memoryRolledBack && a.forbidden === 'forbidden' && a.forbiddenNoConfirm
+            && v.api && v.idleBeforeOpen && v.runningInVip && v.ticksInVip && v.stoppedAfterLeave && v.noTicksWhileAway
+            && v.restartedOnReturn && v.stoppedWhenHidden && v.resumedWhenVisible && v.finalStopped
+            && out.adminPageErrors.length === 0;
+        if (!out.ok) throw new Error('k3BackupAndVipLoop beklenen sözleşmede değil: ' + JSON.stringify(out));
         return out;
     },
 

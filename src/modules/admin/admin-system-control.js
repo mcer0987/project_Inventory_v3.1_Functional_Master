@@ -1,29 +1,29 @@
 /**
- * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
- *  ğŸŒŒ SÄ°STEM KONTROL MERKEZÄ° â€” VIP EXCLUSIVE JS ENGINE
- * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
- *  Bu modÃ¼l, Admin'e tam sistem hakimiyeti sunar.
- *  - GeliÅŸmiÅŸ Konsol Interceptor (log/warn/error/info + onerror)
- *  - Sistem SaÄŸlÄ±k MonitÃ¶rÃ¼ (memory, network, uptime, data size)
+ * ═══════════════════════════════════════════════════════════════════
+ *  🌌 SİSTEM KONTROL MERKEZİ — VIP EXCLUSIVE JS ENGINE
+ * ═══════════════════════════════════════════════════════════════════
+ *  Bu modül, Admin'e tam sistem hakimiyeti sunar.
+ *  - Gelişmiş Konsol Interceptor (log/warn/error/info + onerror)
+ *  - Sistem Sağlık Monitörü (memory, network, uptime, data size)
  *  - Operasyon Raporu (count-up animasyonlu)
  *  - Debug & Hata Takip Paneli
- *  - SortableJS SÃ¼rÃ¼kle-BÄ±rak (geliÅŸtirilmiÅŸ)
- *  - Oturum & GÃ¼venlik Widget'Ä±
- * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  - SortableJS Sürükle-Bırak (geliştirilmiş)
+ *  - Oturum & Güvenlik Widget'ı
+ * ═══════════════════════════════════════════════════════════════════
  */
 
 (function () {
     'use strict';
 
-    // Sayfa yÃ¼klendiÄŸinde baÅŸlat
+    // Sayfa yüklendiğinde başlat
     const _pageLoadTime = Date.now();
     let _logFilter = 'all';
     let _logCount = { info: 0, warn: 0, error: 0, success: 0 };
     let _runtimeErrors = [];
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 1. GELÄ°ÅMÄ°Å KONSOL INTERCEPTOR
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 1. GELİŞMİŞ KONSOL INTERCEPTOR
+    // ═══════════════════════════════════════════════════════════════
 
     const _originals = {
         log: console.log,
@@ -69,7 +69,7 @@
             <span class="log-msg">${_escapeHtml(msg)}</span>
         `;
 
-        // Filter kontrolÃ¼
+        // Filter kontrolü
         if (_logFilter !== 'all' && type !== _logFilter) {
             div.style.display = 'none';
         }
@@ -114,9 +114,9 @@
         _appendLog('info', args);
     };
 
-    // Global hata yakalayÄ±cÄ±
+    // Global hata yakalayıcı
     window.addEventListener('error', function (e) {
-        const errMsg = `${e.message} â€” ${e.filename || 'unknown'}:${e.lineno || '?'}`;
+        const errMsg = `${e.message} — ${e.filename || 'unknown'}:${e.lineno || '?'}`;
         _appendLog('error', ['[RUNTIME ERROR]', errMsg]);
         _runtimeErrors.push({
             message: e.message,
@@ -137,9 +137,9 @@
     });
 
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 2. TERMINAL KONTROL FONKSÄ°YONLARI
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 2. TERMINAL KONTROL FONKSİYONLARI
+    // ═══════════════════════════════════════════════════════════════
 
     window.vipClearTerminal = function () {
         const terminal = _getTerminal();
@@ -147,7 +147,7 @@
             terminal.innerHTML = '';
             _logCount = { info: 0, warn: 0, error: 0, success: 0 };
             _updateLogCountBadges();
-            _appendLog('success', ['ğŸ§¹ Terminal temizlendi.']);
+            _appendLog('success', ['🧹 Terminal temizlendi.']);
         }
     };
 
@@ -156,7 +156,7 @@
         const terminal = _getTerminal();
         if (!terminal) return;
 
-        // TÃ¼m loglarÄ±n gÃ¶rÃ¼nÃ¼rlÃ¼ÄŸÃ¼nÃ¼ gÃ¼ncelle
+        // Tüm logların görünürlüğünü güncelle
         terminal.querySelectorAll('.log-entry').forEach(el => {
             if (type === 'all') {
                 el.style.display = '';
@@ -165,7 +165,7 @@
             }
         });
 
-        // Buton aktif durumunu gÃ¼ncelle
+        // Buton aktif durumunu güncelle
         document.querySelectorAll('.vip-filter-btn').forEach(b => b.classList.remove('active'));
         if (btn) btn.classList.add('active');
     };
@@ -180,9 +180,9 @@
     }
 
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 3. SÄ°STEM SAÄLIK MONÄ°TÃ–RÃœ
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 3. SİSTEM SAĞLIK MONİTÖRÜ
+    // ═══════════════════════════════════════════════════════════════
 
     function _updateSystemHealth() {
         // Uptime
@@ -216,9 +216,9 @@
         if (netEl) {
             const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
             if (conn) {
-                netEl.textContent = `${conn.effectiveType?.toUpperCase() || '?'} â€” ${conn.downlink || '?'} Mbps`;
+                netEl.textContent = `${conn.effectiveType?.toUpperCase() || '?'} — ${conn.downlink || '?'} Mbps`;
             } else {
-                netEl.textContent = navigator.onLine ? 'Ã‡evrimiÃ§i' : 'Ã‡evrimdÄ±ÅŸÄ±';
+                netEl.textContent = navigator.onLine ? 'Çevrimiçi' : 'Çevrimdışı';
             }
         }
 
@@ -229,7 +229,7 @@
         }
         const fbText = document.getElementById('vipFirebaseText');
         if (fbText) {
-            fbText.textContent = navigator.onLine ? 'BaÄŸlÄ±' : 'BaÄŸlantÄ± Kesildi';
+            fbText.textContent = navigator.onLine ? 'Bağlı' : 'Bağlantı Kesildi';
             fbText.style.color = navigator.onLine ? 'var(--vip-matrix)' : 'var(--vip-danger)';
         }
 
@@ -241,13 +241,13 @@
                 const sizeKB = (new Blob([jsonStr]).size / 1024).toFixed(1);
                 const b1Count = Array.isArray(window.data.b1) ? window.data.b1.length : Object.keys(window.data.b1 || {}).length;
                 const b2Count = Array.isArray(window.data.b2) ? window.data.b2.length : Object.keys(window.data.b2 || {}).length;
-                dataEl.textContent = `${sizeKB} KB â€” ${b1Count + b2Count} kayÄ±t`;
+                dataEl.textContent = `${sizeKB} KB — ${b1Count + b2Count} kayıt`;
             } catch (e) {
-                dataEl.textContent = 'HesaplanamadÄ±';
+                dataEl.textContent = 'Hesaplanamadı';
             }
         }
 
-        // DOM dÃ¼ÄŸÃ¼m sayÄ±sÄ±
+        // DOM düğüm sayısı
         const domEl = document.getElementById('vipDomNodes');
         if (domEl) {
             domEl.textContent = document.querySelectorAll('*').length.toLocaleString('tr-TR');
@@ -255,9 +255,9 @@
     }
 
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 4. OPERASYON RAPORU â€” COUNT-UP ANÄ°MASYONLU
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 4. OPERASYON RAPORU — COUNT-UP ANİMASYONLU
+    // ═══════════════════════════════════════════════════════════════
 
     function _animateCountUp(elementId, targetValue, duration) {
         const el = document.getElementById(elementId);
@@ -289,7 +289,7 @@
         const b3Arr = Array.isArray(b3) ? b3 : Object.values(b3);
         const reqArr = Array.isArray(requests) ? requests : Object.values(requests);
 
-        // Toplam stok miktarÄ±
+        // Toplam stok miktarı
         let totalStock = 0;
         [...b1Arr, ...b2Arr].forEach(item => {
             if (item && (item.durumu !== 'Pasif' && item.status !== 'Pasif')) {
@@ -310,10 +310,10 @@
             if (qty <= limit) criticalCount++;
         });
 
-        // ÃœrÃ¼n tÃ¼rÃ¼ sayÄ±sÄ±
+        // Ürün türü sayısı
         const typeCount = (window.data.productTypes || []).length;
 
-        // Animasyonlu sayaÃ§larÄ± baÅŸlat
+        // Animasyonlu sayaçları başlat
         _animateCountUp('opsProducts', totalProducts, 1200);
         _animateCountUp('opsStock', totalStock, 1400);
         _animateCountUp('opsExits', totalExits, 1000);
@@ -323,39 +323,39 @@
     }
 
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 5. DEBUG & HATA TAKÄ°P PANELÄ°
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 5. DEBUG & HATA TAKİP PANELİ
+    // ═══════════════════════════════════════════════════════════════
 
     function _renderDebugPanel() {
         const container = document.getElementById('vipDebugList');
         if (!container) return;
 
-        // Statik (bilinen) hatalar/geliÅŸtirmeler
+        // Statik (bilinen) hatalar/geliştirmeler
         const knownItems = [
-            { status: 'resolved', title: 'Chart.js Canvas Bellek SÄ±zÄ±ntÄ±sÄ±', desc: 'destroy() Ã§aÄŸrÄ±sÄ± eklenerek Ã§Ã¶zÃ¼ldÃ¼', badge: 'Ã‡Ã¶zÃ¼ldÃ¼' },
-            { status: 'resolved', title: 'Sub-collection Veri Mimarisi', desc: 'Tek-dÃ¶kÃ¼man yapÄ±sÄ±ndan alt koleksiyon mimarisine geÃ§iÅŸ', badge: 'TamamlandÄ±' },
-            { status: 'resolved', title: 'Firebase Chunk Yazma (500lÃ¼k)', desc: 'BÃ¼yÃ¼k veri setleri iÃ§in parÃ§alÄ± kayÄ±t', badge: 'TamamlandÄ±' },
-            { status: 'resolved', title: 'SHA-256 GÃ¼venlik Hash', desc: 'Åifrelerin geri dÃ¶ndÃ¼rÃ¼lemez hash ile saklanmasÄ±', badge: 'Aktif' },
-            { status: 'resolved', title: 'SortableJS Entegrasyonu', desc: 'VIP widget sÃ¼rÃ¼kle-bÄ±rak motoru', badge: 'TamamlandÄ±' },
-            { status: 'resolved', title: 'Console Interceptor', desc: 'CanlÄ± log yakalama ve terminal akÄ±ÅŸÄ±', badge: 'Aktif' },
-            { status: 'active', title: 'VIP Kontrol Merkezi v2.0', desc: 'Premium UI yeniden inÅŸasÄ± â€” aktif geliÅŸtirme', badge: 'Devam Ediyor' }
+            { status: 'resolved', title: 'Chart.js Canvas Bellek Sızıntısı', desc: 'destroy() çağrısı eklenerek çözüldü', badge: 'Çözüldü' },
+            { status: 'resolved', title: 'Sub-collection Veri Mimarisi', desc: 'Tek-döküman yapısından alt koleksiyon mimarisine geçiş', badge: 'Tamamlandı' },
+            { status: 'resolved', title: 'Firebase Chunk Yazma (500lük)', desc: 'Büyük veri setleri için parçalı kayıt', badge: 'Tamamlandı' },
+            { status: 'resolved', title: 'SHA-256 Güvenlik Hash', desc: 'Şifrelerin geri döndürülemez hash ile saklanması', badge: 'Aktif' },
+            { status: 'resolved', title: 'SortableJS Entegrasyonu', desc: 'VIP widget sürükle-bırak motoru', badge: 'Tamamlandı' },
+            { status: 'resolved', title: 'Console Interceptor', desc: 'Canlı log yakalama ve terminal akışı', badge: 'Aktif' },
+            { status: 'active', title: 'VIP Kontrol Merkezi v2.0', desc: 'Premium UI yeniden inşası — aktif geliştirme', badge: 'Devam Ediyor' }
         ];
 
-        // Runtime hatalarÄ±nÄ± ekle
+        // Runtime hatalarını ekle
         _runtimeErrors.forEach(err => {
             knownItems.push({
                 status: 'critical',
                 title: err.message.substring(0, 60),
-                desc: `${err.file || 'bilinmeyen'} @ satÄ±r ${err.line || '?'}`,
+                desc: `${err.file || 'bilinmeyen'} @ satır ${err.line || '?'}`,
                 badge: 'Runtime Hata'
             });
         });
 
         const statusIcons = {
-            resolved: 'âœ…',
-            active: 'âš ï¸',
-            critical: 'ğŸ”´'
+            resolved: '✅',
+            active: '⚠️',
+            critical: '🔴'
         };
 
         container.innerHTML = knownItems.map(item => `
@@ -371,12 +371,12 @@
     }
 
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 6. PLATFORM & DONANIM ANALÄ°ZÄ°
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 6. PLATFORM & DONANIM ANALİZİ
+    // ═══════════════════════════════════════════════════════════════
 
     function _updatePlatformInfo() {
-        // TarayÄ±cÄ± Motoru
+        // Tarayıcı Motoru
         const browserEl = document.getElementById('vipBrowserEngine');
         if (browserEl) {
             const ua = navigator.userAgent;
@@ -388,16 +388,16 @@
             browserEl.textContent = engine;
         }
 
-        // Ekran Ã§Ã¶zÃ¼nÃ¼rlÃ¼ÄŸÃ¼
+        // Ekran çözünürlüğü
         const screenEl = document.getElementById('vipScreenRes');
         if (screenEl) {
-            screenEl.textContent = `${window.screen.width}Ã—${window.screen.height} (${window.devicePixelRatio}x)`;
+            screenEl.textContent = `${window.screen.width}×${window.screen.height} (${window.devicePixelRatio}x)`;
         }
 
         // Viewport
         const viewportEl = document.getElementById('vipViewport');
         if (viewportEl) {
-            viewportEl.textContent = `${window.innerWidth}Ã—${window.innerHeight}`;
+            viewportEl.textContent = `${window.innerWidth}×${window.innerHeight}`;
         }
 
         // OS/Platform
@@ -424,23 +424,23 @@
             lsEl.textContent = (totalSize / 1024).toFixed(1) + ' KB';
         }
 
-        // Ã‡erez durumu
+        // Çerez durumu
         const cookieEl = document.getElementById('vipCookies');
         if (cookieEl) {
-            cookieEl.textContent = navigator.cookieEnabled ? 'Aktif' : 'Devre DÄ±ÅŸÄ±';
+            cookieEl.textContent = navigator.cookieEnabled ? 'Aktif' : 'Devre Dışı';
         }
 
-        // DonanÄ±m Ã§ekirdek sayÄ±sÄ±
+        // Donanım çekirdek sayısı
         const coreEl = document.getElementById('vipCores');
         if (coreEl) {
-            coreEl.textContent = (navigator.hardwareConcurrency || '?') + ' Ã‡ekirdek';
+            coreEl.textContent = (navigator.hardwareConcurrency || '?') + ' Çekirdek';
         }
     }
 
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 7. OTURUM & GÃœVENLÄ°K WIDGET'I
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 7. OTURUM & GÜVENLİK WIDGET'I
+    // ═══════════════════════════════════════════════════════════════
 
     function _updateSessionInfo() {
         const countdownEl = document.getElementById('vipSessionTime');
@@ -448,7 +448,7 @@
         const userEl = document.getElementById('vipActiveUser');
         const securityBars = document.querySelectorAll('#vipSecurityLevel .security-bar');
 
-        // Oturum geri sayÄ±m
+        // Oturum geri sayım
         const authData = localStorage.getItem('admin_auth');
         if (authData && countdownEl) {
             try {
@@ -458,7 +458,7 @@
                 const secs = Math.floor((remaining % 60000) / 1000);
                 countdownEl.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
-                // 1 dakikadan az kaldÄ±ysa uyarÄ± modu
+                // 1 dakikadan az kaldıysa uyarı modu
                 if (remaining < 60000) {
                     countdownEl.classList.add('warning');
                 } else {
@@ -474,26 +474,26 @@
             }
         }
 
-        // Son giriÅŸ zamanÄ±
+        // Son giriş zamanı
         if (lastLoginEl) {
             const now = new Date();
             lastLoginEl.textContent = now.toLocaleDateString('tr-TR') + ' ' + now.toLocaleTimeString('tr-TR', { hour12: false });
         }
 
-        // Aktif kullanÄ±cÄ±
+        // Aktif kullanıcı
         if (userEl) {
             const user = window.getActiveUser();
             userEl.textContent = (user && user.name) || 'Admin';
         }
 
-        // GÃ¼venlik seviyesi (5 barlÄ±)
+        // Güvenlik seviyesi (5 barlı)
         if (securityBars.length) {
             let level = 0;
-            if (typeof SecurityConfig !== 'undefined') level++; // SHA-256 tanÄ±mlÄ±
+            if (typeof SecurityConfig !== 'undefined') level++; // SHA-256 tanımlı
             if (localStorage.getItem('admin_auth')) level++;      // Oturum aktif
             if (window.location.protocol === 'https:' || window.location.hostname === 'localhost') level++; // HTTPS veya localhost
-            if (navigator.cookieEnabled) level++;                  // Ã‡erez aktif
-            level++; // VarsayÄ±lan 1 puan â€” uygulama Ã§alÄ±ÅŸÄ±yor
+            if (navigator.cookieEnabled) level++;                  // Çerez aktif
+            level++; // Varsayılan 1 puan — uygulama çalışıyor
 
             securityBars.forEach((bar, i) => {
                 bar.classList.toggle('active', i < level);
@@ -502,15 +502,15 @@
     }
 
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 8. SORTABLEJS ENTEGRASYONU (GELÄ°ÅTÄ°RÄ°LMÄ°Å)
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 8. SORTABLEJS ENTEGRASYONU (GELİŞTİRİLMİŞ)
+    // ═══════════════════════════════════════════════════════════════
 
     function _initSortable() {
         const grid = document.getElementById('vipGrid');
         if (!grid || typeof Sortable === 'undefined') return;
 
-        // KayÄ±tlÄ± dizilimi yÃ¼kle
+        // Kayıtlı dizilimi yükle
         const savedOrder = localStorage.getItem('vipLayoutOrder');
         if (savedOrder) {
             try {
@@ -523,7 +523,7 @@
             } catch (e) { /* Bozuk veri, atla */ }
         }
 
-        // Sortable'Ä± baÅŸlat
+        // Sortable'ı başlat
         new Sortable(grid, {
             animation: 400,
             easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
@@ -540,7 +540,7 @@
                 grid.style.transition = '';
                 const newOrder = Array.from(grid.children).map(el => el.getAttribute('data-id'));
                 localStorage.setItem('vipLayoutOrder', JSON.stringify(newOrder));
-                _appendLog('success', ['ğŸ“ Widget dizilimi kaydedildi.']);
+                _appendLog('success', ['📌 Widget dizilimi kaydedildi.']);
             }
         });
     }
@@ -562,7 +562,7 @@
             });
         });
 
-        // KayÄ±tlÄ± collapse durumlarÄ±nÄ± yÃ¼kle
+        // Kayıtlı collapse durumlarını yükle
         try {
             const collapsed = JSON.parse(localStorage.getItem('vipCollapsedWidgets') || '{}');
             Object.entries(collapsed).forEach(([id, isCollapsed]) => {
@@ -575,39 +575,71 @@
     }
 
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 9. DÄ°ZÄ°LÄ°MÄ° SIFIRLAMA
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 9. DİZİLİMİ SIFIRLAMA
+    // ═══════════════════════════════════════════════════════════════
 
     window.resetVipLayout = function () {
         localStorage.removeItem('vipLayoutOrder');
         localStorage.removeItem('vipCollapsedWidgets');
-        _appendLog('warn', ['ğŸ”„ VIP dizilim sÄ±fÄ±rlandÄ±. Sayfa yenileniyor...']);
+        _appendLog('warn', ['🔄 VIP dizilim sıfırlandı. Sayfa yenileniyor...']);
         setTimeout(() => location.reload(), 500);
     };
 
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 10. VIP SEKME AKTÄ°FLEÅTÄ°ÄÄ°NDE BAÅLATMA
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 10. VIP SEKME AKTİFLEŞTİĞİNDE BAŞLATMA
+    // ═══════════════════════════════════════════════════════════════
 
     let _vipInitialized = false;
     let _healthInterval = null;
     let _sessionInterval = null;
 
+    // [WHY] (Faz 5 · K3 · 5.5 · VIP-08): Sağlık/oturum döngüsü (_updateSystemHealth + _updateSessionInfo, saniyede bir DOM
+    //        yazımı ve performance.memory okuması) VIP sekmesi bir kez açılınca sayfa kapanana kadar çalışıyordu — kullanıcı
+    //        başka sekmeye geçse, tarayıcı sekmesi arka plana alınsa da. Görünmeyen öğelere sonsuz CPU/DOM işi.
+    // [HOW]: Döngü yalnız VIP sekmesi (#systemControlTab) görünür VE tarayıcı sekmesi ön plandayken çalışır. Sekmeden çıkınca
+    //        (AdminTabs.onAny) ve sayfa gizlenince (visibilitychange) clearInterval; geri dönünce tek tazeleme + yeniden başlatma.
+    //        _startHealthLoop idempotent (ikinci interval asla açılmaz). Teşhis: AppModules.VipHealth.{isRunning, ticks}.
+    let _healthTicks = 0;
+    function _isVipTabVisible() {
+        const tab = document.getElementById('systemControlTab');
+        return !!tab && tab.style.display !== 'none' && !document.hidden;
+    }
+    function _startHealthLoop() {
+        if (_healthInterval !== null || !_isVipTabVisible()) return;
+        _healthInterval = setInterval(() => {
+            _healthTicks++;
+            _updateSystemHealth();
+            _updateSessionInfo();
+        }, 1000);
+    }
+    function _stopHealthLoop() {
+        if (_healthInterval === null) return;
+        clearInterval(_healthInterval);
+        _healthInterval = null;
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) { _stopHealthLoop(); return; }
+        if (_vipInitialized && _isVipTabVisible()) { _updateSystemHealth(); _updateSessionInfo(); _startHealthLoop(); }
+    });
+    window.AppModules = window.AppModules || {};
+    window.AppModules.VipHealth = { isRunning: () => _healthInterval !== null, ticks: () => _healthTicks };
+
     function _initVipPanel() {
         if (_vipInitialized) {
-            // Zaten baÅŸlatÄ±lmÄ±ÅŸ, sadece gÃ¼ncelle
+            // Zaten başlatılmış, sadece güncelle
             _updateOpsReport();
             _updateSystemHealth();
             _updateSessionInfo();
             _renderDebugPanel();
+            _startHealthLoop();   // VIP-08: sekmeye geri dönüşte döngü yeniden başlar
             return;
         }
 
         _vipInitialized = true;
 
-        // TÃ¼m modÃ¼lleri baÅŸlat
+        // Tüm modülleri başlat
         _initSortable();
         _initCollapse();
         _updatePlatformInfo();
@@ -616,49 +648,37 @@
         _updateSystemHealth();
         _updateSessionInfo();
 
-        // Periyodik gÃ¼ncellemeler
-        _healthInterval = setInterval(() => {
-            _updateSystemHealth();
-            _updateSessionInfo();
-        }, 1000);
+        // Periyodik güncellemeler
+        _startHealthLoop();   // VIP-08: yalnız VIP sekmesi görünürken (bkz. _startHealthLoop)
 
-        // VIP terminal aÃ§Ä±lÄ±ÅŸ mesajÄ±
+        // VIP terminal açılış mesajı
         setTimeout(() => {
-            _appendLog('success', ['ğŸŒŒ VIP Sistem Kontrol Merkezi v2.0 aktif.']);
-            _appendLog('info', ['ğŸ“¡ Konsol kancalama baÅŸarÄ±lÄ± â€” tÃ¼m loglar burada.']);
+            _appendLog('success', ['🌌 VIP Sistem Kontrol Merkezi v2.0 aktif.']);
+            _appendLog('info', ['📡 Konsol kancalama başarılı — tüm loglar burada.']);
         }, 300);
 
-        // Viewport deÄŸiÅŸimlerini dinle
+        // Viewport değişimlerini dinle
         window.addEventListener('resize', _updatePlatformInfo);
         
         // [WHY]: Her 15 sn gerçek terminale sahte "X kullanıcısı talep onayladı" logu basılıyordu (VIP-03); kaldırıldı.
         //        God-Eye radarı gerçek presence gelene kadar DEMO olarak etiketli (Karar K8-b).
     }
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // 7. YENÄ° VIP Ã–ZELLÄ°KLERÄ° (God-Eye, Backup, Kill Switch)
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════════
+    // 7. YENİ VIP ÖZELLİKLERİ (God-Eye, Backup, Kill Switch)
+    // ═══════════════════════════════════════════════════════════════
 
-    // 1-TÄ±k VeritabanÄ± YedeÄŸi
+    // 1-Tık Veritabanı Yedeği
+    // [WHY] (Faz 5 · K3 · 5.3 · ADM-06): Bu düğme window.data'nın ham dökümünü (sarmalayıcısız, ortam bilgisiz; auditLogs gibi
+    //        uygulama dışı anahtarlar dahil) indiriyordu — index'teki "Yedek Al"dan farklı bir biçim.
+    // [HOW]: Birleşik yedekleme servisine (admin-backup.js, BackupService) devredilir: kanonik { version:'3.2', root, timestamp, data }.
     window.vipBackupDatabase = function() {
         try {
-            const dataToBackup = window.data || {};
-            const jsonStr = JSON.stringify(dataToBackup, null, 2);
-            const blob = new Blob([jsonStr], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement("a");
-            a.href = url;
-            const dateStr = new Date().toISOString().split('T')[0];
-            a.download = `ITSM_Backup_${dateStr}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            _appendLog('success', ['ğŸ’¾ VeritabanÄ± yedeÄŸi baÅŸarÄ±yla indirildi.']);
+            if (!window.BackupService) throw new Error('yedekleme servisi yüklenmedi');
+            const b = window.BackupService.exportBackup({ source: 'vip' });
+            _appendLog('success', [`💾 Kanonik yedek indirildi (v${b.version} · ${b.root} · ${Object.keys(b.data).length} koleksiyon).`]);
         } catch (error) {
-            _appendLog('error', ['ğŸ’¾ Yedekleme sÄ±rasÄ±nda hata oluÅŸtu: ' + error.message]);
+            _appendLog('error', ['💾 Yedekleme sırasında hata oluştu: ' + error.message]);
         }
     };
 
@@ -870,7 +890,7 @@
 
     // Global Kill Switch
     // [WHY]: Kill Switch (Sistemi Kapatma) komutu localStorage'da tutuluyordu, DevTools ile bypass edilebiliyordu.
-    // [HOW]: ArtÄ±k Firestore Ã¼zerindeki 'system_config/admin_settings' dÃ¶kÃ¼manÄ±na asenkron yazÄ±yor. Sadece Firebase Auth ile doÄŸrulanmÄ±ÅŸ adminler bu veriyi deÄŸiÅŸtirebilir.
+    // [HOW]: Artık Firestore üzerindeki 'system_config/admin_settings' dökümanına asenkron yazıyor. Sadece Firebase Auth ile doğrulanmış adminler bu veriyi değiştirebilir.
     // [WHY]: Buton durumu yalnız tıklanınca güncelleniyordu; sayfa yenilenince bakım açıkken bile "GLOBAL KILL SWITCH"
     //        görünüyor, bir sonraki tıklama körlemesine ters yöne çeviriyordu (VIP-07). Uyarı metni kuralların kullanıcıları
     //        engellediğini söylüyordu; oysa bakım modu yalnız istemci tarafında (RULE-05, Faz 4.2).
@@ -929,49 +949,34 @@
         }
     };
 
-    // showAdminTab interceptor â€” VIP sekmesi aÃ§Ä±ldÄ±ÄŸÄ±nda baÅŸlat
-    function _hookShowAdminTab() {
-        // showAdminTab henÃ¼z tanÄ±mlÄ± deÄŸilse tekrar dene
-        if (typeof window.showAdminTab !== 'function') {
-            setTimeout(_hookShowAdminTab, 200);
-            return;
+    // Faz 5 · K3 (5.7 · ARC-07): showAdminTab'ı sarmalayan eski monkey-patch + 200ms'lik retry döngüsü kaldırıldı.
+    // script.js'te her zaman hazır olan merkezi kanca siciline (AppModules.AdminTabs) kaydolunuyor — her sekme
+    // değişiminde (tabId ne olursa olsun) çalışır, VIP sekmesine giriş/çıkışı kendi içinde ayırt eder.
+    window.AppModules.AdminTabs.onAny(function (tabId) {
+        // ── VIP Portal Modu ──
+        const sidebar = document.querySelector('.sidebar');
+        const mainContent = document.querySelector('.main-content');
+        const isVip = (tabId === 'systemControlTab');
+
+        if (isVip) {
+            // VIP dünyasına geçiş
+            if (sidebar) sidebar.classList.add('vip-active');
+            if (mainContent) mainContent.classList.add('vip-bg');
+            document.body.classList.add('vip-portal-active');
+
+            // [WHY]: Yerel _initVipPanel çağrılıyordu; window._initVipPanel sarmalayıcı zinciri (buton durumları, radar
+            //        tıklamaları) hiç çalışmıyordu, aktivite paneli / mesaj / oturum sonlandırma ulaşılamazdı (VIP-04).
+            requestAnimationFrame(() => {
+                setTimeout(() => window._initVipPanel(), 50);
+            });
+        } else {
+            // Normal dünyaya dönüş
+            if (sidebar) sidebar.classList.remove('vip-active');
+            if (mainContent) mainContent.classList.remove('vip-bg');
+            document.body.classList.remove('vip-portal-active');
+            _stopHealthLoop();   // VIP-08: VIP sekmesi kapanınca sağlık döngüsü durur
         }
-
-        const originalFn = window.showAdminTab;
-        window.showAdminTab = function (tabId) {
-            originalFn.call(this, tabId);
-
-            // â”€â”€ VIP Portal Modu â”€â”€
-            const sidebar = document.querySelector('.sidebar');
-            const mainContent = document.querySelector('.main-content');
-            const isVip = (tabId === 'systemControlTab');
-
-            if (isVip) {
-                // VIP dÃ¼nyasÄ±na geÃ§iÅŸ
-                if (sidebar) sidebar.classList.add('vip-active');
-                if (mainContent) mainContent.classList.add('vip-bg');
-                document.body.classList.add('vip-portal-active');
-
-                // [WHY]: Yerel _initVipPanel çağrılıyordu; window._initVipPanel sarmalayıcı zinciri (buton durumları, radar
-                //        tıklamaları) hiç çalışmıyordu, aktivite paneli / mesaj / oturum sonlandırma ulaşılamazdı (VIP-04).
-                requestAnimationFrame(() => {
-                    setTimeout(() => window._initVipPanel(), 50);
-                });
-            } else {
-                // Normal dÃ¼nyaya dÃ¶nÃ¼ÅŸ
-                if (sidebar) sidebar.classList.remove('vip-active');
-                if (mainContent) mainContent.classList.remove('vip-bg');
-                document.body.classList.remove('vip-portal-active');
-            }
-        };
-    }
-
-    // DOMContentLoaded'da kancayÄ± kur
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _hookShowAdminTab);
-    } else {
-        _hookShowAdminTab();
-    }
+    });
     // [WHY]: God-Eye v2 fonksiyonlari IIFE disinda tanimli.
     // [HOW]: _appendLog ve _initVipPanel global scope icin expose ediliyor.
     window._appendLog    = _appendLog;
@@ -1020,15 +1025,15 @@ window.addEventListener('onInventoryDataUpdated', () => {
 
 
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  GOD-EYE v2 â€” KULLANICI MÃœDAHALESÄ°, FORCE LOGOUT & HEATMAP
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════════
+//  GOD-EYE v2 — KULLANICI MÜDAHALESİ, FORCE LOGOUT & HEATMAP
+// ═══════════════════════════════════════════════════════════════════
 
-// â”€â”€â”€ GLOBAL STATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── GLOBAL STATE ─────────────────────────────────────────────────
 let _godEyeHeatmapActive = false;
-let _currentTargetUser   = null; // Panelde aÃ§Ä±k olan kullanÄ±cÄ± verisi
+let _currentTargetUser   = null; // Panelde açık olan kullanıcı verisi
 
-// â”€â”€â”€ MODÃœL LÄ°STESÄ° (Heatmap iÃ§in) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── MODÜL LİSTESİ (Heatmap için) ──────────────────────────────────
 const _GOD_EYE_MODULES = [
     { id: 'b1',       label: 'B1 Depo',    key: 'b1'        },
     { id: 'satin',    label: 'Satin Alma', key: 'requests'  },
@@ -1037,11 +1042,11 @@ const _GOD_EYE_MODULES = [
     { id: 'gorev',    label: 'Gorevler',   key: 'gorevler'  }
 ];
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// [WHY]: Radar dot'larÄ±na tÄ±klama ile kullanÄ±cÄ± panelini tetikler.
-// [HOW]: Her .radar-dot'a click listener ekler, userData'yÄ± okur,
-//        paneli doldurur ve slide-in animasyonunu baÅŸlatÄ±r.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════════
+// [WHY]: Radar dot'larına tıklama ile kullanıcı panelini tetikler.
+// [HOW]: Her .radar-dot'a click listener ekler, userData'yı okur,
+//        paneli doldurur ve slide-in animasyonunu başlatır.
+// ═══════════════════════════════════════════════════════════════════
 function _initRadarDotClickEvents() {
     document.querySelectorAll('.radar-dot').forEach(function(dot) {
         dot.removeEventListener('click', _onRadarDotClick); // Duplicate guard
@@ -1052,13 +1057,13 @@ function _initRadarDotClickEvents() {
 function _onRadarDotClick(e) {
     e.stopPropagation();
 
-    // Ã–nceki seÃ§imi temizle
+    // Önceki seçimi temizle
     document.querySelectorAll('.radar-dot.selected').forEach(function(d) {
         d.classList.remove('selected');
     });
     this.classList.add('selected');
 
-    // KullanÄ±cÄ± bilgisini dot'tan oku
+    // Kullanıcı bilgisini dot'tan oku
     const userData = {
         id:     this.dataset.userId     || 'user-unknown',
         name:   this.dataset.userName   || 'Bilinmeyen Kullanici',
@@ -1070,11 +1075,11 @@ function _onRadarDotClick(e) {
     _openUserActivityPanel(userData);
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// [WHY]: KullanÄ±cÄ± aktivite panelini verilerle doldurur ve aÃ§ar.
-// [HOW]: DOM elementlerini gÃ¼nceller, mock aktivite listesi Ã¼retir,
-//        panel ve overlay'i gÃ¶rÃ¼nÃ¼r kÄ±lar.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════════
+// [WHY]: Kullanıcı aktivite panelini verilerle doldurur ve açar.
+// [HOW]: DOM elementlerini günceller, mock aktivite listesi üretir,
+//        panel ve overlay'i görünür kılar.
+// ═══════════════════════════════════════════════════════════════════
 function _openUserActivityPanel(userData) {
     // Avatar initials
     const initials = userData.name.split(' ').map(function(w) { return w[0]; }).join('').slice(0, 2).toUpperCase();
@@ -1088,7 +1093,7 @@ function _openUserActivityPanel(userData) {
     const moduleEl = document.getElementById('uapUserModule');
     if (moduleEl) moduleEl.innerHTML = '<i class="fas fa-cube me-1"></i>' + escapeHtml(userData.module);
 
-    // Ä°statistikler (mock + window.data analizi)
+    // İstatistikler (mock + window.data analizi)
     const actionCount = _computeUserActionCount(userData.module);
 
     const statActions = document.getElementById('uapStatActions');
@@ -1117,11 +1122,11 @@ function _openUserActivityPanel(userData) {
         logoutBtn._confirmState = false;
     }
 
-    // Mesaj alanÄ±nÄ± temizle
+    // Mesaj alanını temizle
     const msgArea = document.getElementById('uapSystemMessage');
     if (msgArea) msgArea.value = '';
 
-    // Panel ve overlay'i aÃ§
+    // Panel ve overlay'i aç
     const panel   = document.getElementById('userActivityPanel');
     const overlay = document.getElementById('userActivityOverlay');
     if (panel)   panel.classList.add('panel-open');
@@ -1140,14 +1145,14 @@ window.vipCloseUserPanel = function() {
         overlay.classList.remove('overlay-visible');
         setTimeout(function() { overlay.style.display = 'none'; }, 300);
     }
-    // Radar seÃ§imini temizle
+    // Radar seçimini temizle
     document.querySelectorAll('.radar-dot.selected').forEach(function(d) {
         d.classList.remove('selected');
     });
     _currentTargetUser = null;
 };
 
-// KullanÄ±cÄ±nÄ±n modÃ¼lÃ¼ne gÃ¶re window.data'dan eylem sayÄ±sÄ±nÄ± hesapla
+// Kullanıcının modülüne göre window.data'dan eylem sayısını hesapla
 function _computeUserActionCount(moduleName) {
     if (!window.data) return 0;
     const moduleKeyMap = { 'B1 Depo': 'b1', 'B2 Depo': 'b2', 'Satin Alma': 'requests', 'Personel': 'personel' };
@@ -1166,11 +1171,11 @@ function _renderActivityList(moduleName) {
     const fmtMin = function(m) { return now.getHours() + ':' + String(now.getMinutes() - m).padStart(2,'0'); };
 
     const templates = [
-        { icon: 'fa-eye',          text: moduleName + ' modÃ¼lÃ¼nÃ¼ aÃ§tÄ±',    min: 1  },
+        { icon: 'fa-eye',          text: moduleName + ' modülünü açtı',    min: 1  },
         { icon: 'fa-magnifying-glass', text: 'Stok listesi filtreledi',     min: 3  },
-        { icon: 'fa-file-export',  text: 'Rapor sayfasÄ±nÄ± gÃ¶rÃ¼ntÃ¼ledi',     min: 7  },
-        { icon: 'fa-hand-pointer', text: 'Zimmet detayÄ±na tÄ±kladÄ±',         min: 12 },
-        { icon: 'fa-arrow-right-from-bracket', text: 'Oturum baÅŸlattÄ±',     min: 35 }
+        { icon: 'fa-file-export',  text: 'Rapor sayfasını görüntüledi',     min: 7  },
+        { icon: 'fa-hand-pointer', text: 'Zimmet detayına tıkladı',         min: 12 },
+        { icon: 'fa-arrow-right-from-bracket', text: 'Oturum başlattı',     min: 35 }
     ];
 
     // Örnek aktivite listesidir (gerçek oturum/presence izlenmiyor; Karar K8-b).
@@ -1181,34 +1186,34 @@ function _renderActivityList(moduleName) {
             '<i class="fas ' + escapeHtml(t.icon) + ' uap-activity-icon"></i>' +
             '<div>' +
                 '<div>' + escapeHtml(t.text) + '</div>' +
-                '<div class="uap-activity-time">' + escapeHtml(fmtMin(t.min)) + ' â€” az Ã¶nce</div>' +
+                '<div class="uap-activity-time">' + escapeHtml(fmtMin(t.min)) + ' — az önce</div>' +
             '</div>' +
         '</li>';
     }).join('');
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// [WHY]: Admin kullanÄ±cÄ±ya sistem mesajÄ± gÃ¶nderir.
-// [HOW]: Firestore system_config/admin_settings'e user_messages kaydÄ±
-//        yazar. GerÃ§ek dinleyici firebase-handler.js'e devredilir.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════════
+// [WHY]: Admin kullanıcıya sistem mesajı gönderir.
+// [HOW]: Firestore system_config/admin_settings'e user_messages kaydı
+//        yazar. Gerçek dinleyici firebase-handler.js'e devredilir.
+// ═══════════════════════════════════════════════════════════════════
 window.vipSendSystemMessage = async function() {
     const msgEl = document.getElementById('uapSystemMessage');
     if (!msgEl || !msgEl.value.trim()) {
-        if (typeof _appendLog === 'function') _appendLog('warn', ['[God-Eye] Mesaj boÅŸ olamaz.']);
+        if (typeof _appendLog === 'function') _appendLog('warn', ['[God-Eye] Mesaj boş olamaz.']);
         if (msgEl) msgEl.focus();
         return;
     }
 
     const msg    = msgEl.value.trim();
     const userId = _currentTargetUser ? _currentTargetUser.id : 'broadcast';
-    const userName = _currentTargetUser ? _currentTargetUser.name : 'TÃ¼m KullanÄ±cÄ±lar';
+    const userName = _currentTargetUser ? _currentTargetUser.name : 'Tüm Kullanıcılar';
 
     const btn = document.getElementById('uapSendMsgBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> GÃ¶nderiliyor...'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gönderiliyor...'; }
 
     try {
-        if (!window.fireDb) throw new Error('Firestore baÄŸlantÄ±sÄ± yok');
+        if (!window.fireDb) throw new Error('Firestore bağlantısı yok');
 
         const { doc, setDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
         const msgRef = window.systemConfigRef("admin_messages");
@@ -1224,35 +1229,35 @@ window.vipSendSystemMessage = async function() {
             _appendLog('success', ['[God-Eye] Sistem mesaji gonderildi -> ' + userName + ': "' + msg + '"']);
         }
         msgEl.value = '';
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Mesaj GÃ¶nderildi!'; }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Mesaj Gönderildi!'; }
         setTimeout(function() {
-            if (btn) btn.innerHTML = '<i class="fas fa-paper-plane"></i> Sistem MesajÄ± GÃ¶nder';
+            if (btn) btn.innerHTML = '<i class="fas fa-paper-plane"></i> Sistem Mesajı Gönder';
         }, 2500);
 
     } catch (err) {
         if (typeof _appendLog === 'function') {
-            _appendLog('error', ['[God-Eye] Mesaj gÃ¶nderilemedi: ' + err.message]);
+            _appendLog('error', ['[God-Eye] Mesaj gönderilemedi: ' + err.message]);
         }
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Sistem MesajÄ± GÃ¶nder'; }
-        alert('Mesaj gÃ¶nderilemedi: ' + err.message);
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Sistem Mesajı Gönder'; }
+        alert('Mesaj gönderilemedi: ' + err.message);
     }
 };
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// [WHY]: Ä°ki aÅŸamalÄ± onay mekanizmasÄ± ile force logout uygular.
-// [HOW]: Ä°lk tÄ±klamada "emin misiniz?" sorar. Ä°kinci tÄ±klamada
+// ═══════════════════════════════════════════════════════════════════
+// [WHY]: İki aşamalı onay mekanizması ile force logout uygular.
+// [HOW]: İlk tıklamada "emin misiniz?" sorar. İkinci tıklamada
 //        Firestore system_config/admin_settings.force_logout_user_id
-//        alanÄ±na hedef kullanÄ±cÄ± ID'sini yazar.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//        alanına hedef kullanıcı ID'sini yazar.
+// ═══════════════════════════════════════════════════════════════════
 window.vipForceLogoutConfirm = function() {
     const btn = document.getElementById('uapForceLogoutBtn');
     if (!btn) return;
 
     if (!btn._confirmState) {
-        // Birinci tÄ±klama: onay iste
+        // Birinci tıklama: onay iste
         btn._confirmState = true;
         btn.classList.add('confirming');
-        btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> EMÄ°N MÄ°SÄ°NÄ°Z? (Tekrar tÄ±kla)';
+        btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> EMİN MİSİNİZ? (Tekrar tıkla)';
 
         // 4 saniye sonra iptal
         clearTimeout(btn._confirmTimer);
@@ -1262,7 +1267,7 @@ window.vipForceLogoutConfirm = function() {
             btn.innerHTML = '<i class="fas fa-right-from-bracket"></i> Force Logout Uygula';
         }, 4000);
     } else {
-        // Ä°kinci tÄ±klama: gerÃ§ekten uygula
+        // İkinci tıklama: gerçekten uygula
         clearTimeout(btn._confirmTimer);
         btn._confirmState = false;
         btn.classList.remove('confirming');
@@ -1291,16 +1296,16 @@ window.vipForceLogout = async function() {
         return;
     }
 
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> UygulanÄ±yor...'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uygulanıyor...'; }
 
     try {
         if (!window.fireDb) throw new Error('Firestore baglantisi yok');
 
         const { setDoc, deleteField } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
 
-        // [WHY]: force_logout_user_id alanÄ±nÄ± Firestore'a yaz.
-        // [HOW]: firebase-handler.js bu alanÄ± onSnapshot ile dinleyerek
-        //        hedef kullanÄ±cÄ±nÄ±n oturumunu client-side sonlandÄ±rÄ±r.
+        // [WHY]: force_logout_user_id alanını Firestore'a yaz.
+        // [HOW]: firebase-handler.js bu alanı onSnapshot ile dinleyerek
+        //        hedef kullanıcının oturumunu client-side sonlandırır.
         const settingsRef = window.systemConfigRef("admin_settings");
         // VIP-06: tek seferlik komut { targetId, issuedAt, nonce }; istemci yalnız taze ve daha önce işlemediği nonce'u uygular.
         //         Eski düz alanlar (her snapshot'ta yeniden tetikleniyordu) silinir.
@@ -1324,7 +1329,7 @@ window.vipForceLogout = async function() {
 
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check-circle"></i> Oturum KapatÄ±ldÄ±!';
+            btn.innerHTML = '<i class="fas fa-check-circle"></i> Oturum Kapatıldı!';
             btn.style.color = 'var(--vip-matrix)';
             btn.style.borderColor = 'var(--vip-matrix)';
         }
@@ -1348,11 +1353,11 @@ window.vipForceLogout = async function() {
     }
 };
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// [WHY]: Radar gÃ¶rÃ¼nÃ¼mÃ¼nÃ¼ ve Heatmap SVG pie chart'Ä±nÄ± toggle eder.
-// [HOW]: Radar gÃ¶rÃ¼nÃ¼rken gizler, heatmap hesaplar ve SVG Ã§izer;
-//        heatmap gÃ¶rÃ¼nÃ¼rken kapatÄ±p radar'a geri dÃ¶ner.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════════
+// [WHY]: Radar görünümünü ve Heatmap SVG pie chart'ını toggle eder.
+// [HOW]: Radar görünürken gizler, heatmap hesaplar ve SVG çizer;
+//        heatmap görünürken kapatıp radar'a geri döner.
+// ═══════════════════════════════════════════════════════════════════
 window.vipToggleHeatmap = function(btn) {
     _godEyeHeatmapActive = !_godEyeHeatmapActive;
     const toggleBtn  = btn || document.getElementById('godEyeHeatmapToggle');
@@ -1361,18 +1366,18 @@ window.vipToggleHeatmap = function(btn) {
     const statusText = document.getElementById('godEyeStatusText');
 
     if (_godEyeHeatmapActive) {
-        // Radar'Ä± gizle, heatmap'i gÃ¶ster
+        // Radar'ı gizle, heatmap'i göster
         if (radarInner) radarInner.style.display = 'none';
         if (heatmapSVG) { heatmapSVG.classList.add('visible'); }
         if (toggleBtn)  { toggleBtn.classList.add('heatmap-active'); toggleBtn.innerHTML = '<i class="fas fa-eye"></i> RADAR'; }
-        if (statusText) statusText.innerHTML = '<i class="fas fa-fire" style="color: var(--vip-warning); font-size: 9px; margin-right: 4px;"></i>ModÃ¼l yoÄŸunluk haritasÄ± aktif';
+        if (statusText) statusText.innerHTML = '<i class="fas fa-fire" style="color: var(--vip-warning); font-size: 9px; margin-right: 4px;"></i>Modül yoğunluk haritası aktif';
 
-        // Heatmap verilerini hesapla ve Ã§iz
+        // Heatmap verilerini hesapla ve çiz
         const heatData = _computeHeatmapData();
         _renderHeatmap(heatData);
 
     } else {
-        // Heatmap'i gizle, radar'Ä± gÃ¶ster
+        // Heatmap'i gizle, radar'ı göster
         if (heatmapSVG) heatmapSVG.classList.remove('visible');
         if (radarInner) radarInner.style.display = 'block';
         if (toggleBtn)  { toggleBtn.classList.remove('heatmap-active'); toggleBtn.innerHTML = '<i class="fas fa-fire-flame-curved"></i> HEATMAP'; }
@@ -1380,20 +1385,20 @@ window.vipToggleHeatmap = function(btn) {
     }
 };
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// [WHY]: Son loglar Ã¼zerinden modÃ¼l baÅŸÄ±na yoÄŸunluk hesaplar.
-// [HOW]: window.data iÃ§indeki her modÃ¼l koleksiyonunun kayÄ±t sayÄ±sÄ±nÄ±
-//        okur. Matematiksel NaN/sÄ±fÄ±ra bÃ¶lÃ¼nme korumasÄ± dahil.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════════
+// [WHY]: Son loglar üzerinden modül başına yoğunluk hesaplar.
+// [HOW]: window.data içindeki her modül koleksiyonunun kayıt sayısını
+//        okur. Matematiksel NaN/sıfıra bölünme koruması dahil.
+// ═══════════════════════════════════════════════════════════════════
 function _computeHeatmapData() {
-    // Erken Ã§Ä±kÄ±ÅŸ: window.data henÃ¼z yÃ¼klenmemiÅŸse nÃ¶tr daÄŸÄ±lÄ±m
+    // Erken çıkış: window.data henüz yüklenmemişse nötr dağılım
     if (!window.data) {
         return _GOD_EYE_MODULES.map(function(m) {
             return { label: m.label, ratio: 1 / _GOD_EYE_MODULES.length, count: 0 };
         });
     }
 
-    // Ham sayÄ±larÄ± topla
+    // Ham sayıları topla
     const rawCounts = {};
     _GOD_EYE_MODULES.forEach(function(m) {
         const src = window.data[m.key];
@@ -1402,12 +1407,12 @@ function _computeHeatmapData() {
         rawCounts[m.id] = arr.length;
     });
 
-    // â”€â”€ NaN KORUMA KATI 1: toplam sÄ±fÄ±rsa eÅŸit daÄŸÄ±t â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── NaN KORUMA KATI 1: toplam sıfırsa eşit dağıt ──────────────
     const moduleCount   = Math.max(_GOD_EYE_MODULES.length, 1); // K.2: N=0 guard
     const totalActivity = Object.values(rawCounts).reduce(function(a, b) { return a + b; }, 0);
-    const baseRatio     = 1 / moduleCount; // Fallback oranÄ±
+    const baseRatio     = 1 / moduleCount; // Fallback oranı
 
-    // â”€â”€ NaN KORUMA KATI 2: paranoid isNaN + isFinite kontrolÃ¼ â”€â”€â”€â”€â”€
+    // ── NaN KORUMA KATI 2: paranoid isNaN + isFinite kontrolü ─────
     const safeRatio = function(count) {
         const r = totalActivity > 0 ? count / totalActivity : baseRatio;
         return (isNaN(r) || !isFinite(r)) ? 0 : r; // K.3: son savunma
@@ -1422,22 +1427,22 @@ function _computeHeatmapData() {
     });
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════════
 // [WHY]: Heatmap verilerini SVG pie chart olarak render eder.
-// [HOW]: Her dilim iÃ§in trigonometri ile SVG path arc Ã§izer.
-//        YoÄŸunluÄŸa gÃ¶re renk sÄ±nÄ±fÄ± atar (cool/warm/hot).
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// [HOW]: Her dilim için trigonometri ile SVG path arc çizer.
+//        Yoğunluğa göre renk sınıfı atar (cool/warm/hot).
+// ═══════════════════════════════════════════════════════════════════
 function _renderHeatmap(data) {
     const svg = document.getElementById('godEyeHeatmapSVG');
     if (!svg) return;
 
-    const R      = 95;  // DÄ±ÅŸ yarÄ±Ã§ap
-    const R_IN   = 38;  // Ä°Ã§ yarÄ±Ã§ap (donut boÅŸluk)
-    const GAP    = 0.025; // Dilimler arasÄ± aÃ§Ä± boÅŸluÄŸu (radyan)
+    const R      = 95;  // Dış yarıçap
+    const R_IN   = 38;  // İç yarıçap (donut boşluk)
+    const GAP    = 0.025; // Dilimler arası açı boşluğu (radyan)
 
-    let startAngle = -Math.PI / 2; // 12 o'clock'tan baÅŸla
+    let startAngle = -Math.PI / 2; // 12 o'clock'tan başla
 
-    // EÅŸik deÄŸerleri (toplam aktiviteye gÃ¶re normalize)
+    // Eşik değerleri (toplam aktiviteye göre normalize)
     const maxCount = Math.max(...data.map(function(d) { return d.count; }), 1);
 
     const slices = data.map(function(d) {
@@ -1445,14 +1450,14 @@ function _renderHeatmap(data) {
         return { label: d.label, count: d.count, angle: angle, ratio: d.ratio, intensity: d.count / maxCount };
     });
 
-    // Renk sÄ±nÄ±fÄ± belirle
+    // Renk sınıfı belirle
     const _colorClass = function(intensity) {
         if (intensity >= 0.65) return 'hm-slice-hot';
         if (intensity >= 0.30) return 'hm-slice-warm';
         return 'hm-slice-cool';
     };
 
-    // SVG arc path Ã¼ret
+    // SVG arc path üret
     const _arcPath = function(sAngle, eAngle) {
         const x1  = R * Math.cos(sAngle + GAP);
         const y1  = R * Math.sin(sAngle + GAP);
@@ -1486,7 +1491,7 @@ function _renderHeatmap(data) {
             '<title>' + escapeHtml(s.label) + ': ' + escapeHtml(s.count) + ' kayit (%' + Math.round(s.ratio * 100) + ')</title>' +
         '</path>';
 
-        // Yeterince bÃ¼yÃ¼k dilimde etiket gÃ¶ster
+        // Yeterince büyük dilimde etiket göster
         if (s.ratio > 0.08) {
             svgContent += '<text class="hm-label" x="' + lx + '" y="' + ly + '">' + escapeHtml(s.label) + '</text>';
         }
@@ -1502,13 +1507,13 @@ function _renderHeatmap(data) {
     svg.innerHTML = svgContent;
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// _initVipPanel'a God-Eye v2 baÅŸlatÄ±cÄ±sÄ±nÄ± ekle
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════════
+// _initVipPanel'a God-Eye v2 başlatıcısını ekle
+// ═══════════════════════════════════════════════════════════════════
 const _prevInitVipForGodEye = window._initVipPanel;
 window._initVipPanel = function() {
     if (_prevInitVipForGodEye) _prevInitVipForGodEye();
-    // KÄ±sa gecikme ile radar dot click eventlerini baÄŸla
+    // Kısa gecikme ile radar dot click eventlerini bağla
     setTimeout(function() {
         _initRadarDotClickEvents();
     }, 400);

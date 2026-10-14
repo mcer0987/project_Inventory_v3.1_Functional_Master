@@ -7,13 +7,25 @@
     <title>Admin Dashboard | Envanter Yönetimi</title>
     <link rel="icon" href="data:,">
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+        integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
 
-    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js" integrity="sha384-0d+Gr7vM4Drod8E3hXKgciWJSWbjD/opKLLygI9ktiWbuvlDwQLzU46wJ9s5gsp7" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" integrity="sha384-fCAW/rDWORTbQXSiB7mOg0QtQ5c+r0f544y6XoKjuVva0nMBlCpNUjiFeG5iMdS3" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha384-PPIZEGYM1v8zp5Py7UjFb79S58UeqCL9pYVnVPURKEqvioPROaVAJKKLzvH2rDnI" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"
+        integrity="sha384-0d+Gr7vM4Drod8E3hXKgciWJSWbjD/opKLLygI9ktiWbuvlDwQLzU46wJ9s5gsp7" crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+        integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"
+        integrity="sha384-fCAW/rDWORTbQXSiB7mOg0QtQ5c+r0f544y6XoKjuVva0nMBlCpNUjiFeG5iMdS3" crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"
+        integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+        integrity="sha384-PPIZEGYM1v8zp5Py7UjFb79S58UeqCL9pYVnVPURKEqvioPROaVAJKKLzvH2rDnI" crossorigin="anonymous"
+        referrerpolicy="no-referrer">
     <link rel="stylesheet" href="admin-add-style.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="dark-theme.css">
@@ -29,7 +41,9 @@
 
     <!-- VIP System Control & SortableJS -->
     <link rel="stylesheet" href="admin-system-control.css">
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js" integrity="sha384-DgmC6Xe2bSN2WjTDXzWYbUbxyhNP+NNkGDR/g78pCXV7E7rcVTGxVg0uIVCUUcBc" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js"
+        integrity="sha384-DgmC6Xe2bSN2WjTDXzWYbUbxyhNP+NNkGDR/g78pCXV7E7rcVTGxVg0uIVCUUcBc" crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
 
     <script type="module">
         // [WHY]: Query'li URL ikinci bir firebase-handler instance'ı yaratıyordu (ARC-02: çift dinleyici, 26 okuma).
@@ -37,9 +51,9 @@
 
         // [WHY]: Faz 4 · J3 — kilit kartı tek yerden açılır; neden metni karta yazılır (süre doldu / kilitlendi / parola gerekli).
         const LOCK_TEXT = {
-            lock:        ['Oturum Kilitlendi', 'Devam etmek için yönetici parolasını girin.'],
+            lock: ['Oturum Kilitlendi', 'Devam etmek için yönetici parolasını girin.'],
             'not-admin': ['Yönetici Girişi Gerekli', 'Bu sekmede yönetici oturumu yok. Devam etmek için yönetici parolasını girin.'],
-            stale:       ['Oturum Sona Erdi', 'Yönetici oturumu geçersiz. Devam etmek için yönetici parolasını girin.'],
+            stale: ['Oturum Sona Erdi', 'Yönetici oturumu geçersiz. Devam etmek için yönetici parolasını girin.'],
         };
         window.showAdminLock = function (reason) {
             const lockModal = document.getElementById('adminLockModal');
@@ -231,16 +245,14 @@
             <i class="fas fa-moon"></i> <span>Tema</span>
         </button>
         <div class="nav-item active" id="nav-dashboard" onclick="showAdminTab('dashboard-content')">📊 Dashboard</div>
-        <div class="nav-item" onclick="showAdminTab('productTypeSettings')">⚙️ Ürün Türü Ayarları</div>
+        <div class="nav-item" onclick="showAdminTab('productTypeSettings')">🎛️ Operasyon Merkezi</div>
         <!-- <div class="nav-item" onclick="window.location.href='index.html'">⬅️ Depoya Dön</div> -->
         <div class="nav-item" onclick="showAdminTab('purchaseTab')">
             <i class="fas fa-shopping-cart"></i>
             <span>Talep Ve Süreçler</span>
         </div>
-        <div class="nav-item" onclick="showAdminTab('workflowTemplatesTab')">
-            <i class="fas fa-sitemap" style="color: var(--color-purple);"></i>
-            <span>Akış Şablonları</span>
-        </div>
+        <!-- Faz 5 · K3.5: "Akış Şablonları" sidebar butonu kaldırıldı — aynı özellik Tanımlar > İş Akışı Şablonları
+             alt sekmesinde (switchDefTab('workflows')) zaten var; iki ayrı erişim yolu/tablo karışıklığa yol açıyordu. -->
         <div class="nav-item" onclick="showAdminTab('definitionsTab')">
             <i class="fas fa-cog" style="color: var(--color-info);"></i>
             <span>Tanımlar</span>
@@ -264,12 +276,13 @@
              [HOW]: Sitemap butonu ve sürüm bilgisi sidebar'ın en altına
                     sabitlendi (margin-top: auto ile flex içinde aşağı itilir).
              ========================================================= -->
-        <div class="nav-item sitemap-nav-item" onclick="openSitemapModal()" 
-             style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); border-bottom: none; color: var(--vip-matrix, #00ff88); font-weight: 600;">
+        <div class="nav-item sitemap-nav-item" onclick="openSitemapModal()"
+            style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); border-bottom: none; color: var(--vip-matrix, #00ff88); font-weight: 600;">
             <i class="fas fa-project-diagram"></i>
             <span>Sistem Kılavuzu</span>
         </div>
-        <div style="font-size: 0.65rem; text-align: center; color: rgba(255,255,255,0.3); padding-bottom: 15px; letter-spacing: 1px;">
+        <div
+            style="font-size: 0.65rem; text-align: center; color: rgba(255,255,255,0.3); padding-bottom: 15px; letter-spacing: 1px;">
             ITSM Envanter v2.0 <br> VIP Mode
         </div>
     </div>
@@ -302,14 +315,13 @@
                      ================================================================ -->
                 <div class="status-mobile-controls" id="statusMobileControls">
                     <!-- Hamburger: sidebar'ı aç/kapat -->
-                    <button class="btn-status-action" id="sidebarToggleBtn"
-                            aria-label="Menüyü Aç/Kapat" aria-expanded="false"
-                            title="Menü">
+                    <button class="btn-status-action" id="sidebarToggleBtn" aria-label="Menüyü Aç/Kapat"
+                        aria-expanded="false" title="Menü">
                         <i class="fas fa-bars"></i>
                     </button>
                     <!-- Dark Mode: context içinde doğal konumu -->
-                    <button class="btn-status-action" onclick="toggleTheme()"
-                            title="Tema Değiştir" id="themeToggleMobile">
+                    <button class="btn-status-action" onclick="toggleTheme()" title="Tema Değiştir"
+                        id="themeToggleMobile">
                         <i class="fas fa-moon"></i>
                     </button>
                 </div>
@@ -329,8 +341,8 @@
                     </button>
                     <!-- [DECOMMISSIONED] Launchpad Go Button Removed -->
                     <!-- Faz 4 · J4 (EBYS-05): self-approval denetim raporu (${ROOT}/auditLogs); rapor admin oturumu ister -->
-                    <button onclick="window.AppModules.SelfApproval.showReportModal()" class="btn-status-action" id="btn-security-report"
-                        title="Güvenlik Raporu (kendi kendini onaylama denetimi)">
+                    <button onclick="window.AppModules.SelfApproval.showReportModal()" class="btn-status-action"
+                        id="btn-security-report" title="Güvenlik Raporu (kendi kendini onaylama denetimi)">
                         <i class="fas fa-shield-alt"></i>
                     </button>
                     <button onclick="window.adminLogout()" class="btn-status-action logout" title="Güvenli Çıkış">
@@ -355,8 +367,8 @@
             //        gelir — specificity savaşı imkansız hale gelir.
             //        Masaüstünde inline style temizlenir; normal CSS devreye girer.
             document.addEventListener('DOMContentLoaded', function () {
-                var btn      = document.getElementById('sidebarToggleBtn');
-                var sidebar  = document.querySelector('.sidebar');
+                var btn = document.getElementById('sidebarToggleBtn');
+                var sidebar = document.querySelector('.sidebar');
                 var backdrop = document.getElementById('sidebarBackdrop');
                 if (!btn || !sidebar || !backdrop) return;
 
@@ -368,30 +380,30 @@
                 // Mobil başlangıç kurulumu: sidebar'ı inline style ile ekran dışına al
                 function setupMobile() {
                     if (isMobile()) {
-                        sidebar.style.transform    = 'translateX(-100%)';
-                        sidebar.style.transition   = 'transform 0.26s cubic-bezier(0.4, 0, 0.2, 1)';
-                        sidebar.style.position     = 'fixed';
-                        sidebar.style.top          = '0';
-                        sidebar.style.left         = '0';
-                        sidebar.style.height       = '100vh';
-                        sidebar.style.zIndex       = '1200';
-                        sidebar.style.opacity      = '1';
-                        sidebar.style.filter       = 'none';
-                        sidebar.style.width        = '270px';
-                        sidebar.style.overflowY    = 'auto';
+                        sidebar.style.transform = 'translateX(-100%)';
+                        sidebar.style.transition = 'transform 0.26s cubic-bezier(0.4, 0, 0.2, 1)';
+                        sidebar.style.position = 'fixed';
+                        sidebar.style.top = '0';
+                        sidebar.style.left = '0';
+                        sidebar.style.height = '100vh';
+                        sidebar.style.zIndex = '1200';
+                        sidebar.style.opacity = '1';
+                        sidebar.style.filter = 'none';
+                        sidebar.style.width = '270px';
+                        sidebar.style.overflowY = 'auto';
                     } else {
                         // Masaüstünde inline style'ı temizle; CSS devreye girsin
-                        sidebar.style.transform    = '';
-                        sidebar.style.transition   = '';
-                        sidebar.style.position     = '';
-                        sidebar.style.top          = '';
-                        sidebar.style.left         = '';
-                        sidebar.style.height       = '';
-                        sidebar.style.zIndex       = '';
-                        sidebar.style.opacity      = '';
-                        sidebar.style.filter       = '';
-                        sidebar.style.width        = '';
-                        sidebar.style.overflowY    = '';
+                        sidebar.style.transform = '';
+                        sidebar.style.transition = '';
+                        sidebar.style.position = '';
+                        sidebar.style.top = '';
+                        sidebar.style.left = '';
+                        sidebar.style.height = '';
+                        sidebar.style.zIndex = '';
+                        sidebar.style.opacity = '';
+                        sidebar.style.filter = '';
+                        sidebar.style.width = '';
+                        sidebar.style.overflowY = '';
                     }
                 }
 
@@ -581,10 +593,11 @@
 
         </div>
 
-        <!-- Ürün Türü Ayarları -->
+        <!-- Faz 5 · K3.5: "Ürün Türü Ayarları" → "Operasyon Merkezi" (bu tab'ın gerçek içeriği ürün türü yönetiminin
+             çok ötesine geçti: bekleyen talepler, çıkış analiz grafikleri — ad artık kapsamı yansıtıyor). -->
         <div id="productTypeSettings" class="admin-tab-content" style="display: none;">
             <div class="admin-section-header mb-4">
-                <h2 class="fw-bold">Ürün Türü & Çıkış Analizi</h2>
+                <h2 class="fw-bold">🎛️ Operasyon Merkezi</h2>
             </div>
 
             <div class="row" style="display: flex; gap: 20px; align-items: flex-start;">
@@ -632,15 +645,19 @@
                             <span class="badge rounded-pill bg-danger shadow-sm" id="pendingRequestCount">0</span>
                         </div>
                         <div class="card-body p-0">
+                            <!-- Faz 5 · K3.5: table-layout:fixed (global table kuralı) dar ekranda İşlem sütunundaki
+                                 iki sabit genişlikli ikon butonunu sıkıştırıp taşırıyordu. Bu tabloya özel table-layout:
+                                 auto (sütunlar içeriğe göre genişler) + İşlem başlığına min-width; table-responsive
+                                 sarmalayıcı hâlâ çok dar ekranlarda yatay kaydırma sağlar. -->
                             <div class="table-responsive">
-                                <table class="table table-hover mb-0 align-middle">
+                                <table class="table table-hover mb-0 align-middle" style="table-layout: auto;">
                                     <thead class="bg-light">
                                         <tr>
                                             <th class="ps-3">Tarih</th>
                                             <th>Personel</th>
                                             <th>Ürün</th>
                                             <th class="text-center">Durum</th>
-                                            <th class="text-end pe-3">İşlem</th>
+                                            <th class="text-end pe-3" style="min-width: 92px;">İşlem</th>
                                         </tr>
                                     </thead>
                                     <tbody id="adminPendingRequestsBody">
@@ -671,6 +688,98 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Faz 5 · K3.5: Gelecek analitik paneller için yer tutucu kartlar (henüz veri bağlanmadı; ileride her biri
+                 gerçek bir widget'a dönüşecek). Stil tamamen bu dosyaya gömülü (future-widget-*) — paylaşılan CSS
+                 dosyalarına (style.css/admin-add-style.css) dokunulmadı. -->
+            <div class="row mt-4" style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div class="future-widget-card" style="flex: 1; min-width: 260px;">
+                    <div class="future-widget-icon"><i class="fas fa-right-left"></i></div>
+                    <div class="future-widget-label">Yakında</div>
+                    <div class="future-widget-title">Aktif Zimmet & İade Takibi</div>
+                </div>
+                <div class="future-widget-card" style="flex: 1; min-width: 260px;">
+                    <div class="future-widget-icon"><i class="fas fa-satellite-dish"></i></div>
+                    <div class="future-widget-label">Yakında</div>
+                    <div class="future-widget-title">Hurda & Servis Radarı</div>
+                </div>
+                <div class="future-widget-card" style="flex: 1; min-width: 260px;">
+                    <div class="future-widget-icon"><i class="fas fa-triangle-exclamation"></i></div>
+                    <div class="future-widget-label">Yakında</div>
+                    <div class="future-widget-title">Kritik Sipariş İhtiyacı</div>
+                </div>
+            </div>
+
+            <style>
+                /* Faz 5 · K3.5: Operasyon Merkezi — gelecek widget yer tutucuları (pulse/glow efektli). */
+                .future-widget-card {
+                    position: relative;
+                    background: linear-gradient(135deg, var(--color-surface, #fff) 0%, var(--color-surface-alt, #f8fafc) 100%);
+                    border: 1px dashed var(--color-border, #cbd5e1);
+                    border-radius: 16px;
+                    padding: 28px 20px;
+                    text-align: center;
+                    overflow: hidden;
+                    transition: transform 0.25s ease, box-shadow 0.25s ease;
+                }
+                .future-widget-card::before {
+                    content: '';
+                    position: absolute;
+                    inset: 0;
+                    background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.10), transparent 70%);
+                    animation: future-widget-glow 3s ease-in-out infinite;
+                    pointer-events: none;
+                }
+                .future-widget-card:hover {
+                    transform: translateY(-4px);
+                    box-shadow: 0 10px 24px rgba(99, 102, 241, 0.12);
+                }
+                .future-widget-icon {
+                    position: relative;
+                    width: 56px;
+                    height: 56px;
+                    margin: 0 auto 14px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: rgba(99, 102, 241, 0.12);
+                    color: #6366f1;
+                    font-size: 22px;
+                    animation: future-widget-pulse 2.4s ease-in-out infinite;
+                }
+                .future-widget-label {
+                    position: relative;
+                    display: inline-block;
+                    font-size: 11px;
+                    font-weight: 800;
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                    color: #6366f1;
+                    background: rgba(99, 102, 241, 0.1);
+                    padding: 3px 10px;
+                    border-radius: 999px;
+                    margin-bottom: 10px;
+                }
+                .future-widget-title {
+                    position: relative;
+                    font-size: 14px;
+                    font-weight: 700;
+                    color: var(--color-text, #334155);
+                }
+                @keyframes future-widget-pulse {
+                    0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.35); }
+                    50% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0); }
+                }
+                @keyframes future-widget-glow {
+                    0%, 100% { opacity: 0.55; }
+                    50% { opacity: 1; }
+                }
+                [data-theme="dark"] .future-widget-card {
+                    background: linear-gradient(135deg, var(--color-surface, #1e293b) 0%, var(--color-surface-alt, #0f172a) 100%);
+                    border-color: var(--color-border, #334155);
+                }
+            </style>
         </div>
 
         <!-- 📦 Satın Alma Yönetimi -->
@@ -1304,18 +1413,17 @@
                             <i class="fas fa-grip-vertical grip-icon"></i>
                         </div>
                     </div>
-                    <div class="vip-card-body" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
+                    <div class="vip-card-body"
+                        style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
                         <button class="btn w-100 fw-bold" onclick="window.vipBackupDatabase()"
                             style="background: rgba(0,255,136,0.1); color: var(--vip-matrix); border: 1px solid var(--vip-matrix); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-database me-2"></i>1-Tık DB Snapshot
                         </button>
-                        <button class="btn w-100 fw-bold" onclick="window.toggleSystemTips()"
-                            id="vipToggleTipsBtn"
+                        <button class="btn w-100 fw-bold" onclick="window.toggleSystemTips()" id="vipToggleTipsBtn"
                             style="background: rgba(14,165,233,0.1); color: var(--color-info); border: 1px solid var(--color-info); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-comment-dots me-2"></i>İpuçları: Açık
                         </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipToggleKillSwitch()"
-                            id="vipKillSwitchBtn"
+                        <button class="btn w-100 fw-bold" onclick="window.vipToggleKillSwitch()" id="vipKillSwitchBtn"
                             style="background: rgba(255,45,85,0.1); color: var(--vip-danger); border: 1px solid var(--vip-danger); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-power-off me-2"></i>GLOBAL KILL SWITCH
                         </button>
@@ -1323,7 +1431,8 @@
                             style="background: rgba(168,85,247,0.1); color: #c084fc; border: 1px solid #c084fc; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-magic me-2"></i>Tekerrürleri Temizle
                         </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipMigrateB3Schema(this)" title="B3 kayıtlarını önizleme + yedekle yeni şemaya taşır (Faz 3.6)"
+                        <button class="btn w-100 fw-bold" onclick="window.vipMigrateB3Schema(this)"
+                            title="B3 kayıtlarını önizleme + yedekle yeni şemaya taşır (Faz 3.6)"
                             style="background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid #f59e0b; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-dna me-2"></i>Şema Göçü (B3)
                         </button>
@@ -1335,32 +1444,45 @@
                     <div class="vip-card-header">
                         <div class="header-left">
                             <i class="fas fa-eye" style="color: var(--vip-neon-blue);"></i>
-                            <span>God-Eye (Canli Radar)</span> <span class="badge" title="Örnek veri: gerçek oturum/presence izlenmiyor (Karar K8-b)" style="background: var(--vip-warning, #f59e0b); color: #111; font-size: 0.6rem; margin-left: 6px;">DEMO</span>
+                            <span>God-Eye (Canli Radar)</span> <span class="badge"
+                                title="Örnek veri: gerçek oturum/presence izlenmiyor (Karar K8-b)"
+                                style="background: var(--vip-warning, #f59e0b); color: #111; font-size: 0.6rem; margin-left: 6px;">DEMO</span>
                         </div>
                         <div class="header-right">
-                            <button id="godEyeHeatmapToggle" onclick="window.vipToggleHeatmap(this)" title="Heatmap Moduna Gec">
+                            <button id="godEyeHeatmapToggle" onclick="window.vipToggleHeatmap(this)"
+                                title="Heatmap Moduna Gec">
                                 <i class="fas fa-fire-flame-curved"></i> HEATMAP
                             </button>
                             <button class="vip-collapse-btn" title="Kucult"><i class="fas fa-chevron-up"></i></button>
                             <i class="fas fa-grip-vertical grip-icon"></i>
                         </div>
                     </div>
-                    <div class="vip-card-body" style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding-bottom: 16px;">
+                    <div class="vip-card-body"
+                        style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding-bottom: 16px;">
                         <!-- Radar Gorunumu -->
                         <div id="godEyeRadarContainer">
                             <div class="god-eye-radar" id="godEyeRadarInner">
                                 <div class="radar-scanner"></div>
-                                <div class="radar-dot" data-demo="true" data-user-id="user-1" data-user-name="Ahmet Yilmaz" data-user-module="B1 Depo" style="top: 30%; left: 40%;"></div>
-                                <div class="radar-dot" data-demo="true" data-user-id="user-2" data-user-name="Ayse Kaya" data-user-module="Satin Alma" style="top: 70%; left: 60%; animation-delay: 1s;"></div>
-                                <div class="radar-dot" data-demo="true" data-user-id="user-3" data-user-name="Mehmet Demir" data-user-module="Personel" style="top: 50%; left: 20%; animation-delay: 2.5s;"></div>
+                                <div class="radar-dot" data-demo="true" data-user-id="user-1"
+                                    data-user-name="Ahmet Yilmaz" data-user-module="B1 Depo"
+                                    style="top: 30%; left: 40%;"></div>
+                                <div class="radar-dot" data-demo="true" data-user-id="user-2" data-user-name="Ayse Kaya"
+                                    data-user-module="Satin Alma" style="top: 70%; left: 60%; animation-delay: 1s;">
+                                </div>
+                                <div class="radar-dot" data-demo="true" data-user-id="user-3"
+                                    data-user-name="Mehmet Demir" data-user-module="Personel"
+                                    style="top: 50%; left: 20%; animation-delay: 2.5s;"></div>
                             </div>
                             <!-- Heatmap SVG (baslangicta gizli, JS ile doldurulur) -->
                             <svg id="godEyeHeatmapSVG" viewBox="-110 -110 220 220" xmlns="http://www.w3.org/2000/svg">
                             </svg>
                         </div>
                         <!-- Durum Bilgisi -->
-                        <div style="font-size: 0.7rem; color: var(--vip-text-muted); text-align: center; letter-spacing: 0.5px;">
-                            <span id="godEyeStatusText"><i class="fas fa-circle" style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>DEMO — örnek oturumlar (gerçek presence yok)</span>
+                        <div
+                            style="font-size: 0.7rem; color: var(--vip-text-muted); text-align: center; letter-spacing: 0.5px;">
+                            <span id="godEyeStatusText"><i class="fas fa-circle"
+                                    style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>DEMO —
+                                örnek oturumlar (gerçek presence yok)</span>
                         </div>
                     </div>
                 </div>
@@ -1644,8 +1766,10 @@
         style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
         <div class="modern-modal-content"
             style="background:var(--color-surface); color:var(--color-text); margin:40px auto; padding:40px; width:50%; max-width:95vw; border-radius:14px; overflow:hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.25);">
-            <div class="d-flex justify-content-between align-items-center p-3 border-bottom" style="background:var(--color-surface-alt); border-bottom-color:var(--color-border-light) !important;">
-                <h4 class="mb-0 fw-bold" style="color: var(--color-text);"><i class="fas fa-stream me-2"></i>İş Akışı Takibi</h4>
+            <div class="d-flex justify-content-between align-items-center p-3 border-bottom"
+                style="background:var(--color-surface-alt); border-bottom-color:var(--color-border-light) !important;">
+                <h4 class="mb-0 fw-bold" style="color: var(--color-text);"><i class="fas fa-stream me-2"></i>İş Akışı
+                    Takibi</h4>
                 <span onclick="closeWorkflowModal()"
                     style="cursor:pointer; font-size: 22px; line-height: 1; color: var(--color-text-muted);">&times;</span>
             </div>
@@ -1871,6 +1995,7 @@
     <script src="security.js"></script>
     <script type="module" src="src/modules/admin/admin-main.js"></script>
     <script src="script.js"></script>
+    <script src="pdf-generator.js"></script>
     <script src="src/modules/admin/admin-system-control.js"></script>
     <script src="src/modules/admin/admin-sitemap.js"></script>
 
@@ -1942,8 +2067,10 @@
             <div>
                 <div class="uap-section-label"><i class="fas fa-paper-plane me-1"></i>Sistem Mesaji Gonder</div>
                 <div class="uap-msg-form">
-                    <textarea class="uap-msg-textarea" id="uapSystemMessage" placeholder="Kullaniciya gonderilecek sistem mesajini yazin..."></textarea>
-                    <button class="uap-action-btn uap-btn-msg" id="uapSendMsgBtn" onclick="window.vipSendSystemMessage()">
+                    <textarea class="uap-msg-textarea" id="uapSystemMessage"
+                        placeholder="Kullaniciya gonderilecek sistem mesajini yazin..."></textarea>
+                    <button class="uap-action-btn uap-btn-msg" id="uapSendMsgBtn"
+                        onclick="window.vipSendSystemMessage()">
                         <i class="fas fa-paper-plane"></i>
                         Sistem Mesaji Gonder
                     </button>
@@ -1953,7 +2080,8 @@
             <!-- Zorla Oturumu Kapat -->
             <div>
                 <div class="uap-section-label"><i class="fas fa-shield-exclamation me-1"></i>Guvenlik Aksiyonu</div>
-                <button class="uap-action-btn uap-btn-logout" id="uapForceLogoutBtn" onclick="window.vipForceLogoutConfirm()">
+                <button class="uap-action-btn uap-btn-logout" id="uapForceLogoutBtn"
+                    onclick="window.vipForceLogoutConfirm()">
                     <i class="fas fa-right-from-bracket"></i>
                     Force Logout Uygula
                 </button>

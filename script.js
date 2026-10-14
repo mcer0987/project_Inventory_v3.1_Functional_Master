@@ -33,6 +33,33 @@ if (!window.data) {
 }
 window.isFirebaseLoaded = window.isFirebaseLoaded || false;
 
+// ─── Faz 5 · K3 · AppModules.AdminTabs (5.7 · ARC-07) ──────────────────────────────────────────────
+// [WHY]: admin.html'de 3 ayrı dosya (admin-system-control.js, inventory-management.js, edm-workflow.js) kendi
+//        "sekme gösterildiğinde çalış" ihtiyacı için window.showAdminTab'ı ayrı ayrı sarmalıyordu (zincirleme
+//        monkey-patch); her biri kendi setTimeout/retry döngüsünü taşıyordu — yükleme sırası değişirse (ör.
+//        admin-dashboard.js henüz tanımlanmadan bir sarmalayıcı çalışırsa) zincirin bir halkası sessizce kaybolabilirdi.
+// [HOW]: Tek, merkezi kanca sicili. script.js klasik (modül olmayan) bir dosya olarak admin.html'de en erken
+//        yüklenenlerden biridir — admin-main.js'in ESM zinciri (admin-dashboard.js, inventory-management.js,
+//        edm-workflow.js) ve admin-system-control.js gibi geç yüklenen klasik dosyalar her zaman bu sicili hazır
+//        bulur, ayrıca retry/polling gerekmez. showAdminTab'ın TEK kanonik tanımı (admin-dashboard.js) kendi işini
+//        bitirince dispatch(tabId) çağırır; başka HİÇBİR dosya showAdminTab'ı sarmalamaz/değiştirmez.
+window.AppModules = window.AppModules || {};
+(function () {
+    const perTab = new Map();   // tabId -> fn[]
+    const anyTab = [];          // fn[] — her sekme değişiminde (tabId ne olursa olsun) çalışır
+    function onShow(tabId, fn) {
+        if (typeof fn !== 'function') return;
+        if (!perTab.has(tabId)) perTab.set(tabId, []);
+        perTab.get(tabId).push(fn);
+    }
+    function onAny(fn) { if (typeof fn === 'function') anyTab.push(fn); }
+    function dispatch(tabId) {
+        anyTab.forEach(fn => { try { fn(tabId); } catch (e) { console.error('[AdminTabs] onAny kanca hatası:', e); } });
+        (perTab.get(tabId) || []).forEach(fn => { try { fn(tabId); } catch (e) { console.error(`[AdminTabs] onShow('${tabId}') kanca hatası:`, e); } });
+    }
+    window.AppModules.AdminTabs = { onShow, onAny, dispatch };
+})();
+
 // Global currentUser ilklendirme
 window.currentUser = window.getActiveUser();
 

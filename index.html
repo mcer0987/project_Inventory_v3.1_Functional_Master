@@ -682,7 +682,13 @@
         </div>
 
         <div id="personnelInventoryTab" class="tab-content">
-            <h3>Kişi Envanterim</h3>
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+                <h3 style="margin:0;">Kişi Envanterim</h3>
+                <button type="button" onclick="window.generatePersonnelZimmetPDF(window.getActiveUser() && window.getActiveUser().id)"
+                    style="display:inline-flex; align-items:center; gap:7px; padding:10px 18px; border-radius:var(--radius-md); font-weight:600; font-size:13px; background:var(--color-primary); color:#fff; border:none; cursor:pointer; transition:var(--transition);">
+                    <i class="fas fa-file-pdf"></i> Zimmet Tutanağımı İndir (PDF)
+                </button>
+            </div>
             <div class="table-container">
                 <table id="tablePersonnelInventory">
                     <thead>

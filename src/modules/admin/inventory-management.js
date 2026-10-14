@@ -266,6 +266,18 @@ window.inventoryManagementModule = {
                     <i class="fas fa-undo"></i> Zimmetten Düş
                   </button>`;
 
+      // Faz 5 · K1 (5.1 · ZIM-04): resmi zimmet tutanağı — personelId'si çözülebilen kayıtlarda (b3 ve eşlenmiş eski
+      // talepler). Kişinin ÜZERİNDEKİ TÜM zimmetlerini basar (bu satırla sınırlı değil; AssignmentService.getPersonInventory
+      // ile aynı küme), "Zimmetten Düş" gibi satır başına değil kişi başına bir işlemdir.
+      const pdfBtn = a.personelId
+        ? `<button onclick="window.generatePersonnelZimmetPDF(${jsArg(String(a.personelId))})"
+                    title="Bu personelin resmi zimmet tutanağını indir"
+                    style="padding:5px 10px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; border-radius:8px; cursor:pointer; font-size:11px; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:4px; transition:0.2s;"
+                    onmouseover="this.style.background='#e0e7ff'" onmouseout="this.style.background='#eef2ff'">
+                    <i class="fas fa-file-pdf"></i> Tutanak
+                  </button>`
+        : '';
+
       // [G] Seri No veya Envanter No varsa Cihaz Geçmişi butonu (3.9c: servis/sevk dahil birleşik geçmiş)
       const deviceId = [a.sn, a.envanterNo].find(v => v && v !== '-' && !String(v).includes(','));
       const historyBtn = deviceId
@@ -307,6 +319,7 @@ window.inventoryManagementModule = {
               <td style="padding:12px 16px; text-align:center;">
                 <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                   ${actionBtn}
+                  ${pdfBtn}
                   ${historyBtn}
                 </div>
               </td>
@@ -823,77 +836,185 @@ window.inventoryManagementModule = {
   },
 
   // 13. HIZLI EKLEME KISA YOLLARI [E][F]
-  quickAddPersonnel: function () {
-    if (typeof window.openPersonelModal === 'function') {
-      window.openPersonelModal();
-    } else if (typeof window.openPersonnelModal === 'function') {
-      window.openPersonnelModal();
-    } else {
-      if (typeof showAppAlert === 'function') showAppAlert('Personel ekleme modali bu sayfada mevcut degil.', 'warning');
-      return;
-    }
-    const modal = document.getElementById('personelModal') || document.getElementById('personnelModal');
-    if (!modal) return;
-    const obs = new MutationObserver(() => {
-      if (modal.style.display === 'none' || !modal.style.display) {
-        obs.disconnect();
-        setTimeout(() => {
-          const select = document.getElementById('assignPersonnel');
-          if (!select) return;
-          const personeller = window.data?.personel || [];
-          const current = select.value;
-          select.innerHTML = '<option value="">-- Personel Seciniz --</option>' +
-            personeller.map(p => `<option value="${escapeHtml(p.id ?? p.name ?? p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
-          if (personeller.length > 0) {
-            const last = personeller[personeller.length - 1];
-            select.value = String(last.id ?? last.name ?? last.adSoyad ?? current);
-          }
-        }, 300);
-      }
+  // [WHY] (Faz 5 · K3 · 5.2 · ZIM-05): Bu iki köprü `window.openPersonelModal`/`window.openProductModal`'ı çağırıyordu —
+  //       ama o modaller (`#personelModal`, `#productModal`) yalnız index.html'de var; admin.html'de hiç yok. Üstelik
+  //       `openProductModal`, yalnız index.html'de yüklenen `UIComponents`/`main.js`'e bağlı (admin.html onu hiç yüklemiyor).
+  //       Sonuç: admin panelinde butona basınca ilgili fonksiyon modal bulamayıp sessizce hiçbir şey yapmıyordu.
+  // [HOW]: Zimmet modülünün kendi deseni (_injectAssignModal — bir kez document.body'ye enjekte edilen, kendi kendine
+  //        yeten modal) burada da tekrarlanır: admin.html'de başka hiçbir dosyaya bağımlı olmayan, kendi minik
+  //        modalleri ve kaydetme mantığıyla (appendItem — K2'nin personel/B1/B2 şema sözleşmesinden geçer).
+  _injectQuickPersonnelModal: function () {
+    if (document.getElementById('quickPersonnelModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'quickPersonnelModal';
+    modal.style.cssText = 'display:none; position:fixed; inset:0; background:rgba(15,23,42,0.65); z-index:10600; align-items:center; justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:var(--color-surface,#fff); border-radius:16px; width:380px; max-width:92vw; padding:22px; box-shadow:0 24px 64px rgba(0,0,0,0.4);">
+        <h4 style="margin:0 0 16px; font-weight:800; color:var(--color-text);"><i class="fas fa-user-plus" style="color:#16a34a; margin-right:8px;"></i>Yeni Personel Ekle</h4>
+        <form id="quickPersonnelForm" autocomplete="off">
+          <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Ad Soyad *</label>
+          <input type="text" id="qpName" required style="width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); margin-bottom:14px;">
+          <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Oturum Kodu</label>
+          <input type="text" id="qpCode" readonly style="width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface-alt,#f1f5f9); color:var(--color-text-muted); margin-bottom:18px;">
+          <div style="display:flex; gap:10px; justify-content:flex-end;">
+            <button type="button" onclick="window.inventoryManagementModule.closeQuickPersonnelModal()" style="padding:9px 16px; background:none; border:1px solid var(--color-border); border-radius:8px; cursor:pointer; color:var(--color-text);">Vazgeç</button>
+            <button type="submit" style="padding:9px 18px; background:#16a34a; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;">Kaydet</button>
+          </div>
+        </form>
+      </div>`;
+    document.body.appendChild(modal);
+    document.getElementById('quickPersonnelForm').addEventListener('submit', e => {
+      e.preventDefault();
+      window.inventoryManagementModule._saveQuickPersonnel();
     });
-    obs.observe(modal, { attributes: true, attributeFilter: ['style'] });
+  },
+
+  quickAddPersonnel: function () {
+    this._injectQuickPersonnelModal();
+    const modal = document.getElementById('quickPersonnelModal');
+    document.getElementById('qpName').value = '';
+    document.getElementById('qpCode').value = typeof window.getRandomCode === 'function' ? window.getRandomCode() : String(Math.random()).slice(2, 7);
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('qpName')?.focus(), 50);
+  },
+
+  closeQuickPersonnelModal: function () {
+    const modal = document.getElementById('quickPersonnelModal');
+    if (modal) modal.style.display = 'none';
+  },
+
+  _saveQuickPersonnel: async function () {
+    const alert = (m, t) => { if (typeof showAppAlert === 'function') showAppAlert(m, t); };
+    const name = document.getElementById('qpName').value.trim();
+    const code = document.getElementById('qpCode').value.trim();
+    if (!name) { alert('Ad Soyad boş olamaz.', 'warning'); return; }
+    if ((window.data.personel || []).some(p => String(p.code) === code)) { alert('Bu oturum kodu zaten kullanımda; tekrar deneyin.', 'warning'); return; }
+    const res = await window.writeOk(window.appendItem('personel', { name, code }));
+    if (!res) { alert('Personel eklenemedi.', 'error'); return; }
+    this.closeQuickPersonnelModal();
+    alert(`"${name}" eklendi.`, 'success');
+    // Zimmet modalındaki personel seçimini tazele ve yeni kişiyi otomatik seç.
+    const select = document.getElementById('assignPersonnel');
+    if (select) {
+      const personeller = window.data?.personel || [];
+      select.innerHTML = '<option value="">-- Personel Seçiniz --</option>' +
+        personeller.map(p => `<option value="${escapeHtml(p.id ?? p.name ?? p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
+      const created = personeller.find(p => p.name === name && String(p.code) === code);
+      if (created) select.value = String(created.id ?? created.name);
+    }
+  },
+
+  _injectQuickProductModal: function () {
+    if (document.getElementById('quickProductModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'quickProductModal';
+    modal.style.cssText = 'display:none; position:fixed; inset:0; background:rgba(15,23,42,0.65); z-index:10600; align-items:center; justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:var(--color-surface,#fff); border-radius:16px; width:420px; max-width:92vw; padding:22px; box-shadow:0 24px 64px rgba(0,0,0,0.4);">
+        <h4 style="margin:0 0 4px; font-weight:800; color:var(--color-text);"><i class="fas fa-box" style="color:#1d4ed8; margin-right:8px;"></i>Yeni Ürün Ekle</h4>
+        <small style="color:var(--color-text-muted); display:block; margin-bottom:16px;">Yalnız zimmetlenebilir (demirbaş) ürün eklenir; raf/sütun konumu sonra Envanter sekmesinden düzenlenebilir.</small>
+        <form id="quickProductForm" autocomplete="off">
+          <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Depo *</label>
+          <select id="qpDepo" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); margin-bottom:14px;">
+            <option value="b1">B1 Deposu</option>
+            <option value="b2">B2 Deposu</option>
+          </select>
+          <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Tür * (yalnız demirbaş türler listelenir)</label>
+          <select id="qpType" required style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); margin-bottom:14px;"></select>
+          <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Ürün Adı *</label>
+          <input type="text" id="qpName2" required style="width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); margin-bottom:14px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px;">
+            <div>
+              <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Marka</label>
+              <input type="text" id="qpBrand" style="width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text);">
+            </div>
+            <div>
+              <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Adet *</label>
+              <input type="number" id="qpQty" value="1" min="1" required style="width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text);">
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; justify-content:flex-end;">
+            <button type="button" onclick="window.inventoryManagementModule.closeQuickProductModal()" style="padding:9px 16px; background:none; border:1px solid var(--color-border); border-radius:8px; cursor:pointer; color:var(--color-text);">Vazgeç</button>
+            <button type="submit" style="padding:9px 18px; background:#1d4ed8; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;">Kaydet</button>
+          </div>
+        </form>
+      </div>`;
+    document.body.appendChild(modal);
+    document.getElementById('quickProductForm').addEventListener('submit', e => {
+      e.preventDefault();
+      window.inventoryManagementModule._saveQuickProduct();
+    });
   },
 
   quickAddProduct: function () {
-    if (typeof window.openProductModal === 'function') {
-      window.openProductModal();
-    } else {
-      if (typeof showAppAlert === 'function') showAppAlert('Urun ekleme modali bu sayfada mevcut degil.', 'warning');
-      return;
+    this._injectQuickProductModal();
+    const modal = document.getElementById('quickProductModal');
+    // Zimmet akışı yalnız demirbaşı zimmetlediği için (onWarehouseChange) tür listesi de yalnız demirbaş türlerle sınırlanır.
+    const types = (typeof window.getActiveProductTypes === 'function' ? window.getActiveProductTypes() : [])
+      .filter(t => t.isDemirbas === true || t.isDemirbas === 'true');
+    const typeSel = document.getElementById('qpType');
+    typeSel.innerHTML = types.length
+      ? types.map(t => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join('')
+      : '<option value="">-- Önce Tanımlar\'dan demirbaş tür ekleyin --</option>';
+    document.getElementById('qpName2').value = '';
+    document.getElementById('qpBrand').value = '';
+    document.getElementById('qpQty').value = '1';
+    document.getElementById('qpDepo').value = 'b1';
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('qpName2')?.focus(), 50);
+  },
+
+  closeQuickProductModal: function () {
+    const modal = document.getElementById('quickProductModal');
+    if (modal) modal.style.display = 'none';
+  },
+
+  _saveQuickProduct: async function () {
+    const alert = (m, t) => { if (typeof showAppAlert === 'function') showAppAlert(m, t); };
+    const depo = document.getElementById('qpDepo').value;
+    const tür = document.getElementById('qpType').value;
+    const ürün = document.getElementById('qpName2').value.trim();
+    const marka = document.getElementById('qpBrand').value.trim();
+    const adet = parseInt(document.getElementById('qpQty').value, 10) || 0;
+    if (!tür) { alert('Lütfen bir demirbaş tür seçin (yoksa önce Tanımlar sekmesinden ekleyin).', 'warning'); return; }
+    if (!ürün) { alert('Ürün adı boş olamaz.', 'warning'); return; }
+    if (!Number.isInteger(adet) || adet < 1) { alert('Adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+
+    const item = {
+      id: `${depo}_${window.makeId()}`, sütun: '', raf: '', tür, ürün, marka,
+      adet, durumu: 'Kullanıma Hazır', açıklama: '', isDemirbas: true, lastUpdate: Date.now(),
+    };
+    if (depo === 'b2') item.status = 'Kullanıma Hazır';
+
+    const res = await window.writeOk(window.appendItem(depo, item));
+    if (!res) { alert('Ürün eklenemedi.', 'error'); return; }
+    this.closeQuickProductModal();
+    alert(`"${ürün}" ${depo.toUpperCase()} deposuna eklendi.`, 'success');
+
+    // Zimmet satırlarından BİRİNİ bu yeni ürüne hazırla (depo + ürün seçili gelsin).
+    const rows = document.querySelectorAll('#assignRowsContainer .assign-product-row');
+    let target = [...rows].find(r => !r.querySelector('.assign-warehouse-sel')?.value);
+    if (!target && rows.length) target = rows[rows.length - 1];
+    if (target) {
+      const wh = target.querySelector('.assign-warehouse-sel');
+      wh.value = depo;
+      this.onWarehouseChange(wh);
+      const ps = target.querySelector('.assign-product-sel');
+      if (ps) { ps.value = item.id; this.onProductChange(ps); }
     }
-    const modal = document.getElementById('productModal');
-    if (!modal) return;
-    const obs = new MutationObserver(() => {
-      if (modal.style.display === 'none' || !modal.style.display) {
-        obs.disconnect();
-        setTimeout(() => {
-          document.querySelectorAll('#assignRowsContainer .assign-warehouse-sel').forEach(sel => {
-            if (sel.value) window.inventoryManagementModule.onWarehouseChange(sel);
-          });
-        }, 300);
-      }
+    // Aynı depodaki diğer satırların ürün listelerini de tazele (yeni ürün artık seçilebilir).
+    document.querySelectorAll('#assignRowsContainer .assign-warehouse-sel').forEach(sel => {
+      if (sel.value && sel !== (target && target.querySelector('.assign-warehouse-sel'))) this.onWarehouseChange(sel);
     });
-    obs.observe(modal, { attributes: true, attributeFilter: ['style'] });
-  }
+  },
 };
 
-// showAdminTab INTERCEPTOR
-(function attachInventoryTabHook() {
-  function doHook() {
-    if (typeof window.showAdminTab !== 'function') { setTimeout(doHook, 150); return; }
-    if (window._inventoryTabHooked) return;
-    window._inventoryTabHooked = true;
-    const previousShowAdminTab = window.showAdminTab;
-    window.showAdminTab = function (tabId) {
-      if (typeof previousShowAdminTab === 'function') previousShowAdminTab(tabId);
-      if (tabId === 'inventoryManagementTab') {
-        if (window.data && window.inventoryManagementModule) {
-          window.inventoryManagementModule.renderAdminInventoryTab();
-        } else {
-          setTimeout(() => { if (window.inventoryManagementModule) window.inventoryManagementModule.renderAdminInventoryTab(); }, 600);
-        }
-      }
-    };
+// Faz 5 · K3 (5.7 · ARC-07): showAdminTab'ı sarmalayan eski monkey-patch + 150ms'lik retry döngüsü kaldırıldı.
+// script.js'te her zaman hazır olan merkezi kanca siciline (AppModules.AdminTabs) kaydolunuyor.
+window.AppModules.AdminTabs.onShow('inventoryManagementTab', () => {
+  if (window.data && window.inventoryManagementModule) {
+    window.inventoryManagementModule.renderAdminInventoryTab();
+  } else {
+    setTimeout(() => { if (window.inventoryManagementModule) window.inventoryManagementModule.renderAdminInventoryTab(); }, 600);
   }
-  doHook();
-})();
+});
