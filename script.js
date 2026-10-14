@@ -1336,65 +1336,61 @@ window.exportPDF = function (depo) {
     setTimeout(() => { win.print(); win.close(); }, 300);
 };
 
+// [WHY]: Faz 5 denetimi (P1) — içe aktarma kanonik olmayan b1/b2 kaydı üretiyordu ("rafNo", isDemirbas yok, uydurma
+//        "Unbranded"/"Sarf"/limit 3, sayı olmayan adet → 0) ve tüm depoyu saveData ile parça parça yazıyordu; CSV dalı dosyayı
+//        ArrayBuffer olarak okuyup metin gibi bölmeye çalıştığı için hiç çalışmıyordu. saveData'nın b1/b2 tam 'set'
+//        sözleşmesi bu yüzden esnetilmişti (artık esnek değil).
+// [HOW]: Ayrıştırma/eşleme/doğrulama StockImport'ta (saf, birim testli): başlık adlarıyla eşleme, Schema.toCanonicalStock,
+//        validateB1/B2 tam sözleşmesi. Tek hatalı satır bile varsa hiçbir şey yazılmaz. Onaydan sonra yalnız YENİ kayıtlar
+//        atomicInsertItems ile hepsi-ya-da-hiçbiri eklenir (depodaki mevcut kayıtlar yeniden yazılmaz).
 async function importExcel(event) {
-    const file = event.target.files[0];
-    const depo = event.target.getAttribute('data-depo') || 'b1';
+    const input = event.target;
+    const file = input.files[0];
+    const depo = input.getAttribute('data-depo') || 'b1';
+    input.value = '';   // aynı dosya ikinci kez seçilebilsin
     if (!file) return;
     // Faz 4 · J1 (M1): içe aktarma b1/b2 yazması — yalnız admin (B2 etiketi kapısızdı, B1 etiketi dosya seçiciyi yine açıyordu).
-    if (!window.requireDbAdmin('Excel içe aktarma')) { event.target.value = ''; return; }
-    const reader = new FileReader();
-    reader.onload = async function (e) {
-        let importedData = [];
-        try {
-            if (file.name.endsWith('.csv')) {
-                const text = e.target.result;
-                const rows = text.split('\n').map(row => row.split(','));
-                importedData = rows.slice(1).map(row => ({
-                    ürün: row[0]?.trim(),
-                    tür: row[1]?.trim() || "Sarf",
-                    rafNo: row[2]?.trim() || "-",
-                    adet: parseInt(row[3]) || 0,
-                    limit: parseInt(row[4]) || 3,
-                    marka: row[5]?.trim() || "Unbranded"
-                })).filter(item => item.ürün);
-            } else {
-                const dataArr = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(dataArr, { type: 'array' });
-                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                const rawRows = XLSX.utils.sheet_to_json(firstSheet);
-                importedData = rawRows.map(row => {
-                    const name = row['ürün'] || row['Ürün'] || row['name'] || row['Ürün Adı'] || "";
-                    const type = row['cihaz türü'] || row['Tür'] || row['tür'] || row['type'] || "Sarf";
-                    const shelf = row['raf'] || row['Raf No'] || row['shelf'] || row['raf no'] || "-";
-                    const qty = parseInt(row['adet'] || row['Adet'] || row['qty'] || row['miktar']) || 0;
-                    const brand = row['marka'] || row['Marka'] || row['brand'] || "Unbranded";
-                    const column = row['sütun'] || row['Sütun'] || row['column'] || shelf.toString().split('-')[0] || "-";
-                    return {
-                        ürün: name.toString().trim(),
-                        tür: type.toString().trim(),
-                        rafNo: shelf.toString().trim(),
-                        raf: shelf.toString().trim(),
-                        sütun: column.toString().trim(),
-                        adet: qty,
-                        limit: parseInt(row['limit'] || row['Limit'] || 3) || 3,
-                        marka: brand.toString().trim(),
-                        durumu: row['durumu'] || row['Durumu'] || (qty > 0 ? "Mevcut" : "Tükendi"),
-                        lastUpdate: new Date().getTime()
-                    };
-                }).filter(item => item.ürün !== "");
-            }
-            if (importedData.length === 0) { showAppAlert("Yüklenecek geçerli veri bulunamadı!", "error"); return; }
-            const currentDepoData = window.data[depo] || [];
-            const finalData = [...currentDepoData, ...importedData];
-            await window.saveData(depo, finalData);
-            if (typeof renderTable === 'function') renderTable(depo);
-            showAppAlert(`${importedData.length} ürün başarıyla depoya eklendi ve kaydedildi!`, "success");
-        } catch (err) {
-            showAppAlert(err && err.name === 'SaveDataError' ? `Ürünler kaydedilemedi: ${err.message}` : "Excel okunurken bir hata oluştu!", "error");
-        }
-    };
-    reader.readAsArrayBuffer(file);
-    event.target.value = '';
+    if (!window.requireDbAdmin('Excel içe aktarma')) return;
+    const I = window.StockImport;
+    if (!I || !window.Schema || typeof window.atomicInsertItems !== 'function') { showAppAlert('İçe aktarma modülü yüklenemedi; sayfayı yenileyin.', 'error'); return; }
+
+    let rows;
+    try {
+        const buf = await file.arrayBuffer();
+        rows = /\.csv$/i.test(file.name) ? I.parseCsv(I.decodeText(buf)) : I.sheetRows(XLSX, buf);
+    } catch (err) {
+        console.error('İçe aktarma: dosya okunamadı', err);
+        showAppAlert('Dosya okunamadı. CSV (UTF-8 / Windows-1254) veya Excel (.xlsx/.xls) olmalı.', 'error');
+        return;
+    }
+
+    const res = I.buildStockRecords(rows, depo, { schema: window.Schema, makeId: window.makeId, now: Date.now() });
+    if (res.errors.length) {
+        const more = res.errors.length > 5 ? `\n… (+${res.errors.length - 5} hata)` : '';
+        showAppAlert(`İçe aktarma durduruldu, hiçbir kayıt yazılmadı.\n${res.errors.slice(0, 5).join('\n')}${more}`, 'error');
+        return;
+    }
+    if (!res.records.length) { showAppAlert('Yüklenecek geçerli veri bulunamadı!', 'error'); return; }
+
+    const demirbas = res.records.filter(r => r.isDemirbas).length;
+    const question = `${res.records.length} ürün ${depo.toUpperCase()} deposuna eklenecek (${demirbas} demirbaş, ${res.records.length - demirbas} sarf). ` +
+        `Mevcut kayıtlara dokunulmaz.${res.warnings.length ? '\n\nUyarılar:\n' + res.warnings.slice(0, 5).join('\n') : ''}`;
+    const ok = typeof window.showCustomConfirm === 'function'
+        ? await window.showCustomConfirm('Excel / CSV İçe Aktarma', question, { confirmText: 'İçe Aktar' })
+        : window.confirm(question);
+    if (ok !== true) return;
+
+    try {
+        await window.atomicInsertItems(depo, res.records);
+    } catch (err) {
+        const msg = err && err.code === 'rolled-back' ? 'Yazma yarıda kesildi ve eklenen kısım geri alındı; depo işlem öncesi hâlinde.'
+            : err && err.code === 'rollback-pending' ? 'Yazma yarıda kesildi; geri alma yönetici oturumunda otomatik tamamlanacak (depo şu an kilitli).'
+            : 'Hiçbir kayıt yazılmadı.';
+        showAppAlert(`Ürünler kaydedilemedi. ${msg} ${(err && err.message) || ''}`, 'error');
+        return;
+    }
+    if (typeof renderTable === 'function') renderTable(depo);
+    showAppAlert(`${res.records.length} ürün başarıyla depoya eklendi ve kaydedildi!`, 'success');
 }
 
 window.exportToExcel = function (depo) {

@@ -272,6 +272,53 @@
     function validateB1(e, opts = {}) { return _validateStock(e, B1_KEYS, B1_LEGACY_KEYS, opts); }
     function validateB2(e, opts = {}) { return _validateStock(e, B2_KEYS, B2_LEGACY_KEYS, opts); }
 
+    // [WHY]: Faz 5 denetimi (P1) — b1/b2 tam 'set' sözleşmesi saveData'da esnetilmişti, çünkü CSV/Excel içe aktarma
+    //        "rafNo" (b1/b2'de alanın adı 'raf'), "limit" gibi alanlarla ve isDemirbas'sız kayıt üretiyordu; eski yedeklerde de
+    //        İngilizce takma adlı (name/type/shelf/qty) kayıtlar var.
+    // [HOW]: Tek kanonik kurucu: takma adların değeri kanonik alana taşınır ve takma ad silinir; eksik alan tipine uygun
+    //        boş değerle tamamlanır; isDemirbas boolean değilse Schema.isDemirbas kuralıyla (ürün türü tanımı → bayrak →
+    //        ad) üretilir; b2'de durumu/status birbirinden tamamlanır. Kanonik karşılığı olmayan alanlar (limit, isWatched,
+    //        stokOncekiDurum…) korunur. Kanonik kayıt için idempotenttir. Değer UYDURULMAZ: adet tam sayıya çevrilemiyorsa
+    //        olduğu gibi bırakılır ve validateB1/B2 reddeder (sessiz 0 yok).
+    const STOCK_ALIASES = Object.freeze(['name', 'type', 'shelf', 'qty', 'rafNo', 'shelfNo', 'sutun']);
+    function toCanonicalStock(p, col, opts = {}) {
+        if (!p || typeof p !== 'object') return p;
+        const isB2 = col === 'b2';
+        const first = (...vals) => {
+            const v = vals.find(x => x !== undefined && x !== null && x !== '');
+            return v === undefined ? '' : (typeof v === 'string' ? v : String(v));
+        };
+        const out = { ...p };
+        STOCK_ALIASES.forEach(k => { delete out[k]; });
+        if (!isB2) delete out.status;
+
+        const qtyRaw = p.adet ?? p.qty;
+        let adet = qtyRaw;
+        if (qtyRaw === undefined || qtyRaw === null || qtyRaw === '') adet = 0;
+        else if (typeof qtyRaw === 'string' && /^\s*\d+\s*$/.test(qtyRaw)) adet = parseInt(qtyRaw, 10);
+
+        let flag = p.isDemirbas;
+        if (flag === 'true') flag = true;
+        else if (flag === 'false') flag = false;
+
+        Object.assign(out, {
+            id: p.id,
+            sütun: first(p.sütun, p.sutun),
+            raf: first(p.raf, p.rafNo, p.shelf, p.shelfNo),
+            tür: first(p.tür, p.type),
+            ürün: first(p.ürün, p.name),
+            marka: first(p.marka),
+            adet,
+            durumu: first(p.durumu, p.status),
+            açıklama: first(p.açıklama),
+        });
+        out.isDemirbas = typeof flag === 'boolean' ? flag : isDemirbas({ ...out, isDemirbas: undefined });
+        if (isB2) out.status = first(p.status, p.durumu);
+        const lu = Number(p.lastUpdate);
+        out.lastUpdate = typeof p.lastUpdate === 'number' ? p.lastUpdate : (Number.isFinite(lu) && lu > 0 ? lu : (opts.now ?? Date.now()));
+        return out;
+    }
+
     // ─── 3.9a · Cihaz kimliği (Seri No / Envanter No) ───
     // Karşılaştırma anahtarı: boşluksuz, büyük harf; '-' ve boş yok sayılır. Eski kayıtlarda virgülle birleşmiş SN'ler ayrılır.
     function normDeviceId(v) {
@@ -373,7 +420,7 @@
         makeId, normName, idToTs, isDemirbas, normalizeStock, findStock, isSelfApproval,
         B3_SCHEMA_VERSION, B3_KEYS, B3_LEGACY_KEYS, B3_TIP, STOK_DISI,
         buildB3Entry, normalizeB3, toCanonicalB3, validateB3,
-        B1_KEYS, B1_LEGACY_KEYS, B2_KEYS, B2_LEGACY_KEYS, validateB1, validateB2,
+        B1_KEYS, B1_LEGACY_KEYS, B2_KEYS, B2_LEGACY_KEYS, validateB1, validateB2, toCanonicalStock,
         requestStatus, normalizeRequest,
         normDeviceId, deviceKeys, validateDeviceIds,
     };

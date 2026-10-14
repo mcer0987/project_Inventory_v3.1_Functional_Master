@@ -253,41 +253,9 @@ window.exportPDF=function (depo) {
     doc.save(`${depo}-envanter.pdf`);
 }
 
-window.importExcel=function (event) {
-    const file = event.target.files[0];
-    const depo = event.target.getAttribute('data-depo');
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        let importedData;
-        if (file.name.endsWith('.csv')) {
-            const text = e.target.result;
-            const rows = text.split('\n').map(row => row.split(','));
-            importedData = rows.slice(1).map(row => ({
-                name: row[0],
-                type: row[1],
-                shelf: row[2],
-                status: row[3],
-                qty: parseInt(row[4])
-            })).filter(item => item.name && !isNaN(item.qty));
-        } else {
-            const dataArr = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(dataArr, {type: 'array'});
-            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            importedData = XLSX.utils.sheet_to_json(firstSheet, {header: ['name', 'type', 'shelf', 'status', 'qty']});
-            importedData = importedData.map(item => ({
-                ...item,
-                qty: parseInt(item.qty)
-            })).filter(item => item.name && !isNaN(item.qty));
-        }
-        data[depo] = importedData;
-        renderTable(depo);
-        alert(`${importedData.length} ürün başarıyla yüklendi!`);
-    };
-    reader.readAsArrayBuffer(file);
-    event.target.value = ''; // Reset input
-}
+// [Faz 5 denetimi · P1]: Buradaki ikinci importExcel kaldırıldı — eski takma adlarla (name/type/shelf/status/qty) yalnız
+// belleğe yazıyordu ve admin.html'de script.js'ten SONRA yüklendiği için oradaki kanonik içe aktarmanın üzerine biniyordu.
+// Tek içe aktarma yolu: script.js importExcel → StockImport + atomicInsertItems.
 
 // Excel Export (Kütüphanesiz, Saf JS Çözümü)
 window.exportTableToExcel=function (tableID, filename = ''){

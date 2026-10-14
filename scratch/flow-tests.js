@@ -2300,7 +2300,7 @@ const SCENARIOS = {
 
     // Faz 5 · K3 (5.3 · ADM-06 + 5.5 · VIP-08): birleşik yedekleme servisi (iki sayfada aynı kanonik biçim, ortam denetimi,
     // önizlemeli onay, başarısızlıkta bellek geri dönüşü) ve VIP sağlık döngüsünün yalnız VIP sekmesi görünürken çalışması.
-    // İndirme (_download) ve yazma (saveData) yakalanır; Firestore'a hiçbir şey yazılmaz.
+    // İndirme (_download) ve yazma (restoreCollections — Faz 5 denetimi P0 atomik yol) yakalanır; Firestore'a hiçbir şey yazılmaz.
     async k3BackupAndVipLoop(page, browser) {
         const out = {};
         // index.html: UAB "Yedek Al" de aynı kanonik biçimi üretir
@@ -2326,7 +2326,7 @@ const SCENARIOS = {
                 const o = {}, S = window.BackupService;
                 o.loaded = !!S;
                 o.vipRestoreInjected = !!document.getElementById('vipRestoreBtn') && !!document.getElementById('vipRestoreInput');
-                const orig = { dl: S._download, save: window.saveData, adm: window.isDbAdmin, conf: window.showCustomConfirm, alert: window.showAppAlert, data: window.data, reload: S.reloadAfterRestore };
+                const orig = { dl: S._download, save: window.restoreCollections, adm: window.isDbAdmin, conf: window.showCustomConfirm, alert: window.showAppAlert, data: window.data, reload: S.reloadAfterRestore };
                 const alerts = [], saves = [], confirms = [];
                 let answer = true, saveFails = false;
                 let vipFile = null;
@@ -2335,7 +2335,7 @@ const SCENARIOS = {
                 window.showAppAlert = (m, t) => alerts.push(t);
                 window.isDbAdmin = () => true;
                 window.showCustomConfirm = async (title, node, opts) => { confirms.push({ text: node.textContent, confirmText: opts && opts.confirmText }); return answer; };
-                window.saveData = async (obj, opts) => { if (saveFails) throw new Error('schema-violation (test)'); saves.push({ b1: obj.b1, opts }); return { ok: true }; };
+                window.restoreCollections = async (obj, opts) => { if (saveFails) throw Object.assign(new Error('parça 2/3 düştü (test)'), { code: 'rolled-back' }); saves.push({ b1: obj.b1, keys: Object.keys(obj), opts }); return { status: 'committed' }; };
                 const root = window.COLLECTION_ROOT;
                 const canon = (r, b1) => JSON.stringify({ version: '3.2', root: r, timestamp: '2026-10-13T00:00:00Z', source: 'vip', data: { b1 } });
                 try {
@@ -2355,21 +2355,23 @@ const SCENARIOS = {
                     o.cancelled = (await S.restoreFromText(canon(root, [{ id: 'k3bk_1', ürün: 'Yedek Ürün' }]))).status;
                     o.cancelNoWrite = saves.length === 0;
                     o.previewText = confirms[0] && confirms[0].text;
-                    // 4) doğru ortam, onay → saveData tek çağrı, yedekteki b1 + bilinçli seçenekler
+                    // 4) doğru ortam, onay → restoreCollections (atomik) tek çağrı, yalnız yedekteki koleksiyon, kanonik b1
                     answer = true;
                     const restored = await S.restoreFromText(canon(root, [{ id: 'k3bk_1', ürün: 'Yedek Ürün' }]));
                     o.restored = restored.status;
                     o.restoreWrite = saves.length === 1 && saves[0].b1.length === 1 && saves[0].b1[0].id === 'k3bk_1'
-                        && saves[0].opts.allowBulkDelete === true && saves[0].opts.b3Legacy === true;
+                        && saves[0].keys.join() === 'b1' && saves[0].opts.b3Legacy === true
+                        && window.Schema.validateB1(saves[0].b1[0]).length === 0;
                     o.summaryB1 = (restored.summary || []).find(s => s.col === 'b1');
                     // 5) eski VIP ham dökümü → doğrulanmamış uyarısı + ayrı onay metni
                     const before = confirms.length;
                     o.legacy = (await S.restoreFromText(JSON.stringify({ b1: [{ id: 'old1' }], auditLogs: [{ id: 'a' }] }))).status;
                     o.legacyPreview = confirms[before] && { verifiedWarn: /ortam bilgisi yok/i.test(confirms[before].text), auditSkipped: /auditLogs/.test(confirms[before].text), confirmText: confirms[before].confirmText };
-                    // 6) yazma başarısız → bellek eski hâline döner
+                    // 6) yazma başarısız (motor yazılan parçaları geri aldı) → bellek hiç değişmez, sonuç kodu taşınır
                     saveFails = true;
                     const dataBefore = window.data;
-                    o.failed = (await S.restoreFromText(canon(root, [{ id: 'k3bk_2' }]))).status;
+                    const failedRes = await S.restoreFromText(canon(root, [{ id: 'k3bk_2' }]));
+                    o.failed = failedRes.status; o.failedCode = failedRes.code;
                     o.memoryRolledBack = window.data === dataBefore;
                     saveFails = false;
                     // 7) admin olmayan oturum → hiçbir şey sorulmaz
@@ -2379,7 +2381,7 @@ const SCENARIOS = {
                     o.forbiddenNoConfirm = confirms.length === c0;
                 } finally {
                     S._download = orig.dl; S.reloadAfterRestore = orig.reload;
-                    Object.assign(window, { saveData: orig.save, isDbAdmin: orig.adm, showCustomConfirm: orig.conf, showAppAlert: orig.alert });
+                    Object.assign(window, { restoreCollections: orig.save, isDbAdmin: orig.adm, showCustomConfirm: orig.conf, showAppAlert: orig.alert });
                     window.data = orig.data;
                 }
 
@@ -2424,7 +2426,7 @@ const SCENARIOS = {
             && a.restored === 'restored' && a.restoreWrite && a.summaryB1 && a.summaryB1.backup === 1
             && a.legacy === 'restored' && a.legacyPreview && a.legacyPreview.verifiedWarn && a.legacyPreview.auditSkipped
             && /Doğrulanmamış/.test(a.legacyPreview.confirmText || '')
-            && a.failed === 'failed' && a.memoryRolledBack && a.forbidden === 'forbidden' && a.forbiddenNoConfirm
+            && a.failed === 'failed' && a.failedCode === 'rolled-back' && a.memoryRolledBack && a.forbidden === 'forbidden' && a.forbiddenNoConfirm
             && v.api && v.idleBeforeOpen && v.runningInVip && v.ticksInVip && v.stoppedAfterLeave && v.noTicksWhileAway
             && v.restartedOnReturn && v.stoppedWhenHidden && v.resumedWhenVisible && v.finalStopped
             && out.adminPageErrors.length === 0;
@@ -2820,6 +2822,125 @@ const SCENARIOS = {
 
     // Faz 3.5 · toplu silme kilidi eşiği: ≤10 kayıtlı koleksiyonda yalnız mutlak sınır (5), >10'da ayrıca %20.
     // Tablo saf fonksiyonla; küçük koleksiyon davranışı 'requests' üzerinde işaretli kayıtlarla gerçek yazmayla.
+    // Faz 5 denetimi (P0 + P1) — gerçek sayfada:
+    //   P1: importExcel gerçek UI fonksiyonuyla (CSV/XLSX File nesneleri) sürülür; yazıcı (atomicInsertItems) yakalanır.
+    //       saveData b1 yeni kayıt tam sözleşmesi, kanonik kaydın bozulamaması. Bunlar Firestore'a yazmadan reddedilir.
+    //   P0: toplu yazma kilidi (restoreLock) saveData/applyItemOps/runStockOps'u durdurur; restoreCollections/atomicInsertItems
+    //       yönetici dışında reddedilir. --emu: gerçek admin oturumuyla firebase-handler köprüleri üzerinden 600 kayıtlık
+    //       günlüklü ekleme, ortadaki parçada GERÇEK sunucu reddi → geri alma, atomik geri yükleme (ekleneni siler).
+    async p5AuditAtomicImport(page) {
+        const out = await page.evaluate(async (EMU) => {
+            const o = {};
+            const orig = { ins: window.atomicInsertItems, req: window.requireDbAdmin, conf: window.showCustomConfirm, alert: window.showAppAlert, adm: window.isDbAdmin, cfg: window.data.config };
+            const calls = [], alerts = [];
+            window.atomicInsertItems = async (col, recs) => { calls.push({ col, recs }); return { status: 'committed' }; };
+            window.requireDbAdmin = () => true;
+            window.showCustomConfirm = async () => true;
+            window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
+            const fire = async (file, depo) => {
+                const input = document.getElementById('fileInput');
+                input.setAttribute('data-depo', depo);
+                const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files;
+                await window.importExcel({ target: input });
+            };
+            try {
+                o.singleImporter = window.importExcel.toString().includes('StockImport');   // pdf-generator'daki eski kopya yok
+                // 1) CSV (; ayraçlı, BOM'lu, tırnaklı) → kanonik b1
+                await fire(new File(['﻿Ürün Adı;Cihaz Türü;Raf No;Adet;Marka\r\n"Kablo; HDMI";Kablo;R-4;5;Acme\r\nThinkPad;Laptop;R-9;2;Lenovo\r\n'], 'test.csv', { type: 'text/csv' }), 'b1');
+                const c = calls.at(-1);
+                o.csv = c && { col: c.col, n: c.recs.length, contract: c.recs.map(r => window.Schema.validateB1(r).length), noRafNo: c.recs.every(r => !('rafNo' in r)),
+                               raf: c.recs.map(r => r.raf).join(','), demirbas: c.recs.map(r => typeof r.isDemirbas).join(','), name: c.recs[0].ürün };
+                // 2) XLSX → kanonik b2
+                const ws = XLSX.utils.json_to_sheet([{ 'Ürün': 'Monitör 24', 'Adet': 3, 'Durum': 'Kullanıma Hazır', 'Demirbaş': 'Evet' }]);
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'S1');
+                const bin = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+                await fire(new File([bin], 'test.xlsx'), 'b2');
+                const x = calls.at(-1);
+                o.xlsx = x && { col: x.col, contract: window.Schema.validateB2(x.recs[0]), status: x.recs[0].status, isDemirbas: x.recs[0].isDemirbas };
+                // 3) bir satırı hatalı CSV → hiç yazma yok
+                const before = calls.length;
+                await fire(new File(['Ürün,Adet\nA,1\nB,iki\n'], 'bad.csv'), 'b1');
+                o.badRowNoWrite = calls.length === before && /hiçbir kayıt yazılmadı/.test(alerts.at(-1).m) && /Satır 3/.test(alerts.at(-1).m);
+            } finally {
+                Object.assign(window, { atomicInsertItems: orig.ins, requireDbAdmin: orig.req, showCustomConfirm: orig.conf, showAppAlert: orig.alert });
+            }
+
+            // P1 · saveData b1/b2 tam sözleşme (guard Firestore'dan önce)
+            const code = p => p.then(() => 'ok', e => e.code);
+            window.showAppAlert = () => {};
+            try {
+                const legacyNew = { id: 'p5_legacy_' + Date.now(), ürün: 'Eksik Alanlı', adet: 1, rafNo: 'R-1' };
+                o.saveDataNewLegacy = await code(window.saveData('b1', [...(window.data.b1 || []), legacyNew]));
+                window.data.b1 = (window.data.b1 || []).filter(x => x.id !== legacyNew.id);
+                const canon = window.Schema.toCanonicalStock({ id: 'p5_canon', ürün: 'Kanonik', adet: 1 }, 'b1');
+                const keep = { data: window.data.b1, mirror: window._dbMirror.b1 };
+                window._dbMirror.b1 = [JSON.parse(JSON.stringify(canon))]; window.data.b1 = [canon];
+                o.saveDataDegrade = await code(window.saveData('b1', [{ ...canon, name: 'eski alan' }]));
+                o.saveDataDropField = await code(window.saveData('b1', [{ ...canon, isDemirbas: 'evet' }]));
+                window.data.b1 = keep.data; window._dbMirror.b1 = keep.mirror;
+
+                // P0 · toplu yazma kilidi
+                window.data.config = { ...(orig.cfg || {}), restoreLock: { id: 'p5test', collections: ['b1'] } };
+                window.isDbAdmin = () => true;
+                const someB1 = (window.data.b1 || [])[0];
+                o.lockSaveData = await code(window.saveData('b1', [...(window.data.b1 || []), window.Schema.toCanonicalStock({ id: 'p5_new', ürün: 'Yeni', adet: 1 }, 'b1')]));
+                window.data.b1 = (window.data.b1 || []).filter(x => x.id !== 'p5_new');
+                o.lockApply = someB1 ? await code(window.applyItemOps([{ op: 'update', col: 'b1', id: someB1.id, fields: { açıklama: 'x' } }])) : 'no-b1';
+                o.lockStock = someB1 ? await code(window.runStockOps({ stock: [{ col: 'b1', id: someB1.id, delta: -1 }] })) : 'no-b1';
+            } finally {
+                window.data.config = orig.cfg; window.isDbAdmin = orig.adm; window.showAppAlert = orig.alert;
+            }
+            // Yönetici olmayan oturum
+            o.nonAdminRestore = window.isDbAdmin() ? 'admin' : await code(window.restoreCollections({ b1: [] }));
+            o.nonAdminInsert = window.isDbAdmin() ? 'admin' : await code(window.atomicInsertItems('b1', [{ id: 'x' }]));
+            return o;
+        }, EMU);
+
+        if (EMU) {
+            out.emu = await page.evaluate(async () => {
+                const ft = window.__ft, o = {};
+                const sys = async () => { const d = await ft.readAll('system_config'); return { journal: d.filter(x => x._docId.startsWith('bulk_write_journal')).length, lock: (d.find(x => x._docId === 'admin_settings') || {}).restoreLock ?? null }; };
+                await ft.asAdmin(async () => {
+                    const mk = (i, extra) => window.Schema.toCanonicalStock({ id: `b1_p5emu_${i}`, ürün: `P5 ${ft.MARKER} ${i}`, adet: 1, ...extra }, 'b1');
+                    // 1) ortadaki parçada (girdi 700 / 450'lik parçalar) GERÇEK sunucu reddi: 1 MiB üstü doküman
+                    const bad = Array.from({ length: 900 }, (_, i) => mk(i, i === 700 ? { açıklama: 'x'.repeat(1100 * 1024) } : {}));
+                    o.rejected = await window.atomicInsertItems('b1', bad).then(() => 'ok', e => e.code);
+                    o.rejectedLeftNothing = (await ft.readMarked('b1')).length === 0;
+                    o.rejectedClean = await sys();
+                    // dinleyici, geri alınana kadar görünen dokümanları bellekten çıkarsın (yoksa yinelenen id sanılır)
+                    await ft.waitFor(async () => !(window.data.b1 || []).some(x => String(x.id).startsWith('b1_p5emu_')), 15000);
+                    // 2) 600 kayıt (2 parça, günlüklü) başarı
+                    const good = Array.from({ length: 600 }, (_, i) => mk(i));
+                    const r = await window.atomicInsertItems('b1', good);
+                    o.insert = { journaled: r.journaled, chunks: r.chunks, inFirestore: (await ft.readMarked('b1')).length, contract: (await ft.readMarked('b1')).every(d => { const { _docId, ...rest } = d; return window.Schema.validateB1(rest).length === 0; }) };
+                    o.insertClean = await sys();
+                    // 3) atomik geri yükleme: b1'i eklemeden önceki hâline döndür (600 silme, günlüklü) — temizlik de budur
+                    const keep = (await ft.readAll('b1')).filter(d => !JSON.stringify(d).includes(ft.MARKER)).map(({ _docId, ...d }) => (d.id == null ? { id: _docId, ...d } : d));
+                    const rr = await window.restoreCollections({ b1: keep });
+                    o.restore = { deleted: rr.deleted, journaled: rr.journaled, markedLeft: (await ft.readMarked('b1')).length };
+                    o.restoreClean = await sys();
+                });
+                return o;
+            });
+        }
+
+        const e = out.emu;
+        out.ok = out.singleImporter
+            && out.csv && out.csv.col === 'b1' && out.csv.n === 2 && out.csv.contract.join() === '0,0' && out.csv.noRafNo && out.csv.raf === 'R-4,R-9'
+            && out.csv.demirbas === 'boolean,boolean' && out.csv.name === 'Kablo; HDMI'
+            && out.xlsx && out.xlsx.col === 'b2' && out.xlsx.contract.length === 0 && out.xlsx.status === 'Kullanıma Hazır' && out.xlsx.isDemirbas === true
+            && out.badRowNoWrite
+            && out.saveDataNewLegacy === 'schema-violation' && out.saveDataDegrade === 'schema-violation' && out.saveDataDropField === 'schema-violation'
+            && out.lockSaveData === 'bulk-locked' && ['bulk-locked', 'no-b1'].includes(out.lockApply) && ['bulk-locked', 'no-b1'].includes(out.lockStock)
+            && out.nonAdminRestore === 'forbidden' && out.nonAdminInsert === 'forbidden'
+            && (!EMU || (e && e.rejected === 'rolled-back' && e.rejectedLeftNothing && e.rejectedClean.journal === 0 && e.rejectedClean.lock === null
+                && e.insert.journaled === true && e.insert.chunks === 2 && e.insert.inFirestore === 600 && e.insert.contract
+                && e.insertClean.journal === 0 && e.insertClean.lock === null
+                && e.restore.deleted === 600 && e.restore.journaled === true && e.restore.markedLeft === 0 && e.restoreClean.lock === null));
+        if (!out.ok) throw new Error('p5AuditAtomicImport beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
     async hotfixBulkLock(page) {
         return page.evaluate(async () => {
             const ft = window.__ft, o = {};
