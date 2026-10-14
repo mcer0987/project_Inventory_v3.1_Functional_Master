@@ -28,7 +28,8 @@ import {
     query,
     orderBy,
     limit,
-    serverTimestamp
+    serverTimestamp,
+    Timestamp
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ============================================================
@@ -523,6 +524,9 @@ window.startRealtimeSync = function () {
 
             // Force logout: tek seferlik, taze komut (VIP-06) — bkz. handleForceLogoutCommand
             handleForceLogoutCommand(data.force_logout);
+
+            // Faz 5 denetimi · P0: yarım kalmış toplu yazma kilidi → yönetici sekmesinde otomatik kurtarma
+            if (data.restoreLock) _scheduleBulkRecovery();
         }
     }, (err) => reportListenerError('admin_settings', err)));
 
@@ -635,10 +639,26 @@ function _deniedFailure(e) {
         ? { code: 'maintenance', message: MAINTENANCE_WRITE_MESSAGE }
         : { code: 'forbidden', message: FORBIDDEN_WRITE_MESSAGE };
 }
-const _SHOWN_BY_DATA_LAYER = ['bulk-delete-blocked', 'maintenance', 'forbidden'];
+const _SHOWN_BY_DATA_LAYER = ['bulk-delete-blocked', 'maintenance', 'forbidden', 'bulk-locked'];
 function _announceDenied(code, message) {
-    if (code !== 'maintenance' && code !== 'forbidden') return;
+    if (code !== 'maintenance' && code !== 'forbidden' && code !== 'bulk-locked') return;
     if (typeof window.showAppAlert === 'function') window.showAppAlert(message, 'error');
+}
+
+// [WHY]: Faz 5 denetimi · P0 — tek batch'e sığmayan geri yükleme/içe aktarma (atomic-writer.js) parça parça yazılırken
+//        başka bir istemcinin aynı koleksiyona yazması, olası geri almada o yazmanın ezilmesi demek; yarım kalmış (geri
+//        alınmayı bekleyen) bir işin üstüne yazmak ise yarım veriyi kalıcılaştırır.
+// [HOW]: Motor kilidi admin_settings.restoreLock'a yazar (tüm istemciler bu dokümanı zaten dinliyor → window.data.config).
+//        Kilit varken kilitli koleksiyonlara giden saveData / applyItemOps / runStockOps yazmaları Firestore'a gönderilmez.
+//        Kilidi tutan sekme bu yolları kullanmaz (motor kendi batch'lerini yazar); _bulkActive yerel kopyadır (snapshot
+//        gelmeden önceki kısa aralık için).
+export const BULK_LOCK_MESSAGE = '🔒 Toplu geri yükleme / içe aktarma sürüyor ya da geri alınmayı bekliyor; bu koleksiyona şu an yazılamıyor. Birkaç dakika sonra tekrar deneyin.';
+let _bulkActive = null;   // { collections } — bu sekmede çalışan motor işi
+function _bulkLockBlocks(cols) {
+    const L = (window.data && window.data.config && window.data.config.restoreLock) || _bulkActive;
+    if (!L) return false;
+    const locked = Array.isArray(L.collections) && L.collections.length ? L.collections : null;
+    return !locked || cols.some(c => locked.includes(c));
 }
 
 window.addEventListener('unhandledrejection', ev => {
@@ -720,19 +740,21 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
         }
         const deletes = [...mirrorById.keys()].filter(k => !keep.has(k));
 
-        // Faz 3.5/K2 · şema muhafızı (b3, b1, b2): yeni doküman tam sözleşmeden geçer; var olan (eski biçimli olabilir)
-        // dokümanda yalnız yeni eklenen alan adları denetlenir (değişikliğe eski alan adı giremez). İhlalde hiçbir
-        // koleksiyon yazılmaz.
-        // [K2 istisnası]: b1/b2 için bu eski toplu yol (CSV/Excel içe aktarma, tür adı toplu değişikliği gibi) hâlâ
-        // kanonik olmayan ("rafNo" gibi fazladan alan, isDemirbas eksik) kayıtlar üretebiliyor; tam 'set' sözleşmesi
-        // burada zorlanırsa bu akışlar kırılır. Yeni atomik yol (applyItemOps/runStockOps — confirmTransfer, hurda,
-        // saveAssignment vb.) tam sözleşmeyi zaten zorunlu kılıyor; bu eski yolda b1/b2 için yalnız eski alan adı
-        // denetimi yapılır (b3 tam sözleşmesi aynen korunur).
+        // Faz 3.5/K2 · şema muhafızı (b3, b1, b2): yeni doküman tam 'set' sözleşmesinden geçer; var olan (eski biçimli
+        // olabilir) dokümanda yalnız yeni eklenen alan adları denetlenir (değişikliğe eski/bilinmeyen alan adı giremez).
+        // İhlalde hiçbir koleksiyon yazılmaz.
+        // [Faz 5 denetimi · P1]: K2'deki b1/b2 istisnası kaldırıldı — yeni b1/b2 dokümanı da tam sözleşmeden geçer (içe
+        // aktarma artık Schema.toCanonicalStock + atomicInsertItems kullanıyor). Ayrıca kanonik bir b1/b2 kaydı bu yoldan
+        // kanonik olmayana dönüştürülemez: saveData merge yazdığı için kaydın yazma SONRASI hâli tam sözleşmeyle denetlenir.
         if (colName === 'b3' || colName === 'b1' || colName === 'b2') {
+            const stock = colName !== 'b3';
             const guard = _schemaGuardError(writes.map(w => {
                 const prev = mirrorById.get(w.key);
-                if (!prev && colName === 'b3') return { op: 'set', col: colName, id: w.key, data: w.data };
-                const added = prev ? Object.fromEntries(Object.entries(w.data).filter(([k]) => !(k in prev))) : w.data;
+                if (!prev) return { op: 'set', col: colName, id: w.key, data: w.data };
+                if (stock && !_stockViolation({ op: 'set', col: colName, data: prev })) {
+                    return { op: 'set', col: colName, id: w.key, data: { ...prev, ...w.data } };
+                }
+                const added = Object.fromEntries(Object.entries(w.data).filter(([k]) => !(k in prev)));
                 return { op: 'update', col: colName, id: w.key, data: added };
             }), opts);
             if (guard) return fail(guard.code, guard.message, guard.details);
@@ -759,6 +781,10 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
     if (ops.length && _maintenanceBlocksWrite()) {
         _announceDenied('maintenance', MAINTENANCE_WRITE_MESSAGE);
         return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
+    }
+    if (ops.length && _bulkLockBlocks(plans.map(p => p.colName))) {
+        _announceDenied('bulk-locked', BULK_LOCK_MESSAGE);
+        return fail('bulk-locked', BULK_LOCK_MESSAGE);
     }
     try {
         const CHUNK_SIZE = 490;
@@ -836,7 +862,8 @@ function _b3Violation(p, opts = {}) {
 // [HOW]: _b3Violation ile birebir aynı iki aşamalı desen ('set' → tam sözleşme, 'update' → yalnız bilinen alan adı).
 //        planStockOps'un KENDİ hesapladığı stok deltası (patch/full) bu guard'ın kapsamı DIŞINDA kalır — tıpkı B3 guard'ının
 //        da yalnız çağıranın `writes` dizisini denetleyip stok deltasını denetlemediği gibi (bkz. runStockOps).
-function _stockViolation(p, opts = {}) {
+//        Faz 5 denetimi (P1): 'set' için gevşetme bayrağı (stockLegacy) YOK — hiçbir yazma yolu eksik alanlı b1/b2 yazamaz.
+function _stockViolation(p) {
     if (p.op === 'delete') return null;
     const S = window.Schema;
     const isB1 = p.col === 'b1';
@@ -844,7 +871,7 @@ function _stockViolation(p, opts = {}) {
     const KEYS = isB1 ? S.B1_KEYS : S.B2_KEYS;
     const LEGACY_KEYS = isB1 ? S.B1_LEGACY_KEYS : S.B2_LEGACY_KEYS;
     if (p.op === 'set') {
-        const errors = (isB1 ? S.validateB1 : S.validateB2)(p.data, { legacy: opts.stockLegacy === true });
+        const errors = (isB1 ? S.validateB1 : S.validateB2)(p.data);
         return errors.length ? errors : null;
     }
     const bad = Object.keys(p.data || {}).filter(k => !KEYS.includes(k));
@@ -853,7 +880,7 @@ function _stockViolation(p, opts = {}) {
 
 function _schemaViolation(p, opts) {
     if (p.col === 'b3') return _b3Violation(p, opts);
-    if (p.col === 'b1' || p.col === 'b2') return _stockViolation(p, opts);
+    if (p.col === 'b1' || p.col === 'b2') return _stockViolation(p);
     return null;
 }
 function _schemaGuardError(prepared, opts) {
@@ -922,6 +949,10 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
     if (_maintenanceBlocksWrite()) {
         _announceDenied('maintenance', MAINTENANCE_WRITE_MESSAGE);
         return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
+    }
+    if (_bulkLockBlocks(prepared.map(p => p.col))) {
+        _announceDenied('bulk-locked', BULK_LOCK_MESSAGE);
+        return fail('bulk-locked', BULK_LOCK_MESSAGE);
     }
 
     try {
@@ -1206,6 +1237,10 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
     if (stockByKey.size + prepared.length === 0) return fail('invalid-argument', 'En az bir işlem gerekli.');
     const guard = _schemaGuardError(prepared, opts);   // Faz 3.5/K2: b3/b1/b2 sözleşmesi — ihlalde transaction hiç başlamaz (stok da değişmez)
     if (guard) return fail(guard.code, guard.message, guard.details);
+    if (_bulkLockBlocks([...[...stockByKey.values()].map(s => s.col), ...prepared.map(p => p.col)])) {
+        _announceDenied('bulk-locked', BULK_LOCK_MESSAGE);
+        return fail('bulk-locked', BULK_LOCK_MESSAGE);
+    }
 
     let stockResults;
     try {
@@ -1263,3 +1298,149 @@ export const runStockTransaction = window.runStockTransaction = async function (
     const res = await runStockOps({ stock: [{ col: colName, id: docId, delta }] }, { strict: true, forbiddenMessage: 'Stok işlemleri yalnızca sistem yöneticisi tarafından yapılabilir.' });
     return res.stock[0];
 };
+
+// ─── Hepsi-ya-da-hiçbiri toplu yazma (Faz 5 denetimi · P0/P1) ─────────────────────────────────────
+// [WHY]: Yedekten geri yükleme ve CSV/Excel içe aktarma saveData'nın 490'lık bağımsız batch'leriyle yazılıyordu; ara bir
+//        batch başarısız olursa Firestore'da yarım veri kalıyordu. Bkz. src/services/atomic-writer.js (günlük + geri alma).
+// [HOW]: restoreCollections — koleksiyonları yedekteki hâline TAM DEĞİŞTİRMEYLE getirir (plan sunucudan taze okunur,
+//        _dbMirror'a güvenilmez). atomicInsertItems — yeni kayıtları ekler. İkisi de yazmadan ÖNCE şema muhafızından geçer
+//        (b1/b2 tam 'set' sözleşmesi, gevşetme yok) ve yalnız Firebase admin oturumuyla çalışır. Hata sözleşmesi saveData ile
+//        aynı (strict → SaveDataError); motor kodları korunur: 'rolled-back' | 'rollback-pending' | 'pending-journal' | …
+const _atomicStore = () => window.AtomicWriter.createFirestoreStore({
+    db: fireDb, root: COLLECTION_ROOT, fns: { doc, collection, getDoc, getDocs, writeBatch, Timestamp },
+});
+
+// Toplu yazmanın şema muhafızı: b1/b2 → tam sözleşme ('set'); b3 → yeni doküman tam sözleşme, var olan dokümanda yalnız
+// yeni alan adları (saveData ile aynı kural; geri yükleme eski göç kayıtları için b3Legacy verir).
+function _bulkSchemaGuard(entries, opts) {
+    const prepared = entries.filter(e => e.next).map(e => {
+        if (e.col === 'b3' && e.prev) {
+            return { op: 'update', col: e.col, id: e.id, data: Object.fromEntries(Object.entries(e.next).filter(([k]) => !(k in e.prev))) };
+        }
+        return { op: 'set', col: e.col, id: e.id, data: e.next };
+    });
+    return _schemaGuardError(prepared, opts);
+}
+
+async function _runBulk({ name, collections, entries, opts }) {
+    const strict = opts.strict !== false;
+    const fail = (code, message, details) => {
+        const err = new SaveDataError(code, message, details);
+        console.error(`❌ ${name} [${code}]: ${message}`, details || '');
+        if (strict) throw err;
+        return false;
+    };
+    if (!window.userAuth) return fail('no-auth', 'Oturum bulunamadı; yazma reddedildi.');
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) return fail('forbidden', 'Toplu yazma yalnız yönetici oturumuyla yapılabilir.');
+    if (!window.AtomicWriter) return fail('write-failed', 'Toplu yazma motoru (atomic-writer.js) yüklenmemiş.');
+    if (_bulkActive) return fail('bulk-locked', 'Bu sekmede başka bir toplu yazma sürüyor.');
+    const unknown = collections.find(c => !COLLECTIONS.includes(c));
+    if (unknown) return fail('unknown-collection', `Bilinmeyen koleksiyon: "${unknown}"`, { collection: unknown });
+
+    _bulkActive = { collections };
+    try {
+        const res = await window.AtomicWriter.run({
+            store: _atomicStore(), kind: name, collections, uid: window.userAuth.uid, entries,
+            guard: list => _bulkSchemaGuard(list, opts),
+        });
+        console.log(`☁️ ${name}: ${res.written} yazıldı · ${res.deleted} silindi · ${res.chunks} parça${res.journaled ? ' (günlüklü)' : ' (tek atomik batch)'}`);
+        return res;
+    } catch (e) {
+        if (e && e.name === 'SaveDataError') return fail(e.code, e.message, e.details);
+        if (e && e.code === 'rollback-pending') setTimeout(() => _scheduleBulkRecovery(0, true), 30000);
+        if (e && e.name === 'AtomicWriteError') return fail(e.code, e.message, e.details);
+        const denied = _deniedFailure(e);
+        if (denied) return fail(denied.code, denied.message, { code: e.code });
+        return fail('write-failed', `Toplu yazma başarısız; hiçbir kayıt yazılmadı: ${e && e.message}`, { code: e && e.code });
+    } finally {
+        _bulkActive = null;
+    }
+}
+
+/**
+ * Koleksiyonları hedef içeriklerine (yedek) hepsi-ya-da-hiçbiri olarak getirir. Yalnız target'taki koleksiyonlar değişir.
+ * @param {Object<string, object[]>} target
+ * @param {{b3Legacy?:boolean, strict?:boolean}} [opts]
+ */
+export const restoreCollections = window.restoreCollections = async function (target, opts = {}) {
+    const cols = Object.keys(target || {});
+    if (!cols.length || cols.some(c => !Array.isArray(target[c]))) {
+        if (opts.strict === false) return false;
+        throw new SaveDataError('invalid-argument', 'restoreCollections { koleksiyon: dizi } bekliyor.');
+    }
+    const res = await _runBulk({
+        name: 'restoreCollections', collections: cols, opts,
+        entries: async store => window.AtomicWriter.planRestore({
+            target, server: await window.AtomicWriter.readCollections(store, cols), makeId: window.makeId,
+        }),
+    });
+    if (res) {
+        cols.forEach(col => {
+            window.data[col] = target[col].map(x => _clean(_stripRenderFields(x)));
+            window._dbMirror[col] = _clone(window.data[col]);
+        });
+        _bumpDataRevision();
+    }
+    return res;
+};
+
+/** Yeni kayıtları (id'leri dolu ve benzersiz) hepsi-ya-da-hiçbiri olarak ekler — CSV/Excel içe aktarma. */
+export const atomicInsertItems = window.atomicInsertItems = async function (col, items, opts = {}) {
+    if (!Array.isArray(items) || !items.length || items.some(x => !x || x.id == null || String(x.id).trim() === '')) {
+        if (opts.strict === false) return false;
+        throw new SaveDataError('invalid-argument', 'atomicInsertItems id\'li kayıt dizisi bekliyor.');
+    }
+    const known = new Set([...(window._dbMirror[col] || []), ...(window.data[col] || [])].map(x => x && String(x.id)));
+    const seen = new Set();
+    for (const it of items) {
+        const id = String(it.id);
+        if (known.has(id) || seen.has(id)) {
+            if (opts.strict === false) return false;
+            throw new SaveDataError('duplicate-id', `"${col}" içinde ${id} id'li kayıt zaten var.`, { collection: col, id });
+        }
+        seen.add(id);
+    }
+    const clean = items.map(x => _clean(_stripRenderFields(x)));
+    const res = await _runBulk({
+        name: 'atomicInsertItems', collections: [col], opts,
+        entries: clean.map(x => ({ col, id: String(x.id).replace(/\//g, '_'), prev: null, next: x })),
+    });
+    if (res) clean.forEach(x => _applyLocal(col, { op: 'set', id: x.id, data: x }));
+    return res;
+};
+
+/** Yarım kalmış toplu yazmayı kurtarır (yazılmış parçaları geri alır ya da tamamlanmış işin günlüğünü temizler). */
+export const recoverBulkWrite = window.recoverBulkWrite = async function ({ force = false } = {}) {
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Kurtarma yalnız yönetici oturumuyla yapılabilir.');
+    if (_bulkActive) return { status: 'busy', retryInMs: 30000 };
+    return window.AtomicWriter.recover({ store: _atomicStore(), force });
+};
+
+// Kilit görülünce (admin_settings snapshot'ı ya da admin oturumu açılışı) yönetici sekmesinde kurtarma otomatik denenir.
+// Sahibi canlı olabilecek iş (son 2 dk içinde ilerlemiş) beklenir; yönetici olmayan sekme hiçbir şey yapmaz.
+let _recoveryTimer = null;
+function _scheduleBulkRecovery(delay = 3000, force = false) {
+    if (_recoveryTimer) return;
+    _recoveryTimer = setTimeout(async () => {
+        _recoveryTimer = null;
+        const L = window.data && window.data.config && window.data.config.restoreLock;
+        if ((!L && !force) || _bulkActive || !window.AtomicWriter) return;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) return;   // admin girişinde onAuthReady yeniden dener
+        try {
+            const r = await recoverBulkWrite({ force });
+            if (r.status === 'busy') { _scheduleBulkRecovery(r.retryInMs); return; }
+            if (r.status === 'rolled-back') {
+                console.warn('♻️ [atomic-writer] Yarım kalmış toplu yazma geri alındı:', r.journal && r.journal.kind);
+                if (typeof window.showAppAlert === 'function') window.showAppAlert('Yarım kalmış bir toplu yazma (geri yükleme / içe aktarma) geri alındı; veriler işlem öncesi hâline döndü.', 'warning');
+            } else if (r.status === 'finalized') {
+                console.log('♻️ [atomic-writer] Tamamlanmış toplu yazmanın günlüğü temizlendi.');
+            }
+        } catch (e) {
+            console.error('❌ [atomic-writer] Kurtarma başarısız; 60 sn sonra yeniden denenecek.', e);
+            _scheduleBulkRecovery(60000, force);
+        }
+    }, delay);
+}
+window.addEventListener('onAuthReady', () => {
+    if (window.data && window.data.config && window.data.config.restoreLock) _scheduleBulkRecovery();
+});

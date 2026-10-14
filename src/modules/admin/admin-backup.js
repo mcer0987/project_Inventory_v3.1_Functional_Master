@@ -12,7 +12,8 @@
  *        Geri yükleme: (1) ayrıştır + eski biçimleri tanı (v1.0 sarmalı, VIP ham dökümü), (2) ortam denetimi: kanonik yedeğin
  *        root'u aktif köke eşit değilse REDDEDİLİR; root'suz eski biçim yalnız ayrı bir "ortam doğrulanamadı" uyarısıyla,
  *        (3) koleksiyon bazında önizleme (yedekte / şu an / eklenecek / silinecek) onay diyaloğunda gösterilir,
- *        (4) onaylanırsa saveData tek yoldan yazar (şema muhafızı dahil); başarısızsa bellek eski hâline döner.
+ *        (4) onaylanırsa restoreCollections hepsi-ya-da-hiçbiri yazar (şema muhafızı dahil; Faz 5 denetimi · P0 —
+ *        bkz. src/services/atomic-writer.js); başarısızlıkta Firestore da bellek de işlem öncesi hâlindedir.
  *        Saf fonksiyonlar (parseBackup, diffSummary, checkRoot) window'a dokunmaz → tests/unit/backup.test.mjs.
  */
 (function () {
@@ -88,6 +89,27 @@
         return { ok: true, verified: true, reason: `Ortam eşleşiyor ("${activeRoot}").` };
     }
 
+    /**
+     * Faz 5 denetimi (P1): b1/b2 tam 'set' sözleşmesi geri yüklemede de zorunlu. Eski yedeklerdeki takma adlı / eksik
+     * alanlı stok kayıtları Schema.toCanonicalStock ile kanonik hâle getirilir (değerler korunur, alan adları düzelir);
+     * kanonik kayıt değişmez. Yedeği yerinde değiştirmez.
+     * @returns {{data:object, converted:{col:string, count:number}[]}}
+     */
+    function canonicalizeStock(data, toCanonicalStock) {
+        const out = { ...data }, converted = [];
+        ['b1', 'b2'].forEach(col => {
+            if (!Array.isArray(data[col])) return;
+            let count = 0;
+            out[col] = data[col].map(p => {
+                const c = toCanonicalStock(p, col);
+                if (JSON.stringify(Object.entries(c).sort()) !== JSON.stringify(Object.entries(p).sort())) count++;
+                return c;
+            });
+            if (count) converted.push({ col, count });
+        });
+        return { data: out, converted };
+    }
+
     /** Koleksiyon bazında önizleme: yedekteki kayıt sayısı, şu anki sayı, eklenecek ve silinecek id sayısı. */
     function diffSummary(backup, currentData) {
         return Object.keys(backup.data).map(col => {
@@ -159,6 +181,12 @@
         const rootCheck = checkRoot(parsed.backup, activeRoot);
         if (!rootCheck.ok) { notify(rootCheck.reason, 'error'); return { status: 'wrong-root', message: rootCheck.reason }; }
 
+        if (window.Schema && typeof window.Schema.toCanonicalStock === 'function') {
+            const c = canonicalizeStock(parsed.backup.data, window.Schema.toCanonicalStock);
+            parsed.backup.data = c.data;
+            c.converted.forEach(x => parsed.warnings.push(`"${x.col}": ${x.count} eski biçimli stok kaydı kanonik şemaya dönüştürülecek (değerler korunur).`));
+        }
+
         const summary = diffSummary(parsed.backup, window.data);
         const ok = typeof window.showCustomConfirm === 'function'
             ? await window.showCustomConfirm('Yedekten Geri Yükle — Önizleme', previewNode(parsed, rootCheck, summary),
@@ -166,19 +194,22 @@
             : window.confirm('Yedek geri yüklenecek; yedekte olmayan kayıtlar silinecek. Emin misiniz?');
         if (ok !== true) return { status: 'cancelled', summary };
 
-        // Yalnız yedekte bulunan koleksiyonlar değişir; diğerleri olduğu gibi kalır (saveData değişmeyeni yazmaz).
-        const prev = window.data;
-        const next = { ...prev };
-        Object.keys(parsed.backup.data).forEach(k => { next[k] = clone(parsed.backup.data[k]); });
+        // [Faz 5 denetimi · P0]: saveData parça parça (bağımsız batch'ler) yazdığı için ara bir hatada Firestore'da yarım
+        // veri kalıyordu. restoreCollections (atomic-writer.js) hepsi-ya-da-hiçbiri: tek batch'e sığmayan iş günlüklenir,
+        // hata olursa yazılan parçalar geri alınır. Yalnız yedekteki koleksiyonlar değişir; window.data yalnız başarıda değişir.
+        // Eski yedeklerdeki b3 kayıtlarına göçteki gevşeklik tanınır (b3Legacy) — şema muhafızı yine çalışır.
         try {
-            // Kullanıcı onaylı tam geri yükleme: toplu silme kilidi bilinçli açılır (Faz 3.1); eski yedeklerdeki b3
-            // kayıtlarına göçteki gevşeklik tanınır (b3Legacy) — şema muhafızı yine çalışır.
-            await window.saveData(next, { allowBulkDelete: true, b3Legacy: true });
+            await window.restoreCollections(clone(parsed.backup.data), { b3Legacy: true });
         } catch (e) {
-            window.data = prev;
+            const code = (e && e.code) || 'write-failed';
             const message = (e && e.message) || 'bilinmeyen hata';
-            notify('Yedek geri yüklenemedi; hiçbir değişiklik yazılmadı. ' + message, 'error');
-            return { status: 'failed', message, summary };
+            const text = code === 'rollback-pending'
+                ? 'Geri yükleme yarıda kaldı ve geri alma henüz tamamlanamadı. Veritabanı yazmaya kilitlendi; yönetici oturumunda geri alma otomatik tamamlanacak. ' + message
+                : code === 'rolled-back'
+                    ? 'Yedek geri yüklenemedi; yazılan kısımlar geri alındı, veritabanı işlem öncesi hâlinde. ' + message
+                    : 'Yedek geri yüklenemedi; hiçbir değişiklik yazılmadı. ' + message;
+            notify(text, 'error');
+            return { status: 'failed', code, message, summary };
         }
         notify('Yedek geri yüklendi', 'success');
         if (Service.reloadAfterRestore) setTimeout(() => location.reload(), 800);
@@ -186,7 +217,7 @@
     }
 
     const Service = {
-        BACKUP_VERSION, buildBackup, parseBackup, checkRoot, diffSummary,
+        BACKUP_VERSION, buildBackup, parseBackup, checkRoot, diffSummary, canonicalizeStock,
         exportBackup, restoreFromText, _download: download, reloadAfterRestore: true,
     };
     window.AppModules = window.AppModules || {};

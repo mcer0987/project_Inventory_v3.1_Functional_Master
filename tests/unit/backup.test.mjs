@@ -103,3 +103,22 @@ test('diffSummary: koleksiyon bazında yedekte/şu an/eklenecek/silinecek', () =
         { col: 'personel', backup: 0, current: 1, added: 0, removed: 1 },
     ]);
 });
+
+// Faz 5 denetimi · P1: geri yüklemede de b1/b2 tam sözleşmesi — eski yedekteki stok kayıtları kanonikleştirilir.
+test('canonicalizeStock: eski b1/b2 kayıtları kanonik olur, kanonik olan ve diğer koleksiyonlar dokunulmaz', () => {
+    const S = loadService();
+    const sctx = vm.createContext({ window: { data: { productTypes: [] } }, console });
+    vm.runInContext(fs.readFileSync(path.join(ROOT, 'src/utils/schema.js'), 'utf8'), sctx, { filename: 'schema.js' });
+    const Schema = sctx.window.Schema;
+    const canon = { id: 'c', sütun: '', raf: 'R', tür: '', ürün: 'Kanonik', marka: '', adet: 1, durumu: '', açıklama: '', isDemirbas: false, lastUpdate: 1 };
+    const data = { b1: [{ id: 'old', name: 'Eski', qty: 2 }, canon], personel: [{ id: 'p1', name: 'Ayşe' }] };
+    const r = plain(S.canonicalizeStock(data, Schema.toCanonicalStock));
+    assert.deepEqual(r.converted, [{ col: 'b1', count: 1 }]);
+    assert.equal(r.data.b1[0].ürün, 'Eski');
+    assert.equal(r.data.b1[0].adet, 2);
+    assert.ok(!('name' in r.data.b1[0]) && !('qty' in r.data.b1[0]));
+    assert.deepEqual(plain(Schema.validateB1(r.data.b1[0])), []);
+    assert.deepEqual(r.data.b1[1], canon);
+    assert.deepEqual(r.data.personel, data.personel, 'personel.name stok takma adı değildir');
+    assert.equal(data.b1[0].name, 'Eski', 'yedek yerinde değiştirilmez');
+});
