@@ -3980,6 +3980,172 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 4B · J7.5 — kod benzersizliği: katı kural (ekleme/düzenleme/hızlı ekleme) + VIP Kod Benzersizleştirme sihirbazı.
+    //   A · index (yazmalar taklit, Firestore'a gitmez): ortak kodlu kişi düzenlenemez; yeni kişi var olan kodla eklenemez.
+    //   B · admin.html, gerçek admin (yalnız --emu): aynı kodlu iki test personeli (biri hesaplı) → sihirbaz grubu bulur;
+    //       satır içi denetim (var olan kod ✗, iki kişi kodu korursa ✗, Uygula kapalı); hesaplı kişinin kodu değişir →
+    //       Firestore'da yeni kod, eski parola geçersiz, yeni parola aynı uid; ortak kodla hızlı ekleme engellenir.
+    async j75CodeWizard(page, browser) {
+        const out = {};
+        out.index = await page.evaluate(async () => {
+            const o = {}, ops = [], alerts = [];
+            const orig = { p: window.data.personel, alert: window.showAppAlert, adm: window.isDbAdmin, val: window.validateAdminAction,
+                api: ['appendItem', 'updateItem', 'removeItem', 'provisionStaffAccount'].map(k => [k, window[k]]) };
+            ['appendItem', 'updateItem', 'removeItem', 'provisionStaffAccount'].forEach(k => { window[k] = async (...a) => { ops.push(k); return { written: 1, status: 'created' }; }; });
+            window.isDbAdmin = () => true; window.validateAdminAction = () => true;
+            window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
+            try {
+                window.data.personel = [{ id: 'j75a', name: 'Ortak A', code: 'ortak5' }, { id: 'j75b', name: 'Ortak B', code: ' ortak5 ' }, { id: 'j75c', name: 'Tekil', code: 'tekil5' }];
+                // düzenleme: ortak kodlu kişi → durur
+                window.openPersonelModal('edit', 'j75a');
+                document.getElementById('personelName').value = 'Ortak A (yeni ad)';
+                document.getElementById('personelForm').requestSubmit();
+                await new Promise(r => setTimeout(r, 80));
+                o.editBlocked = ops.length === 0 && /Kod Benzersizleştirme/.test(alerts.at(-1) && alerts.at(-1).m);
+                // tekil kişinin düzenlemesi serbest
+                window.openPersonelModal('edit', 'j75c');
+                document.getElementById('personelName').value = 'Tekil (yeni ad)';
+                document.getElementById('personelForm').requestSubmit();
+                await new Promise(r => setTimeout(r, 80));
+                o.editUniqueAllowed = ops.includes('updateItem');
+                // ekleme: var olan kod (kırpılmış hâliyle de) → durur; kısa kod → durur
+                ops.length = 0;
+                for (const code of ['tekil5', ' ortak5', 'ab1']) {
+                    window.openPersonelModal('add');
+                    document.getElementById('personelName').value = 'Yeni Kişi';
+                    document.getElementById('personelCode').value = code;
+                    document.getElementById('personelForm').requestSubmit();
+                    await new Promise(r => setTimeout(r, 60));
+                }
+                o.addBlocked = ops.length === 0;
+                o.addMessages = alerts.slice(-3).map(a => a.m);
+                o.messagesHideCode = !alerts.some(a => /tekil5|ortak5/.test(a.m));
+                // öneri: listede olmayan, 5 karakter
+                const s = window.getRandomCode();
+                o.suggestion = s.length === 5 && window.StaffCodeRegistry.validateCode(s, window.data.personel).ok;
+            } finally {
+                window.data.personel = orig.p;
+                orig.api.forEach(([k, f]) => { window[k] = f; });
+                Object.assign(window, { showAppAlert: orig.alert, isDbAdmin: orig.adm, validateAdminAction: orig.val });
+                document.getElementById('personelModal').style.display = 'none';
+            }
+            return o;
+        });
+
+        if (EMU) {
+            const ctx = await browser.createBrowserContext();
+            const errs = [];
+            const base = `http://127.0.0.1:${PORT}`;
+            const waitFn = async (p, fn, ms = 25000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn)) return true; } catch (e) { } await new Promise(r => setTimeout(r, 250)); } return false; };
+            try {
+                const a = await ctx.newPage();
+                a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
+                await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+                await waitFn(a, () => window.isFirebaseLoaded === true && !!window.userAuth);
+                const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+                await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+                await nav;
+                out.adminReady = await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && (window.data.personel || []).length > 0);
+                out.wizard = await a.evaluate(async MARKER => {
+                    const o = {}, R = window.StaffCodeRegistry, SP = window.StaffProvisioning;
+                    const wait = async (fn, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 200)); } return false; };
+                    const login = async (email, password) => {
+                        const appMod = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+                        const authMod = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+                        const app = appMod.getApps().find(x => x.name === 'j75verify') || appMod.initializeApp(window.firebaseApp.options, 'j75verify');
+                        if (!window.__j75auth) { window.__j75auth = authMod.initializeAuth(app, { persistence: authMod.inMemoryPersistence }); authMod.connectAuthEmulator(window.__j75auth, 'http://127.0.0.1:9099', { disableWarnings: true }); }
+                        try { const c = await authMod.signInWithEmailAndPassword(window.__j75auth, email, password); const uid = c.user.uid; await authMod.signOut(window.__j75auth); return uid; } catch (e) { return null; }
+                    };
+                    const alerts = [], real = { alert: window.showAppAlert, confirm: window.showCustomConfirm };
+                    window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
+                    window.showCustomConfirm = async () => true;
+                    const adminUid = window.userAuth.uid;
+                    const shared = R.suggestCode(window.data.personel);
+                    const A = { id: window.makeId(), name: `J75 Hesaplı ${MARKER}`, code: shared };
+                    const B = { id: window.makeId(), name: `J75 Hesapsız ${MARKER}`, code: shared };
+                    try {
+                        // Kurulum: katı kuralı bilerek aşan eski veri taklidi — veri katmanına doğrudan yazılır
+                        await window.appendItem('personel', A);
+                        await window.appendItem('personel', B);
+                        const prov = await window.provisionStaffAccount(A);
+                        o.setup = prov.status === 'created';
+                        const uidA = prov.uid;
+
+                        // Ortak kodla hızlı ekleme engellenir (katı kural)
+                        window.inventoryManagementModule.quickAddPersonnel();
+                        document.getElementById('qpName').value = `J75 Hızlı ${MARKER}`;
+                        document.getElementById('qpCode').value = shared;
+                        const before = window.data.personel.length;
+                        await window.inventoryManagementModule._saveQuickPersonnel();
+                        o.quickAddBlocked = window.data.personel.length === before && /başka bir personelde/.test(alerts.at(-1) && alerts.at(-1).m);
+                        window.inventoryManagementModule.closeQuickPersonnelModal();
+
+                        // Sihirbaz
+                        const btn = document.querySelector('button[onclick*="vipDedupeStaffCodes"]');
+                        o.button = !!btn;
+                        const ctl = window.vipDedupeStaffCodes(btn);
+                        const ov = document.getElementById('staffCodeWizard');
+                        const rowA = ov && ov.querySelector(`[data-id="${A.id}"]`), rowB = ov && ov.querySelector(`[data-id="${B.id}"]`);
+                        const q = (row, role) => row.querySelector(`[data-role="${role}"]`);
+                        const apply = document.getElementById('scwApply');
+                        const fire = el => el.dispatchEvent(new Event(el.type === 'checkbox' ? 'change' : 'input'));
+                        o.opened = !!(ctl && rowA && rowB);
+                        o.defaults = { keepsAccountHolder: !q(rowA, 'change').checked, otherChanges: q(rowB, 'change').checked, suggested: R.validateCode(q(rowB, 'new-code').value, window.data.personel).ok, applyEnabled: !apply.disabled };
+
+                        // Satır içi denetim: var olan bir kod → ✗, Uygula kapalı; mesajda kod yok
+                        const existing = window.data.personel.find(p => p.code && String(p.id) !== String(A.id) && String(p.id) !== String(B.id)).code;
+                        q(rowB, 'new-code').value = existing; fire(q(rowB, 'new-code'));
+                        o.inlineDuplicate = { bad: rowB.dataset.valid === 'bad', applyDisabled: apply.disabled, msgHidesCode: !q(rowB, 'msg').textContent.includes(existing) };
+                        // İki kişi de kodunu korursa grup ✗
+                        q(rowB, 'change').checked = false; fire(q(rowB, 'change'));
+                        const grp = rowA.closest('fieldset').querySelector('[data-role="group-status"]');
+                        o.groupRule = { groupBad: grp.dataset.ok === '0', applyDisabled: apply.disabled };
+                        // Karar: hesaplı A'nın kodu değişsin, B korusun
+                        q(rowA, 'change').checked = true; fire(q(rowA, 'change'));
+                        const newCode = R.suggestCode(window.data.personel, { reserved: [shared] });
+                        q(rowA, 'new-code').value = newCode; fire(q(rowA, 'new-code'));
+                        o.ready = { aValid: rowA.dataset.valid === 'ok', groupOk: grp.dataset.ok === '1', applyEnabled: !apply.disabled };
+
+                        apply.click();
+                        o.done = await wait(async () => ov.dataset.state === 'done', 20000);
+                        o.rowResult = rowA.dataset.result;
+                        const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');   // admin.html'de __ft yok: sunucudan doğrudan oku
+                        const snap = await fsm.getDoc(fsm.doc(window.fireDb, window.COLLECTION_ROOT, 'personel', 'items', String(A.id))); const fresh = snap.exists() ? snap.data() : null;
+                        o.firestoreCode = !!fresh && fresh.code === newCode && fresh.uid === uidA;
+                        o.oldPasswordDead = (await login(SP.staffEmail(A.id), SP.staffPassword(shared))) === null;
+                        o.newPasswordSameUid = (await login(SP.staffEmail(A.id), SP.staffPassword(newCode))) === uidA;
+                        o.resolved = R.resolveLoginCode(window.data.personel, shared).status === 'unique' && R.resolveLoginCode(window.data.personel, newCode).status === 'unique';
+                        o.adminKept = window.isDbAdmin() && window.userAuth.uid === adminUid;
+                        o.alertHidesCodes = !alerts.some(x => x.m.includes(shared) || x.m.includes(newCode));
+                        document.getElementById('scwCancel').click();
+                        o.closed = !document.getElementById('staffCodeWizard') && !btn.disabled;
+                    } finally {
+                        window.showAppAlert = real.alert; window.showCustomConfirm = real.confirm;
+                        for (const p of [A, B]) { try { await window.removeItem('personel', p.id); } catch (e) { } }
+                    }
+                    return o;
+                }, '__flowtest__');
+            } finally {
+                out.adminPageErrors = errs;
+                await ctx.close();
+            }
+        } else {
+            out.emulator = 'skipped B (gerçek admin + Auth emülatörü yalnız --emu)';
+        }
+
+        const I = out.index, W = out.wizard;
+        out.ok = I.editBlocked && I.editUniqueAllowed && I.addBlocked && I.messagesHideCode && I.suggestion
+            && (!EMU || (out.adminReady && W.setup && W.quickAddBlocked && W.button && W.opened
+                && W.defaults.keepsAccountHolder && W.defaults.otherChanges && W.defaults.suggested && W.defaults.applyEnabled
+                && W.inlineDuplicate.bad && W.inlineDuplicate.applyDisabled && W.inlineDuplicate.msgHidesCode
+                && W.groupRule.groupBad && W.groupRule.applyDisabled
+                && W.ready.aValid && W.ready.groupOk && W.ready.applyEnabled
+                && W.done && W.rowResult === 'changed' && W.firestoreCode && W.oldPasswordDead && W.newPasswordSameUid
+                && W.resolved && W.adminKept && W.alertHidesCodes && W.closed && out.adminPageErrors.length === 0));
+        if (!out.ok) throw new Error('j75CodeWizard beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
     async j6EkASession(page, browser) {
         const sleep = ms => new Promise(r => setTimeout(r, ms));
         const TOKEN = 'J6-' + Date.now();

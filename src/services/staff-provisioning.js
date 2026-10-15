@@ -154,10 +154,70 @@
         return { plan, results, counts, stopped, remaining: plan.toCreate.length - results.length };
     }
 
+    /**
+     * Faz 4B · J7.5 — personelin giriş kodunu değiştirir ve (hesabı varsa) Auth parolasını aynı koda taşır. Admin SDK yok:
+     * ikincil örnekte ESKİ parolayla girilir → updatePassword → signOut. Sıra: önce Auth, sonra personel kaydı; kayıt
+     * yazılamazsa parola eskiye geri alınır. Yarıda kalmış bir değişiklik (parola yeni, kayıt eski) yeniden çalıştırılınca
+     * parola yeni kodla doğrulanır ve yalnız kayıt tamamlanır (idempotent).
+     * @param {Function} write  (person, fields) → Promise  — fields: { code } (+ hesap ilk kez bulunduysa uid/authEmail)
+     * @returns {Promise<{status:'changed'|'changed-code-only'|'invalid'|'auth-out-of-sync'|'write-failed'|'error',
+     *                    uid?:string, email?:string, reverted?:boolean, reason?:string}>}
+     * Kotada ProvisioningStop('rate-limited') fırlatır.
+     */
+    async function changeStaffCode(person, newCode, provisioner, write, { now = Date.now } = {}) {
+        const email = staffEmail(person && person.id);
+        const oldPw = staffPassword(person && person.code);
+        const code = normCode(newCode);
+        const newPw = staffPassword(code);
+        if (!newPw) return { status: 'invalid', reason: 'yeni giriş kodu geçersiz' };
+        if (!email) return { status: 'invalid', reason: 'id e-postaya çevrilemiyor' };
+
+        let uid = person.uid || null, authUpdated = false;
+        const outOfSync = { status: 'auth-out-of-sync', email, reason: 'giriş hesabının parolası mevcut kodla da yeni kodla da eşleşmiyor; değişiklik yapılmadı (yerel firebase-admin betiğiyle sıfırlanmalı)' };
+        const stopIfRate = c => { if (RATE_LIMIT.includes(c)) throw new ProvisioningStop('rate-limited', 'Firebase giriş deneme kotası doldu; bir süre sonra devam edin.'); };
+        try {
+            if (!oldPw) throw Object.assign(new Error('eski kod parola üretmiyor'), { code: 'auth/invalid-credential' });
+            uid = await provisioner.changePassword(email, oldPw, newPw);
+            authUpdated = true;
+        } catch (e) {
+            const c = errCode(e);
+            stopIfRate(c);
+            if (!WRONG_PASSWORD.includes(c)) return { status: 'error', email, reason: c || (e && e.message) || 'bilinmeyen hata' };
+            // Eski parola tutmadı: ya önceki yarım koşuda parola zaten yeni koda geçti, ya da hesap yok
+            try {
+                uid = await provisioner.findAccount(email, newPw);
+                authUpdated = true;
+            } catch (e2) {
+                const c2 = errCode(e2);
+                stopIfRate(c2);
+                if (!WRONG_PASSWORD.includes(c2)) return { status: 'error', email, reason: c2 || (e2 && e2.message) || 'bilinmeyen hata' };
+                if (person.uid) return outOfSync;   // bağlı hesap var ama iki parolayla da girilemiyor
+                uid = null;                          // hesap yok: yalnız kod değişir (hesap sonra yeni kodla açılır)
+            }
+        }
+
+        const fields = { code };
+        if (authUpdated && !person.uid) Object.assign(fields, { uid, authEmail: email, authProvisionedAt: now() });
+        try {
+            await write(person, fields);
+        } catch (e) {
+            const reason = (e && (e.code || e.message)) || 'kayıt yazılamadı';
+            if (!authUpdated) return { status: 'write-failed', email, reverted: true, reason };
+            try {
+                await provisioner.changePassword(email, newPw, oldPw);
+                return { status: 'write-failed', email, reverted: true, reason };
+            } catch (_) {
+                return { status: 'write-failed', email, reverted: false, reason: `${reason} — hesap parolası yeni koda geçti, personel kaydı eski kodda kaldı; aynı yeni kodla tekrar uygulayın` };
+            }
+        }
+        return { status: authUpdated ? 'changed' : 'changed-code-only', uid: uid || undefined, email };
+    }
+
     // ─── Firebase bağdaştırıcısı (ikincil app örneği) ────────────────────────────────────────────────
     /**
      * fns: { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator,
-     *        createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } — tarayıcıda CDN modülü, testte npm 'firebase'.
+     *        createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updatePassword }
+     *        — tarayıcıda CDN modülü, testte npm 'firebase'.
      * options: ana uygulamanın Firebase yapılandırması. emulatorUrl: yalnız emülatör modunda.
      */
     function createAuthProvisioner({ fns, options, emulatorUrl = null, name = PROVISIONER_APP }) {
@@ -177,6 +237,12 @@
         return {
             createAccount: (email, password) => withSession(async a => (await fns.createUserWithEmailAndPassword(a, email, password)).user.uid),
             findAccount: (email, password) => withSession(async a => (await fns.signInWithEmailAndPassword(a, email, password)).user.uid),
+            // J7.5: eski parolayla taze giriş (updatePassword "yakın zamanda giriş" ister) → yeni parola → signOut
+            changePassword: (email, oldPassword, newPassword) => withSession(async a => {
+                const cred = await fns.signInWithEmailAndPassword(a, email, oldPassword);
+                await fns.updatePassword(cred.user, newPassword);
+                return cred.user.uid;
+            }),
             get auth() { return getAuthOnce(); },
         };
     }
@@ -210,7 +276,7 @@
     const StaffProvisioning = {
         STAFF_EMAIL_DOMAIN, PASSWORD_PAD, MIN_CODE_LENGTH, PROVISIONER_APP, ProvisioningStop,
         staffEmail, staffPassword, isStaffEmail, planProvisioning, provisionOne, provisionMissing, createAuthProvisioner,
-        describe, provisionWithNotice,
+        describe, provisionWithNotice, changeStaffCode,
     };
     window.AppModules = window.AppModules || {};
     window.AppModules.StaffProvisioning = StaffProvisioning;

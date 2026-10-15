@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { initializeApp, getApps, deleteApp } from 'firebase/app';
 import {
     initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword,
-    signInWithEmailAndPassword, signOut,
+    signInWithEmailAndPassword, signOut, updatePassword,
 } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc, setDoc, updateDoc, deleteField, terminate } from 'firebase/firestore';
 
@@ -29,8 +29,10 @@ const ADMIN = { email: 'admin@medipol.local', password: 'emu-yonetici-0001' };
 // Aynı realm'de yükle (Firebase SDK başka vm realm'inin nesnelerini reddeder; tarayıcıda da tek realm).
 globalThis.window = globalThis.window || {};
 vm.runInThisContext(fs.readFileSync(path.join(ROOT_DIR, 'src/services/staff-provisioning.js'), 'utf8'), { filename: 'staff-provisioning.js' });
+vm.runInThisContext(fs.readFileSync(path.join(ROOT_DIR, 'src/utils/staff-code-registry.js'), 'utf8'), { filename: 'staff-code-registry.js' });
 const SP = globalThis.window.StaffProvisioning;
-const fns = { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut };
+const REG = globalThis.window.StaffCodeRegistry;
+const fns = { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updatePassword };
 
 // Bir "tarayıcı sekmesi": kendi app + Auth + Firestore örneği
 function session(name) {
@@ -156,4 +158,87 @@ test('J10 GİRDİSİ (risk kanıtı): sign-up açıkken herkes kendine @staff.me
     assert.ok(SP.isStaffEmail(cred.user.email), 'alan adı denetimi bu hesabı personel sanırdı');
     const linked = (await readPersonel(primary.db)).some(p => p.uid === cred.user.uid);
     assert.equal(linked, false, 'ama hiçbir personel kaydına bağlı değil — J10 bu ayrımı yapmalı');
+});
+
+// ─── J7.5 · Kod benzersizleştirme: personel.code + Auth parolası (Admin SDK yok) ────────────────────────────
+let verifierAuth = null;
+const login = async (email, password) => {
+    if (!verifierAuth) verifierAuth = session('j75verify').auth;
+    try { const c = await signInWithEmailAndPassword(verifierAuth, email, password); const uid = c.user.uid; await signOut(verifierAuth); return uid; }
+    catch (e) { return null; }
+};
+const readMany = async (db, ids) => Promise.all(ids.map(async id => ({ id, ...(await getDoc(ref(db, id))).data() })));
+const writeVia = db => (person, fields) => updateDoc(ref(db, person.id), fields);
+
+test('J7.5 · çakışan iki personel: bağlı olanın kodu değişir → eski parola ölür, yeni parola aynı uid; J8 çözümleyici ambiguous → unique', async () => {
+    const adminUid = primary.auth.currentUser.uid;
+    const A = { id: 'dup_a', name: 'Çakışan A', code: 'ortak1' }, B = { id: 'dup_b', name: 'Çakışan B', code: 'ortak1' };
+    for (const p of [A, B]) await setDoc(ref(primary.db, p.id), p);
+    const r0 = await SP.provisionOne(A, provisioner, linkVia(primary.db));   // A'nın hesabı var (J7), B'nin yok
+    assert.equal(r0.status, 'created');
+    let people = await readMany(primary.db, ['dup_a', 'dup_b']);
+    assert.equal(REG.resolveLoginCode(people, 'ortak1').status, 'ambiguous', 'J8 bu durumda girişi reddedecek');
+    assert.equal(REG.duplicateGroups(people).length, 1);
+
+    const plan = REG.planCodeChanges(people, [{ id: 'dup_a', newCode: 'tekil7' }]);
+    assert.equal(plan.ok, true);
+    const r = await SP.changeStaffCode(plan.changes[0].person, plan.changes[0].newCode, provisioner, writeVia(primary.db));
+    assert.equal(r.status, 'changed');
+    assert.equal(r.uid, r0.uid);
+
+    people = await readMany(primary.db, ['dup_a', 'dup_b']);
+    assert.equal(people[0].code, 'tekil7');
+    assert.equal(people[0].uid, r0.uid, 'uid değişmez');
+    assert.equal(await login(SP.staffEmail('dup_a'), SP.staffPassword('ortak1')), null, 'eski parola artık geçersiz');
+    assert.equal(await login(SP.staffEmail('dup_a'), SP.staffPassword('tekil7')), r0.uid, 'yeni parola aynı hesabı açar');
+    assert.equal(REG.resolveLoginCode(people, 'ortak1').person.id, 'dup_b');
+    assert.equal(REG.resolveLoginCode(people, 'tekil7').person.id, 'dup_a');
+    assert.equal(REG.duplicateGroups(people).length, 0);
+    assert.equal(primary.auth.currentUser.uid, adminUid, 'admin oturumu düşmedi');
+    assert.equal(provisioner.auth.currentUser, null);
+});
+
+test('J7.5 · hesabı olmayan kişinin kodu değişir → yalnız kod; ardından J7 hesabı YENİ kodla açar', async () => {
+    const [B] = await readMany(primary.db, ['dup_b']);
+    const r = await SP.changeStaffCode(B, 'tekil8', provisioner, writeVia(primary.db));
+    assert.equal(r.status, 'changed-code-only');
+    const [B2] = await readMany(primary.db, ['dup_b']);
+    assert.equal(B2.code, 'tekil8');
+    const p = await SP.provisionOne(B2, provisioner, linkVia(primary.db));
+    assert.equal(p.status, 'created');
+    assert.equal(await login(SP.staffEmail('dup_b'), SP.staffPassword('tekil8')), p.uid);
+});
+
+test('J7.5 · personel kaydı yazılamazsa (GERÇEK kural reddi) Auth parolası eski koda geri alınır', async () => {
+    const C = { id: 'dup_c', name: 'Geri Alma', code: 'ortak2' };
+    await setDoc(ref(primary.db, C.id), C);
+    const r0 = await SP.provisionOne(C, provisioner, linkVia(primary.db));
+    // Yazıcı yönetici olmayan (personel hesabı) bir oturumla yazar → üretim kuralları reddeder
+    const staff = session('j75staff');
+    await signInWithEmailAndPassword(staff.auth, SP.staffEmail('dup_b'), SP.staffPassword('tekil8'));
+    const [Cnow] = await readMany(primary.db, ['dup_c']);
+    const r = await SP.changeStaffCode(Cnow, 'tekil9', provisioner, writeVia(staff.db));
+    assert.equal(r.status, 'write-failed');
+    assert.equal(r.reverted, true);
+    assert.match(r.reason, /permission-denied/);
+    assert.equal((await readMany(primary.db, ['dup_c']))[0].code, 'ortak2', 'kayıt değişmedi');
+    assert.equal(await login(SP.staffEmail('dup_c'), SP.staffPassword('ortak2')), r0.uid, 'eski parola geri geldi');
+    assert.equal(await login(SP.staffEmail('dup_c'), SP.staffPassword('tekil9')), null);
+    await signOut(staff.auth);
+});
+
+test('J7.5 · bağlı hesabın parolası koddan sapmışsa → auth-out-of-sync, hiçbir şey yazılmaz', async () => {
+    const D = { id: 'dup_d', name: 'Sapmış', code: 'ortak3' };
+    await setDoc(ref(primary.db, D.id), D);
+    const r0 = await SP.provisionOne(D, provisioner, linkVia(primary.db));
+    const x = session('j75drift');   // yalnız test: parolayı koddan bağımsız bir değere çek
+    const c = await signInWithEmailAndPassword(x.auth, SP.staffEmail('dup_d'), SP.staffPassword('ortak3'));
+    await updatePassword(c.user, 'tamamenBaskaParola1');
+    await signOut(x.auth);
+    const [Dnow] = await readMany(primary.db, ['dup_d']);
+    const r = await SP.changeStaffCode(Dnow, 'tekil0', provisioner, writeVia(primary.db));
+    assert.equal(r.status, 'auth-out-of-sync');
+    const [Dafter] = await readMany(primary.db, ['dup_d']);
+    assert.equal(Dafter.code, 'ortak3');
+    assert.equal(Dafter.uid, r0.uid);
 });

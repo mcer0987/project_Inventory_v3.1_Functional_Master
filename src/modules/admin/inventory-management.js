@@ -888,7 +888,9 @@ window.inventoryManagementModule = {
     const name = document.getElementById('qpName').value.trim();
     const code = document.getElementById('qpCode').value.trim();
     if (!name) { alert('Ad Soyad boş olamaz.', 'warning'); return; }
-    if ((window.data.personel || []).some(p => String(p.code) === code)) { alert('Bu oturum kodu zaten kullanımda; tekrar deneyin.', 'warning'); return; }
+    // Faz 4B · J7.5: tek kod kuralı (staff-code-registry.js)
+    const check = window.StaffCodeRegistry.validateCode(code, window.data.personel || []);
+    if (!check.ok) { alert(check.message, 'warning'); return; }
     // Faz 4B · J7: id önceden üretilir; kayıttan hemen sonra aynı kişiye Auth hesabı açılır (staff-provisioning.js).
     const person = { id: window.makeId(), name, code };
     const res = await window.writeOk(window.appendItem('personel', person));

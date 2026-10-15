@@ -31,7 +31,8 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
 // [HOW]: Toplam sayı da sabitlenir; uygulamaya dosya eklenip çıkarıldığında bu sayı bilinçli olarak güncellenir.
 //        52 = Faz 5 öncesi 47 + P0-P1 (atomic-writer.js, stock-import.js) 2 + pdf-fonts 3.
 //        53 = + Faz 4B · J7 src/services/staff-provisioning.js.
-const EXPECTED_COUNT = 53;
+//        54 = + Faz 4B · J7.5 src/utils/staff-code-registry.js.
+const EXPECTED_COUNT = 54;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

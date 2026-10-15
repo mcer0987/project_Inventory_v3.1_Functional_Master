@@ -471,10 +471,9 @@ async function addPersonel() {
     const name = document.getElementById('personelName').value.trim();
     const code = document.getElementById('personelCode').value.trim();
     if (!name) { showAppAlert('Ad Soyad boş olamaz.', 'warning'); return; }
-    if ((window.data.personel || []).some(p => String(p.code) === code)) {
-        showAppAlert("Bu oturum kodu zaten kullanımda!", "warning");
-        return;
-    }
+    // Faz 4B · J7.5: tek kod kuralı (staff-code-registry.js) — kırpılmış, harf duyarlı, ≥4, boşluksuz, başka personelde yok
+    const check = window.StaffCodeRegistry.validateCode(code, window.data.personel || []);
+    if (!check.ok) { showAppAlert(check.message, 'warning'); return; }
     // Faz 4B · J7: id önceden üretilir — kayıttan hemen sonra aynı kişiye Auth hesabı açılır (staff-provisioning.js).
     const person = { id: window.makeId(), name, code };
     if (!(await window.writeOk(window.appendItem('personel', person)))) { showAppAlert('Personel eklenemedi.', 'error'); return; }
@@ -488,6 +487,13 @@ async function editPersonel(id) {
     if (!window.requireDbAdmin('Personel düzenleme')) return;
     const name = document.getElementById('personelName').value.trim();
     if (!name) { showAppAlert('Ad Soyad boş olamaz.', 'warning'); return; }
+    // Faz 4B · J7.5: kodu başka personelle ortak olan kayıt düzenlenmez (hesap açma da bu kodla yapılırdı); önce VIP aracı
+    const current = (window.data.personel || []).find(p => String(p.id) === String(id));
+    const shared = current ? window.StaffCodeRegistry.findConflicts(window.data.personel || [], current.code, { excludeId: id }) : [];
+    if (shared.length) {
+        showAppAlert(`Bu personelin giriş kodu ${shared.length} başka personelde de kullanılıyor. Önce VIP → "Kod Benzersizleştirme" ile düzeltin.`, 'warning');
+        return;
+    }
     if (!(await window.writeOk(window.updateItem('personel', id, { name })))) { showAppAlert('Personel güncellenemedi.', 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
@@ -502,7 +508,10 @@ function closePersonelModal() {
     if (modal) modal.style.display = 'none';
 }
 
+// Faz 4B · J7.5: öneri artık listede olmayan, okunaklı ve her zaman 5 karakterlik kod (eski üretici nadiren 1-4 karakter
+// ve var olan bir kodu döndürebiliyordu).
 function getRandomCode() {
+    if (window.StaffCodeRegistry) return window.StaffCodeRegistry.suggestCode(window.data.personel || []);
     return Math.random().toString(36).substring(2, 7);
 }
 

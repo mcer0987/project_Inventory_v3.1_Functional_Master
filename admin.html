@@ -36,6 +36,7 @@
     <script src="src/utils/schema.js"></script>
     <script src="src/utils/stock-import.js"></script>
     <script src="src/services/atomic-writer.js"></script>
+    <script src="src/utils/staff-code-registry.js"></script>
     <script src="src/services/staff-provisioning.js"></script>
     <script src="src/services/assignment-service.js"></script>
     <script src="src/ui/device-ids.js"></script>
@@ -1443,6 +1444,11 @@
                             title="Hesabı olmayan personele Firebase giriş hesabı açar; önizleme + onay (Faz 4B · J7)"
                             style="background: rgba(56,189,248,0.1); color: #38bdf8; border: 1px solid #38bdf8; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-user-shield me-2"></i>Auth Göç Aracı
+                        </button>
+                        <button class="btn w-100 fw-bold" onclick="window.vipDedupeStaffCodes(this)"
+                            title="Aynı giriş kodunu paylaşan personeli bulur; yeni kod seçtirir, hesap parolasını da günceller (Faz 4B · J7.5)"
+                            style="background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid #10b981; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-key me-2"></i>Kod Benzersizleştirme
                         </button>
                     </div>
                 </div>

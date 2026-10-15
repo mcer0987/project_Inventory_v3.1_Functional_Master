@@ -12,7 +12,7 @@ import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.7.
 import {
     initializeAuth, onAuthStateChanged, signInAnonymously, connectAuthEmulator, setPersistence,
     browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
-    createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut
+    createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updatePassword
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
     initializeFirestore,
@@ -1454,7 +1454,7 @@ window.addEventListener('onAuthReady', () => {
 //        Bu tur giriş akışına ve kurallara dokunmaz (J8/J10); hesaplar açılır ama henüz giriş için kullanılmaz.
 let _staffProvisioner = null;
 const _getStaffProvisioner = () => _staffProvisioner || (_staffProvisioner = window.StaffProvisioning.createAuthProvisioner({
-    fns: { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut },
+    fns: { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updatePassword },
     options: firebaseConfig,
     emulatorUrl: EMULATOR_MODE ? `http://${EMULATOR_HOST}:9099` : null,
 }));
@@ -1481,3 +1481,29 @@ export const provisionMissingStaffAccounts = window.provisionMissingStaffAccount
     return window.StaffProvisioning.provisionMissing(window.data.personel || [], _getStaffProvisioner(), _linkStaffAccount, opts);
 };
 
+// ─── Giriş kodu değiştirme (Faz 4B · J7.5 · VIP Kod Benzersizleştirme) ─────────────────────────────
+// [WHY]: Aynı kodu paylaşan personel J8'de "kod → hesap" eşlemesini belirsiz bırakır; kod değişince J7'de açılan hesabın
+//        parolası da değişmeli (aksi hâlde hesap eski kodla kalır). İstemci SDK'sı başka kullanıcının parolasını değiştiremez.
+// [HOW]: Parti önce StaffCodeRegistry.planCodeChanges ile doğrulanır (yeni kod hiçbir mevcut/partideki kodla çakışmaz →
+//        sıralı uygulamada ara çakışma yok). Her kişi için StaffProvisioning.changeStaffCode: ikincil örnekte eski parolayla
+//        giriş → updatePassword → signOut, sonra personel.code (admin yazması). Kotada durur, kalan sayıyı bildirir.
+export const changeStaffCodes = window.changeStaffCodes = async function (changes, { onProgress } = {}) {
+    _requireProvisioningAdmin();
+    if (!window.StaffCodeRegistry) throw new SaveDataError('write-failed', 'Kod sicili (staff-code-registry.js) yüklenmemiş.');
+    const plan = window.StaffCodeRegistry.planCodeChanges(window.data.personel || [], changes);
+    if (!plan.ok) return { ok: false, errors: plan.errors, results: [], stopped: null, remaining: 0 };
+    const write = (person, fields) => updateItem('personel', person.id, fields);
+    const results = [];
+    let stopped = null;
+    for (let i = 0; i < plan.changes.length; i++) {
+        const { person, newCode } = plan.changes[i];
+        try {
+            results.push({ id: String(person.id), ...(await window.StaffProvisioning.changeStaffCode(person, newCode, _getStaffProvisioner(), write)) });
+        } catch (e) {
+            if (e && e.name === 'ProvisioningStop') { stopped = { code: e.code, message: e.message }; break; }
+            results.push({ id: String(person.id), status: 'error', reason: (e && e.message) || 'bilinmeyen hata' });
+        }
+        if (onProgress) onProgress(i + 1, plan.changes.length);
+    }
+    return { ok: true, errors: [], results, stopped, remaining: plan.changes.length - results.length, unresolved: plan.unresolved };
+};

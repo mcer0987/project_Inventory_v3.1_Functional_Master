@@ -35,6 +35,15 @@ function fakeAuth() {
             accounts.set(key, { uid, password });
             return uid;
         },
+        async changePassword(email, oldPassword, newPassword) {
+            a.calls.push(['change', email]);
+            if (a.fault) { const f = a.fault('change', email); if (f) throw err(f); }
+            const acc = accounts.get(email.toLowerCase());
+            if (!acc || acc.password !== oldPassword) throw err('invalid-credential');
+            if (newPassword.length < 6) throw err('weak-password');
+            acc.password = newPassword;
+            return acc.uid;
+        },
         async findAccount(email, password) {
             a.calls.push(['find', email]);
             if (a.fault) { const f = a.fault('find', email); if (f) throw err(f); }
@@ -235,4 +244,90 @@ test('createAuthProvisioner: ikincil app "provisioner" bellek içi kalıcılıkl
         ['initializeApp', 'provisioner'], ['initializeAuth', 'provisioner', 'MEMORY'], ['emulator', 'http://127.0.0.1:9099'],
         ['signOut', 'provisioner'], ['signOut', 'provisioner'],
     ]);
+});
+
+// ─── J7.5 · giriş kodu değiştirme (Auth parolası + personel.code) ──────────────────────────────────────
+async function withAccount(S, auth, person) {
+    const uid = await auth.createAccount(S.staffEmail(person.id), S.staffPassword(person.code));
+    return { ...person, uid };
+}
+
+test('changeStaffCode: hesabı olan kişi → parola yeni koda taşınır, sonra yalnız code yazılır (uid aynı)', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const person = await withAccount(S, auth, { id: 'a1', code: 'eski1' });
+    const writes = [];
+    const r = plain(await S.changeStaffCode(person, ' yeni2 ', auth, async (p, f) => writes.push(f)));
+    assert.deepEqual(r, { status: 'changed', uid: person.uid, email: 'pa1@staff.medipol.local' });
+    assert.deepEqual(plain(writes), [{ code: 'yeni2' }], 'kod kırpılarak yazılır; bağlı hesapta uid yeniden yazılmaz');
+    assert.equal(auth.accounts.get('pa1@staff.medipol.local').password, 'yeni2Mdp!');
+});
+
+test('changeStaffCode: hesabı olmayan kişi → yalnız kod değişir (changed-code-only); sonra hesap yeni kodla açılabilir', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const writes = [];
+    const r = plain(await S.changeStaffCode({ id: 'b1', code: 'eski1' }, 'yeni2', auth, async (p, f) => writes.push(f)));
+    assert.equal(r.status, 'changed-code-only');
+    assert.deepEqual(plain(writes), [{ code: 'yeni2' }]);
+    assert.equal(auth.accounts.size, 0);
+});
+
+test('changeStaffCode: hesap var ama bağlanmamış (J7 link-failed) → parola taşınır VE uid bağlanır', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const { uid } = await withAccount(S, auth, { id: 'c1', code: 'eski1' });
+    const writes = [];
+    const r = plain(await S.changeStaffCode({ id: 'c1', code: 'eski1' }, 'yeni2', auth, async (p, f) => writes.push(f), { now: () => 7 }));
+    assert.equal(r.status, 'changed');
+    assert.deepEqual(plain(writes), [{ code: 'yeni2', uid, authEmail: 'pc1@staff.medipol.local', authProvisionedAt: 7 }]);
+});
+
+test('changeStaffCode: kayıt yazılamazsa parola ESKİ koda geri alınır (Auth ile Firestore tutarlı kalır)', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const person = await withAccount(S, auth, { id: 'd1', code: 'eski1' });
+    const r = plain(await S.changeStaffCode(person, 'yeni2', auth, async () => { throw Object.assign(new Error('x'), { code: 'permission-denied' }); }));
+    assert.equal(r.status, 'write-failed');
+    assert.equal(r.reverted, true);
+    assert.equal(auth.accounts.get('pd1@staff.medipol.local').password, 'eski1Mdp!');
+});
+
+test('changeStaffCode: geri alma da düşerse (parola yeni, kayıt eski) aynı yeni kodla tekrar uygulamak tamamlar', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const person = await withAccount(S, auth, { id: 'e1', code: 'eski1' });
+    let changes = 0;
+    auth.fault = op => (op === 'change' && ++changes === 2 ? 'network-request-failed' : null);   // 2. change = geri alma
+    const r1 = plain(await S.changeStaffCode(person, 'yeni2', auth, async () => { throw new Error('ağ'); }));
+    assert.equal(r1.status, 'write-failed');
+    assert.equal(r1.reverted, false);
+    assert.match(r1.reason, /aynı yeni kodla tekrar/);
+    assert.equal(auth.accounts.get('pe1@staff.medipol.local').password, 'yeni2Mdp!');
+    auth.fault = null;
+    const writes = [];
+    const r2 = plain(await S.changeStaffCode(person, 'yeni2', auth, async (p, f) => writes.push(f)));
+    assert.equal(r2.status, 'changed', 'eski parola tutmaz → yeni parola zaten geçerli → yalnız kayıt yazılır');
+    assert.deepEqual(plain(writes), [{ code: 'yeni2' }]);
+});
+
+test('changeStaffCode: bağlı hesap iki parolayla da açılmıyor → auth-out-of-sync, HİÇBİR şey yazılmaz', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    await auth.createAccount('pf1@staff.medipol.local', 'baskaParolaMdp!');
+    const writes = [];
+    const r = plain(await S.changeStaffCode({ id: 'f1', code: 'eski1', uid: 'u' }, 'yeni2', auth, async (p, f) => writes.push(f)));
+    assert.equal(r.status, 'auth-out-of-sync');
+    assert.deepEqual(writes, []);
+});
+
+test('changeStaffCode: kota → ProvisioningStop; geçersiz yeni kod → invalid (Auth çağrısı yok)', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    auth.fault = () => 'too-many-requests';
+    await assert.rejects(S.changeStaffCode({ id: 'g1', code: 'eski1' }, 'yeni2', auth, async () => {}), e => e.code === 'rate-limited');
+    auth.fault = null;
+    auth.calls.length = 0;
+    assert.equal((await S.changeStaffCode({ id: 'g1', code: 'eski1' }, 'ab', auth, async () => {})).status, 'invalid');
+    assert.equal(auth.calls.length, 0);
 });

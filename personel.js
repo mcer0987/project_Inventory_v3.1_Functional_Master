@@ -28,6 +28,7 @@ window.deletePersonel = async function (id) {
 };
 
 window.getRandomCode = function () {
-    // Varsa mevcut fonksiyon, yoksa basit bir random (ekstra eklemedim, mevcut kodda varsa kullan)
-    return Math.random().toString(36).substring(2, 7); // Örnek basit kod üretimi
+    // Faz 4B · J7.5: listede olmayan, okunaklı kod (staff-code-registry.js); sicil yoksa eski üretici
+    if (window.StaffCodeRegistry) return window.StaffCodeRegistry.suggestCode(window.data.personel || []);
+    return Math.random().toString(36).substring(2, 7);
 };
