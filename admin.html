@@ -36,6 +36,7 @@
     <script src="src/utils/schema.js"></script>
     <script src="src/utils/stock-import.js"></script>
     <script src="src/services/atomic-writer.js"></script>
+    <script src="src/services/staff-provisioning.js"></script>
     <script src="src/services/assignment-service.js"></script>
     <script src="src/ui/device-ids.js"></script>
     <link rel="stylesheet" href="todo-module.css">
@@ -1437,6 +1438,11 @@
                             title="B3 kayıtlarını önizleme + yedekle yeni şemaya taşır (Faz 3.6)"
                             style="background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid #f59e0b; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-dna me-2"></i>Şema Göçü (B3)
+                        </button>
+                        <button class="btn w-100 fw-bold" onclick="window.vipMigrateStaffAuth(this)"
+                            title="Hesabı olmayan personele Firebase giriş hesabı açar; önizleme + onay (Faz 4B · J7)"
+                            style="background: rgba(56,189,248,0.1); color: #38bdf8; border: 1px solid #38bdf8; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-user-shield me-2"></i>Auth Göç Aracı
                         </button>
                     </div>
                 </div>

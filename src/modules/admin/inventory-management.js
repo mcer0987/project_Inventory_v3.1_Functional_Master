@@ -889,10 +889,13 @@ window.inventoryManagementModule = {
     const code = document.getElementById('qpCode').value.trim();
     if (!name) { alert('Ad Soyad boş olamaz.', 'warning'); return; }
     if ((window.data.personel || []).some(p => String(p.code) === code)) { alert('Bu oturum kodu zaten kullanımda; tekrar deneyin.', 'warning'); return; }
-    const res = await window.writeOk(window.appendItem('personel', { name, code }));
+    // Faz 4B · J7: id önceden üretilir; kayıttan hemen sonra aynı kişiye Auth hesabı açılır (staff-provisioning.js).
+    const person = { id: window.makeId(), name, code };
+    const res = await window.writeOk(window.appendItem('personel', person));
     if (!res) { alert('Personel eklenemedi.', 'error'); return; }
     this.closeQuickPersonnelModal();
-    alert(`"${name}" eklendi.`, 'success');
+    const acct = await window.StaffProvisioning.provisionWithNotice(person);
+    alert(`"${name}" eklendi. ${acct.text}`, acct.ok ? 'success' : 'warning');
     // Zimmet modalındaki personel seçimini tazele ve yeni kişiyi otomatik seç.
     const select = document.getElementById('assignPersonnel');
     if (select) {

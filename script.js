@@ -475,10 +475,13 @@ async function addPersonel() {
         showAppAlert("Bu oturum kodu zaten kullanımda!", "warning");
         return;
     }
-    if (!(await window.writeOk(window.appendItem('personel', { name, code })))) { showAppAlert('Personel eklenemedi.', 'error'); return; }
+    // Faz 4B · J7: id önceden üretilir — kayıttan hemen sonra aynı kişiye Auth hesabı açılır (staff-provisioning.js).
+    const person = { id: window.makeId(), name, code };
+    if (!(await window.writeOk(window.appendItem('personel', person)))) { showAppAlert('Personel eklenemedi.', 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
-    showAppAlert('Personel eklendi.', 'success');
+    const acct = await window.StaffProvisioning.provisionWithNotice(person);
+    showAppAlert(`Personel eklendi. ${acct.text}`, acct.ok ? 'success' : 'warning');
 }
 
 async function editPersonel(id) {
@@ -488,7 +491,10 @@ async function editPersonel(id) {
     if (!(await window.writeOk(window.updateItem('personel', id, { name })))) { showAppAlert('Personel güncellenemedi.', 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
-    showAppAlert('Personel güncellendi.', 'success');
+    // Faz 4B · J7: hesabı henüz olmayan personele düzenleme sırasında hesap açılır (kod düzenlemede değişmez → parola sabit).
+    const person = (window.data.personel || []).find(p => String(p.id) === String(id));
+    const acct = person && !person.uid ? await window.StaffProvisioning.provisionWithNotice(person) : null;
+    showAppAlert(acct ? `Personel güncellendi. ${acct.text}` : 'Personel güncellendi.', acct && !acct.ok ? 'warning' : 'success');
 }
 
 function closePersonelModal() {

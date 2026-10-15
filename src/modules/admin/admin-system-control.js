@@ -888,6 +888,68 @@
         }
     };
 
+    // ─── Auth Göç Aracı (Faz 4B · J7 · 4.6 / K4) ───
+    // [WHY]: Aşama B için her personelin Firebase Auth hesabı olmalı; J7 öncesi eklenen personelin hesabı yok.
+    // [HOW]: Plan önizlemesi (hesaplı / açılacak / açılamayacak + nedeni, aynı kodu paylaşan kişi sayısı) → onay → sırayla
+    //        provisionMissingStaffAccounts (ikincil app örneği; admin oturumu düşmez). Kota dolarsa durur, kalan sayıyı
+    //        bildirir; yeniden çalıştırmak güvenlidir (bağlı personel atlanır, yarım kalan hesap yeniden bağlanır).
+    //        Giriş kodları ve parolalar hiçbir mesaja, loga ya da konsola yazılmaz.
+    let _provisioningStaff = false;
+    window.vipMigrateStaffAuth = async function (btn) {
+        if (_provisioningStaff) return;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error');
+            return;
+        }
+        const SP = window.StaffProvisioning;
+        if (!SP || typeof window.provisionMissingStaffAccounts !== 'function') { _dupAlert('Hesap açma modülü yüklenemedi; sayfayı yenileyin.', 'error'); return; }
+        _provisioningStaff = true;
+        const label = btn ? [...btn.childNodes].map(n => n.cloneNode(true)) : null;   // ilerleme metninden sonra geri konur
+        if (btn) btn.disabled = true;
+        try {
+            const plan = SP.planProvisioning(window.data?.personel || []);
+            const dup = plan.duplicateCodes.reduce((n, d) => n + d.ids.length, 0);
+            if (plan.toCreate.length === 0) {
+                const bad = plan.invalid.length ? ` Hesap açılamayacak ${plan.invalid.length} personel var; nedenleri konsola yazıldı.` : '';
+                _dupAlert(`Tüm uygun personelin giriş hesabı var (${plan.linked.length}/${plan.total}).${bad}`, plan.invalid.length ? 'warning' : 'info');
+                if (plan.invalid.length) console.warn('[Auth Göçü] hesap açılamayacak personel:', plan.invalid.map(x => ({ id: x.person.id, ad: x.person.name, neden: x.reason })));
+                return;
+            }
+            const sample = plan.toCreate.slice(0, 5).map((x, i) => `${i + 1}. ${x.person.name || '-'} → ${x.email}`);
+            const message = [
+                `Ortam: ${window.COLLECTION_ROOT}. Personel: ${plan.total} · hesabı olan: ${plan.linked.length} · açılacak: ${plan.toCreate.length} · açılamayacak: ${plan.invalid.length}.`,
+                dup ? `⚠ ${dup} personel aynı giriş kodunu başkasıyla paylaşıyor (hesapları ayrı açılır; J8 hesapla girişten önce kodlar tekilleştirilmeli).` : '',
+                '', ...sample, plan.toCreate.length > 5 ? `… ve ${plan.toCreate.length - 5} kişi daha.` : '', '',
+                'Hesaplar ikincil bir oturumda açılır; yönetici oturumunuz etkilenmez. Giriş akışı ve kurallar bu adımda DEĞİŞMEZ.',
+                'Firebase hesap açmayı IP başına sınırlar; sınır dolarsa iş durur ve kaldığı yerden yeniden çalıştırılabilir. Devam edilsin mi?',
+            ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
+            const ok = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('Auth Göç Aracı — Personel Hesapları', message)
+                : confirm(`${plan.toCreate.length} personele giriş hesabı açılsın mı?`);
+            if (ok !== true) return;
+
+            const res = await window.provisionMissingStaffAccounts({
+                onProgress: (done, total) => { if (btn) btn.textContent = `Hesaplar açılıyor… ${done}/${total}`; },
+            });
+            const c = res.counts;
+            const okCount = (c.created || 0) + (c.relinked || 0);
+            const failed = res.results.filter(r => !['created', 'relinked', 'already-linked'].includes(r.status));
+            const parts = [`açılan ${c.created || 0}`, `yeniden bağlanan ${c.relinked || 0}`];
+            if (failed.length) parts.push(`başarısız ${failed.length}`);
+            if (res.remaining) parts.push(`bekleyen ${res.remaining}`);
+            const stopNote = res.stopped ? ` Durdu: ${res.stopped.message}` : '';
+            _dupAlert(`🔐 Auth göçü: ${parts.join(' · ')}.${stopNote}${failed.length ? ' Ayrıntılar konsolda.' : ''}`, failed.length || res.stopped ? 'warning' : 'success');
+            _appendLog(failed.length || res.stopped ? 'warn' : 'success', [`🔐 AUTH GÖÇÜ (J7): ${okCount} hesap bağlandı · ${failed.length} başarısız · ${res.remaining} bekleyen · kök ${window.COLLECTION_ROOT}.${stopNote}`]);
+            if (failed.length) console.warn('[Auth Göçü] başarısız:', failed.map(r => ({ id: r.id, durum: r.status, eposta: r.email, neden: r.reason })));
+        } catch (error) {
+            console.error('Auth göçü hatası:', error);
+            _dupAlert('Auth göçü yarıda kaldı; açılan hesaplar bağlı, kalanlar yeniden çalıştırınca açılır. ' + (error && error.message), 'error');
+        } finally {
+            _provisioningStaff = false;
+            if (btn) { btn.disabled = false; if (label) btn.replaceChildren(...label); }
+        }
+    };
+
     // Global Kill Switch
     // [WHY]: Kill Switch (Sistemi Kapatma) komutu localStorage'da tutuluyordu, DevTools ile bypass edilebiliyordu.
     // [HOW]: Artık Firestore üzerindeki 'system_config/admin_settings' dökümanına asenkron yazıyor. Sadece Firebase Auth ile doğrulanmış adminler bu veriyi değiştirebilir.

@@ -8,10 +8,11 @@
  */
 
 // 1. MODÜLER FIREBASE IMPORTLARI (Versiyon 10+)
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
     initializeAuth, onAuthStateChanged, signInAnonymously, connectAuthEmulator, setPersistence,
-    browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence
+    browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
+    createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
     initializeFirestore,
@@ -1444,3 +1445,39 @@ function _scheduleBulkRecovery(delay = 3000, force = false) {
 window.addEventListener('onAuthReady', () => {
     if (window.data && window.data.config && window.data.config.restoreLock) _scheduleBulkRecovery();
 });
+
+// ─── Personel Auth hesabı açma (Faz 4B · J7 · 4.6 / K4) ─────────────────────────────────────────────
+// [WHY]: Aşama B'de her personelin kendi Firebase Auth hesabı olacak. Ana Auth örneğiyle hesap açmak, Firebase'in yeni
+//        hesapla oturum açması demek — admin oturumu düşerdi.
+// [HOW]: Hesaplar staff-provisioning.js'in ikincil app örneğinde ('provisioner', bellek içi kalıcılık) açılır; bağlama
+//        (personel.uid / authEmail / authProvisionedAt) ana oturumdaki admin yazmasıdır (updateItem). Yalnız Firebase admin.
+//        Bu tur giriş akışına ve kurallara dokunmaz (J8/J10); hesaplar açılır ama henüz giriş için kullanılmaz.
+let _staffProvisioner = null;
+const _getStaffProvisioner = () => _staffProvisioner || (_staffProvisioner = window.StaffProvisioning.createAuthProvisioner({
+    fns: { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut },
+    options: firebaseConfig,
+    emulatorUrl: EMULATOR_MODE ? `http://${EMULATOR_HOST}:9099` : null,
+}));
+const _linkStaffAccount = (person, fields) => updateItem('personel', person.id, fields);
+function _requireProvisioningAdmin() {
+    if (!window.StaffProvisioning) throw new SaveDataError('write-failed', 'Hesap açma modülü (staff-provisioning.js) yüklenmemiş.');
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Personel hesabı yalnız yönetici oturumuyla açılabilir.');
+}
+
+/** Tek personele hesap açar/bağlar. Dönüş: StaffProvisioning.provisionOne sonucu; kota/kapalı sign-up → status 'stopped'. */
+export const provisionStaffAccount = window.provisionStaffAccount = async function (person) {
+    _requireProvisioningAdmin();
+    try {
+        return await window.StaffProvisioning.provisionOne(person, _getStaffProvisioner(), _linkStaffAccount);
+    } catch (e) {
+        if (e && e.name === 'ProvisioningStop') return { status: 'stopped', code: e.code, reason: e.message };
+        throw e;
+    }
+};
+
+/** Hesabı olmayan tüm personele hesap açar (VIP Auth Göç Aracı). */
+export const provisionMissingStaffAccounts = window.provisionMissingStaffAccounts = async function (opts = {}) {
+    _requireProvisioningAdmin();
+    return window.StaffProvisioning.provisionMissing(window.data.personel || [], _getStaffProvisioner(), _linkStaffAccount, opts);
+};
+

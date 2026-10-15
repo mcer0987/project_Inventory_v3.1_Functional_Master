@@ -1206,6 +1206,9 @@ const SCENARIOS = {
             ['appendItem', 'updateItem', 'removeItem'].forEach(k => { window[k] = async (...a) => { ops.push([k, ...JSON.parse(JSON.stringify(a))]); return { written: 1 }; }; });
             window.validateAdminAction = () => true;
             const realAdm = window.isDbAdmin; window.isDbAdmin = () => true;   // J1: personel yazmaları yalnız admin (taklit)
+            // J7: ekleme/düzenleme hesap da açar — yazmalar taklit edildiği için hesap açma da yakalanır (gerçek Auth'a gitmez)
+            const accounts = [], realProv = window.provisionStaffAccount;
+            window.provisionStaffAccount = async person => { accounts.push(String(person.id)); return { status: 'created', uid: 'u-' + person.id }; };
             let confirmAnswer = false; window.showCustomConfirm = async () => confirmAnswer;
             window.showAppAlert = () => {};
             window.data.personel = [{ id: 'p1', name: 'Ayşe', code: '11111', role: 'x' }, { id: 'p2', name: '<img src=x onerror="window.__px=1">', code: '22222' }];
@@ -1235,8 +1238,10 @@ const SCENARIOS = {
             document.getElementById('personelForm').requestSubmit();
             await new Promise(r => setTimeout(r, 50));
             out.add = ops.at(-1);
+            out.accountRequests = accounts;   // düzenlenen p1 (uid'siz) + eklenen yeni kişi; reddedilen ikinci kod için istek yok
 
             window.data.personel = orig.p;
+            window.provisionStaffAccount = realProv;
             orig.api.forEach(([k, f]) => { window[k] = f; });
             Object.assign(window, { validateAdminAction: orig.val, showCustomConfirm: orig.confirm, showAppAlert: orig.alert, isDbAdmin: realAdm });
             document.getElementById('personelModal').style.display = 'none';
@@ -2200,6 +2205,7 @@ const SCENARIOS = {
                 const orig = {
                     b1: window.data.b1, b2: window.data.b2, personel: window.data.personel, types: window.data.productTypes,
                     append: window.appendItem, isDbAdmin: window.isDbAdmin, checkIsAdmin: window.checkIsAdmin, alert: window.showAppAlert,
+                    provision: window.provisionStaffAccount,
                 };
                 window.isDbAdmin = () => true; window.checkIsAdmin = () => true; window.showAppAlert = () => {};
                 // appendItem gerçek applyItemOps'un _applyLocal'ını taklit eder: window.data[col]'a id'li kayıt eklenir.
@@ -2210,6 +2216,10 @@ const SCENARIOS = {
                     (window.data[col] = window.data[col] || []).unshift(withId);
                     return { written: 1, ids: [withId.id] };
                 };
+                // Faz 4B · J7: hızlı personel ekleme hesap da açar — yazma taklit edildiği için hesap açma da yakalanır (aksi hâlde
+                // admin kapısı taklit edilmişken gerçek Firebase Auth'a hesap açma isteği giderdi).
+                const provisioned = [];
+                window.provisionStaffAccount = async person => { provisioned.push(person); return { status: 'created', uid: 'k3uid', email: 'x' }; };
 
                 try {
                     // ── ADM-05: renderCustomWatchDashboard ikinci (ve sonraki) çağrıda da çiziyor mu? ──
@@ -2257,6 +2267,7 @@ const SCENARIOS = {
                     document.getElementById('qpName').value = 'K3 Test Personel';
                     await window.inventoryManagementModule._saveQuickPersonnel();
                     o.personnelCreated = captured.some(c => c.col === 'personel' && c.item.name === 'K3 Test Personel');
+                    o.personnelAccountRequested = provisioned.length === 1 && provisioned[0].name === 'K3 Test Personel' && captured.some(c => c.col === 'personel' && String(c.item.id) === String(provisioned[0].id));
                     const selPersonVal = document.getElementById('assignPersonnel')?.value;
                     o.personnelAutoSelected = !!selPersonVal && window.data.personel.some(p => String(p.id) === selPersonVal && p.name === 'K3 Test Personel');
 
@@ -2274,7 +2285,7 @@ const SCENARIOS = {
                     const prodRowVal = document.querySelector('#assignRowsContainer .assign-product-sel')?.value;
                     o.productRowAutoSelected = !!createdProduct && prodRowVal === createdProduct.item.id;
                 } finally {
-                    Object.assign(window, { appendItem: orig.append, isDbAdmin: orig.isDbAdmin, checkIsAdmin: orig.checkIsAdmin, showAppAlert: orig.alert });
+                    Object.assign(window, { appendItem: orig.append, isDbAdmin: orig.isDbAdmin, checkIsAdmin: orig.checkIsAdmin, showAppAlert: orig.alert, provisionStaffAccount: orig.provision });
                     window.data.b1 = orig.b1; window.data.b2 = orig.b2; window.data.personel = orig.personel; window.data.productTypes = orig.types;
                     window.inventoryManagementModule.closeAssignModal();
                     window.inventoryManagementModule.closeQuickPersonnelModal?.();
@@ -2290,7 +2301,7 @@ const SCENARIOS = {
         out.ok = out.tableExistsAfterFirstRender && out.cardAfterFirst && out.tableExistsAfterSecondRender && out.cardUpdatedAfterSecond
             && out.hasAdminTabsApi && out.inventoryTabHookFired && out.workflowTabHookFired
             && out.vipActiveClassAdded === true && out.vipActiveClassRemoved === true
-            && out.personnelModalOpened && out.personnelCreated && out.personnelAutoSelected
+            && out.personnelModalOpened && out.personnelCreated && out.personnelAccountRequested && out.personnelAutoSelected
             && out.productModalOpened && out.productTypeOptionsOnlyDemirbas && out.productCreated && out.productIsDemirbas
             && (out.productSchemaErrors || []).length === 0 && out.productRowAutoSelected
             && out.adminPageErrors.length === 0;
@@ -3854,6 +3865,121 @@ const SCENARIOS = {
     // düzeyinde sınıyordu). İki ortam: gerçek personel girişi → modal + yazma → çıkış → tekrar giriş → zaman aşımı → tekrar
     // giriş; mobil otomatik kart görünümü. Yalnız emülatör (kural 7: VIP komutları yalnız emülatörde): yönetici mesajı bir kez,
     // force logout bir kez + tekrar giriş, bakım modu (personel kilitlenir / admin kilitlenmez / bakım ekranından admin girişi).
+    // Faz 4B · J7 (4.6 / K4) — personel hesabı açma, gerçek UI fonksiyonlarıyla ve gerçek admin oturumuyla (yalnız --emu):
+    //   A · index: "Yeni Personel" (openPersonelModal → addPersonel) kaydı + hesap açar; admin oturumu düşmez; açılan hesapla
+    //       e-posta/parola girişi aynı uid'yi verir. Test personeli sonunda silinir.
+    //   B · admin.html (index "Yönetici Paneli" girişiyle): VIP "Auth Göç Aracı" önizleme → onay → tüm personel bağlanır; ikinci
+    //       çalıştırma hiçbir şey açmaz; önizleme/uyarı/log metinlerinde giriş kodu geçmez; düğme etiketi geri gelir.
+    async j7StaffProvisioning(page, browser) {
+        const out = {};
+        if (!EMU) return { emulator: 'skipped (gerçek admin ve Auth emülatörü yalnız --emu)', ok: true };
+        const APP = 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js', AUTH = 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+
+        // ── A · index: personel ekleme akışı ──
+        // (sayfa içinde eval yok: CSP 'unsafe-eval' vermez — doğrulayıcı her evaluate'te satır içi)
+        out.add = await page.evaluate(async (APP, AUTH) => {
+            const ft = window.__ft, o = {};
+            const verify = async (APP, AUTH, email, password) => {
+                const appMod = await import(APP), authMod = await import(AUTH);
+                const app = appMod.getApps().find(x => x.name === 'j7verify') || appMod.initializeApp(window.firebaseApp.options, 'j7verify');
+                const auth = window.__j7auth || (window.__j7auth = authMod.initializeAuth(app, { persistence: authMod.inMemoryPersistence }));
+                if (!window.__j7emu) { authMod.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true }); window.__j7emu = true; }
+                const cred = await authMod.signInWithEmailAndPassword(auth, email, password);
+                const uid = cred.user.uid; await authMod.signOut(auth); return uid;
+            };
+            const alerts = [], realAlert = window.showAppAlert;
+            window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
+            try {
+                await ft.asAdmin(async () => {
+                    const adminUid = window.userAuth.uid;
+                    const name = `J7 Personel ${ft.MARKER}`;
+                    window.openPersonelModal('add');
+                    document.getElementById('personelName').value = name;
+                    const code = document.getElementById('personelCode').value;
+                    document.getElementById('personelForm').onsubmit({ preventDefault() {} });
+                    o.alerted = await ft.waitFor(async () => alerts.some(a => /Personel eklendi/.test(a.m)), 20000);
+                    const doc = (await ft.readAll('personel')).find(d => d.name === name);
+                    o.alert = alerts.find(a => /Personel eklendi/.test(a.m));
+                    o.linked = !!(doc && doc.uid) && doc.authEmail === window.StaffProvisioning.staffEmail(doc.id);
+                    o.adminKept = window.isDbAdmin() && window.userAuth.uid === adminUid && window.userAuth.email === 'admin@medipol.local';
+                    o.loginUidMatches = doc ? (await verify(APP, AUTH, doc.authEmail, window.StaffProvisioning.staffPassword(code))) === doc.uid : false;
+                    o.codeNotInAlert = !alerts.some(a => a.m.includes(code));
+                    if (doc) await window.removeItem('personel', doc._docId);
+                });
+            } finally { window.showAppAlert = realAlert; }
+            return o;
+        }, APP, AUTH);
+
+        // ── B · admin.html: VIP Auth Göç Aracı ──
+        const ctx = await browser.createBrowserContext();
+        const errs = [];
+        const base = `http://127.0.0.1:${PORT}`;
+        const waitFn = async (p, fn, ms = 25000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn)) return true; } catch (e) { } await new Promise(r => setTimeout(r, 250)); } return false; };
+        try {
+            const a = await ctx.newPage();
+            a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
+            await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+            await waitFn(a, () => window.isFirebaseLoaded === true && !!window.userAuth);
+            const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await nav;
+            out.adminReady = await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && (window.data.personel || []).length > 0);
+            out.vip = await a.evaluate(async (APP, AUTH) => {
+                const o = {};
+                const verify = async (APP, AUTH, email, password) => {
+                const appMod = await import(APP), authMod = await import(AUTH);
+                const app = appMod.getApps().find(x => x.name === 'j7verify') || appMod.initializeApp(window.firebaseApp.options, 'j7verify');
+                const auth = window.__j7auth || (window.__j7auth = authMod.initializeAuth(app, { persistence: authMod.inMemoryPersistence }));
+                if (!window.__j7emu) { authMod.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true }); window.__j7emu = true; }
+                const cred = await authMod.signInWithEmailAndPassword(auth, email, password);
+                const uid = cred.user.uid; await authMod.signOut(auth); return uid;
+            };
+                const btn = document.querySelector('button[onclick*="vipMigrateStaffAuth"]');
+                o.button = !!btn;
+                const labelBefore = btn && btn.textContent.trim();
+                const adminUid = window.userAuth.uid;
+                // Önceki koşulardan kalan bağları sıfırla (Auth hesapları emülatörde kalır → bu koşuda "relinked" beklenir)
+                for (const p of (window.data.personel || []).filter(p => p.uid)) await window.updateItem('personel', p.id, { uid: null, authEmail: null });
+                const codes = (window.data.personel || []).map(p => String(p.code || '')).filter(c => c.length >= 3);
+                const alerts = [], confirms = [];
+                const real = { alert: window.showAppAlert, confirm: window.showCustomConfirm };
+                window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
+                window.showCustomConfirm = async (title, msg) => { confirms.push(String(msg)); return true; };
+                try {
+                    const plan = window.StaffProvisioning.planProvisioning(window.data.personel);
+                    o.planned = plan.toCreate.length;
+                    await window.vipMigrateStaffAuth(btn);
+                    o.preview = confirms[0] && { counts: /açılacak: \d+/.test(confirms[0]), noCode: !codes.some(c => confirms[0].includes(c)), adminNote: /yönetici oturumunuz etkilenmez/.test(confirms[0]) };
+                    o.result = alerts.at(-1);
+                    o.allLinked = await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((window.data.personel || []).filter(p => window.StaffProvisioning.staffPassword(p.code)).every(p => p.uid)) return true; await new Promise(r => setTimeout(r, 250)); } return false; })();
+                    o.adminKept = window.isDbAdmin() && window.userAuth.uid === adminUid;
+                    o.labelRestored = btn.textContent.trim() === labelBefore && !btn.disabled;
+                    const one = (window.data.personel || []).find(p => p.uid);
+                    o.loginUidMatches = one ? (await verify(APP, AUTH, one.authEmail, window.StaffProvisioning.staffPassword(one.code))) === one.uid : false;
+                    // ikinci çalıştırma: açılacak kimse yok, onay bile sorulmaz
+                    const c0 = confirms.length;
+                    await window.vipMigrateStaffAuth(btn);
+                    o.secondRun = { noConfirm: confirms.length === c0, msg: alerts.at(-1) && alerts.at(-1).m };
+                    o.noCodeInAlerts = !alerts.some(a => codes.some(c => a.m.includes(c)));
+                } finally { window.showAppAlert = real.alert; window.showCustomConfirm = real.confirm; }
+                return o;
+            }, APP, AUTH);
+        } finally {
+            out.adminPageErrors = errs;
+            await ctx.close();
+        }
+
+        const A = out.add, V = out.vip || {};
+        out.ok = A.alerted && /Giriş hesabı açıldı/.test(A.alert && A.alert.m) && A.alert.t === 'success' && A.linked && A.adminKept && A.loginUidMatches && A.codeNotInAlert
+            && out.adminReady && V.button && V.planned > 0 && V.preview && V.preview.counts && V.preview.noCode && V.preview.adminNote
+            && /Auth göçü: açılan \d+ · yeniden bağlanan \d+/.test(V.result && V.result.m) && V.result.t === 'success'
+            && V.allLinked && V.adminKept && V.labelRestored && V.loginUidMatches
+            && V.secondRun.noConfirm && /giriş hesabı var/.test(V.secondRun.msg || '') && V.noCodeInAlerts
+            && out.adminPageErrors.length === 0;
+        if (!out.ok) throw new Error('j7StaffProvisioning beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
     async j6EkASession(page, browser) {
         const sleep = ms => new Promise(r => setTimeout(r, ms));
         const TOKEN = 'J6-' + Date.now();
