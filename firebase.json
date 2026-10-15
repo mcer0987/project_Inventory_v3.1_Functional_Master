@@ -32,7 +32,9 @@
       "**/*.tar.gz",
       "**/*.pem",
       "**/*.key",
-      "certs/**"
+      "certs/**",
+      "repomix-output*",
+      "**/repomix-output*"
     ],
     "headers": [
       {

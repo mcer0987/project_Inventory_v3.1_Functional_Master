@@ -14,6 +14,13 @@
 !*.css
 !*.js
 !src/
+# Zimmet tutanağı fontları (Faz 5 · K1) + lisansı; README derleme bağlamına girmez
+!pdf-fonts/
+pdf-fonts/*.md
+
+# Yerel depo dökümleri (repomix) — beyaz liste zaten dışlar; ileride bir genişletme bunu açmasın diye açıkça
+repomix-output*
+**/repomix-output*
 
 # nginx yapılandırması (web köküne değil /etc/nginx'e kopyalanır)
 !nginx/
