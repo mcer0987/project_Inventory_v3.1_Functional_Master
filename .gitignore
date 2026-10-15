@@ -70,3 +70,6 @@ node_modules/
 
 # Faz 4 · J0: emülatör tohum kopyası (demo verisi, personel kodları içerir)
 scratch/emu-data/
+
+# Faz 5 kapanışı: yerel repomix depo dökümleri (tüm kaynak kodu içerir)
+repomix-output*
