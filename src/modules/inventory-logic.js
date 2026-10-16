@@ -296,8 +296,12 @@ export const saveRequest = async function (event) {
         if (!_find('requests', editId)) { alert('Düzenlenen talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
         saved = await window.writeOk(window.updateItem('requests', editId, formFields));
     } else {
+        // Faz 4B · J9: sahiplik uid'si yalnız Auth'tan — oturum personelin KENDİ hesabıysa; anonim/yönetici oturumunda yazılmaz
+        //              (Sahiplik Göç Aracı personel kaydındaki uid ile sonradan doldurur). İlk yazımdan sonra değişmez.
+        const personelUid = window.Ownership.selfUid();
         saved = await window.writeOk(window.appendItem('requests', {
             ...formFields,
+            ...(personelUid ? { personelUid } : {}),
             personel: user.name,
             // Kişi eşleşmesi id ile (3.7). Erişim kodu artık talebe kopyalanmıyor (herkesin okuyabildiği koleksiyon).
             personelId: user.id ?? null,

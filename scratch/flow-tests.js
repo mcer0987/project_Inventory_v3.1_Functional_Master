@@ -4294,6 +4294,196 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 4B · J9 (GPT-6 kural 1–2) — sahiplik uid'leri gerçek UI fonksiyonlarıyla:
+    //   A · iki modda, ağa gitmeden: veri katmanı muhafızı (dolu uid değişmez, personel ilk yazımı yapamaz, başkası adına kayıt
+    //       açılamaz); anonim oturumda selfUid null; önizleme (Sahiplik Göç Aracı) hiçbir şey yazmaz.
+    //   B · --emu: hesaplı personel gerçek formlardan talep / satın alma / görev açar → uid'ler oturumun Auth uid'si; tam yazma
+    //       sahipliği silmez; kuralları atlayan doğrudan yazma reddedilir. Yönetici VIP aracında eski kayda uid ekler; tekrar 0.
+    async j9Ownership(page, browser) {
+        const out = {};
+        out.a = await page.evaluate(async () => {
+            const o = {}, code = p => p.then(() => 'ok', e => e.code);
+            o.loaded = !!window.Ownership && typeof window.planOwnershipMigration === 'function' && typeof window.applyOwnershipMigration === 'function';
+            o.anonSelfUid = window.userAuth && window.userAuth.isAnonymous ? window.Ownership.selfUid() === null : 'not-anon';
+            const realAlert = window.showAppAlert; window.showAppAlert = () => {};
+            const stamp = 'j9_' + Date.now();
+            const owned = { id: stamp + '_a', personelUid: 'u-owner', ürün: 'J9 muhafız __flowtest__' };
+            const bare = { id: stamp + '_b', ürün: 'J9 muhafız __flowtest__' };
+            const keep = { m: window._dbMirror.requests, d: window.data.requests };
+            window._dbMirror.requests = [...(keep.m || []), JSON.parse(JSON.stringify(owned)), JSON.parse(JSON.stringify(bare))];
+            window.data.requests = [...(keep.d || []), { ...owned }, { ...bare }];
+            try {
+                o.changeOwner = await code(window.updateItem('requests', owned.id, { personelUid: 'u-baska' }));
+                o.staffFirstWrite = await code(window.updateItem('requests', bare.id, { personelUid: window.userAuth.uid }));
+                o.createForOther = await code(window.appendItem('requests', { id: stamp + '_c', ürün: 'J9 __flowtest__', personelUid: 'baskasi' }));
+                o.saveDataChange = await code(window.saveData('requests', window.data.requests.map(r => r.id === owned.id ? { ...r, personelUid: 'u-baska' } : r)));
+            } finally {
+                window._dbMirror.requests = keep.m; window.data.requests = keep.d; window.showAppAlert = realAlert;
+            }
+            return o;
+        });
+
+        const ctx = await browser.createBrowserContext();
+        const errs = [];
+        const base = `http://127.0.0.1:${PORT}`;
+        const waitFn = async (p, fn, ms = 25000, arg) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch (e) { } await new Promise(r => setTimeout(r, 250)); } return false; };
+        const adminPage = async () => {
+            const a = await ctx.newPage();
+            a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
+            if (EMU) {
+                await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+                await waitFn(a, () => window.isFirebaseLoaded === true && !!window.userAuth);
+                const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+                await a.evaluate(c => { window._dx._b['access-val-node'] = c; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+                await nav;
+            } else {
+                await a.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
+                await a.goto(`${base}/admin.html`, { waitUntil: 'domcontentloaded' });
+            }
+            await waitFn(a, () => window.isFirebaseLoaded === true && (window.data.personel || []).length > 0);
+            return a;
+        };
+        try {
+            // ── Önizleme yazmaz (iki modda; gerçek demoda yönetici yalnız istemcide taklit — UYGULA YOK) ──
+            const a = await adminPage();
+            out.preview = await a.evaluate(async (EMU) => {
+                const o = {}, real = window.isDbAdmin;
+                if (!EMU) window.isDbAdmin = () => true;
+                let writes = 0;
+                const wrap = ['applyItemOps', 'saveData', 'runStockOps', 'applyOwnershipMigration'].map(k => [k, window[k]]);
+                wrap.forEach(([k, f]) => { window[k] = async (...x) => { writes++; return f(...x); }; });
+                try {
+                    const ctl = window.vipOwnershipMigration(document.querySelector('button[onclick*="vipOwnershipMigration"]'));
+                    const ov = document.getElementById('ownershipWizard');
+                    o.opened = !!ctl && !!ov && ov.dataset.state === 'preview';
+                    o.summaryRows = ov ? ov.querySelectorAll('[data-role="summary"] tr[data-col]').length : 0;
+                    o.items = ctl ? ctl.plan.items.length : null;
+                    o.noWrites = writes === 0;
+                    // Her öğenin KENDİ metni, tam sözcük olarak (birleşik metinde ör. beş "0" hücresi "00000" koduna benzer)
+                    const leaves = ov ? [...ov.querySelectorAll('*')].filter(e => !e.children.length).map(e => e.textContent) : [];
+                    const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    o.noCodesShown = !(window.data.personel || []).some(p => p.code && String(p.code).length >= 4
+                        && leaves.some(t => new RegExp(`(^|[^0-9A-Za-z])${esc(String(p.code))}([^0-9A-Za-z]|$)`).test(t)));
+                    document.getElementById('owwClose').click();
+                    o.closed = !document.getElementById('ownershipWizard');
+                } finally {
+                    wrap.forEach(([k, f]) => { window[k] = f; });
+                    window.isDbAdmin = real;
+                }
+                return o;
+            }, EMU);
+
+            if (EMU) {
+                // ── Kurulum (yönetici): hesaplı test personeli + J9 öncesi biçimde eski talep ──
+                out.setup = await a.evaluate(async MARKER => {
+                    const code = window.StaffCodeRegistry.suggestCode(window.data.personel);
+                    const person = { id: window.makeId(), name: `J9 Sahip ${MARKER}`, code };
+                    await window.appendItem('personel', person);
+                    const r = await window.provisionStaffAccount(person);
+                    const legacy = { id: 'j9_legacy_' + Date.now(), personel: person.name, personelId: person.id, ürün: `J9 eski talep ${MARKER}`, adet: 1, durum: 'Beklemede' };
+                    await window.applyItemOps([{ op: 'set', col: 'requests', item: legacy }]);
+                    return { ...person, uid: r.uid, status: r.status, legacyId: legacy.id };
+                }, '__flowtest__');
+
+                // ── Personel: gerçek formlarla kayıt aç ──
+                const s = await ctx.newPage();
+                s.on('pageerror', e => errs.push(e.message)); s.on('dialog', d => d.dismiss());
+                await s.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+                await waitFn(s, () => window.isFirebaseLoaded === true && !!window.userAuth && (window.data.personel || []).length > 0);
+                await waitFn(s, id => (window.data.personel || []).some(p => String(p.id) === id && p.uid), 15000, String(out.setup.id));
+                await s.evaluate(async c => { window._dx._b['access-val-node'] = c; await window.handleLogin(); }, out.setup.code);
+                await waitFn(s, () => document.body.classList.contains('logged-in') && !window.userAuth.isAnonymous, 15000);
+                out.staff = await s.evaluate(async MARKER => {
+                    const o = { uid: window.userAuth.uid, selfUid: window.Ownership.selfUid() };
+                    window.showAppAlert = () => {}; window.alert = () => {};
+                    const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+                    const read = async (col, id) => { const sn = await fsm.getDoc(fsm.doc(window.fireDb, window.COLLECTION_ROOT, col, 'items', String(id))); return sn.exists() ? sn.data() : null; };
+                    const newest = (col, pred) => (window.data[col] || []).filter(pred).sort((x, y) => String(y.id).localeCompare(String(x.id)))[0];
+                    // talep formu
+                    window.editingReqId = null;
+                    document.getElementById('reqProdName').value = `J9 talep ${MARKER}`;
+                    document.getElementById('reqQty').value = '1';
+                    await window.saveRequest(new Event('submit'));
+                    const req = newest('requests', r => r.ürün === `J9 talep ${MARKER}`);
+                    o.request = req ? (await read('requests', req.id)).personelUid : null;
+                    // satın alma formu
+                    document.getElementById('purName').value = `J9 satın alma ${MARKER}`;
+                    document.getElementById('purQty').value = '1';
+                    await window.savePurchaseRequest(new Event('submit'));
+                    const po = newest('purchaseOrders', p => p.urun === `J9 satın alma ${MARKER}`);
+                    o.purchase = po ? (await read('purchaseOrders', po.id)).createdByUid : null;
+                    // görev (kişisel hatırlatıcı): oluşturan + atanan = kendisi
+                    window.todoModule.openNewTaskModal('personel-reminder');
+                    await new Promise(r => setTimeout(r, 150));
+                    document.getElementById('todoTaskTitle').value = `J9 görev ${MARKER}`;
+                    await window.todoModule.saveNewTask();
+                    const task = newest('tasks', t => t.title === `J9 görev ${MARKER}`);
+                    const tdoc = task ? await read('tasks', task.id) : {};
+                    o.task = { creatorUid: tdoc.creatorUid, assigneeUid: tdoc.assigneeUid };
+                    // tam yazma (upsertItem) sahipliği silmez; değiştirme istemcide reddedilir; kuralları atlayan doğrudan yazma reddedilir
+                    if (req) {
+                        const local = { ...window.data.requests.find(r => r.id === req.id) };
+                        delete local.personelUid;
+                        await window.upsertItem('requests', { ...local, not: 'tam yazma' });
+                        o.afterUpsert = (await read('requests', req.id)).personelUid;
+                        o.clientChange = await window.updateItem('requests', req.id, { personelUid: 'u-baska' }).then(() => 'ok', e => e.code);
+                        o.rulesChange = await fsm.updateDoc(fsm.doc(window.fireDb, window.COLLECTION_ROOT, 'requests', 'items', String(req.id)), { personelUid: 'u-baska' }).then(() => 'ok', e => e.code);
+                    }
+                    return o;
+                }, '__flowtest__');
+                await s.close();
+
+                // ── Yönetici: VIP aracıyla eski talebe uid ekle; tekrar açınca bu kayıt listede yok ──
+                out.migrate = await a.evaluate(async (legacyId) => {
+                    const o = {};
+                    const wait = async (fn, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 200)); } return false; };
+                    await wait(async () => (window.data.requests || []).some(r => r.id === legacyId));
+                    const realConfirm = window.showCustomConfirm; window.showCustomConfirm = async () => true;
+                    const realAlert = window.showAppAlert; window.showAppAlert = () => {};
+                    try {
+                        const btn = document.querySelector('button[onclick*="vipOwnershipMigration"]');
+                        const ctl = window.vipOwnershipMigration(btn);
+                        o.legacyPlanned = ctl.plan.items.some(i => i.col === 'requests' && i.id === legacyId);
+                        const res = await ctl.run();
+                        o.status = res && res.status;
+                        o.legacyWritten = !!res && res.written.some(w => w.id === legacyId);
+                        o.resultShown = document.querySelector('#ownershipWizard [data-role="result"]')?.dataset.status;
+                        document.getElementById('owwClose').click();
+                        const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+                        const sn = await fsm.getDoc(fsm.doc(window.fireDb, window.COLLECTION_ROOT, 'requests', 'items', legacyId));
+                        o.legacyUid = sn.data().personelUid;
+                        const again = window.vipOwnershipMigration(btn);
+                        o.idempotent = !again.plan.items.some(i => i.id === legacyId);
+                        again.close();
+                    } finally {
+                        window.showCustomConfirm = realConfirm; window.showAppAlert = realAlert;
+                    }
+                    return o;
+                }, out.setup.legacyId);
+
+                await a.evaluate(async id => { try { await window.removeItem('personel', id); } catch (e) { } }, String(out.setup.id));
+            }
+            await a.close();
+        } finally {
+            out.pageErrors = errs;
+            await ctx.close();
+        }
+
+        const A = out.a, P = out.preview;
+        out.ok = A.loaded && A.anonSelfUid === true && A.changeOwner === 'owner-immutable' && A.staffFirstWrite === 'owner-first-write'
+            && A.createForOther === 'owner-uid-mismatch' && A.saveDataChange === 'owner-immutable'
+            && P.opened && P.summaryRows === 4 && P.noWrites && P.noCodesShown && P.closed
+            && (!EMU || (out.setup.status === 'created'
+                && out.staff.selfUid === out.staff.uid && out.staff.request === out.staff.uid && out.staff.purchase === out.staff.uid
+                && out.staff.task.creatorUid === out.staff.uid && out.staff.task.assigneeUid === out.staff.uid
+                && out.staff.afterUpsert === out.staff.uid && out.staff.clientChange === 'owner-immutable' && out.staff.rulesChange === 'permission-denied'
+                && out.migrate.legacyPlanned && out.migrate.status === 'done' && out.migrate.legacyWritten && out.migrate.resultShown === 'done'
+                && out.migrate.legacyUid === out.setup.uid && out.migrate.idempotent))
+            && out.pageErrors.length === 0;
+        if (!out.ok) throw new Error('j9Ownership beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
     async j6EkASession(page, browser) {
         const sleep = ms => new Promise(r => setTimeout(r, ms));
         const TOKEN = 'J6-' + Date.now();

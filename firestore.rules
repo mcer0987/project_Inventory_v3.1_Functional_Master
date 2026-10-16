@@ -55,6 +55,19 @@ service cloud.firestore {
              && noTag(d.get('oncelik', '')) && noTag(d.get('createdByName', ''))));
     }
 
+    // Faz 4B · J9: sahiplik uid'leri (GPT-6 kural 1). Personel yeni kayıtta yalnız KENDİ uid'sini yazabilir (ya da hiç);
+    // var olan kayıtta sahiplik alanını değiştiremez, silemez, sonradan ekleyemez (ilk yazım = yönetici / Sahiplik Göç Aracı).
+    // Yönetici kuralı bilerek kısıtlanmadı (göç ve yedekten geri yükleme); yönetici yazmaları istemci muhafızından geçer.
+    function ownerField(c) {
+      return c == 'requests' ? 'personelUid' : (c == 'purchaseOrders' ? 'createdByUid' : (c == 'tasks' ? 'creatorUid' : ''));
+    }
+    function ownerOnCreate(c, d) {
+      return ownerField(c) == '' || d.get(ownerField(c), null) == null || d.get(ownerField(c), null) == request.auth.uid;
+    }
+    function ownerUnchanged(c, d, old) {
+      return ownerField(c) == '' || d.get(ownerField(c), null) == old.get(ownerField(c), null);
+    }
+
     // KJ-5: yalnız inventory_demo'da, akış testlerinin __flowtest__ işaretli dokümanlarının temizliği.
     function marked(d, f) { return d.get(f, '') is string && d.get(f, '').matches('.*__flowtest__.*'); }
     function isTestDoc(d) {
@@ -70,9 +83,13 @@ service cloud.firestore {
       // Admin: tüm bilinen koleksiyonlar (system_config dahil); bakım modundan etkilenmez.
       allow write: if validRoot(root) && knownCol(col) && isAdmin();
 
-      // Personel: yalnız iş akışı koleksiyonları, bakım kapalıyken, etiketsiz metinle.
-      allow create, update: if validRoot(root) && signedIn() && !isAdmin()
-        && staffWritable(col) && !maintenanceOn(root) && textOk(col, request.resource.data);
+      // Personel: yalnız iş akışı koleksiyonları, bakım kapalıyken, etiketsiz metinle; sahiplik uid'si J9 kuralına uygun.
+      allow create: if validRoot(root) && signedIn() && !isAdmin()
+        && staffWritable(col) && !maintenanceOn(root) && textOk(col, request.resource.data)
+        && ownerOnCreate(col, request.resource.data);
+      allow update: if validRoot(root) && signedIn() && !isAdmin()
+        && staffWritable(col) && !maintenanceOn(root) && textOk(col, request.resource.data)
+        && ownerUnchanged(col, request.resource.data, resource.data);
 
       // Silme: personel yalnız görev; talepler, satın almalar, zimmet ve servis kayıtları admin'e ait.
       allow delete: if validRoot(root) && signedIn() && col == 'tasks' && !maintenanceOn(root);

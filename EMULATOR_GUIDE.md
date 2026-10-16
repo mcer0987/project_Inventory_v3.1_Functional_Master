@@ -87,6 +87,7 @@ Aynı satır 5 dakikadan uzun süre değişmiyorsa o senaryo takılmıştır (a�
 | `npm run test:rules` | Veritabanı güvenlik kuralları (kim neyi okuyup yazabilir) | ~1 dk |
 | `npm run test:staff:emu` | Personel giriş hesapları | ~1 dk |
 | `npm run test:atomic:emu` | Toplu yazma / yedekten geri yükleme güvenliği | ~1 dk |
+| `npm run test:ownership:emu` | Kayıt sahipliği (uid) göçü ve değiştirilemezlik | ~1 dk |
 
 ## Sık karşılaşılan sorunlar
 | Belirti | Çözüm |

@@ -585,6 +585,7 @@ window.confirmStartWorkflow = async function () {
             currentState: window.WorkflowEngine.states.INITIATION,
             steps: checked.steps.map(s => ({
                 user: s.user,
+                userUid: window.Ownership.uidForPersonName(s.user),   // J9: onaylayıcının Auth uid'si (yoksa null)
                 tip: s.tip,
                 status: "pending",
                 note: "",
@@ -1741,6 +1742,7 @@ window.createWorkflowFromTemplate = function (tpl) {
             processedSteps.push({
                 id: 'step_' + stepIndex++,
                 user: s.user,
+                userUid: window.Ownership ? window.Ownership.uidForPersonName(s.user) : null,   // J9: akış başlarken güncel personelden
                 tip: s.tip,
                 order: s.order,
                 status: "pending",
@@ -2367,10 +2369,16 @@ window.saveTemplateData = async function () {
         // ID yoksa yeni oluştur, varsa mevcutu kullan (Düzenleme modu için)
         const id = WorkflowState.currentEditingTemplateId || "tpl_" + Date.now();
 
+        // Faz 4B · J9: adım onaylayıcısının Auth uid'si (adı TEK bir personeli işaret ediyorsa); belirsiz / hesapsız / sistem → null
+        const steps = WorkflowState.tempTplSteps.map(s => ({ ...s, userUid: window.Ownership.uidForPersonName(s.user) }));
+        const unresolved = steps.filter(s => !s.userUid).length;
+        if (unresolved && typeof showAppAlert === 'function') {
+            showAppAlert(`Not: ${unresolved} adımın onaylayıcısı için giriş hesabı bulunamadı (hesap yok ya da ad birden fazla personelde). Şablon kaydedilir; bu adımlar hesapla eşleşmez.`, 'warning');
+        }
         const templateData = {
             id: id,
             name: name,
-            steps: WorkflowState.tempTplSteps,
+            steps,
             auth: WorkflowState.tempTplAuth || [],
             createdAt: Date.now()
         };

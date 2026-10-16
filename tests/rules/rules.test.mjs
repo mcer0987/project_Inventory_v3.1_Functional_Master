@@ -185,3 +185,37 @@ describe('Denetim günlüğü (4.7 · KJ-7)', () => {
     test('admin rapor sorgusunu çalıştırır (J4)', () => assertSucceeds(reportQuery(ctx.admin())));
     test('anonim rapor sorgusunu çalıştıramaz (J4)', () => assertFails(reportQuery(ctx.anon())));
 });
+
+// Faz 4B · J9 (GPT-6 kural 1): sahiplik uid'leri — personel yalnız kendi uid'siyle oluşturur, sonradan değiştiremez/ekleyemez;
+// yönetici (Sahiplik Göç Aracı) ilk yazımı yapabilir.
+describe('Sahiplik uid alanları (J9)', () => {
+    const staff = () => env.authenticatedContext('staff-uid', { email: 'pS1@staff.medipol.local', firebase: { sign_in_provider: 'password' } }).firestore();
+    const OWN = { requests: 'personelUid', purchaseOrders: 'createdByUid', tasks: 'creatorUid' };
+    const base = { requests: { ürün: 'Mouse', adet: 1 }, purchaseOrders: { urun: 'Toner' }, tasks: { title: 'Görev' } };
+    for (const [col, f] of Object.entries(OWN)) {
+        test(`${col}: personel kendi uid'siyle oluşturur`, () => assertSucceeds(setDoc(item(staff(), LIVE, col, 'o1'), { id: 'o1', ...base[col], [f]: 'staff-uid' })));
+        test(`${col}: başkasının uid'siyle oluşturamaz`, () => assertFails(setDoc(item(staff(), LIVE, col, 'o1'), { id: 'o1', ...base[col], [f]: 'someone-else' })));
+        test(`${col}: anonim başkası adına uid yazamaz`, () => assertFails(setDoc(item(ctx.anon(), LIVE, col, 'o1'), { id: 'o1', ...base[col], [f]: 'staff-uid' })));
+        test(`${col}: uid'siz oluşturma (eski yol) serbest`, () => assertSucceeds(setDoc(item(ctx.anon(), LIVE, col, 'o1'), { id: 'o1', ...base[col] })));
+        test(`${col}: dolu uid değiştirilemez`, async () => {
+            await seed(db => setDoc(item(db, LIVE, col, 'o2'), { id: 'o2', ...base[col], [f]: 'staff-uid' }));
+            await assertFails(updateDoc(item(staff(), LIVE, col, 'o2'), { [f]: 'other-uid' }));
+        });
+        test(`${col}: dolu uid silinemez (tam yazma dahil)`, async () => {
+            await seed(db => setDoc(item(db, LIVE, col, 'o2'), { id: 'o2', ...base[col], [f]: 'staff-uid' }));
+            await assertFails(setDoc(item(staff(), LIVE, col, 'o2'), { id: 'o2', ...base[col] }));
+        });
+        test(`${col}: uid'ye dokunmayan güncelleme serbest`, async () => {
+            await seed(db => setDoc(item(db, LIVE, col, 'o2'), { id: 'o2', ...base[col], [f]: 'staff-uid' }));
+            await assertSucceeds(updateDoc(item(staff(), LIVE, col, 'o2'), { not: 'güncellendi' }));
+        });
+        test(`${col}: personel var olan kayda uid sonradan ekleyemez`, async () => {
+            await seed(db => setDoc(item(db, LIVE, col, 'o3'), { id: 'o3', ...base[col] }));
+            await assertFails(updateDoc(item(staff(), LIVE, col, 'o3'), { [f]: 'staff-uid' }));
+        });
+        test(`${col}: yönetici ilk yazımı yapar (göç)`, async () => {
+            await seed(db => setDoc(item(db, LIVE, col, 'o3'), { id: 'o3', ...base[col] }));
+            await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, col, 'o3'), { [f]: 'staff-uid' }));
+        });
+    }
+});

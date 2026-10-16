@@ -58,6 +58,8 @@ const _normP = s => String(s || '').trim().toLocaleLowerCase('tr-TR');
 function _isPurchaseOwner(item) {
     const me = typeof window.getActiveUser === 'function' ? window.getActiveUser() : window.currentUser;
     if (!me || !item) return false;
+    // Faz 4B · J9: sahiplik uid'si varsa önce o (Auth kimliği; ad/id yedekleri eski kayıtlar için)
+    if (item.createdByUid && window.userAuth && String(item.createdByUid) === String(window.userAuth.uid)) return true;
     // Faz 4B · J8: oturum giriş kodunu taşımaz; yeni talepler createdBy = personel id, eski talepler (createdBy = kod) ad ile eşleşir
     const by = item.createdBy && item.createdBy !== 'unknown' ? String(item.createdBy) : null;
     if (by && [me.id, me.code].some(v => v != null && v !== '' && String(v) === by)) return true;
@@ -242,6 +244,8 @@ window.savePurchaseRequest = async function (e) {
             aciklama: document.getElementById('purDesc')?.value || "",
             createdBy: requester.id || "unknown",
             createdByName: requester.name,
+            // Faz 4B · J9: sahiplik uid'si yalnız Auth'tan (personelin kendi hesabı); ilk yazımdan sonra değişmez
+            ...(window.Ownership.selfUid() ? { createdByUid: window.Ownership.selfUid() } : {}),
             durum: "Onay Bekliyor",
             createdAt: Date.now(),
             files: uploadedFiles.map(f => ({
@@ -401,7 +405,8 @@ window.renderPurchaseModule = function (options = {}) {
         data = data.filter(item => {
             const itemCreatedBy = String(item.createdBy || "");
             const ownerName = String(item.createdByName || item.talepEden || "").trim().toLocaleLowerCase('tr-TR');
-            const ownRequest = (!!currentId && itemCreatedBy === currentId) || (!!currentMe && ownerName === currentMe);
+            const myUid = window.userAuth && !window.userAuth.isAnonymous ? String(window.userAuth.uid) : '';
+            const ownRequest = (!!myUid && String(item.createdByUid || '') === myUid) || (!!currentId && itemCreatedBy === currentId) || (!!currentMe && ownerName === currentMe);
 
             // Onay bekleyen kontrolü
             let waitingApproval = false;

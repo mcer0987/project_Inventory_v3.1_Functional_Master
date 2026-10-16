@@ -572,6 +572,7 @@ window.todoModule = {
             task.priority = priority;
             task.dueDate = date;
             task.assigneeId = assignee;
+            task.assigneeUid = window.Ownership.uidForPersonName(assignee);   // J9: türetilmiş — atanan değişince yeniden hesaplanır
             task.updatedAt = new Date().toISOString();
             await window.saveData('tasks', allTasks);
             showAppAlert("Görev güncellendi.", "success");
@@ -686,6 +687,7 @@ window.todoModule = {
         const task = allTasks.find(t => String(t.id) === String(taskId));
         if (task) {
             task.assigneeId = assignee;
+            task.assigneeUid = window.Ownership.uidForPersonName(assignee);   // J9: türetilmiş
             task.isPersonal = false;
             await window.saveData('tasks', allTasks);
             showAppAlert(`Görev ${assignee} personeline atandı.`, "success");
@@ -717,6 +719,10 @@ window.todoModule = {
             description: desc,
             assigneeId: assignee,
             creatorId: window.currentUser ? window.currentUser.name : "Admin",
+            // Faz 4B · J9: oluşturan = işlemi yapan Auth hesabı (personel ya da yönetici; anonimde yok) — değişmez.
+            // Atanan = adı TEK bir personeli işaret ediyorsa onun hesabı (havuz / belirsiz / hesapsız → null).
+            creatorUid: window.Ownership.actorUid(),
+            assigneeUid: window.Ownership.uidForPersonName(assignee),
             priority: priority,
             dueDate: date,
             status: 'Pending',

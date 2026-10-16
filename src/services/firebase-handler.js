@@ -762,6 +762,9 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
             }), opts);
             if (guard) return fail(guard.code, guard.message, guard.details);
         }
+        // Faz 4B · J9: sahiplik alanları (personelUid/createdByUid/creatorUid) değiştirilemez; tam yazmada eski değer taşınır.
+        const owner = _ownerGuardError(writes.map(w => ({ op: 'set', col: colName, id: w.key, data: w.data })));
+        if (owner) return fail(owner.code, owner.message, owner.details);
 
         const bulk = isBulkDeleteBlocked(deletes.length, mirror.length);
         if (bulk && opts.allowBulkDelete !== true) {
@@ -898,6 +901,28 @@ function _schemaGuardError(prepared, opts) {
     return null;
 }
 
+// ─── Faz 4B · J9 · sahiplik muhafızı ─────────────────────────────────────────────────────────────────────
+// [WHY]: Sahiplik uid'leri (J10 kurallarının "kimin kaydı" kararı) bir kez yazıldıktan sonra değişmemeli (GPT-6 kural 1); tam
+//        değiştirme yapan yollar (upsertItem, saveData) alanı bilmeyen eski bir yerel kopyayla sahipliği sessizce silebilirdi.
+// [HOW]: Kural Ownership.ownerGuard'da (saf, birim testli). Firestore'daki son hâl (mirror) ile karşılaştırılır: dolu alan farklı
+//        bir değerle → 'owner-immutable'; gönderilmemiş/boş → eski değer taşınır; var olan kayda ilk yazım yalnız yönetici;
+//        yeni kayıtta yalnız oturumun kendi uid'si. Sunucu tarafı karşılığı firestore.rules (personel yazmaları).
+//        Modül yüklenmemişse sahiplik koleksiyonlarına yazma kapalı (güvenli varsayılan).
+function _ownerGuardError(prepared) {
+    const touches = prepared.filter(p => p && p.op !== 'delete' && ['requests', 'purchaseOrders', 'tasks'].includes(p.col));
+    if (!touches.length) return null;
+    const O = window.Ownership;
+    if (!O || typeof O.ownerGuard !== 'function') return new SaveDataError('write-failed', 'Sahiplik modülü (ownership.js) yüklenmemiş; kayıt yapılmadı.');
+    const actorUid = window.userAuth ? window.userAuth.uid : null;
+    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+    for (const p of touches) {
+        const prev = (window._dbMirror[p.col] || []).find(_sameId(p.id)) || null;
+        const e = O.ownerGuard({ col: p.col, op: p.op, data: p.data, prev, actorUid, isAdmin });
+        if (e) return new SaveDataError(e.code, e.message, { collection: p.col, id: p.id, field: e.field });
+    }
+    return null;
+}
+
 function _applyLocal(colName, op) {
     _bumpDataRevision();
     for (const store of [window.data, window._dbMirror]) {
@@ -949,6 +974,8 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
     if (prepared.length > 490) return fail('invalid-argument', `Tek atomik işlemde en fazla 490 doküman yazılabilir (${prepared.length}).`);
     const guard = _schemaGuardError(prepared, opts);   // Faz 3.5/K2: b3/b1/b2 sözleşmesi — ihlalde batch'in hiçbir parçası yazılmaz
     if (guard) return fail(guard.code, guard.message, guard.details);
+    const owner = _ownerGuardError(prepared);           // Faz 4B · J9: sahiplik alanları değiştirilemez
+    if (owner) return fail(owner.code, owner.message, owner.details);
     if (_maintenanceBlocksWrite()) {
         _announceDenied('maintenance', MAINTENANCE_WRITE_MESSAGE);
         return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
@@ -1240,6 +1267,8 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
     if (stockByKey.size + prepared.length === 0) return fail('invalid-argument', 'En az bir işlem gerekli.');
     const guard = _schemaGuardError(prepared, opts);   // Faz 3.5/K2: b3/b1/b2 sözleşmesi — ihlalde transaction hiç başlamaz (stok da değişmez)
     if (guard) return fail(guard.code, guard.message, guard.details);
+    const owner = _ownerGuardError(prepared);           // Faz 4B · J9: sahiplik alanları değiştirilemez
+    if (owner) return fail(owner.code, owner.message, owner.details);
     if (_bulkLockBlocks([...[...stockByKey.values()].map(s => s.col), ...prepared.map(p => p.col)])) {
         _announceDenied('bulk-locked', BULK_LOCK_MESSAGE);
         return fail('bulk-locked', BULK_LOCK_MESSAGE);
@@ -1532,4 +1561,54 @@ export const setStaffAuthMode = window.setStaffAuthMode = async function (mode) 
     if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Giriş modunu yalnız yönetici değiştirebilir.');
     await setDoc(systemConfigRef('admin_settings'), { staffAuthMode: mode }, { merge: true });
     return mode;
+};
+
+// ─── Sahiplik Göç Aracı (Faz 4B · J9) ─────────────────────────────────────────────────────────────────
+// [WHY]: J9 öncesi kayıtların (talep, satın alma, görev, şablon/akış adımları) sahiplik uid'leri yok; J10 kuralları bunlar
+//        olmadan sahibini tanıyamaz.
+// [HOW]: Plan ve uygulama mantığı Ownership'te (saf, birim testli); burada yalnız Firestore bağdaştırıcısı ve yetki kapısı.
+//        Önizleme yerel veriden, YAZMADAN; uygulama sunucudan taze okuyarak transaction'larla (bkz. Ownership.applyMigration).
+const _ownershipStore = () => ({
+    async readAll(col) {
+        const snap = await getDocs(collection(fireDb, COLLECTION_ROOT, col, 'items'));
+        return snap.docs.map(d => ({ id: d.id, data: d.data() }));
+    },
+    transaction: fn => runTransaction(fireDb, t => fn({
+        async get(col, id) { const sn = await t.get(_docRef(col, id)); return sn.exists() ? { id: sn.id, ...sn.data() } : null; },
+        update(col, id, patch) { t.update(_docRef(col, id), patch); },
+    })),
+});
+function _requireOwnershipAdmin() {
+    if (!window.Ownership) throw new SaveDataError('write-failed', 'Sahiplik modülü (ownership.js) yüklenmemiş.');
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Sahiplik göçü yalnız yönetici oturumuyla yapılabilir.');
+}
+
+/** Önizleme: hiçbir yere yazmaz (yerel veriden plan). */
+export const planOwnershipMigration = window.planOwnershipMigration = function () {
+    _requireOwnershipAdmin();
+    const d = window.data || {};
+    return window.Ownership.planMigration({
+        data: { requests: d.requests || [], purchaseOrders: d.purchaseOrders || [], tasks: d.tasks || [], workflowTemplates: d.workflowTemplates || [] },
+        personel: d.personel || [],
+        staffEmail: window.StaffProvisioning ? window.StaffProvisioning.staffEmail : null,
+    });
+};
+
+/** Uygulama: plan önizlemedeki haliyle; her kayıt transaction içinde yeniden doğrulanır. */
+export const applyOwnershipMigration = window.applyOwnershipMigration = async function (plan, { onProgress } = {}) {
+    _requireOwnershipAdmin();
+    if (_bulkLockBlocks(['requests', 'purchaseOrders', 'tasks'])) throw new SaveDataError('bulk-locked', BULK_LOCK_MESSAGE);
+    const res = await window.Ownership.applyMigration({
+        plan, store: _ownershipStore(), onProgress,
+        staffEmail: window.StaffProvisioning ? window.StaffProvisioning.staffEmail : null,
+    });
+    // Yazılanları yerel kopyaya hemen işle (snapshot beklenmeden; sonraki önizleme tutarlı olsun)
+    res.written.forEach(w => {
+        if (COLLECTIONS.includes(w.col)) { _applyLocal(w.col, { op: 'update', id: w.id, data: w.patch }); return; }
+        const list = (window.data && window.data[w.col]) || [];
+        const i = list.findIndex(_sameId(w.id));
+        if (i !== -1) list[i] = { ...list[i], ...w.patch };
+    });
+    console.log(`🪪 Sahiplik göçü: ${res.status} · yazılan ${res.written.length} · atlanan ${res.skipped.length} · düşen ${res.failed.length} · denenmeyen ${res.notAttempted}`);
+    return res;
 };

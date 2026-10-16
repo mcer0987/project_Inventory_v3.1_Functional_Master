@@ -1168,6 +1168,142 @@
     };
     if (window.AppModules && window.AppModules.Session) window.renderStaffAuthModeButton(window.AppModules.Session.getStaffAuthMode());
 
+    // ─── Sahiplik Göç Aracı (Faz 4B · J9) ───
+    // [WHY]: J9 öncesi kayıtlarda sahiplik uid'leri yok; J10 kuralları sahibi ancak bunlarla tanır. Yanlış eşleme kalıcıdır
+    //        (sahiplik alanı yazıldıktan sonra değişmez), bu yüzden belirsiz her şey raporlanır, hiçbir şey tahmin edilmez.
+    // [HOW]: Önizleme planOwnershipMigration (YAZMAZ) → koleksiyon özeti + sorun listesi (belirsiz ad, hesapsız personel,
+    //        çakışan kaynak, tutarsız hesap bağı, dolu-farklı uid) → onay → applyOwnershipMigration (transaction'lı, parçalı).
+    //        Sonuç gizlenmez: yazılan / atlanan (nedeniyle) / düşen / denenmeyen ayrı gösterilir. Giriş kodu hiçbir yerde
+    //        gösterilmez. DOM API (innerHTML yok). Test kancaları: #ownershipWizard[data-state], data-role nitelikleri.
+    const _OWN_STATUS = {
+        ambiguous: 'Ad / kod birden fazla personelde — eşlenmedi',
+        'not-found': 'Personel bulunamadı',
+        'no-account': 'Personelin giriş hesabı yok (önce Auth Göç Aracı)',
+        'account-inconsistent': 'Personelin hesap bağı tutarsız',
+        conflict: 'Kayıttaki kaynaklar farklı kişileri gösteriyor',
+        unmatched: 'Kayıtta kişi bilgisi yok',
+        system: 'Sistem / rol / havuz — uid yazılmaz',
+        mismatch: 'Dolu uid bugünkü hesaptan farklı — değiştirilmedi',
+    };
+    const _OWN_COL = { requests: 'Envanter talepleri', purchaseOrders: 'Satın alma talepleri', tasks: 'Görevler', workflowTemplates: 'İş akışı şablonları' };
+    const _OWN_SKIP = { 'changed-since-preview': 'önizlemeden sonra değişti', deleted: 'silinmiş', already: 'bu arada doldurulmuş' };
+    let _ownershipOpen = false;
+
+    window.vipOwnershipMigration = function (btn) {
+        if (_ownershipOpen) return null;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error'); return null; }
+        let plan;
+        try { plan = window.planOwnershipMigration(); }
+        catch (e) { _dupAlert('Önizleme hazırlanamadı: ' + ((e && e.message) || 'bilinmeyen hata'), 'error'); return null; }
+
+        const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text !== undefined) n.textContent = text; return n; };
+        const overlay = el('div', 'position:fixed; inset:0; background:rgba(15,23,42,0.7); z-index:10650; display:flex; align-items:center; justify-content:center;');
+        overlay.id = 'ownershipWizard';
+        overlay.dataset.state = 'preview';
+        const panel = el('div', 'background:var(--color-surface,#fff); color:var(--color-text); border-radius:16px; width:860px; max-width:95vw; max-height:88vh; overflow:auto; padding:22px; box-shadow:0 24px 64px rgba(0,0,0,0.45);');
+        overlay.appendChild(panel);
+        panel.append(el('h4', 'margin:0 0 6px; font-weight:800;', '🪪 Sahiplik Göç Aracı — Önizleme'),
+            el('div', 'font-size:13px; color:var(--color-text-muted); margin-bottom:14px;',
+                `Ortam: ${window.COLLECTION_ROOT}. Bu ekran hiçbir şey yazmadı. "Uygula" yalnız BOŞ sahiplik alanlarına, kaydın sahibi TEK bir personele ` +
+                'kesin olarak eşleniyorsa ve o personelin giriş hesabı varsa uid ekler. Yazılan sahiplik alanı sonradan değiştirilemez; ' +
+                'belirsiz kayıtlar aşağıda listelenir ve dokunulmaz.'));
+
+        // Koleksiyon özeti
+        const table = el('table', 'width:100%; border-collapse:collapse; font-size:13px; margin-bottom:14px;');
+        table.dataset.role = 'summary';
+        const tr = (cells, head) => { const r = el('tr'); cells.forEach(c => { const td = el(head ? 'th' : 'td', 'text-align:left; padding:6px 8px; border-bottom:1px solid var(--color-border);' + (head ? 'font-size:11px; text-transform:uppercase; color:var(--color-text-muted);' : ''), String(c)); r.appendChild(td); }); return r; };
+        table.appendChild(tr(['Koleksiyon', 'Kayıt', 'Güncellenecek kayıt', 'Eklenecek uid', 'Zaten dolu alan', 'Sorun'], true));
+        Object.entries(plan.summary).forEach(([col, s]) => {
+            const r = tr([_OWN_COL[col] || col, s.total, s.toUpdate, s.assigns, s.alreadyFields, s.issues]);
+            r.dataset.col = col;
+            table.appendChild(r);
+        });
+        panel.appendChild(table);
+
+        if (plan.duplicateUidGroups.length) {
+            panel.appendChild(el('div', 'font-size:12px; color:#dc2626; margin-bottom:10px;',
+                `⚠ ${plan.duplicateUidGroups.length} giriş hesabı birden fazla personele bağlı (${plan.duplicateUidGroups.map(g => g.join(' / ')).join('; ')}). Bu personellere uid yazılmaz.`));
+        }
+
+        // Sorunlar (gruplu sayı + ilk 60 satır)
+        const byStatus = {};
+        plan.issues.forEach(i => { byStatus[i.status] = (byStatus[i.status] || 0) + 1; });
+        const issueBox = el('div', 'border:1px solid var(--color-border); border-radius:10px; padding:10px 12px; margin-bottom:14px;');
+        issueBox.dataset.role = 'issues';
+        issueBox.appendChild(el('div', 'font-weight:800; font-size:13px; margin-bottom:6px;', plan.issues.length ? `Eşlenmeyecek alanlar: ${plan.issues.length}` : 'Eşlenmeyecek alan yok.'));
+        Object.entries(byStatus).forEach(([st, n]) => {
+            const row = el('div', 'font-size:12px;', `• ${_OWN_STATUS[st] || st}: ${n}`);
+            row.dataset.status = st;
+            issueBox.appendChild(row);
+        });
+        if (plan.issues.length) {
+            const list = el('div', 'max-height:220px; overflow:auto; margin-top:8px; font-size:12px; border-top:1px dashed var(--color-border); padding-top:6px;');
+            plan.issues.slice(0, 60).forEach(i => {
+                const cand = i.candidates && i.candidates.length ? ` — adaylar: ${i.candidates.join(', ')}` : '';
+                list.appendChild(el('div', 'padding:2px 0;', `${_OWN_COL[i.col] || i.col} · ${i.label} · ${i.field}: ${_OWN_STATUS[i.status] || i.status}${i.detail ? ' (' + i.detail + ')' : ''}${cand}`));
+            });
+            if (plan.issues.length > 60) list.appendChild(el('div', 'padding:2px 0; color:var(--color-text-muted);', `… ve ${plan.issues.length - 60} satır daha (tamamı konsolda).`));
+            issueBox.appendChild(list);
+            console.table(plan.issues.map(i => ({ koleksiyon: i.col, kayit: i.label, alan: i.field, durum: i.status, ayrinti: i.detail || '' })));
+        }
+        panel.appendChild(issueBox);
+
+        const footer = el('div', 'display:flex; gap:10px; justify-content:flex-end; align-items:center; flex-wrap:wrap;');
+        const status = el('div', 'flex:1; font-size:12px; color:var(--color-text-muted);',
+            plan.items.length ? `${plan.totals.records} kayda ${plan.totals.assigns} uid eklenecek.` : 'Eklenecek uid yok — tüm eşlenebilir kayıtlar zaten güncel.');
+        status.dataset.role = 'status';
+        const cancel = el('button', 'padding:9px 16px; background:none; border:1px solid var(--color-border); border-radius:8px; cursor:pointer; color:var(--color-text);', 'Kapat');
+        cancel.type = 'button'; cancel.id = 'owwClose';
+        const apply = el('button', 'padding:9px 18px; background:#db2777; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;', 'Uygula');
+        apply.type = 'button'; apply.id = 'owwApply';
+        apply.disabled = plan.items.length === 0;
+        apply.style.opacity = apply.disabled ? '0.5' : '1';
+        footer.append(status, cancel, apply);
+        panel.appendChild(footer);
+
+        const close = () => { overlay.remove(); _ownershipOpen = false; if (btn) btn.disabled = false; };
+        cancel.addEventListener('click', close);
+
+        async function run() {
+            if (!plan.items.length) return null;
+            const question = `${plan.totals.records} kayda ${plan.totals.assigns} sahiplik uid'si eklenecek (yalnız boş alanlara). ` +
+                `${plan.issues.length} alan belirsiz olduğu için eşlenmeyecek. Yazılan sahiplik alanı sonradan değiştirilemez. Devam edilsin mi?`;
+            const ok = typeof showCustomConfirm === 'function' ? await showCustomConfirm('Sahiplik Göçü — Onay', question) : confirm(question);
+            if (ok !== true) return null;
+            overlay.dataset.state = 'running';
+            apply.disabled = true; cancel.disabled = true;
+            let res;
+            try {
+                res = await window.applyOwnershipMigration(plan, { onProgress: (d, t) => { apply.textContent = `Uygulanıyor… ${d}/${t}`; } });
+            } catch (e) {
+                res = { status: 'stopped', written: [], skipped: [], failed: [], notAttempted: plan.items.length, error: { code: (e && e.code) || 'error', message: (e && e.message) || 'bilinmeyen hata' } };
+            }
+            const skipText = Object.entries(res.skipped.reduce((m, s) => { m[s.reason] = (m[s.reason] || 0) + 1; return m; }, {}))
+                .map(([r, n]) => `${n} ${_OWN_SKIP[r] || r}`).join(', ');
+            const result = el('div', 'margin-top:12px; padding:10px 12px; border-radius:10px; font-size:13px; border:1px solid ' + (res.status === 'done' ? '#16a34a' : '#dc2626') + ';');
+            result.dataset.role = 'result';
+            result.dataset.status = res.status;
+            result.append(
+                el('div', 'font-weight:800;', res.status === 'done' ? '✓ Göç tamamlandı' : (res.status === 'aborted' ? '✗ Göç başlatılmadı' : '✗ Göç yarıda durdu')),
+                el('div', '', `Yazılan kayıt: ${res.written.length} · Atlanan: ${res.skipped.length}${skipText ? ' (' + skipText + ')' : ''} · Düşen: ${res.failed.length} · Denenmeyen: ${res.notAttempted}`));
+            if (res.error) result.appendChild(el('div', 'color:#dc2626;', `Neden: ${res.error.message} [${res.error.code}]. Yazılanlar kalıcıdır; aracı yeniden açıp çalıştırmak kalanları tamamlar.`));
+            panel.insertBefore(result, footer);
+            const level = res.status === 'done' && !res.failed.length ? 'success' : 'warning';
+            _dupAlert(`🪪 Sahiplik göçü: ${res.written.length} kayıt yazıldı, ${res.skipped.length} atlandı, ${res.failed.length} düştü, ${res.notAttempted} denenmedi.`, level);
+            _appendLog(level === 'success' ? 'success' : 'warn', [`🪪 SAHİPLİK GÖÇÜ (J9): ${res.status} · yazılan ${res.written.length} · atlanan ${res.skipped.length} · düşen ${res.failed.length} · denenmeyen ${res.notAttempted} · kök ${window.COLLECTION_ROOT}`]);
+            apply.textContent = 'Uygulandı';
+            cancel.disabled = false;
+            overlay.dataset.state = 'done';
+            return res;
+        }
+        apply.addEventListener('click', () => { run(); });
+
+        _ownershipOpen = true;
+        if (btn) btn.disabled = true;
+        document.body.appendChild(overlay);
+        return { overlay, plan, run, close };
+    };
+
     // Global Kill Switch
     // [WHY]: Kill Switch (Sistemi Kapatma) komutu localStorage'da tutuluyordu, DevTools ile bypass edilebiliyordu.
     // [HOW]: Artık Firestore üzerindeki 'system_config/admin_settings' dökümanına asenkron yazıyor. Sadece Firebase Auth ile doğrulanmış adminler bu veriyi değiştirebilir.
