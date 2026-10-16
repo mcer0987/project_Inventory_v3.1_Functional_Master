@@ -58,7 +58,9 @@ const _normP = s => String(s || '').trim().toLocaleLowerCase('tr-TR');
 function _isPurchaseOwner(item) {
     const me = typeof window.getActiveUser === 'function' ? window.getActiveUser() : window.currentUser;
     if (!me || !item) return false;
-    if (me.code && item.createdBy && item.createdBy !== 'unknown' && String(item.createdBy) === String(me.code)) return true;
+    // Faz 4B · J8: oturum giriş kodunu taşımaz; yeni talepler createdBy = personel id, eski talepler (createdBy = kod) ad ile eşleşir
+    const by = item.createdBy && item.createdBy !== 'unknown' ? String(item.createdBy) : null;
+    if (by && [me.id, me.code].some(v => v != null && v !== '' && String(v) === by)) return true;
     const owner = _normP(item.createdByName || item.talepEden);
     return !!owner && owner === _normP(me.name);
 }
@@ -160,9 +162,10 @@ window.openNewPurchaseModal = function () {
 // [WHY]: Talep eden, yeni talepte ölü initEBYSModal'daki sabit "Muhammed CER" yedeğine düşebiliyor; kayıtta ise elle
 //        değiştirilebilen form alanından okunuyordu (EBYS-06).
 // [HOW]: Talep eden her zaman oturumdaki aktif kullanıcıdır (getActiveUser → currentUser); form alanı yalnız gösterimdir.
+// Faz 4B · J8: createdBy artık personel id'si — giriş kodu herkesin okuduğu satın alma belgesine yazılmaz (J9 uid ekler).
 function _purchaseRequester() {
     const u = (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null) || window.currentUser || {};
-    return { name: String(u.name || '').trim(), code: String(u.code || u.id || '').trim() };
+    return { name: String(u.name || '').trim(), id: String(u.id || '').trim() };
 }
 
 // -----------------------------
@@ -237,7 +240,7 @@ window.savePurchaseRequest = async function (e) {
             tur: document.getElementById('purType')?.value || "",
             oncelik: document.getElementById('purPriority')?.value || "Normal",
             aciklama: document.getElementById('purDesc')?.value || "",
-            createdBy: requester.code || "unknown",
+            createdBy: requester.id || "unknown",
             createdByName: requester.name,
             durum: "Onay Bekliyor",
             createdAt: Date.now(),
@@ -390,13 +393,15 @@ window.renderPurchaseModule = function (options = {}) {
     // --------------------------------------------------
     if (!window.isAdminPanel) {
         const currentMe = (window.currentUser?.name || "").trim().toLocaleLowerCase('tr-TR');
-        const currentCode = String(window.currentUser?.code || window.currentUser?.id || "");
+        // Faz 4B · J8: oturum kodu taşımaz — kendi talebi: createdBy = personel id (yeni) ya da talep eden adı (kodla açılmış eski talepler)
+        const currentId = String(window.currentUser?.id || "");
 
         console.log(`🔍 EBYS Filtreleme Başladı. Aktif: ${currentMe}`);
 
         data = data.filter(item => {
             const itemCreatedBy = String(item.createdBy || "");
-            const ownRequest = itemCreatedBy === currentCode;
+            const ownerName = String(item.createdByName || item.talepEden || "").trim().toLocaleLowerCase('tr-TR');
+            const ownRequest = (!!currentId && itemCreatedBy === currentId) || (!!currentMe && ownerName === currentMe);
 
             // Onay bekleyen kontrolü
             let waitingApproval = false;
@@ -414,7 +419,7 @@ window.renderPurchaseModule = function (options = {}) {
             // Kullanıcı kendi talebi veya onay bekleyen bir talep ise göster
             const shouldShow = ownRequest || waitingApproval;
             if (item.evrakNo?.includes('8146')) {
-                console.log(`🧐 [DEBUG] 8146 Talebi Kontrolü: ownRequest=${ownRequest}, waitingApproval=${waitingApproval}, itemCreatedBy=${itemCreatedBy}, currentCode=${currentCode}`);
+                console.log(`🧐 [DEBUG] 8146 Talebi Kontrolü: ownRequest=${ownRequest}, waitingApproval=${waitingApproval}`);
             }
             return shouldShow;
         });

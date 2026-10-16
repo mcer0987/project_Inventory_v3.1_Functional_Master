@@ -4,11 +4,13 @@
 window.renderPersonelTable = function () {
     const tbody = document.querySelector('#tablePersonel tbody');
     if (!tbody) return;
+    // Faz 4B · J8: giriş kodu yalnız Firebase admin oturumunda gösterilir (personel parolasıdır)
+    const showCodes = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
     tbody.innerHTML = (window.data.personel || []).map(item => `
         <tr>
             <td><input type="checkbox" class="row-select" data-id="${escapeHtml(item.id ?? '')}"></td>
             <td>${escapeHtml(item.name || '-')}</td>
-            <td>${escapeHtml(item.code || '-')}</td>
+            <td>${showCodes ? escapeHtml(item.code || '-') : '•••••'}</td>
             <td>
                 <button class="edit-btn" onclick="if(validateAdminAction()) openPersonelModal('edit', ${jsArg(item.id)})">Düzenle</button>
                 <button class="delete-btn" onclick="if(validateAdminAction()) deletePersonel(${jsArg(item.id)})">Sil</button>

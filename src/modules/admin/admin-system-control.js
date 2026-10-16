@@ -1119,6 +1119,55 @@
         return { overlay, validate, run, close };
     };
 
+    // ─── Personel Giriş Modu (Faz 4B · J8) ───
+    // [WHY]: Hesapla giriş kademeli açılmalı ve sahada sorun çıkarsa tek tıkla eski davranışa dönülebilmeli.
+    // [HOW]: Düğme sunucudaki modu gösterir (admin_settings snapshot'ı → renderStaffAuthModeButton); tıklanınca bir sonraki
+    //        moda (anonim → hibrit → yalnız hesap) geçiş, ne değişeceğini anlatan onaydan sonra setStaffAuthMode ile yazılır.
+    const _STAFF_MODE_TEXT = {
+        anonymous: { label: 'Giriş Modu: Anonim (eski)', info: 'Hesaplar kullanılmaz; personel kodla girer ve anonim oturumla çalışır.' },
+        hybrid: { label: 'Giriş Modu: Hibrit', info: 'Hesabı olan personel hesabıyla girer (yenilemede oturum korunur); hesabı olmayan eski yoldan.' },
+        accounts: { label: 'Giriş Modu: Yalnız Hesap', info: 'Yalnız hesabı olan personel girebilir; hesabı olmayan giremez.' },
+    };
+    window.renderStaffAuthModeButton = function (mode) {
+        const btn = document.getElementById('vipStaffAuthModeBtn');
+        const t = _STAFF_MODE_TEXT[mode] || _STAFF_MODE_TEXT.hybrid;
+        if (!btn) return;
+        btn.dataset.mode = mode;
+        const label = btn.querySelector('[data-role="label"]');
+        if (label) label.textContent = t.label;
+        btn.title = t.info;
+    };
+    window.vipCycleStaffAuthMode = async function (btn) {
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error'); return; }
+        const S = window.AppModules.Session;
+        const cur = S.getStaffAuthMode();
+        const order = S.STAFF_AUTH_MODES;
+        const next = order[(order.indexOf(cur) + 1) % order.length];
+        let extra = '';
+        if (next === 'accounts') {
+            const plan = window.StaffProvisioning ? window.StaffProvisioning.planProvisioning(window.data?.personel || []) : null;
+            const missing = plan ? plan.toCreate.length + plan.invalid.length : 0;
+            if (missing) extra = `\n\n⚠ ${missing} personelin giriş hesabı yok — bu personel yalnız-hesap modunda GİREMEZ. Önce "Auth Göç Aracı"nı çalıştırın.`;
+            const dups = window.StaffCodeRegistry ? window.StaffCodeRegistry.duplicateGroups(window.data?.personel || []).length : 0;
+            if (dups) extra += `\n⚠ ${dups} grupta ortak giriş kodu var — bu personel giriş yapamaz. Önce "Kod Benzersizleştirme".`;
+        }
+        const question = `Personel giriş modu: ${_STAFF_MODE_TEXT[cur].label.replace('Giriş Modu: ', '')} → ${_STAFF_MODE_TEXT[next].label.replace('Giriş Modu: ', '')}\n\n${_STAFF_MODE_TEXT[next].info}${extra}\n\nAçık oturumlar etkilenmez; yeni girişler ve sayfa yenilemeleri yeni modla yapılır. Devam edilsin mi?`;
+        const ok = typeof showCustomConfirm === 'function' ? await showCustomConfirm('Personel Giriş Modu', question) : confirm(question);
+        if (ok !== true) return;
+        if (btn) btn.disabled = true;
+        try {
+            await window.setStaffAuthMode(next);
+            window.renderStaffAuthModeButton(next);
+            _dupAlert(`Personel giriş modu: ${_STAFF_MODE_TEXT[next].label.replace('Giriş Modu: ', '')}.`, 'success');
+            _appendLog('warn', [`🪪 PERSONEL GİRİŞ MODU: ${cur} → ${next} · kök ${window.COLLECTION_ROOT}`]);
+        } catch (e) {
+            _dupAlert('Giriş modu kaydedilemedi: ' + ((e && e.message) || 'bilinmeyen hata'), 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    };
+    if (window.AppModules && window.AppModules.Session) window.renderStaffAuthModeButton(window.AppModules.Session.getStaffAuthMode());
+
     // Global Kill Switch
     // [WHY]: Kill Switch (Sistemi Kapatma) komutu localStorage'da tutuluyordu, DevTools ile bypass edilebiliyordu.
     // [HOW]: Artık Firestore üzerindeki 'system_config/admin_settings' dökümanına asenkron yazıyor. Sadece Firebase Auth ile doğrulanmış adminler bu veriyi değiştirebilir.

@@ -145,6 +145,8 @@ window.setupUI = setupUI;
  *        Header geç yüklenirse 100ms sonra yeniden denenir (retry guard).
  */
 export const updateNavbarUI = function (user) {
+    // Faz 4B · J8: global referans kodsuz (session-store sanitizeUser) — giriş kodu window.currentUser'da tutulmaz
+    user = window.AppModules.Session.sanitizeUser(user);
     window.currentUser = user; // Global referansı güncelle
 
     const header = document.querySelector('.header');
@@ -230,7 +232,7 @@ window.updateNavbarUI = updateNavbarUI;
  *        okunmaya devam ediyor ama yetki kararına dahil edilmiyor.
  */
 export const checkAuth = function () {
-    const activeUser = window.getActiveUser();
+    let activeUser = window.getActiveUser();
 
     const loginModal = document.getElementById('loginModal');
     const inventoryScreen = document.getElementById('inventory-screen');
@@ -257,6 +259,29 @@ export const checkAuth = function () {
             }
             return;
         }
+    }
+
+    // [WHY]: Faz 4B · J8 (K5) — personel oturumu yenilemede kayboluyordu: localStorage'daki activeUser yetki kaynağı sayılmadığı
+    //        (J3) için anonim personel her F5'te yeniden kod giriyordu.
+    // [HOW]: Personel HESABI oturumunda kimlik Firebase'in kendi kalıcılığından gelir ve personel listesinden uid ile bulunur
+    //        (activeUser'a güvenilmez, yeniden yazılır). Liste henüz gelmediyse personel yüklenince yeniden denenir; uid hiçbir
+    //        personele bağlı değilse (silinmiş personel, yabancı hesap) ya da mod 'anonymous'a alındıysa oturum kapatılır.
+    //        Anonim (eski yol) personel oturumu bilinçli olarak eskisi gibi yenilemede geri yüklenmez.
+    if (!isAuthValid && window.AppModules.Session.isStaffAccountSession()) {
+        const S = window.SecurityConfig;
+        const uid = window.userAuth.uid;
+        const list = window.data && window.data.personel;
+        if (!window.isFirebaseLoaded || !Array.isArray(list)) { _recheckAuthWhenPersonelLoaded(); return; }
+        const person = list.find(p => p && p.uid && String(p.uid) === String(uid));
+        if (!person || window.AppModules.Session.getStaffAuthMode() === 'anonymous') {
+            console.warn('🔒 [auth-engine] Personel hesabı oturumu geçersiz (' + (person ? 'mod anonim' : 'personele bağlı değil') + ') — kapatılıyor.');
+            if (S) S.endAdminSession('stale');
+            return;
+        }
+        window.setActiveUser(person);
+        activeUser = window.getActiveUser();
+        isAuthValid = true;
+        document.body.classList.add('logged-in');
     }
 
     if (isAuthValid) {
@@ -328,6 +353,20 @@ export const checkAuth = function () {
 // window.checkAuth() çağırır. Bu bağlama kritik öneme sahiptir.
 window.checkAuth = checkAuth;
 
+// J8: personel hesabı oturumu geri yüklenirken personel listesi henüz gelmemişse, ilk personel snapshot'ında bir kez yeniden dene.
+let _authRecheckPending = false;
+function _recheckAuthWhenPersonelLoaded() {
+    if (_authRecheckPending) return;
+    _authRecheckPending = true;
+    const onData = e => {
+        if (!e || !e.detail || e.detail.collection !== 'personel') return;
+        window.removeEventListener('onInventoryDataUpdated', onData);
+        _authRecheckPending = false;
+        setTimeout(checkAuth, 0);
+    };
+    window.addEventListener('onInventoryDataUpdated', onData);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Giriş durumu ve hazır olma (Faz 4 kapanış hotfix'i · saha bulgusu 07.10.2026)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -393,11 +432,85 @@ export const handleLogin = async function (event) {
     }
 };
 
+// Hatalı/reddedilen giriş: modal açık kalır, kutu sarsılır ve temizlenir.
+function _rejectStaffLogin(html, codeInput) {
+    setLoginStatus(html);
+    if (codeInput) {
+        codeInput.style.transform = 'translateX(10px)';
+        setTimeout(() => codeInput.style.transform = 'translateX(-10px)', 50);
+        setTimeout(() => codeInput.style.transform = 'translateX(0)', 100);
+        codeInput.value = '';
+        if (window._dx) window._dx._r('access-val-node');
+        codeInput.focus();
+    }
+}
+const _LOGIN_MSG = {
+    invalid: "<span style='color:var(--danger-color); font-weight:bold;'>❌ Hatalı Giriş Kodu!</span>",
+    contact: "<span style='color:var(--danger-color); font-weight:bold;'>⚠️ Giriş yapılamadı, lütfen yöneticiye başvurun.</span>",
+    noAccount: "<span style='color:var(--danger-color); font-weight:bold;'>⚠️ Giriş hesabınız henüz tanımlı değil, lütfen yöneticiye başvurun.</span>",
+    rateLimited: "<span style='color:var(--danger-color); font-weight:bold;'>⏳ Çok fazla deneme yapıldı. Birkaç dakika sonra tekrar deneyin.</span>",
+    network: "<span style='color:var(--danger-color)'>⚠️ Sunucuya bağlanılamadı. Bağlantınızı kontrol edip tekrar deneyin.</span>",
+};
+const _auditLogin = (type, reason) => {
+    if (typeof window.appendAuditLog === 'function') window.appendAuditLog({ type, result: 'blocked', reason }).catch(() => { });
+};
+
 async function completeStaffLogin(code, { codeInput, loginModal }) {
 
     // [WHY]: Her personel girişi admin hesabına bir parola denemesi yapıyordu (AUTH-04).
     // [HOW]: Bu form yalnız personel kodunu doğrular; admin girişi yalnız "Yönetici Paneli" (checkAdminAndGo) akışındadır.
-    const user = window.data.personel.find(p => p.code === code);
+    // [WHY]: Faz 4B · J8 (4.6 / K4) — giriş "listede ilk eşleşen" kişiyi alıyordu (aynı kodu paylaşan iki kişiden biri diğerinin
+    //        oturumuna girebiliyordu) ve her zaman anonim oturumla kalıyordu.
+    // [HOW]: StaffCodeRegistry.planStaffLogin: kod birden fazla kişide → RED (ilk eşleşmeye düşülmez, denetim günlüğüne
+    //        'blocked'); STAFF_AUTH_MODE ('hybrid' varsayılan) ve personelin hesabına göre: hesabı olan → ana Auth örneğinde
+    //        e-posta/parola ile giriş (kod + dolgu; uid personel.uid ile doğrulanır), hesabı olmayan → eski yol (anonim oturum).
+    //        'accounts' modunda hesabı olmayan giremez; 'anonymous' modunda hesaplar kullanılmaz.
+    const Session = window.AppModules.Session;
+    const R = window.StaffCodeRegistry;
+    const mode = Session.getStaffAuthMode();
+    const plan = R.planStaffLogin({ personel: window.data.personel || [], code, mode });
+
+    if (plan.action === 'reject') {
+        if (plan.reason === 'ambiguous') {
+            console.warn('🔒 [auth-engine] Giriş reddedildi: kod ' + plan.count + ' personelde kayıtlı (belirsiz).');
+            _auditLogin('login-ambiguous', 'giriş kodu ' + plan.count + ' personelde ortak');
+            _rejectStaffLogin(_LOGIN_MSG.contact, codeInput);
+        } else {
+            _rejectStaffLogin(plan.reason === 'no-account' ? _LOGIN_MSG.noAccount : _LOGIN_MSG.invalid, codeInput);
+        }
+        return;
+    }
+
+    const user = plan.person;
+    if (plan.action === 'account') {
+        setLoginStatus("<span style='color:var(--warning-color)'>⏳ Giriş yapılıyor…</span>");
+        try {
+            const fbUser = await window.signInStaffAccount(plan.email, window.StaffProvisioning.staffPassword(code));
+            if (user.uid && String(fbUser.uid) !== String(user.uid)) {
+                // Hesap başka bir personele ait: oturum hemen kapatılır (yanlış kimlikle tek bir yazma bile yapılmaz)
+                console.error('🔒 [auth-engine] Hesap uid personel kaydıyla eşleşmiyor — oturum kapatılıyor.');
+                await window.SecurityConfig.logout();
+                _auditLogin('login-uid-mismatch', 'hesap uid personel kaydıyla eşleşmiyor');
+                _rejectStaffLogin(_LOGIN_MSG.contact, codeInput);
+                return;
+            }
+        } catch (e) {
+            const pol = R.accountFailurePolicy(mode, e && e.code);
+            if (pol.action === 'reject') {
+                console.warn('🔒 [auth-engine] Hesapla giriş reddedildi:', pol.reason, e && e.code);
+                if (pol.reason === 'account-out-of-sync') _auditLogin('login-account-out-of-sync', 'hesap parolası giriş koduyla eşleşmiyor');
+                _rejectStaffLogin(pol.reason === 'rate-limited' ? _LOGIN_MSG.rateLimited : pol.reason === 'network' ? _LOGIN_MSG.network : _LOGIN_MSG.contact, codeInput);
+                return;
+            }
+            // Hibrit: hesap senkronu bozuk → eski yoldan (giriş başarısız olunca anonim oturum değişmez)
+            console.warn('⚠️ [auth-engine] Hesapla giriş başarısız (' + (e && e.code) + '); hibrit modda eski yoldan devam ediliyor.');
+        }
+    } else if (Session.isStaffAccountSession()) {
+        // Eski yol: önceki bir personel hesabı oturumu açık kaldıysa kapatılır, anonim oturumla devam edilir
+        await window.SecurityConfig.logout();
+        const t = Date.now();
+        while (!(window.userAuth && window.userAuth.isAnonymous) && Date.now() - t < 10000) await new Promise(r => setTimeout(r, 100));
+    }
 
     if (user) {
         // [SECURITY_GUARD]: K2 kararına kadar biyometrik adım bayrakla kapalı (bkz. ENABLE_BIOMETRIC_LOGIN).
@@ -467,7 +580,7 @@ async function completeStaffLogin(code, { codeInput, loginModal }) {
             if (typeof window.switchTab === 'function') window.switchTab('b1');
         }
 
-        updateNavbarUI(user);
+        updateNavbarUI(window.getActiveUser() || user);
         setupUI();
 
         // Şablon motoru varsa yükle
@@ -477,18 +590,6 @@ async function completeStaffLogin(code, { codeInput, loginModal }) {
 
         if (typeof window.showAppAlert === 'function') {
             window.showAppAlert(`Hoş geldin, ${user.name}`, 'success');
-        }
-    } else {
-        // ─── HATALI GİRİŞ ─── Modalı ASLA kapatma
-        setLoginStatus("<span style='color:var(--danger-color); font-weight:bold;'>❌ Hatalı Giriş Kodu!</span>");
-        if (codeInput) {
-            // Hafif sarsılma animasyonu (shake feedback)
-            codeInput.style.transform = 'translateX(10px)';
-            setTimeout(() => codeInput.style.transform = 'translateX(-10px)', 50);
-            setTimeout(() => codeInput.style.transform = 'translateX(0)', 100);
-            codeInput.value = '';
-            if (window._dx) window._dx._r('access-val-node');
-            codeInput.focus();
         }
     }
 }

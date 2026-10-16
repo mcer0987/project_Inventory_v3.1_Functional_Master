@@ -79,6 +79,39 @@
         return { status: 'unique', person: matches[0], count: 1 };
     }
 
+    // ─── J8 · Hibrit giriş kararı ────────────────────────────────────────────────────────────────────
+    const AUTH_MODES = ['anonymous', 'hybrid', 'accounts'];
+    /**
+     * Girilen kod + mod → ne yapılacağı (saf; Firebase'e dokunmaz).
+     * @returns {{action:'reject', reason:'invalid'|'ambiguous'|'no-account', count?:number}
+     *         | {action:'account', person:object, email:string}
+     *         | {action:'legacy', person:object}}
+     */
+    function planStaffLogin({ personel, code, mode }) {
+        const m = AUTH_MODES.includes(mode) ? mode : 'hybrid';
+        const r = resolveLoginCode(personel, code);
+        if (r.status === 'none') return { action: 'reject', reason: 'invalid' };
+        if (r.status === 'ambiguous') return { action: 'reject', reason: 'ambiguous', count: r.count };
+        const person = r.person;
+        if (m === 'anonymous') return { action: 'legacy', person };
+        if (person.authEmail) return { action: 'account', person, email: String(person.authEmail) };
+        return m === 'accounts' ? { action: 'reject', reason: 'no-account' } : { action: 'legacy', person };
+    }
+
+    /**
+     * Hesapla giriş başarısız olunca: 'legacy' (hibritte parola uyumsuzsa eski yola düş) | 'reject' + neden.
+     * Hibritte yalnız kimlik bilgisi uyuşmazlığı (hesap senkronu bozuk) eski yola düşer — Aşama A güvenlik seviyesi zaten
+     * budur; ağ / kota / devre dışı hesap gibi durumlar reddedilir (eski yola düşmek sorunu gizlerdi).
+     */
+    function accountFailurePolicy(mode, errorCode) {
+        const c = String(errorCode || '').replace(/^auth\//, '');
+        if (['too-many-requests', 'quota-exceeded'].includes(c)) return { action: 'reject', reason: 'rate-limited' };
+        if (c === 'user-disabled') return { action: 'reject', reason: 'disabled' };
+        const mismatch = ['wrong-password', 'invalid-credential', 'invalid-login-credentials', 'user-not-found'].includes(c);
+        if (mismatch) return mode === 'hybrid' ? { action: 'legacy', reason: 'account-out-of-sync' } : { action: 'reject', reason: 'account-out-of-sync' };
+        return { action: 'reject', reason: 'network' };
+    }
+
     /** Listede ve reserved'da olmayan, okunması kolay rastgele kod. rng enjekte edilebilir (test). */
     function suggestCode(personel, { reserved = [], length = SUGGEST_LENGTH, rng = Math.random, maxTries = 200 } = {}) {
         const taken = new Set([...(personel || []).map(p => p && normCode(p.code)), ...reserved.map(normCode)]);
@@ -122,6 +155,7 @@
     const StaffCodeRegistry = {
         MIN_CODE_LENGTH, SUGGEST_ALPHABET, SUGGEST_LENGTH,
         normCode, findConflicts, validateCode, duplicateGroups, resolveLoginCode, suggestCode, planCodeChanges,
+        planStaffLogin, accountFailurePolicy,
     };
     window.AppModules = window.AppModules || {};
     window.AppModules.StaffCodeRegistry = StaffCodeRegistry;

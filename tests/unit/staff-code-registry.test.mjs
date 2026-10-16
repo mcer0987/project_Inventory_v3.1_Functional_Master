@@ -115,3 +115,35 @@ test('planCodeChanges: geçerli parti; takas (A↔B), partide aynı yeni kod, ke
     assert.equal(R.planCodeChanges(P(), [{ id: 'zz', newCode: 'yeni1' }]).ok, false);
     assert.equal(R.planCodeChanges(P(), [{ id: 'b', newCode: 'ab' }]).ok, false);
 });
+
+// ─── J8 · hibrit giriş kararı ──────────────────────────────────────────────────────────────────────────
+test('planStaffLogin: ortak kod → reject/ambiguous (ilk eşleşmeye düşmez); bilinmeyen → invalid', () => {
+    const R = load();
+    assert.deepEqual(plain(R.planStaffLogin({ personel: P(), code: 'kod11', mode: 'hybrid' })), { action: 'reject', reason: 'ambiguous', count: 3 });
+    assert.deepEqual(plain(R.planStaffLogin({ personel: P(), code: 'yok11', mode: 'hybrid' })), { action: 'reject', reason: 'invalid' });
+    assert.equal(R.planStaffLogin({ personel: P(), code: 'pair1', mode: 'anonymous' }).reason, 'ambiguous', 'anonim modda da ortak kod reddedilir');
+});
+
+test('planStaffLogin: hibrit → hesabı olan hesapla, olmayan eski yoldan; yalnız-hesap → hesapsız red; anonim → hep eski yol', () => {
+    const R = load();
+    const people = [{ id: 'a', name: 'Hesaplı', code: 'aaaa1', uid: 'u-a', authEmail: 'pa@staff.medipol.local' }, { id: 'b', name: 'Hesapsız', code: 'bbbb1' }];
+    const plan = (code, mode) => plain(R.planStaffLogin({ personel: people, code, mode }));
+    assert.deepEqual(plan('aaaa1', 'hybrid'), { action: 'account', person: people[0], email: 'pa@staff.medipol.local' });
+    assert.equal(plan('bbbb1', 'hybrid').action, 'legacy');
+    assert.deepEqual(plan('bbbb1', 'accounts'), { action: 'reject', reason: 'no-account' });
+    assert.equal(plan('aaaa1', 'accounts').action, 'account');
+    assert.equal(plan('aaaa1', 'anonymous').action, 'legacy');
+    assert.equal(plan('aaaa1', 'bilinmeyen-mod').action, 'account', 'geçersiz mod → hibrit');
+    assert.equal(plan(' aaaa1 ', 'hybrid').action, 'account', 'girişle aynı kırpma');
+});
+
+test('accountFailurePolicy: hibritte yalnız kimlik uyuşmazlığı eski yola düşer; kota/ağ/devre dışı her modda red', () => {
+    const R = load();
+    const p = (m, c) => plain(R.accountFailurePolicy(m, c));
+    assert.deepEqual(p('hybrid', 'auth/invalid-credential'), { action: 'legacy', reason: 'account-out-of-sync' });
+    assert.deepEqual(p('hybrid', 'auth/wrong-password'), { action: 'legacy', reason: 'account-out-of-sync' });
+    assert.deepEqual(p('accounts', 'auth/invalid-credential'), { action: 'reject', reason: 'account-out-of-sync' });
+    assert.deepEqual(p('hybrid', 'auth/too-many-requests'), { action: 'reject', reason: 'rate-limited' });
+    assert.deepEqual(p('hybrid', 'auth/user-disabled'), { action: 'reject', reason: 'disabled' });
+    assert.deepEqual(p('hybrid', 'auth/network-request-failed'), { action: 'reject', reason: 'network' });
+});

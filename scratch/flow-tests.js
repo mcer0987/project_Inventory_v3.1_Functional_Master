@@ -1,7 +1,8 @@
 // [WHY]: Faz 2 yazma akışlarını gerçek Firestore'a karşı, yalnız inventory_demo'da ve kendi kendini temizleyerek doğrulamak.
 // [HOW]: Repo 127.0.0.1'de servis edilir (→ inventory_demo); başka kök görülürse durur. Test kayıtları MARKER ile etiketlenir,
 //        koşudan önce ve sonra silinir. Anonim (personel) oturumla yazılabilen koleksiyonlar test edilir.
-// Usage: node scratch/flow-tests.js [scenarioName ...]
+// Usage: node scratch/flow-tests.js [scenarioName ...] [--emu] [--headed]
+//        --headed: test Chrome'u ekranda açılır (F12 ile konsol izlenebilir; pencereye tıklamak testi bozabilir).
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -13,6 +14,7 @@ const PORT = 5594;
 const MARKER = '__flowtest__';
 // Faz 4 · J0: --emu → uygulama yerel emülatöre bağlanır (?emu=1). Önce `npm run emu` + `npm run emu:seed`.
 const EMU = process.argv.includes('--emu');
+const HEADED = process.argv.includes('--headed');
 // Yalnız emülatör Auth'unda geçerli sahte admin parolası (scratch/emu-seed.mjs ile aynı; gerçek parola DEĞİLDİR; ≥12 karakter).
 const EMU_ADMIN_CODE = 'emu-yonetici-0001';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
@@ -792,7 +794,7 @@ const SCENARIOS = {
         const result = {};
         result.forceLogoutReceiver = await page.evaluate(() => {
             const o = {}; let calls = 0; const realLogout = window.logout; window.logout = () => { calls++; };
-            window.setActiveUser({ name: 'Hedef FT', code: '12345' });
+            window.setActiveUser({ id: '12345', name: 'Hedef FT' });   // J8: oturum giriş kodu taşımaz — hedef id ile eşleşir
             const now = Date.now(), cmd = { targetId: '12345', issuedAt: now, nonce: 'ft_' + now };
             o.first = window.handleForceLogoutCommand(cmd); o.second = window.handleForceLogoutCommand(cmd); o.logoutCalls = calls;
             o.stale = window.handleForceLogoutCommand({ targetId: '12345', issuedAt: now - 11 * 60000, nonce: 'ft_old_' + now });
@@ -853,7 +855,7 @@ const SCENARIOS = {
                 demoNote: !!document.querySelector('#uapActivityList .uap-demo-note'),
                 radarBadge: [...document.querySelectorAll('.vip-card[data-id="widget-godeye"] .badge')].map(b => b.textContent) };
             await window.vipForceLogout(); o.demoTargetRefused = alerts.at(-1)?.[1];
-            window.setActiveUser({ name: 'Admin', code: '9999' }); _currentTargetUser = { id: '9999', name: 'Başka', demo: false };
+            window.setActiveUser({ id: '9999', name: 'Admin' }); _currentTargetUser = { id: '9999', name: 'Başka', demo: false };   // J8: kendini hedefleme id ile
             await window.vipForceLogout(); o.selfTargetRefused = alerts.at(-1)?.[1];
             window.vipCloseUserPanel();
             o.launchpad = { button: !!document.getElementById('vipToggleLaunchpadBtn'), toggle: typeof window.toggleLaunchpadGlobal, flag: localStorage.getItem('launchpadDisabledGlobal') };
@@ -3328,7 +3330,7 @@ const SCENARIOS = {
             const n = s => { const r = S.normalizeAdminPassword(s); return r.ok ? (r.legacy ? 'legacy:' + r.value : 'as-is') : (r.error ? 'min12' : 'invalid'); };
             o.normalize = { five: n('12345'), six: n('abcdef'), eleven: n('x'.repeat(11)), twelve: n('x'.repeat(12)), four: n('1234'), empty: n('') };
             const uid = window.userAuth && window.userAuth.uid;
-            const saved = { visa: localStorage.getItem('admin_auth'), end: S.endAdminSession };
+            const saved = { visa: localStorage.getItem('admin_auth'), end: S.endAdminSession, loaded: window.isFirebaseLoaded };
             o.midLength = { result: await S.authenticate('abcdefgh'), message: S.lastErrorMessage,
                 authUnchanged: !!window.userAuth && window.userAuth.uid === uid && window.userAuth.isAnonymous, visaWritten: Sess.getAdminVisaRemaining() !== null };
             const ended = []; S.endAdminSession = async r => { ended.push(r); };
@@ -3348,6 +3350,9 @@ const SCENARIOS = {
                 o.logoutRoutesToEndAdminSession = routed;
             } finally {
                 S.endAdminSession = saved.end;
+                // logout hazır bayrağını kapatır; taklit edilen endAdminSession senkronu yeniden başlatmadığı için bayrak kendiliğinden
+                // açılmaz — sonraki senaryoların girişi 15 sn bekleyip düşüyordu (J8 bulgusu). Gerçek çıkışta senkron yeniden başlar.
+                window.isFirebaseLoaded = saved.loaded;
                 clearTimeout(window.sessionTimer); clearTimeout(window.warningTimeout);
                 localStorage.removeItem('admin_auth'); if (saved.visa) localStorage.setItem('admin_auth', saved.visa);
             }
@@ -4146,6 +4151,149 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 4B · J8 (4.6 / K4) — hibrit personel girişi, gerçek giriş ekranıyla (handleLogin):
+    //   A · ana sayfa, Firestore'a yazmadan (iki modda): ortak kod → red + 'blocked' denetim kaydı (ilk eşleşmeye düşmez);
+    //       hesapsız personel hibritte eski yoldan (anonim oturum) girer; yalnız-hesap modunda reddedilir; oturum nesnesinde ve
+    //       localStorage'da giriş kodu yok; personel tablosunda kod admin dışında maskeli.
+    //   B · --emu: hesaplı personel e-posta/parola ile girer (uid = personel.uid, anonim değil), kurallar altında yazar,
+    //       F5'te oturum Firebase kalıcılığıyla geri gelir (K5), çıkışta anonime döner; 'anonymous' modunda hesap kullanılmaz.
+    async j8HybridLogin(page, browser) {
+        const out = {};
+        out.a = await page.evaluate(async () => {
+            const o = {}, ft = window.__ft;
+            const statusText = () => (document.getElementById('loginStatus') || {}).textContent || '';
+            const login = async code => { window._dx._b['access-val-node'] = code; await window.handleLogin(); };
+            const orig = { p: window.data.personel, cfg: window.data.config, alert: window.showAppAlert };
+            o.readyAtStart = { auth: !!window.userAuth, anon: !!window.userAuth?.isAnonymous, loaded: window.isFirebaseLoaded === true, personel: Array.isArray(window.data.personel) ? window.data.personel.length : null, activeUser: !!window.getActiveUser(), loggedIn: document.body.classList.contains('logged-in') };
+            const auditBefore = (window.__auditStub || []).length;
+            window.showAppAlert = () => {};
+            // Önceki senaryoların bıraktığı yerel oturum (setActiveUser fikstürleri) temizlenir; Firebase oturumu anonim kalır
+            if (window.getActiveUser()) window.clearSession();
+            document.body.classList.remove('logged-in');
+            try {
+                const base = (window.data.personel || []).filter(p => !String(p.id).startsWith('j8_'));
+                const uniq = () => window.StaffCodeRegistry.suggestCode(window.data.personel);
+                const shared = uniq();
+                window.data.personel = [...base, { id: 'j8_dupA', name: 'J8 Ortak A', code: shared }, { id: 'j8_dupB', name: 'J8 Ortak B', code: shared }];
+                // 1) ortak kod → red
+                await login(shared);
+                o.ambiguous = { rejected: !window.getActiveUser(), message: /yöneticiye başvurun/.test(statusText()), anon: !!window.userAuth?.isAnonymous };
+                if (!ft.emulator) o.ambiguous.audit = (window.__auditStub || []).slice(auditBefore).some(a => a.type === 'login-ambiguous' && a.result === 'blocked' && !JSON.stringify(a).includes(shared));
+                // 2) hesapsız personel, hibrit → eski yol (anonim oturum)
+                const legacyCode = uniq();
+                window.data.personel = [...base, { id: 'j8_legacy', name: 'J8 Hesapsız', code: legacyCode }];
+                window.data.config = { ...(orig.cfg || {}), staffAuthMode: 'hybrid' };
+                await login(legacyCode);
+                const u = window.getActiveUser();
+                o.legacy = { loggedIn: !!u && u.id === 'j8_legacy' && document.body.classList.contains('logged-in'), anon: !!window.userAuth?.isAnonymous,
+                             noCodeInSession: !!u && !('code' in u) && !('code' in (window.currentUser || {})),
+                             noCodeInStorage: !(localStorage.getItem('activeUser') || '').includes(legacyCode) && !JSON.stringify(window.AppModules.Session.unmaskUserData(localStorage.getItem('activeUser'))).includes(legacyCode) };
+                // personel tablosu: admin olmayan oturumda kod maskeli
+                window.renderPersonelTable();
+                const cells = [...document.querySelectorAll('#tablePersonel tbody tr td:nth-child(3)')].map(td => td.textContent.trim());
+                o.tableMasked = cells.length > 0 && cells.every(c => c === '•••••');
+                await window.handleLogout('manual');
+                await ft.waitFor(async () => !!window.userAuth?.isAnonymous && !window.getActiveUser() && window.isFirebaseLoaded === true, 15000);
+                await ft.sleep(1500);   // çıkışla yeniden başlayan senkron bellekteki personel/ayar kopyasını ezer — oturduktan sonra kur
+                // 3) yalnız-hesap modu: hesapsız personel reddedilir
+                window.data.personel = [...base, { id: 'j8_legacy', name: 'J8 Hesapsız', code: legacyCode }];
+                window.data.config = { ...(orig.cfg || {}), staffAuthMode: 'accounts' };
+                await login(legacyCode);
+                o.accountsModeRejectsLegacy = !window.getActiveUser() && /hesabınız henüz tanımlı değil/.test(statusText());
+                // 4) yanlış kod
+                await login(uniq());
+                o.invalidCode = !window.getActiveUser() && /Hatalı Giriş Kodu/.test(statusText());
+            } finally {
+                window.data.personel = orig.p; window.data.config = orig.cfg; window.showAppAlert = orig.alert;
+                if (window.getActiveUser()) { await window.handleLogout('manual'); }
+                await ft.waitFor(async () => !!window.userAuth?.isAnonymous, 8000);
+            }
+            return o;
+        });
+
+        if (EMU) {
+            // Kurulum (ana sayfa, gerçek admin): hesaplı test personeli
+            const setup = await page.evaluate(async () => {
+                const ft = window.__ft;
+                let person = null;
+                await ft.asAdmin(async () => {
+                    const code = window.StaffCodeRegistry.suggestCode(window.data.personel);
+                    person = { id: window.makeId(), name: `J8 Hesaplı ${ft.MARKER}`, code };
+                    await window.appendItem('personel', person);
+                    const r = await window.provisionStaffAccount(person);
+                    person.uid = r.uid; person.authEmail = r.email; person.status = r.status;
+                });
+                return person;
+            });
+            out.setup = { status: setup && setup.status };
+            const ctx = await browser.createBrowserContext();
+            const errs = [];
+            const base = `http://127.0.0.1:${PORT}`;
+            const waitFn = async (p, fn, ms = 25000, arg) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch (e) { } await new Promise(r => setTimeout(r, 250)); } return false; };
+            const ready = p => waitFn(p, () => window.isFirebaseLoaded === true && !!window.userAuth && (window.data.personel || []).length > 0);
+            const state = p => p.evaluate(() => {
+                const u = window.getActiveUser();
+                return { uid: window.userAuth && window.userAuth.uid, anon: !!(window.userAuth && window.userAuth.isAnonymous), email: window.userAuth && window.userAuth.email,
+                         userId: u && String(u.id), loggedIn: document.body.classList.contains('logged-in'),
+                         loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none',
+                         codeInSession: !!u && 'code' in u, staffSession: window.AppModules.Session.isStaffAccountSession(), isDbAdmin: window.isDbAdmin() };
+            });
+            try {
+                const s = await ctx.newPage();
+                s.on('pageerror', e => errs.push(e.message)); s.on('dialog', d => d.dismiss());
+                await s.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+                await ready(s);
+                await waitFn(s, id => (window.data.personel || []).some(p => String(p.id) === id && p.uid), 15000, String(setup.id));
+                // 1) hesapla giriş
+                await s.evaluate(async code => { window._dx._b['access-val-node'] = code; await window.handleLogin(); }, setup.code);
+                await waitFn(s, () => document.body.classList.contains('logged-in'), 15000);
+                out.accountLogin = await state(s);
+                // 2) kurallar altında personel yazması (Aşama A: oturumlu personel talep açabilir)
+                out.staffWrite = await s.evaluate(async MARKER => {
+                    const r = await window.appendItem('requests', { personel: 'J8 ' + MARKER, ürün: 'J8 test ' + MARKER, adet: 1, durum: 'Beklemede', not: MARKER }).then(() => 'ok', e => e.code);
+                    return r;
+                }, '__flowtest__');
+                // 3) F5 → oturum Firebase kalıcılığıyla geri gelir (K5)
+                await s.reload({ waitUntil: 'domcontentloaded' });
+                await ready(s);
+                await waitFn(s, () => document.body.classList.contains('logged-in') && !!window.getActiveUser() && getComputedStyle(document.getElementById('loginModal')).display === 'none', 20000);
+                await new Promise(r => setTimeout(r, 1500));   // modal sonradan yeniden açılmıyor mu?
+                out.afterReload = await state(s);
+                // 4) çıkış → anonim
+                await s.evaluate(() => window.handleLogout('manual'));
+                await waitFn(s, () => !!window.userAuth && window.userAuth.isAnonymous && !window.getActiveUser(), 15000);
+                out.afterLogout = await state(s);
+                // 5) 'anonymous' modu: hesap kullanılmaz (bellek içi mod; sunucu ayarına dokunulmaz)
+                await s.evaluate(async code => { window.data.config = { ...(window.data.config || {}), staffAuthMode: 'anonymous' }; window._dx._b['access-val-node'] = code; await window.handleLogin(); }, setup.code);
+                await waitFn(s, () => document.body.classList.contains('logged-in'), 15000);
+                out.anonymousMode = await state(s);
+                await s.evaluate(() => window.handleLogout('manual'));
+                await waitFn(s, () => !!window.userAuth && window.userAuth.isAnonymous, 15000);
+            } finally {
+                out.staffPageErrors = errs;
+                await ctx.close();
+                await page.evaluate(async id => { await window.__ft.asAdmin(async () => { try { await window.removeItem('personel', id); } catch (e) { } }); }, setup.id);
+            }
+            const A = out.accountLogin, R = out.afterReload;
+            out.b = A && R && setup
+                && setup.status === 'created'
+                && A.loggedIn && !A.anon && A.staffSession && A.uid === setup.uid && A.email === setup.authEmail && A.userId === String(setup.id) && !A.codeInSession && !A.isDbAdmin && !A.loginModal
+                && out.staffWrite === 'ok'
+                && R.loggedIn && R.uid === setup.uid && R.userId === String(setup.id) && !R.loginModal && !R.codeInSession
+                && out.afterLogout.anon && !out.afterLogout.userId
+                && out.anonymousMode.loggedIn && out.anonymousMode.anon && out.anonymousMode.userId === String(setup.id)
+                && out.staffPageErrors.length === 0;
+        }
+
+        const a = out.a;
+        out.ok = a.ambiguous.rejected && a.ambiguous.message && a.ambiguous.anon && (a.ambiguous.audit !== false)
+            && a.legacy.loggedIn && a.legacy.anon && a.legacy.noCodeInSession && a.legacy.noCodeInStorage && a.tableMasked
+            && a.accountsModeRejectsLegacy && a.invalidCode
+            && (!EMU || out.b === true);
+        if (!out.ok) throw new Error('j8HybridLogin beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
     async j6EkASession(page, browser) {
         const sleep = ms => new Promise(r => setTimeout(r, ms));
         const TOKEN = 'J6-' + Date.now();
@@ -4273,7 +4421,11 @@ const SCENARIOS = {
     const wanted = names.length ? names : Object.keys(SCENARIOS);
     if (EMU) await fetch('http://127.0.0.1:8080/').catch(() => { throw new Error('Emülatör çalışmıyor: önce npm run emu'); });
     const server = await startServer();
-    const browser = await puppeteer.launch({ headless: true, executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' });
+    const browser = await puppeteer.launch({ headless: !HEADED, defaultViewport: HEADED ? null : undefined, executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' });
+    const startedAt = Date.now();
+    const clock = () => new Date().toLocaleTimeString('tr-TR');
+    const elapsed = () => { const t = Math.round((Date.now() - startedAt) / 1000); return `${Math.floor(t / 60)}dk ${t % 60}sn`; };
+    console.log(`▶ ${wanted.length} senaryo · ${EMU ? 'emülatör' : 'gerçek demo'}${HEADED ? ' · görünür Chrome' : ''} · başlangıç ${clock()}`);
     const page = await browser.newPage();
     const pageErrors = [];
     page.on('pageerror', e => pageErrors.push(e.message));
@@ -4285,13 +4437,17 @@ const SCENARIOS = {
         await installHelpers(page);
         const pre = await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
         console.log(`pre-cleanup removed: ${pre}`);
-        for (const name of wanted) {
+        let fails = 0;
+        for (const [i, name] of wanted.entries()) {
+            // İlerleme satırı senaryo BAŞLARKEN yazılır (takılan senaryo hemen görünsün). İzleme: Select-String '^\['
+            console.log(`\n[${i + 1}/${wanted.length}] ${name} başladı · ${clock()} · geçen ${elapsed()} · hata ${fails}`);
             try {
                 await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
                 await new Promise(r => setTimeout(r, 1500));
                 console.log(`\n=== ${name} ===\n` + JSON.stringify(await SCENARIOS[name](page, browser), null, 1));
-            } catch (e) { failed = true; console.log(`\n=== ${name} FAILED: ${e.message}`); }
+            } catch (e) { failed = true; fails++; console.log(`\n=== ${name} FAILED: ${e.message}`); }
         }
+        console.log(`\n■ bitti · ${wanted.length} senaryo · ${fails} hata · süre ${elapsed()}`);
     } finally {
         try {
             const post = await page.evaluate(() => window.__ft && window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));

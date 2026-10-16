@@ -17,12 +17,22 @@
     }
 
     // UTF-8 byte string first, so btoa never sees chars > 0xFF (Turkish names broke the old mask).
+    // [WHY]: Faz 4B · J8 — oturum nesnesi personel kaydının kopyasıydı: giriş KODU da localStorage'a (maske güvenlik değil)
+    //        ve window.currentUser'a gidiyordu; satın alma talebi createdBy alanıyla herkesin okuduğu belgelere taşınıyordu.
+    // [HOW]: Oturuma yalnız kimlik alanları girer; code / password / token hiçbir zaman saklanmaz. Kodla eşleşen eski kayıtlar
+    //        (satın alma, talep, şablon yetkisi) id ve ad yedekleriyle eşleşir (J9 uid'ye taşır).
+    const SECRET_FIELDS = ['code', 'password', 'token'];
+    function sanitizeUser(obj) {
+        if (!obj || typeof obj !== 'object') return obj;
+        const clean = { ...obj };
+        SECRET_FIELDS.forEach(k => { delete clean[k]; });
+        return clean;
+    }
+
     function maskUserData(obj) {
         if (!obj || typeof obj !== 'object') return null;
         try {
-            const clean = { ...obj };
-            delete clean.password;
-            delete clean.token;
+            const clean = sanitizeUser(obj);
             return PREFIX + btoa(xor(unescape(encodeURIComponent(JSON.stringify(clean)))));
         } catch (e) {
             console.error('[session-store] mask failed:', e.message);
@@ -43,10 +53,11 @@
 
     function setActiveUser(user) {
         if (!user) return false;
-        const masked = maskUserData(user);
+        const clean = sanitizeUser(user);
+        const masked = maskUserData(clean);
         if (!masked) return false;
         localStorage.setItem(KEY, masked);
-        window.currentUser = user;
+        window.currentUser = clean;
         return true;
     }
 
@@ -55,7 +66,8 @@
         if (!raw) return null;
         const user = unmaskUserData(raw);
         if (!user || typeof user !== 'object') return null;
-        if (!raw.startsWith(PREFIX)) setActiveUser(user);
+        // Eski biçim ya da J8 öncesi kodu taşıyan oturum → ayıklanıp yeniden yazılır (göç)
+        if (!raw.startsWith(PREFIX) || SECRET_FIELDS.some(k => k in user)) { setActiveUser(user); return sanitizeUser(user); }
         return user;
     }
 
@@ -133,10 +145,31 @@
     //        sunucusuz ortamda yalnız bir UX kapısı olurdu (doğrulama sonucu istemcide, atlatılabilir).
     const ENABLE_BIOMETRIC_LOGIN = false;
 
+    // ─── Personel giriş modu (Faz 4B · J8 · 4.6 / K4) ─────────────────────────────────────────────
+    // [WHY]: Personel hesapları (J7) kademeli devreye girmeli: hesabı olmayan personel çalışmaya devam etmeli, sahada sorun
+    //        çıkarsa tek ayarla eski davranışa dönülebilmeli.
+    // [HOW]: Mod system_config/admin_settings.staffAuthMode'dan okunur (tüm istemciler bu dokümanı zaten dinliyor; yalnız admin
+    //        yazar). Geçersiz/eksik → varsayılan 'hybrid'.
+    //          'anonymous' → eski davranış: kod eşleşmesi + anonim oturum (hesaplar kullanılmaz)
+    //          'hybrid'    → hesabı olan personel hesabıyla girer; hesabı olmayan eski yoldan
+    //          'accounts'  → yalnız hesapla giriş; hesabı olmayan personel giremez (Aşama B hedefi)
+    const STAFF_AUTH_MODES = Object.freeze(['anonymous', 'hybrid', 'accounts']);
+    const DEFAULT_STAFF_AUTH_MODE = 'hybrid';
+    const STAFF_EMAIL_DOMAIN = 'staff.medipol.local';
+    function getStaffAuthMode() {
+        const m = window.data && window.data.config && window.data.config.staffAuthMode;
+        return STAFF_AUTH_MODES.includes(m) ? m : DEFAULT_STAFF_AUTH_MODE;
+    }
+    // Firebase oturumu bir personel hesabı mı (J7 sentetik e-postası, e-posta/parola)?
+    function isStaffAccountSession(u = window.userAuth) {
+        return !!(u && !u.isAnonymous && typeof u.email === 'string' && u.email.toLowerCase().endsWith('@' + STAFF_EMAIL_DOMAIN));
+    }
+
     const Session = {
         ENABLE_BIOMETRIC_LOGIN,
         getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, requireDbAdmin,
-        maskUserData, unmaskUserData, ADMIN_EMAIL,
+        maskUserData, unmaskUserData, sanitizeUser, ADMIN_EMAIL,
+        STAFF_AUTH_MODES, DEFAULT_STAFF_AUTH_MODE, getStaffAuthMode, isStaffAccountSession,
         getAdminVisaRemaining, hasValidAdminVisa, grantAdminVisa, extendAdminVisa, clearAdminVisa,
         get ADMIN_SESSION_MS() { return adminSessionMs(); },
     };

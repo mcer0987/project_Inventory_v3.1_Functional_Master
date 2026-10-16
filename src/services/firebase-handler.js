@@ -494,6 +494,8 @@ window.startRealtimeSync = function () {
             console.log("⚙️ Hash updated.");
             // VIP-07: kill switch butonu her zaman sunucudaki gerçek durumu gösterir (admin.html'de tanımlı).
             if (typeof window.renderKillSwitchButton === 'function') window.renderKillSwitchButton(data.maintenance === true);
+            // Faz 4B · J8: VIP 'Personel Giriş Modu' düğmesi sunucudaki gerçek modu gösterir
+            if (typeof window.renderStaffAuthModeButton === 'function') window.renderStaffAuthModeButton(window.AppModules.Session.getStaffAuthMode());
 
             // Launchpad bayrağı artık dinlenmez (VIP-10 / K9-a); eski istemcilerdeki kopyası temizlenir.
             localStorage.removeItem('launchpadDisabledGlobal');
@@ -1506,4 +1508,28 @@ export const changeStaffCodes = window.changeStaffCodes = async function (change
         if (onProgress) onProgress(i + 1, plan.changes.length);
     }
     return { ok: true, errors: [], results, stopped, remaining: plan.changes.length - results.length, unresolved: plan.unresolved };
+};
+
+// ─── Personel hesabıyla giriş (Faz 4B · J8 · 4.6 / K4) ─────────────────────────────────────────────
+// [WHY]: J7 hesapları açtı; giriş hâlâ anonim oturumla yapılıyordu. Hesapla giriş, kurallara "kim" bilgisini taşır (J10) ve
+//        sayfa yenilemede oturumun korunmasını (K5) Firebase'in kendi kalıcılığına bırakır.
+// [HOW]: ANA Auth örneğinde (J7'deki ikincil örnek değil) yerel kalıcılıkla giriş: anonim oturum yerini personel hesabına
+//        bırakır, Firestore dinleyicileri yeni kimlikle sürer (anonim → admin geçişindeki gibi). onAuthStateChanged'in
+//        window.userAuth'u güncellemesi beklenir; çağıran uid bağını (personel.uid) ayrıca doğrular.
+export const signInStaffAccount = window.signInStaffAccount = async function (email, password) {
+    await setPersistence(auth, browserLocalPersistence);
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    const uid = cred.user.uid;
+    const t = Date.now();
+    while (!(window.userAuth && window.userAuth.uid === uid) && Date.now() - t < 10000) await new Promise(r => setTimeout(r, 50));
+    return cred.user;
+};
+
+/** VIP: personel giriş modunu sunucuya yazar (admin_settings.staffAuthMode; tüm istemciler dinler). Yalnız Firebase admin. */
+export const setStaffAuthMode = window.setStaffAuthMode = async function (mode) {
+    const S = window.AppModules.Session;
+    if (!S.STAFF_AUTH_MODES.includes(mode)) throw new SaveDataError('invalid-argument', `Geçersiz giriş modu: ${mode}`);
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Giriş modunu yalnız yönetici değiştirebilir.');
+    await setDoc(systemConfigRef('admin_settings'), { staffAuthMode: mode }, { merge: true });
+    return mode;
 };
