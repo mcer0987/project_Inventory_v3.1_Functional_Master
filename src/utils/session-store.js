@@ -145,21 +145,14 @@
     //        sunucusuz ortamda yalnız bir UX kapısı olurdu (doğrulama sonucu istemcide, atlatılabilir).
     const ENABLE_BIOMETRIC_LOGIN = false;
 
-    // ─── Personel giriş modu (Faz 4B · J8 · 4.6 / K4) ─────────────────────────────────────────────
-    // [WHY]: Personel hesapları (J7) kademeli devreye girmeli: hesabı olmayan personel çalışmaya devam etmeli, sahada sorun
-    //        çıkarsa tek ayarla eski davranışa dönülebilmeli.
-    // [HOW]: Mod system_config/admin_settings.staffAuthMode'dan okunur (tüm istemciler bu dokümanı zaten dinliyor; yalnız admin
-    //        yazar). Geçersiz/eksik → varsayılan 'hybrid'.
-    //          'anonymous' → eski davranış: kod eşleşmesi + anonim oturum (hesaplar kullanılmaz)
-    //          'hybrid'    → hesabı olan personel hesabıyla girer; hesabı olmayan eski yoldan
-    //          'accounts'  → yalnız hesapla giriş; hesabı olmayan personel giremez (Aşama B hedefi)
-    const STAFF_AUTH_MODES = Object.freeze(['anonymous', 'hybrid', 'accounts']);
-    const DEFAULT_STAFF_AUTH_MODE = 'hybrid';
+    // ─── Personel giriş modu (Faz 4B · J8 → J10) ──────────────────────────────────────────────────
+    // [WHY]: J8'de mod (anonim / hibrit / yalnız hesap) kademeli geçiş için ayarlanabilirdi. J10 (Aşama B kuralları) anonim
+    //        oturumu ve kodla eşleşmeyi tamamen kaldırdı: kurallar yalnız personel kaydına bağlı Auth hesabını tanır.
+    // [HOW]: Mod SABİT 'accounts'; system_config'teki eski staffAuthMode değeri yok sayılır (geri dönüş istemciden yapılamaz).
+    const STAFF_AUTH_MODES = Object.freeze(['accounts']);
+    const DEFAULT_STAFF_AUTH_MODE = 'accounts';
     const STAFF_EMAIL_DOMAIN = 'staff.medipol.local';
-    function getStaffAuthMode() {
-        const m = window.data && window.data.config && window.data.config.staffAuthMode;
-        return STAFF_AUTH_MODES.includes(m) ? m : DEFAULT_STAFF_AUTH_MODE;
-    }
+    function getStaffAuthMode() { return DEFAULT_STAFF_AUTH_MODE; }
     // Firebase oturumu bir personel hesabı mı (J7 sentetik e-postası, e-posta/parola)?
     function isStaffAccountSession(u = window.userAuth) {
         return !!(u && !u.isAnonymous && typeof u.email === 'string' && u.email.toLowerCase().endsWith('@' + STAFF_EMAIL_DOMAIN));

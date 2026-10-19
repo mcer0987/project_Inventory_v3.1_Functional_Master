@@ -416,7 +416,8 @@ window.renderPurchaseModule = function (options = {}) {
                 const currentStepIndex = Math.min(currentStep, Math.max(0, steps.length - 1));
                 const step = steps[currentStepIndex];
                 const stepUser = (step?.user || "").trim().toLocaleLowerCase('tr-TR');
-                if (stepUser === currentMe && step.status !== 'approved') {
+                const mine = step?.userUid ? (!!myUid && String(step.userUid) === myUid) : stepUser === currentMe;   // J10: uid öncelikli
+                if (mine && step.status !== 'approved') {
                     waitingApproval = true;
                 }
             }
@@ -1404,6 +1405,11 @@ window.updatePurchaseRequest = async function (e, id) {
     const item = _findPurchase(id);
     if (!item) { if (typeof showAppAlert === 'function') showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     if (!_canManagePurchase(item)) { _denyManage(); return; }
+    // Faz 4B · J10: akış başladıktan sonra talebin içeriği değiştirilemez (kurallar reddeder; onaylanan içerik sabit kalmalı)
+    if (item.workflow?.started === true && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+        if (typeof showAppAlert === 'function') showAppAlert('Onay akışı başlamış bir talep düzenlenemez. Önce talebi geri çekin.', 'warning');
+        return;
+    }
     const undo = _snapshotPurchase(item);
 
     // Yeni dosya yükleme

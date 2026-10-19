@@ -11,7 +11,7 @@
  *          tasks.assigneeUid · workflowTemplates/purchaseOrders.workflow.steps[].userUid → TÜRETİLMİŞ: görev başkasına atanınca /
  *          şablon düzenlenince yeniden hesaplanır (atanan ve onaylayıcı meşru olarak değişir; sahibi değişmez)
  *        UID kaynağı (GPT-6 kural 1): yalnız Firebase Auth — ya oturumun kendi uid'si (window.userAuth) ya da J7'de hesap açılırken
- *        Auth'un döndürdüğü ve personel kaydına bağlanan uid (personel.uid; authEmail personel id'siyle tutarlı olmalı). Addan
+ *        Auth'un döndürdüğü ve personel kaydına bağlanan uid (personel.uid; authEmail personelin PRI adresi olmalı). Addan
  *        uid TÜRETİLMEZ; ad yalnız TEK bir personeli işaret ediyorsa o personelin Auth uid'sine götürür. Belirsiz / hesapsız /
  *        sistem adımlarına (ör. "Admin", "Sistem", havuz) uid YAZILMAZ — alan null kalır ve raporlanır.
  *        Göç (GPT-6 kural 2): önizleme saf (yazmaz); uygulama kayıt başına Firestore transaction'ı ile — her kayıt transaction
@@ -34,9 +34,9 @@
     // ─── Personel dizini ───────────────────────────────────────────────────────────────────────────────
     /**
      * @param {object[]} personel
-     * @param {{staffEmail?: Function}} [opts]  staffEmail(id) → beklenen J7 hesap e-postası (tutarlılık denetimi)
+     * @param {{accountEmail?: Function}} [opts]  accountEmail(personel) → beklenen hesap e-postası (J10 PRI: <pri>@…; tutarlılık denetimi)
      */
-    function buildPersonIndex(personel, { staffEmail } = {}) {
+    function buildPersonIndex(personel, { accountEmail } = {}) {
         const byId = new Map(), byCode = new Map(), byName = new Map(), byUid = new Map();
         const push = (m, k, p) => m.set(k, [...(m.get(k) || []), p]);
         (personel || []).forEach(p => {
@@ -47,18 +47,18 @@
             if (n) push(byName, n, p);
             if (!blank(p.uid)) push(byUid, String(p.uid), p);
         });
-        return { byId, byCode, byName, byUid, staffEmail: typeof staffEmail === 'function' ? staffEmail : null };
+        return { byId, byCode, byName, byUid, accountEmail: typeof accountEmail === 'function' ? accountEmail : null };
     }
 
-    /** Personelin Auth uid'si (J7 bağı). Tutarsız bağ (paylaşılan uid, e-posta uyumsuzluğu) güvenilmez. */
+    /** Personelin Auth uid'si (J7 bağı). Tutarsız bağ (paylaşılan uid, e-posta PRI adresi değil — ör. taşınmamış J7 hesabı) güvenilmez. */
     function accountOf(index, p) {
         if (!p || blank(p.uid)) return { status: 'no-account' };
         const uid = String(p.uid).trim();
         if ((index.byUid.get(uid) || []).length > 1) return { status: 'account-inconsistent', detail: 'aynı giriş hesabı birden fazla personele bağlı' };
-        if (index.staffEmail) {
-            const expected = index.staffEmail(p.id);
+        if (index.accountEmail) {
+            const expected = index.accountEmail(p);
             if (!expected || blank(p.authEmail) || String(p.authEmail).trim().toLowerCase() !== expected.toLowerCase()) {
-                return { status: 'account-inconsistent', detail: 'hesap e-postası personel kaydıyla uyuşmuyor' };
+                return { status: 'account-inconsistent', detail: 'hesap e-postası personelin kurumsal kimliğiyle (PRI) uyuşmuyor' };
             }
         }
         return { status: 'ok', uid };
@@ -111,7 +111,7 @@
         }
         if (!person) return { status: 'not-found', detail: 'kayıttaki ad / kod hiçbir personelle eşleşmiyor' };
         const acct = accountOf(index, person);
-        if (acct.status !== 'ok') return { status: acct.status, person, via, detail: acct.detail || 'personelin giriş hesabı yok (önce VIP → Auth Göç Aracı)' };
+        if (acct.status !== 'ok') return { status: acct.status, person, via, detail: acct.detail || 'personelin giriş hesabı yok (önce VIP → PRI / Hesap Göç Aracı)' };
         return { status: 'ok', person, uid: acct.uid, via };
     }
 
@@ -196,18 +196,18 @@
     }
 
     // Personel kayıtlarının sahiplik çözümünü etkileyen alanları — önizleme ile uygulama arasında değişti mi?
-    const personFingerprint = p => JSON.stringify([String(p.id), norm(p.name || p.adSoyad), blank(p.code) ? '' : String(p.code).trim(), blank(p.uid) ? '' : String(p.uid), blank(p.authEmail) ? '' : String(p.authEmail).toLowerCase()]);
+    const personFingerprint = p => JSON.stringify([String(p.id), norm(p.name || p.adSoyad), blank(p.code) ? '' : String(p.code).trim(), blank(p.uid) ? '' : String(p.uid), blank(p.authEmail) ? '' : String(p.authEmail).toLowerCase(), blank(p.pri) ? '' : String(p.pri).toLowerCase()]);
     function personelFingerprint(personel) {
         return (personel || []).filter(p => p && !blank(p.id)).map(personFingerprint).sort().join('\n');
     }
 
     /**
      * Önizleme (SAF — hiçbir yere yazmaz).
-     * @param {{data: Object<string, object[]>, personel: object[], staffEmail?: Function}} input
+     * @param {{data: Object<string, object[]>, personel: object[], accountEmail?: Function}} input
      * @returns {{items:{col,id,patch,key,label}[], summary:Object, issues:{col,id,label,field,status,detail,candidates}[], personelFingerprint:string, totals}}
      */
-    function planMigration({ data, personel, staffEmail }) {
-        const index = buildPersonIndex(personel, { staffEmail });
+    function planMigration({ data, personel, accountEmail }) {
+        const index = buildPersonIndex(personel, { accountEmail });
         const items = [], issues = [], summary = {};
         MIGRATION_COLLECTIONS.forEach(col => {
             const docs = (data && data[col]) || [];
@@ -243,12 +243,12 @@
      * @param {object} o
      * @param {object} o.plan             planMigration sonucu (önizleme)
      * @param {object} o.store            { readAll(col) → [{id, data}], transaction(fn(tx)) → sonuç; tx: get(col,id) → data|null, update(col,id,patch) }
-     * @param {Function} [o.staffEmail]
+     * @param {Function} [o.accountEmail]
      * @param {Function} [o.onProgress]   (done, total)
      * @returns {Promise<{status:'done'|'stopped'|'aborted', written:{col,id}[], skipped:{col,id,reason}[], failed:{col,id,code,message}[],
      *                   notAttempted:number, error?:{code,message}}>}
      */
-    async function applyMigration({ plan, store, staffEmail, onProgress, chunkSize = CHUNK_SIZE }) {
+    async function applyMigration({ plan, store, accountEmail, onProgress, chunkSize = CHUNK_SIZE }) {
         const result = { status: 'done', written: [], skipped: [], failed: [], notAttempted: 0 };
         if (!plan || !Array.isArray(plan.items)) throw new Error('applyMigration: önizleme planı gerekli');
         // 1. Personel listesi önizlemeden sonra değiştiyse (yeni / silinen / yeniden adlandırılan / hesabı değişen personel) DUR.
@@ -256,7 +256,7 @@
         if (personelFingerprint(freshPersonel) !== plan.personelFingerprint) {
             return { ...result, status: 'aborted', notAttempted: plan.items.length, error: { code: 'personel-changed', message: 'Personel listesi önizlemeden sonra değişti; önizlemeyi yenileyin.' } };
         }
-        const index = buildPersonIndex(freshPersonel, { staffEmail });
+        const index = buildPersonIndex(freshPersonel, { accountEmail });
         const byIdFresh = new Map(freshPersonel.map(p => [String(p.id), p]));
         let done = 0;
         for (let i = 0; i < plan.items.length; i += chunkSize) {
@@ -362,14 +362,45 @@
     }
     function currentIndex() {
         const SP = window.StaffProvisioning;
-        return buildPersonIndex((window.data && window.data.personel) || [], { staffEmail: SP ? SP.staffEmail : null });
+        return buildPersonIndex((window.data && window.data.personel) || [], { accountEmail: SP ? SP.accountEmailOf : null });
     }
     const uidForPersonName = name => uidForName(currentIndex(), name);
+
+    // ─── Kod temizliği planı (Faz 4B · J10) ──────────────────────────────────────────────────────────────
+    // [WHY]: Giriş artık yalnız Firebase Auth ile; düz metin giriş kodları (personel.code ve eski kayıtlara kopyalanmış hâlleri:
+    //        requests.personelKodu, purchaseOrders.createdBy) veritabanında kalmamalı.
+    // [HOW]: Engeller (kod silinirse personel kilitlenir ya da sahiplik eşlemesi kaybolur): hesabı olmayan/tutarsız personel,
+    //        Sahiplik Göç Aracı'nın yazmadığı kayıt. Sahiplik sorunları (belirsiz ad vb.) engel değil, uyarı: kod silindikten
+    //        sonra o kayıtlar yalnız ad/id ile eşlenebilir. createdBy bir personelin koduysa personel id'siyle (tekilse),
+    //        kimsenin kodu değil ama kod biçimindeyse (silinmiş personel) 'unknown' ile değiştirilir; addır → dokunulmaz.
+    function planCodeCleanse({ personel, requests, purchaseOrders, accountEmail, ownershipPendingItems = 0, ownershipIssues = 0 }) {
+        const index = buildPersonIndex(personel, { accountEmail });
+        const label = p => (p && (p.name || p.adSoyad)) || '-';
+        const plan = { personel: [], requests: [], purchaseOrders: [], blockers: { noAccount: [], ownershipPending: ownershipPendingItems }, warnings: { ownershipIssues } };
+        (personel || []).forEach(p => {
+            if (!p || blank(p.id)) return;
+            if (accountOf(index, p).status !== 'ok') plan.blockers.noAccount.push(label(p));
+            if (!blank(p.code)) plan.personel.push({ id: String(p.id), label: label(p) });
+        });
+        (requests || []).forEach(r => { if (r && !blank(r.id) && !blank(r.personelKodu)) plan.requests.push({ id: String(r.id), label: `${r.ürün || r.urun || '-'} · ${r.personel || '-'}` }); });
+        (purchaseOrders || []).forEach(po => {
+            if (!po || blank(po.id) || blank(po.createdBy)) return;
+            const by = String(po.createdBy).trim();
+            if (index.byId.has(by) || isSystemActor(by) || (index.byName.get(norm(by)) || []).length) return;
+            const hits = index.byCode.get(by) || [];
+            const looksLikeCode = /^[A-Za-z0-9]{4,12}$/.test(by);
+            if (!hits.length && !looksLikeCode) return;
+            plan.purchaseOrders.push({ id: String(po.id), label: `${po.evrakNo || po.urun || '-'} · ${po.createdByName || po.talepEden || '-'}`, replaceWith: hits.length === 1 ? String(hits[0].id) : 'unknown' });
+        });
+        plan.ready = plan.blockers.noAccount.length === 0 && plan.blockers.ownershipPending === 0;
+        plan.total = plan.personel.length + plan.requests.length + plan.purchaseOrders.length;
+        return plan;
+    }
 
     const Ownership = {
         OWNER_FIELDS, MIGRATION_COLLECTIONS, CHUNK_SIZE, SYSTEM_ACTORS,
         buildPersonIndex, accountOf, resolveOwner, uidForName, planDoc, planMigration, applyMigration, ownerGuard,
-        personelFingerprint, isSystemActor,
+        personelFingerprint, isSystemActor, planCodeCleanse,
         selfUid, actorUid, uidForPersonName,
     };
     window.AppModules = window.AppModules || {};

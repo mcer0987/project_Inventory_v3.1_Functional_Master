@@ -4,13 +4,22 @@
 window.renderPersonelTable = function () {
     const tbody = document.querySelector('#tablePersonel tbody');
     if (!tbody) return;
-    // Faz 4B · J8: giriş kodu yalnız Firebase admin oturumunda gösterilir (personel parolasıdır)
-    const showCodes = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+    // Faz 4B · J10: giriş kodu hiçbir yerde gösterilmez (saklanmaz); yerine birim, kurumsal kimlik (PRI) ve giriş hesabı durumu.
+    //              Hesabı olmayana "Hesap Aç" (yalnız yönetici; yeni kodla). PRI'si olmayan / J7 adresinde kalmış hesap → göç aracı.
+    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+    const SP = window.StaffProvisioning;
+    const account = item => {
+        const pri = item.pri ? `<code>${escapeHtml(item.pri)}</code> ` : '<span style="color:#b45309;">PRI yok</span> ';
+        if (!item.uid) return pri + (isAdmin ? `<button class="edit-btn" onclick="openPersonelAccount(${jsArg(item.id)})">Hesap Aç</button>` : '· hesap yok');
+        const onPri = SP && String(item.authEmail || '').toLowerCase() === SP.accountEmailOf(item);
+        return pri + (onPri ? '✓' : '<span style="color:#b45309;" title="Hesap kurumsal kimlik adresinde değil: VIP → PRI / Hesap Göç Aracı">⚠ göç bekliyor</span>');
+    };
     tbody.innerHTML = (window.data.personel || []).map(item => `
         <tr>
             <td><input type="checkbox" class="row-select" data-id="${escapeHtml(item.id ?? '')}"></td>
             <td>${escapeHtml(item.name || '-')}</td>
-            <td>${showCodes ? escapeHtml(item.code || '-') : '•••••'}</td>
+            <td>${escapeHtml(item.birim || '-')}</td>
+            <td>${account(item) /* xss-ok: account() kendi şablonlarında escapeHtml / jsArg kullanır (linter ayrıca denetler) */}</td>
             <td>
                 <button class="edit-btn" onclick="if(validateAdminAction()) openPersonelModal('edit', ${jsArg(item.id)})">Düzenle</button>
                 <button class="delete-btn" onclick="if(validateAdminAction()) deletePersonel(${jsArg(item.id)})">Sil</button>

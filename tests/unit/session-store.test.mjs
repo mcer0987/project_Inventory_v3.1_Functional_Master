@@ -39,16 +39,12 @@ test('getActiveUser: J8 öncesi kodu taşıyan oturum okunurken ayıklanır ve y
     assert.ok(!('code' in S.unmaskUserData(store.get('activeUser'))));
 });
 
-test('getStaffAuthMode: admin_settings.staffAuthMode; eksik/geçersiz → hybrid', () => {
+test('getStaffAuthMode (J10): sabit "accounts" — sunucudaki eski staffAuthMode değeri yok sayılır', () => {
     const { S, window } = load();
-    assert.equal(S.getStaffAuthMode(), 'hybrid');
-    window.data = { config: { staffAuthMode: 'accounts' } };
     assert.equal(S.getStaffAuthMode(), 'accounts');
-    window.data.config.staffAuthMode = 'anonymous';
-    assert.equal(S.getStaffAuthMode(), 'anonymous');
-    window.data.config.staffAuthMode = 'admin';
-    assert.equal(S.getStaffAuthMode(), 'hybrid');
-    assert.deepEqual(plain(S.STAFF_AUTH_MODES), ['anonymous', 'hybrid', 'accounts']);
+    window.data = { config: { staffAuthMode: 'anonymous' } };
+    assert.equal(S.getStaffAuthMode(), 'accounts');
+    assert.deepEqual(plain(S.STAFF_AUTH_MODES), ['accounts']);
 });
 
 test('isStaffAccountSession: yalnız @staff.medipol.local e-posta/parola oturumu; anonim ve admin değil', () => {

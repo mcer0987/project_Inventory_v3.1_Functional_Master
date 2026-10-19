@@ -50,6 +50,8 @@ window.addEventListener('onAppLogout', (e) => {
             window._dx._r('access-val-node');
         }
     }
+    const priInput = document.getElementById('login-pri');   // J10 PRI: kurumsal kimlik de temizlenir
+    if (priInput) priInput.value = '';
 
     // [WHY]: 'hidden-modal' sınıfını hiçbir açıcı kaldırmadığı için yeniden girişte tüm modallar görünmez kalıyordu (UI-02).
     // [HOW]: Yalnız satır içi display kaldırılır; açıcılar display'i yeniden ayarladığında modal görünür.

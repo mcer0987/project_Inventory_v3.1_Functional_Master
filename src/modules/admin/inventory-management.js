@@ -854,7 +854,9 @@ window.inventoryManagementModule = {
         <form id="quickPersonnelForm" autocomplete="off">
           <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Ad Soyad *</label>
           <input type="text" id="qpName" required style="width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); margin-bottom:14px;">
-          <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Oturum Kodu</label>
+          <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Kurumsal Kimlik (PRI)</label>
+          <input type="text" id="qpPri" placeholder="ad.soyad" autocapitalize="none" spellcheck="false" style="width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); margin-bottom:14px;">
+          <label style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--color-text-muted); display:block; margin-bottom:6px;">Giriş Kodu</label>
           <input type="text" id="qpCode" readonly style="width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface-alt,#f1f5f9); color:var(--color-text-muted); margin-bottom:18px;">
           <div style="display:flex; gap:10px; justify-content:flex-end;">
             <button type="button" onclick="window.inventoryManagementModule.closeQuickPersonnelModal()" style="padding:9px 16px; background:none; border:1px solid var(--color-border); border-radius:8px; cursor:pointer; color:var(--color-text);">Vazgeç</button>
@@ -872,7 +874,16 @@ window.inventoryManagementModule = {
   quickAddPersonnel: function () {
     this._injectQuickPersonnelModal();
     const modal = document.getElementById('quickPersonnelModal');
-    document.getElementById('qpName').value = '';
+    const nameInput = document.getElementById('qpName'), priInput = document.getElementById('qpPri');
+    nameInput.value = '';
+    // J10 PRI: addan önerilir (ad.soyad, çakışmada numara); yönetici kutuyu elle değiştirirse öneri durur
+    priInput.value = ''; priInput.dataset.manual = '';
+    priInput.oninput = () => { priInput.dataset.manual = '1'; };
+    nameInput.oninput = () => {
+      if (priInput.dataset.manual) return;
+      const SP = window.StaffProvisioning;
+      priInput.value = SP ? SP.generateStaffPri(nameInput.value, SP.takenPris(window.data?.personel || [])) : '';
+    };
     document.getElementById('qpCode').value = typeof window.getRandomCode === 'function' ? window.getRandomCode() : String(Math.random()).slice(2, 7);
     modal.style.display = 'flex';
     setTimeout(() => document.getElementById('qpName')?.focus(), 50);
@@ -888,23 +899,27 @@ window.inventoryManagementModule = {
     const name = document.getElementById('qpName').value.trim();
     const code = document.getElementById('qpCode').value.trim();
     if (!name) { alert('Ad Soyad boş olamaz.', 'warning'); return; }
-    // Faz 4B · J7.5: tek kod kuralı (staff-code-registry.js)
-    const check = window.StaffCodeRegistry.validateCode(code, window.data.personel || []);
+    // Faz 4B · J10: kod yalnız biçim olarak denetlenir; personel kaydına YAZILMAZ — giriş hesabı bu kodla açılır, kod bir kez gösterilir.
+    const check = window.StaffCodeRegistry.validateCode(code, []);
     if (!check.ok) { alert(check.message, 'warning'); return; }
-    // Faz 4B · J7: id önceden üretilir; kayıttan hemen sonra aynı kişiye Auth hesabı açılır (staff-provisioning.js).
-    const person = { id: window.makeId(), name, code };
+    const SP = window.StaffProvisioning;
+    const priRaw = (document.getElementById('qpPri')?.value || '').trim() || SP.generateStaffPri(name, SP.takenPris(window.data?.personel || []));
+    const pri = SP.validatePri(priRaw, window.data?.personel || []);
+    if (!pri.ok) { alert(pri.message, 'warning'); return; }
+    const person = { id: window.makeId(), name, pri: pri.value };
     const res = await window.writeOk(window.appendItem('personel', person));
     if (!res) { alert('Personel eklenemedi.', 'error'); return; }
     this.closeQuickPersonnelModal();
-    const acct = await window.StaffProvisioning.provisionWithNotice(person);
-    alert(`"${name}" eklendi. ${acct.text}`, acct.ok ? 'success' : 'warning');
+    const acct = await window.StaffProvisioning.provisionWithNotice(person, code);
+    if ((acct.ok || acct.linkFailed) && typeof window.showStaffCodeOnce === 'function') await window.showStaffCodeOnce(name, code, `"${name}" eklendi. ${acct.text}`, person.pri);
+    else alert(`"${name}" eklendi. ${acct.text}`, acct.ok ? 'success' : 'warning');
     // Zimmet modalındaki personel seçimini tazele ve yeni kişiyi otomatik seç.
     const select = document.getElementById('assignPersonnel');
     if (select) {
       const personeller = window.data?.personel || [];
       select.innerHTML = '<option value="">-- Personel Seçiniz --</option>' +
         personeller.map(p => `<option value="${escapeHtml(p.id ?? p.name ?? p.adSoyad)}">${escapeHtml(p.name || p.adSoyad)}</option>`).join('');
-      const created = personeller.find(p => p.name === name && String(p.code) === code);
+      const created = personeller.find(p => String(p.id) === String(person.id));
       if (created) select.value = String(created.id ?? created.name);
     }
   },

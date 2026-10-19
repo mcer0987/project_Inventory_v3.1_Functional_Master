@@ -1,9 +1,11 @@
-// Faz 4B · J7 — personel hesabı açma altyapısının Auth + Firestore EMÜLATÖRÜNE karşı uçtan uca doğrulaması. Gerçek
-// Firebase JS SDK; staff-provisioning.js tarayıcıdaki dosyanın aynısı (firebase-handler'ın CDN modülü yerine npm 'firebase'
-// fonksiyonları enjekte edilir). Firestore'da ÜRETİM kuralları (firestore.rules) yüklüdür.
-// Kanıtlanan: (1) ikincil 'provisioner' örneği ana admin oturumunu düşürmez, (2) açılan hesaplarla e-posta/parola girişi
-// çalışır ve uid personel kaydına bağlanır, (3) yeniden çalıştırma idempotent, yarım bağlama onarılır, kod değişikliği
-// çakışma olarak raporlanır, (4) Aşama A kuralları personel hesabına admin yetkisi vermez (J7 yetki genişletmez).
+// Faz 4B · J7 → J10 PRI — personel hesapları ve kurumsal kimlik (PRI) altyapısının Auth + Firestore EMÜLATÖRÜNE karşı uçtan uca
+// doğrulaması. Gerçek Firebase JS SDK; staff-provisioning.js tarayıcıdaki dosyanın aynısı. Firestore'da ÜRETİM kuralları (Aşama B)
+// yüklüdür. Bağlama, firebase-handler._linkStaffAccount ile aynı sırada: önce staffAccounts/{uid} eşlemesi, sonra personel kaydı.
+// Kanıtlanan: (1) PRI / Hesap göçü: hesaplar <pri>@ adresinde açılır; J7 hesabının (p<id>@) e-postası uid KORUNARAK taşınır;
+// ikincil 'provisioner' örneği ana admin oturumunu düşürmez; (2) PRI + kodla giriş çalışır, kurallar eşlemeyi tanır, eski J7
+// adresi artık giriş vermez; (3) yeniden çalıştırma idempotent, yarım bağlama onarılır; (4) PRI'si tahmin edilip önceden açılmış
+// hesap → conflict, o hesap hiçbir şey okuyamaz ve kendini eşleyemez; (5) personel kaydına kod yazılamaz; kod temizliğinden sonra
+// giriş Auth ile sürer; (6) bağ kaldırılınca eşleme kalsa da erişim biter; oturumsuz ziyaretçi personel okuyamaz.
 // Usage: npm run test:staff:emu   (firebase emulators:exec --only firestore,auth içinde)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,9 +16,9 @@ import { fileURLToPath } from 'node:url';
 import { initializeApp, getApps, deleteApp } from 'firebase/app';
 import {
     initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword,
-    signInWithEmailAndPassword, signOut, updatePassword,
+    signInWithEmailAndPassword, signOut, updateEmail,
 } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator, doc, getDoc, setDoc, updateDoc, deleteField, terminate } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteField, terminate } from 'firebase/firestore';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ROOT = 'inventory_demo';
@@ -29,10 +31,8 @@ const ADMIN = { email: 'admin@medipol.local', password: 'emu-yonetici-0001' };
 // Aynı realm'de yükle (Firebase SDK başka vm realm'inin nesnelerini reddeder; tarayıcıda da tek realm).
 globalThis.window = globalThis.window || {};
 vm.runInThisContext(fs.readFileSync(path.join(ROOT_DIR, 'src/services/staff-provisioning.js'), 'utf8'), { filename: 'staff-provisioning.js' });
-vm.runInThisContext(fs.readFileSync(path.join(ROOT_DIR, 'src/utils/staff-code-registry.js'), 'utf8'), { filename: 'staff-code-registry.js' });
 const SP = globalThis.window.StaffProvisioning;
-const REG = globalThis.window.StaffCodeRegistry;
-const fns = { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updatePassword };
+const fns = { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateEmail };
 
 // Bir "tarayıcı sekmesi": kendi app + Auth + Firestore örneği
 function session(name) {
@@ -44,18 +44,32 @@ function session(name) {
     return { app, auth, db };
 }
 const ref = (db, id) => doc(db, ROOT, 'personel', 'items', String(id));
+const mapRef = (db, uid) => doc(db, ROOT, 'staffAccounts', 'items', String(uid));
 const code = e => e && e.code;
 
-let primary, provisioner;
+let primary, provisioner, legacyUid;
+// J10 öncesi veri: kodlu personel, PRI yok. j7_legacy'nin J7 biçiminde (p<id>@) hesabı var ve bağlı.
 const PERSONEL = [
     { id: 1790573516931123, name: 'Ali Veli', code: 'k1aaa' },
     { id: 'temp_1790573539061_cp4eq', name: 'Ayşe Yılmaz', code: 'Q7zP9' },
-    { id: 'user_manuel_001', name: 'Mehmet Kaya', code: 'x9y8z' },
-    { id: 'Ab-Upper', name: 'Büyük Harfli Id', code: 'up123' },
-    { id: 'short1', name: 'Kısa Kod', code: 'ab' },
+    { id: 'user_manuel_001', name: 'Mehmet Ali Kaya', code: 'x9y8z' },
+    { id: 'Ab-Upper', name: 'Büyük Harfli Id', code: 'up123' },    // J7'de "p." + hex olurdu; PRI'de id önemsiz
+    { id: 'short1', name: 'Kısa Kod', code: 'ab' },                // hesap açılamaz (kod kısa) → yalnız PRI
+    { id: 'j7_legacy', name: 'Eski Hesaplı', code: 'old77' },      // J7 hesabı → taşınır
 ];
-const linkVia = db => (person, fields) => updateDoc(ref(db, person.id), fields);
-const readPersonel = async db => Promise.all(PERSONEL.map(async p => ({ id: p.id, ...(await getDoc(ref(db, p.id))).data() })));
+// firebase-handler._linkStaffAccount ile aynı sözleşme
+const linkVia = db => async (person, fields) => {
+    if (fields.uid) await setDoc(mapRef(db, fields.uid), { personelId: String(person.id), pri: fields.pri || person.pri, linkedAt: Date.now() });
+    await updateDoc(ref(db, person.id), fields);
+};
+const writePriVia = db => (person, pri) => updateDoc(ref(db, person.id), { pri });
+const readPersonel = async db => (await getDocs(collection(db, ROOT, 'personel', 'items'))).docs.map(d => ({ id: d.id, ...d.data() }));
+const byId = list => new Map(list.map(p => [String(p.id), p]));
+const migrate = async () => {
+    const people = await readPersonel(primary.db);
+    const plan = SP.planAccounts(people);
+    return { plan, res: await SP.applyAccounts(plan, byId(people), provisioner, linkVia(primary.db), { writePri: writePriVia(primary.db) }) };
+};
 
 // Üretim kuralları emülatöre REST ile yüklenir (CLI, proje dizini dışındaki kural dosyasını yapılandırmada kabul etmiyor;
 // @firebase/rules-unit-testing de aynı uç noktayı kullanır).
@@ -68,177 +82,150 @@ async function loadProductionRules() {
 }
 
 before(async () => {
-    await loadProductionRules();
     primary = session('primary');
     // Ana sekmede admin oturumu (emülatörde hesap yoksa açılır; açılış zaten oturum açar)
     try { await createUserWithEmailAndPassword(primary.auth, ADMIN.email, ADMIN.password); }
     catch (e) { if (code(e) !== 'auth/email-already-in-use') throw e; await signInWithEmailAndPassword(primary.auth, ADMIN.email, ADMIN.password); }
-    for (const p of PERSONEL) await setDoc(ref(primary.db, p.id), p);   // üretim kuralı: admin yazar
+    // J7 hesabı (eski biçim) ikincil bir oturumda açılır
+    const old = session('j7-old');
+    legacyUid = (await createUserWithEmailAndPassword(old.auth, SP.legacyStaffEmail('j7_legacy'), SP.staffPassword('old77'))).user.uid;
+    await signOut(old.auth);
+    // J10 öncesi veri (kodlu personel) kurallar yüklenmeden tohumlanır: Aşama B kuralları personel kaydına kod yazılmasını reddeder.
+    for (const p of PERSONEL) {
+        const extra = p.id === 'j7_legacy' ? { uid: legacyUid, authEmail: SP.legacyStaffEmail('j7_legacy') } : {};
+        await setDoc(ref(primary.db, p.id), { ...p, ...extra });
+    }
+    await loadProductionRules();
     provisioner = SP.createAuthProvisioner({ fns, options: OPTIONS, emulatorUrl: AUTH_URL });
 });
 after(async () => {
     for (const app of getApps()) { try { await terminate(getFirestore(app)); } catch (_) { } await deleteApp(app); }
 });
 
-test('toplu hesap açma: geçerli personele hesap açılır ve bağlanır; admin oturumu DÜŞMEZ', async () => {
+test('PRI / Hesap göçü: PRI atanır, <pri>@ hesapları açılır, J7 hesabı uid korunarak taşınır; admin oturumu DÜŞMEZ', async () => {
     const adminUid = primary.auth.currentUser.uid;
-    const people = await readPersonel(primary.db);
-    const r = await SP.provisionMissing(people, provisioner, linkVia(primary.db));
-    assert.deepEqual(r.counts, { created: 4 });
-    assert.equal(r.stopped, null);
-    assert.deepEqual(r.plan.invalid.map(x => x.person.id), ['short1']);
+    const { plan, res } = await migrate();
+    const action = Object.fromEntries(plan.rows.map(r => [r.id, [r.action, r.pri]]));
+    assert.deepEqual(action, {
+        '1790573516931123': ['create', 'ali.veli'], 'temp_1790573539061_cp4eq': ['create', 'ayse.yilmaz'], 'user_manuel_001': ['create', 'mehmet.kaya'],
+        'Ab-Upper': ['create', 'buyuk.id'], 'short1': ['no-code', 'kisa.kod'], 'j7_legacy': ['move', 'eski.hesapli'],
+    });
+    assert.deepEqual(res.counts, { created: 4, moved: 1, 'pri-written': 1 });
+    assert.equal(res.stopped, null);
 
-    // Ana oturum hâlâ aynı admin
+    // Ana oturum hâlâ aynı admin ve kurallar onu hâlâ admin sayıyor
     assert.equal(primary.auth.currentUser && primary.auth.currentUser.uid, adminUid, 'admin oturumu korunmalı');
-    assert.equal(primary.auth.currentUser.email, ADMIN.email);
-    // …ve kurallar onu hâlâ admin sayıyor (admin yazması geçer)
     await updateDoc(ref(primary.db, 'short1'), { not: 'admin hâlâ yazabiliyor' });
-
-    // Personel kayıtları bağlandı; ikincil örnekte oturum kalmadı
-    const after = await readPersonel(primary.db);
-    for (const p of after.filter(x => x.id !== 'short1')) {
-        assert.ok(p.uid, `${p.id} uid almalı`);
-        assert.equal(p.authEmail, SP.staffEmail(p.id));
-        assert.equal(typeof p.authProvisionedAt, 'number');
-    }
-    assert.equal(after.find(x => x.id === 'short1').uid, undefined);
     assert.equal(provisioner.auth.currentUser, null, 'ikincil örnek işlemden sonra signOut eder');
-    assert.equal(after.find(x => x.id === 'Ab-Upper').authEmail, 'p.41622d5570706572@staff.medipol.local');
-});
 
-test('açılan hesaplarla giriş: e-posta = staffEmail(id), parola = staffPassword(kod), uid personel kaydındakiyle aynı', async () => {
-    const verifier = session('verifier');
-    for (const p of (await readPersonel(primary.db)).filter(x => x.uid)) {
-        const cred = await signInWithEmailAndPassword(verifier.auth, SP.staffEmail(p.id), SP.staffPassword(p.code));
-        assert.equal(cred.user.uid, p.uid);
-        const tok = await cred.user.getIdTokenResult();
-        assert.equal(tok.signInProvider, 'password');
-        await signOut(verifier.auth);
-        await assert.rejects(signInWithEmailAndPassword(verifier.auth, SP.staffEmail(p.id), p.code), 'çıplak kod (dolgusuz) parola değildir');
+    const after = byId(await readPersonel(primary.db));
+    for (const [id, [, pri]] of Object.entries(action)) {
+        const p = after.get(id);
+        assert.equal(p.pri, pri, `${id} PRI`);
+        if (id === 'short1') { assert.equal(p.uid, undefined); continue; }
+        assert.ok(p.uid, `${id} uid almalı`);
+        assert.equal(p.authEmail, `${pri}@staff.medipol.local`);
+        const m = (await getDoc(mapRef(primary.db, p.uid))).data();
+        assert.deepEqual([m.personelId, m.pri], [id, pri], `${id} kimlik eşlemesi`);
     }
+    assert.equal(after.get('j7_legacy').uid, legacyUid, 'taşınan J7 hesabının uid\'si AYNI (sahiplik bağları kopmaz)');
 });
 
-test('idempotent: ikinci koşu hiçbir hesap açmaz', async () => {
-    const r = await SP.provisionMissing(await readPersonel(primary.db), provisioner, linkVia(primary.db));
-    assert.equal(r.plan.toCreate.length, 0);
-    assert.equal(r.results.length, 0);
+test('PRI + kodla giriş: uid personel kaydındaki; kurallar eşlemeyi tanır (okur); eski J7 adresi artık giriş vermez', async () => {
+    const people = (await readPersonel(primary.db)).filter(p => p.uid);
+    for (const p of people) {
+        const v = session('login-' + p.id);
+        const cred = await signInWithEmailAndPassword(v.auth, SP.staffEmail(p.pri), SP.staffPassword(p.code));
+        assert.equal(cred.user.uid, p.uid);
+        assert.equal((await cred.user.getIdTokenResult()).signInProvider, 'password');
+        assert.ok((await getDoc(ref(v.db, p.id))).exists(), `${p.pri} personel olarak okur`);
+        await signOut(v.auth);
+        await assert.rejects(signInWithEmailAndPassword(v.auth, SP.staffEmail(p.pri), p.code), 'çıplak kod (dolgusuz) parola değildir');
+    }
+    const old = session('old-email');
+    await assert.rejects(signInWithEmailAndPassword(old.auth, SP.legacyStaffEmail('j7_legacy'), SP.staffPassword('old77')), 'J7 adresi taşındı');
+});
+
+test('idempotent: ikinci koşu hesap açmaz; yalnız kimlik eşlemeleri yenilenir', async () => {
+    const { plan, res } = await migrate();
+    assert.deepEqual({ ...plan.counts }, { total: 6, ok: 5, create: 0, move: 0, 'no-code': 1, blocked: 0, priWrites: 0 });
+    assert.deepEqual(res.counts, { ok: 5 });
 });
 
 test('yarım bağlama onarılır: uid silinmiş kayıt → aynı hesap bulunup yeniden bağlanır (relinked, aynı uid)', async () => {
     const before = (await getDoc(ref(primary.db, 'user_manuel_001'))).data().uid;
     await updateDoc(ref(primary.db, 'user_manuel_001'), { uid: deleteField(), authEmail: deleteField() });
-    const r = await SP.provisionMissing(await readPersonel(primary.db), provisioner, linkVia(primary.db));
-    assert.deepEqual(r.counts, { relinked: 1 });
+    const { res } = await migrate();
+    assert.equal(res.counts.relinked, 1);
     assert.equal((await getDoc(ref(primary.db, 'user_manuel_001'))).data().uid, before);
 });
 
-test('kod değişmiş + bağsız kayıt → conflict (hesap sıfırlaması yerel firebase-admin betiğinin işi), bağlama yapılmaz', async () => {
-    await updateDoc(ref(primary.db, 'temp_1790573539061_cp4eq'), { code: 'YENI9', uid: deleteField() });
-    const r = await SP.provisionMissing(await readPersonel(primary.db), provisioner, linkVia(primary.db));
-    assert.deepEqual(r.counts, { conflict: 1 });
-    assert.equal((await getDoc(ref(primary.db, 'temp_1790573539061_cp4eq'))).data().uid, undefined);
+test('PRI addan tahmin edilip hesap önceden açılmışsa → conflict; o hesap hiçbir şey okuyamaz ve kendini eşleyemez', async () => {
+    const squatter = session('squatter');
+    const cred = await createUserWithEmailAndPassword(squatter.auth, 'yeni.kisi@staff.medipol.local', 'saldirgan1');
+    const p = { id: 'j10_new2', name: 'Yeni Kişi', pri: 'yeni.kisi' };
+    await setDoc(ref(primary.db, p.id), p);
+    const r = await SP.provisionOne(p, provisioner, linkVia(primary.db), { code: 'kod55' });
+    assert.equal(r.status, 'conflict');
+    assert.match(SP.describe(r).text, /PRI/);
+    assert.equal((await getDoc(ref(primary.db, p.id))).data().uid, undefined);
+    await assert.rejects(getDoc(ref(squatter.db, p.id)), e => code(e) === 'permission-denied');
+    await assert.rejects(setDoc(mapRef(squatter.db, cred.user.uid), { personelId: p.id, pri: p.pri }), e => code(e) === 'permission-denied');
+    await assert.rejects(updateDoc(ref(squatter.db, p.id), { uid: cred.user.uid }), e => code(e) === 'permission-denied');
+    await signOut(squatter.auth);
 });
 
-test('Aşama A kuralları (değişmedi): personel hesabı admin DEĞİLDİR — personel/b1 yazamaz, okuyabilir', async () => {
+test('Aşama B: bağlı personel okur ama admin DEĞİLDİR — personel/b1 yazamaz', async () => {
     const staff = session('staff');
     const p = (await readPersonel(primary.db)).find(x => x.id === 'user_manuel_001');
-    await signInWithEmailAndPassword(staff.auth, SP.staffEmail(p.id), SP.staffPassword(p.code));
-    assert.ok((await getDoc(ref(staff.db, p.id))).exists(), 'oturumlu okuma (Aşama A) çalışır');
+    await signInWithEmailAndPassword(staff.auth, SP.staffEmail(p.pri), SP.staffPassword(p.code));
     await assert.rejects(updateDoc(ref(staff.db, p.id), { name: 'kendini değiştirme' }), e => code(e) === 'permission-denied');
     await assert.rejects(setDoc(doc(staff.db, ROOT, 'b1', 'items', 'x'), { ürün: 'x' }), e => code(e) === 'permission-denied');
     await signOut(staff.auth);
 });
 
-test('J10 GİRDİSİ (risk kanıtı): sign-up açıkken herkes kendine @staff.medipol.local hesabı açabilir', async () => {
-    // Bu test bir açığı belgeler, düzeltmez: e-postalar doğrulanmaz; istemci tarafı hesap açma açık oldukça (J7 bunu
-    // gerektirir) "alan adı @staff." tek başına personel kanıtı DEĞİLDİR. J10 isStaff() personel kaydındaki uid'ye bakmalı.
-    const intruder = session('intruder');
-    const cred = await createUserWithEmailAndPassword(intruder.auth, 'p999999@staff.medipol.local', 'herhangiParola1');
-    assert.ok(cred.user.uid);
-    assert.ok(SP.isStaffEmail(cred.user.email), 'alan adı denetimi bu hesabı personel sanırdı');
-    const linked = (await readPersonel(primary.db)).some(p => p.uid === cred.user.uid);
-    assert.equal(linked, false, 'ama hiçbir personel kaydına bağlı değil — J10 bu ayrımı yapmalı');
+test('KVKK: oturumsuz ziyaretçi personel kaydını ve listesini okuyamaz (giriş ekranı veritabanını okumaz)', async () => {
+    const visitor = session('visitor');
+    await assert.rejects(getDoc(ref(visitor.db, 'user_manuel_001')), e => code(e) === 'permission-denied');
+    await assert.rejects(getDocs(collection(visitor.db, ROOT, 'personel', 'items')), e => code(e) === 'permission-denied');
 });
 
-// ─── J7.5 · Kod benzersizleştirme: personel.code + Auth parolası (Admin SDK yok) ────────────────────────────
-let verifierAuth = null;
-const login = async (email, password) => {
-    if (!verifierAuth) verifierAuth = session('j75verify').auth;
-    try { const c = await signInWithEmailAndPassword(verifierAuth, email, password); const uid = c.user.uid; await signOut(verifierAuth); return uid; }
-    catch (e) { return null; }
-};
-const readMany = async (db, ids) => Promise.all(ids.map(async id => ({ id, ...(await getDoc(ref(db, id))).data() })));
-const writeVia = db => (person, fields) => updateDoc(ref(db, person.id), fields);
-
-test('J7.5 · çakışan iki personel: bağlı olanın kodu değişir → eski parola ölür, yeni parola aynı uid; J8 çözümleyici ambiguous → unique', async () => {
-    const adminUid = primary.auth.currentUser.uid;
-    const A = { id: 'dup_a', name: 'Çakışan A', code: 'ortak1' }, B = { id: 'dup_b', name: 'Çakışan B', code: 'ortak1' };
-    for (const p of [A, B]) await setDoc(ref(primary.db, p.id), p);
-    const r0 = await SP.provisionOne(A, provisioner, linkVia(primary.db));   // A'nın hesabı var (J7), B'nin yok
-    assert.equal(r0.status, 'created');
-    let people = await readMany(primary.db, ['dup_a', 'dup_b']);
-    assert.equal(REG.resolveLoginCode(people, 'ortak1').status, 'ambiguous', 'J8 bu durumda girişi reddedecek');
-    assert.equal(REG.duplicateGroups(people).length, 1);
-
-    const plan = REG.planCodeChanges(people, [{ id: 'dup_a', newCode: 'tekil7' }]);
-    assert.equal(plan.ok, true);
-    const r = await SP.changeStaffCode(plan.changes[0].person, plan.changes[0].newCode, provisioner, writeVia(primary.db));
-    assert.equal(r.status, 'changed');
-    assert.equal(r.uid, r0.uid);
-
-    people = await readMany(primary.db, ['dup_a', 'dup_b']);
-    assert.equal(people[0].code, 'tekil7');
-    assert.equal(people[0].uid, r0.uid, 'uid değişmez');
-    assert.equal(await login(SP.staffEmail('dup_a'), SP.staffPassword('ortak1')), null, 'eski parola artık geçersiz');
-    assert.equal(await login(SP.staffEmail('dup_a'), SP.staffPassword('tekil7')), r0.uid, 'yeni parola aynı hesabı açar');
-    assert.equal(REG.resolveLoginCode(people, 'ortak1').person.id, 'dup_b');
-    assert.equal(REG.resolveLoginCode(people, 'tekil7').person.id, 'dup_a');
-    assert.equal(REG.duplicateGroups(people).length, 0);
-    assert.equal(primary.auth.currentUser.uid, adminUid, 'admin oturumu düşmedi');
-    assert.equal(provisioner.auth.currentUser, null);
+test('J10: yönetici kodsuz personel oluşturur; <pri>@ hesabı parametreyle verilen kodla açılır; kayda kod yazılamaz', async () => {
+    const p = { id: 'j10_new', name: 'Yeni Personel', birim: 'BT', pri: SP.generateStaffPri('Yeni Personel', (await readPersonel(primary.db)).map(x => x.pri)) };
+    await setDoc(ref(primary.db, p.id), p);
+    await assert.rejects(setDoc(ref(primary.db, 'j10_bad'), { id: 'j10_bad', name: 'Kodlu', code: 'abcd1' }), e => code(e) === 'permission-denied');
+    const r = await SP.provisionOne(p, provisioner, linkVia(primary.db), { code: 'kod77' });
+    assert.equal(r.status, 'created');
+    assert.equal(r.email, 'yeni.personel@staff.medipol.local');
+    const doc1 = (await getDoc(ref(primary.db, p.id))).data();
+    assert.equal(doc1.uid, r.uid);
+    assert.ok(!('code' in doc1), 'kod personel kaydına yazılmadı');
+    await assert.rejects(updateDoc(ref(primary.db, p.id), { code: 'kod77' }), e => code(e) === 'permission-denied');
+    const v = session('j10verify');
+    assert.equal((await signInWithEmailAndPassword(v.auth, ' Yeni.Personel '.trim().toLowerCase() + '@staff.medipol.local', SP.staffPassword('kod77'))).user.uid, r.uid);
+    assert.ok((await getDoc(ref(v.db, p.id))).exists(), 'yeni personel kendi hesabıyla okur');
+    await signOut(v.auth);
 });
 
-test('J7.5 · hesabı olmayan kişinin kodu değişir → yalnız kod; ardından J7 hesabı YENİ kodla açar', async () => {
-    const [B] = await readMany(primary.db, ['dup_b']);
-    const r = await SP.changeStaffCode(B, 'tekil8', provisioner, writeVia(primary.db));
-    assert.equal(r.status, 'changed-code-only');
-    const [B2] = await readMany(primary.db, ['dup_b']);
-    assert.equal(B2.code, 'tekil8');
-    const p = await SP.provisionOne(B2, provisioner, linkVia(primary.db));
-    assert.equal(p.status, 'created');
-    assert.equal(await login(SP.staffEmail('dup_b'), SP.staffPassword('tekil8')), p.uid);
+test('bağ kaldırılınca (personel.uid silinir) eşleme kalsa da erişim biter', async () => {
+    const p = (await readPersonel(primary.db)).find(x => x.id === 'j10_new');
+    const v = session('unlinked');
+    await signInWithEmailAndPassword(v.auth, SP.staffEmail(p.pri), SP.staffPassword('kod77'));
+    assert.ok((await getDoc(ref(v.db, p.id))).exists());
+    await updateDoc(ref(primary.db, p.id), { uid: deleteField() });
+    assert.ok((await getDoc(mapRef(primary.db, p.uid))).exists(), 'eşleme duruyor');
+    await assert.rejects(getDoc(ref(v.db, p.id)), e => code(e) === 'permission-denied');
+    await signOut(v.auth);
 });
 
-test('J7.5 · personel kaydı yazılamazsa (GERÇEK kural reddi) Auth parolası eski koda geri alınır', async () => {
-    const C = { id: 'dup_c', name: 'Geri Alma', code: 'ortak2' };
-    await setDoc(ref(primary.db, C.id), C);
-    const r0 = await SP.provisionOne(C, provisioner, linkVia(primary.db));
-    // Yazıcı yönetici olmayan (personel hesabı) bir oturumla yazar → üretim kuralları reddeder
-    const staff = session('j75staff');
-    await signInWithEmailAndPassword(staff.auth, SP.staffEmail('dup_b'), SP.staffPassword('tekil8'));
-    const [Cnow] = await readMany(primary.db, ['dup_c']);
-    const r = await SP.changeStaffCode(Cnow, 'tekil9', provisioner, writeVia(staff.db));
-    assert.equal(r.status, 'write-failed');
-    assert.equal(r.reverted, true);
-    assert.match(r.reason, /permission-denied/);
-    assert.equal((await readMany(primary.db, ['dup_c']))[0].code, 'ortak2', 'kayıt değişmedi');
-    assert.equal(await login(SP.staffEmail('dup_c'), SP.staffPassword('ortak2')), r0.uid, 'eski parola geri geldi');
-    assert.equal(await login(SP.staffEmail('dup_c'), SP.staffPassword('tekil9')), null);
-    await signOut(staff.auth);
-});
-
-test('J7.5 · bağlı hesabın parolası koddan sapmışsa → auth-out-of-sync, hiçbir şey yazılmaz', async () => {
-    const D = { id: 'dup_d', name: 'Sapmış', code: 'ortak3' };
-    await setDoc(ref(primary.db, D.id), D);
-    const r0 = await SP.provisionOne(D, provisioner, linkVia(primary.db));
-    const x = session('j75drift');   // yalnız test: parolayı koddan bağımsız bir değere çek
-    const c = await signInWithEmailAndPassword(x.auth, SP.staffEmail('dup_d'), SP.staffPassword('ortak3'));
-    await updatePassword(c.user, 'tamamenBaskaParola1');
-    await signOut(x.auth);
-    const [Dnow] = await readMany(primary.db, ['dup_d']);
-    const r = await SP.changeStaffCode(Dnow, 'tekil0', provisioner, writeVia(primary.db));
-    assert.equal(r.status, 'auth-out-of-sync');
-    const [Dafter] = await readMany(primary.db, ['dup_d']);
-    assert.equal(Dafter.code, 'ortak3');
-    assert.equal(Dafter.uid, r0.uid);
+test('J10 · kod temizliği: personel.code değiştirilemez, silinir; giriş Firebase Auth ile sürer', async () => {
+    const p = (await readPersonel(primary.db)).find(x => x.id === 'temp_1790573539061_cp4eq');
+    await assert.rejects(updateDoc(ref(primary.db, p.id), { code: 'baska1' }), e => code(e) === 'permission-denied');
+    await updateDoc(ref(primary.db, p.id), { code: deleteField() });
+    assert.ok(!('code' in (await getDoc(ref(primary.db, p.id))).data()));
+    const v = session('cleansed');
+    const cred = await signInWithEmailAndPassword(v.auth, SP.staffEmail(p.pri), SP.staffPassword('Q7zP9'));
+    assert.equal(cred.user.uid, p.uid);
+    assert.ok((await getDoc(ref(v.db, p.id))).exists());
+    await signOut(v.auth);
 });

@@ -1,5 +1,5 @@
-// Faz 4B · J7 — personel Auth hesabı açma çekirdeği (src/services/staff-provisioning.js). Gerçek dosya, tarayıcısız (vm);
-// Firebase yerine sahte bir "provisioner" (hesap deposu) kullanılır. Gerçek Auth emülatörüne karşı:
+// Faz 4B · J7 → J10 PRI — personel Auth hesabı ve kurumsal kimlik (PRI) çekirdeği (src/services/staff-provisioning.js). Gerçek
+// dosya, tarayıcısız (vm); Firebase yerine sahte bir "provisioner" (hesap deposu) kullanılır. Gerçek Auth emülatörüne karşı:
 // tests/integration/staff-provisioning.emu.test.mjs (npm run test:staff:emu).
 // Usage: npm run test:unit
 import { test } from 'node:test';
@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const plain = x => JSON.parse(JSON.stringify(x));
+const D = '@staff.medipol.local';
 
 function load(win = {}) {
     const ctx = vm.createContext({ window: win, console });
@@ -35,15 +36,6 @@ function fakeAuth() {
             accounts.set(key, { uid, password });
             return uid;
         },
-        async changePassword(email, oldPassword, newPassword) {
-            a.calls.push(['change', email]);
-            if (a.fault) { const f = a.fault('change', email); if (f) throw err(f); }
-            const acc = accounts.get(email.toLowerCase());
-            if (!acc || acc.password !== oldPassword) throw err('invalid-credential');
-            if (newPassword.length < 6) throw err('weak-password');
-            acc.password = newPassword;
-            return acc.uid;
-        },
         async findAccount(email, password) {
             a.calls.push(['find', email]);
             if (a.fault) { const f = a.fault('find', email); if (f) throw err(f); }
@@ -51,167 +43,267 @@ function fakeAuth() {
             if (!acc || acc.password !== password) throw err('invalid-credential');
             return acc.uid;
         },
+        async moveAccount(from, password, to, { expectUid } = {}) {
+            a.calls.push(['move', from, to]);
+            if (a.fault) { const f = a.fault('move', from); if (f) throw err(f); }
+            const acc = accounts.get(from.toLowerCase());
+            if (!acc || acc.password !== password) throw err('invalid-credential');
+            if (expectUid && acc.uid !== expectUid) throw Object.assign(new Error('uid-mismatch'), { code: 'uid-mismatch' });
+            if (accounts.has(to.toLowerCase())) throw err('email-already-in-use');
+            accounts.delete(from.toLowerCase());
+            accounts.set(to.toLowerCase(), acc);
+            return acc.uid;
+        },
     };
     return a;
 }
 function fakeDb(personel) {
-    const db = { personel: personel.map(p => ({ ...p })), fail: null };
+    const db = { personel: personel.map(p => ({ ...p })), fail: null, links: [] };
     db.link = async (person, fields) => {
         if (db.fail && db.fail(person)) throw Object.assign(new Error('yazılamadı'), { code: 'permission-denied' });
+        db.links.push([String(person.id), { ...fields }]);
         Object.assign(db.personel.find(p => String(p.id) === String(person.id)), fields);
     };
+    db.writePri = async (person, pri) => { db.personel.find(p => String(p.id) === String(person.id)).pri = pri; };
+    db.byId = () => new Map(db.personel.map(p => [String(p.id), { ...p }]));
     return db;
 }
 
-// ─── E-posta / parola ────────────────────────────────────────────────────────────────────────────────
-test('staffEmail: güvenli id → p<id>@staff.medipol.local; makeId sayısı ve eski temp_ id\'leri', () => {
+// ─── Kurumsal kimlik (PRI) ───────────────────────────────────────────────────────────────────────────
+test('foldTr / normalizePri: Türkçe harfler arındırılır, küçük harf ("İ".toLowerCase() tuzağı yok)', () => {
     const S = load();
-    assert.equal(S.staffEmail(1790573516931123), 'p1790573516931123@staff.medipol.local');
-    assert.equal(S.staffEmail('temp_1790573516931_qgkyn'), 'ptemp_1790573516931_qgkyn@staff.medipol.local');
-    assert.equal(S.staffEmail('user_manuel_001'), 'puser_manuel_001@staff.medipol.local');
-    assert.equal(S.staffEmail(''), null);
-    assert.equal(S.staffEmail(null), null);
+    assert.equal(S.foldTr('Ayşe Yılmaz'), 'ayse yilmaz');
+    assert.equal(S.foldTr('İSMAİL IŞIK'), 'ismail isik');
+    assert.equal(S.foldTr('ÇĞÖŞÜ çğöşü âîû'), 'cgosu cgosu aiu');
+    assert.equal(S.foldTr('José Müller'), 'jose muller', 'diğer aksanlar da atılır');
+    assert.equal(S.normalizePri('  Ayşe.Yılmaz '), 'ayse.yilmaz');
 });
 
-test('staffEmail: güvenli olmayan id onaltılık kodlanır; büyük/küçük harf ve "p." ön eki çakışma üretmez', () => {
+test('generateStaffPri: iki kelime ad.soyad; daha fazla → ilk.son; tek kelime; çakışmada artan numara', () => {
     const S = load();
-    const upper = S.staffEmail('Ab'), lower = S.staffEmail('ab');
-    assert.equal(lower, 'pab@staff.medipol.local');
-    assert.equal(upper, 'p.4162@staff.medipol.local');
-    assert.notEqual(upper.toLowerCase(), lower.toLowerCase(), 'Firebase e-postaları harf duyarsız: Ab ve ab ayrı hesap olmalı');
-    assert.equal(S.staffEmail('Şükrü'), 'p.c59ec3bc6b72c3bc@staff.medipol.local');
-    assert.match(S.staffEmail('a b/c'), /^p\.[0-9a-f]+@staff\.medipol\.local$/);
-    assert.equal(S.staffEmail('X'.repeat(40)), null, 'yerel kısım 64 karakteri aşarsa reddedilir');
-    // Kapsamlı çakışma taraması: farklı id → farklı e-posta (harf duyarsız)
-    const ids = ['a', 'A', 'a.', 'p', 'P', '41', 'x41', 'Ab', 'ab', 'aB', '1', '01', 'ı', 'i', 'İ', '-', '_'];
-    const seen = new Map();
-    ids.forEach(id => { const e = S.staffEmail(id).toLowerCase(); assert.ok(!seen.has(e), `${id} ile ${seen.get(e)} aynı e-postaya düştü`); seen.set(e, id); });
+    assert.equal(S.generateStaffPri('Ayşe Yılmaz'), 'ayse.yilmaz');
+    assert.equal(S.generateStaffPri('Mehmet Ali Yılmaz'), 'mehmet.yilmaz');
+    assert.equal(S.generateStaffPri('  Muhammed   CER  '), 'muhammed.cer');
+    assert.equal(S.generateStaffPri('Seher'), 'seher');
+    assert.equal(S.generateStaffPri('İhale Ofisi'), 'ihale.ofisi');
+    assert.equal(S.generateStaffPri("Ayşe-Nur O'Brien"), 'aysenur.obrien', 'kelime içi noktalama atılır');
+    assert.equal(S.generateStaffPri(''), 'personel');
+    assert.equal(S.generateStaffPri('...'), 'personel');
+    assert.equal(S.generateStaffPri('Ayşe Yılmaz', ['ayse.yilmaz']), 'ayse.yilmaz2');
+    assert.equal(S.generateStaffPri('Ayşe Yılmaz', ['ayse.yilmaz', 'ayse.yilmaz2']), 'ayse.yilmaz3');
+    assert.equal(S.generateStaffPri('Ayşe Yılmaz', ['AYSE.YILMAZ']), 'ayse.yilmaz2', 'karşılaştırma normalize');
+    assert.equal(S.generateStaffPri('Mehmet Ali Yılmaz', new Set(['mehmet.yilmaz'])), 'mehmet.yilmaz2', 'Set de kabul edilir');
+    assert.ok(S.generateStaffPri('A'.repeat(80) + ' B').length <= 40);
+});
+
+test('validatePri: biçim, tekillik (düzenlenen kişi hariç); dönen değer normalize', () => {
+    const S = load();
+    const pers = [{ id: 'p1', name: 'Ayşe Yılmaz', pri: 'ayse.yilmaz' }, { id: 'p2', name: 'Ali' }];
+    assert.deepEqual(plain(S.validatePri('Ali.Veli', pers)), { ok: true, value: 'ali.veli' });
+    assert.equal(S.validatePri('', pers).ok, false);
+    for (const bad of ['ali veli', '.ali', 'ali.', 'ali..veli', 'ali@veli', 'x'.repeat(65)]) assert.equal(S.validatePri(bad, pers).ok, false, bad);
+    const dup = S.validatePri('ayse.yilmaz', pers);
+    assert.equal(dup.ok, false);
+    assert.match(dup.message, /Ayşe Yılmaz/);
+    assert.equal(S.validatePri('ayse.yilmaz', pers, 'p1').ok, true, 'kişinin kendi PRI\'si çakışma sayılmaz');
+    assert.deepEqual(plain(S.takenPris(pers, 'p2')), ['ayse.yilmaz']);
+});
+
+test('PRI deseni firestore.rules isStaff deseniyle aynı (istemci geçerli saydığını kural da personel sayar, tersi de)', () => {
+    const S = load();
+    const rules = fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8');
+    const m = rules.match(/matches\('(\[a-z0-9\]\+[^']*)@staff\[\.\]medipol\[\.\]local'\)/);
+    assert.ok(m, 'kuralda PRI e-posta deseni bulunamadı');
+    const ruleRe = new RegExp('^' + m[1] + '$');
+    for (const s of ['ayse.yilmaz', 'ayse.yilmaz2', 'seher', 'a-b_c.d', 'ali..veli', '.ali', 'ali.', 'ali veli', 'ALI', 'ali@x', '1', 'ö'])
+        assert.equal(ruleRe.test(s), S.PRI_RE.test(s), s);
+});
+
+// ─── E-posta / parola ────────────────────────────────────────────────────────────────────────────────
+test('staffEmail: PRI → <pri>@staff.medipol.local (normalize); geçersiz → null; eski J7 adresi ayrı', () => {
+    const S = load();
+    assert.equal(S.staffEmail('ayse.yilmaz'), 'ayse.yilmaz' + D);
+    assert.equal(S.staffEmail(' Ayşe.Yılmaz '), 'ayse.yilmaz' + D);
+    assert.equal(S.staffEmail('ali veli'), null);
+    assert.equal(S.staffEmail(''), null);
+    assert.equal(S.staffEmail(null), null);
+    assert.equal(S.accountEmailOf({ id: 'p1', pri: 'ali.veli' }), 'ali.veli' + D);
+    assert.equal(S.accountEmailOf({ id: 'p1' }), null);
+    assert.equal(S.legacyStaffEmail('temp_1790573516931_qgkyn'), 'ptemp_1790573516931_qgkyn' + D);
+    assert.equal(S.legacyStaffEmail('Ab'), 'p.4162' + D);
 });
 
 test('staffPassword: girişle aynı normalizasyon (kırpılmış, harf duyarlı) + dolgu; kısa/boş kod reddedilir', () => {
     const S = load();
     assert.equal(S.staffPassword('qgkyn'), 'qgkynMdp!');
     assert.equal(S.staffPassword('  qgkyn '), 'qgkynMdp!', 'girişte kod kırpılır');
-    assert.notEqual(S.staffPassword('ABCDE'), S.staffPassword('abcde'), 'giriş p.code === code: harf duyarlı');
+    assert.notEqual(S.staffPassword('ABCDE'), S.staffPassword('abcde'), 'harf duyarlı');
     assert.equal(S.staffPassword(12345), '12345Mdp!');
-    assert.ok(S.staffPassword('abcd').length >= 6, 'Firebase en az 6 karakter');
     assert.equal(S.staffPassword('abc'), null);
     assert.equal(S.staffPassword(''), null);
     assert.equal(S.staffPassword(undefined), null);
 });
 
-// ─── Plan ────────────────────────────────────────────────────────────────────────────────────────────
-test('planProvisioning: bağlı / açılacak / açılamayacak; ortak kod yalnız kişi id\'siyle raporlanır (kod değeri sızmaz)', () => {
+// ─── Tek hesap ───────────────────────────────────────────────────────────────────────────────────────
+test('provisionOne: <pri>@ hesabı açılır, sonra uid/authEmail/pri/authProvisionedAt bağlanır', async () => {
     const S = load();
-    const plan = plain(S.planProvisioning([
-        { id: 'a1', name: 'Ali', code: 'k1aaa' },
-        { id: 'a2', name: 'Ayşe', code: 'k2bbb', uid: 'u-existing' },
-        { id: 'a3', name: 'Kısa', code: 'ab' },
-        { id: 'a4', name: 'Kodsuz' },
-        { name: 'İdsiz', code: 'k5eee' },
-        { id: 'a6', name: 'İkiz 1', code: 'same1' },
-        { id: 'a7', name: 'İkiz 2', code: 'same1' },
-        null,
-    ]));
-    assert.equal(plan.total, 7);
-    assert.deepEqual(plan.linked.map(p => p.id), ['a2']);
-    assert.deepEqual(plan.toCreate.map(x => x.person.id), ['a1', 'a6', 'a7']);
-    assert.equal(plan.toCreate[0].email, 'pa1@staff.medipol.local');
-    assert.deepEqual(plan.invalid.map(x => x.reason), ['giriş kodu 4 karakterden kısa', 'giriş kodu yok', 'id yok ya da e-postaya çevrilemiyor']);
-    assert.deepEqual(plan.duplicateCodes, [{ ids: ['a6', 'a7'] }]);
-    assert.ok(!JSON.stringify(plan.duplicateCodes).includes('same1'));
+    const auth = fakeAuth(), db = fakeDb([{ id: 'a1', name: 'Ali Veli', pri: 'ali.veli' }]);
+    const r = plain(await S.provisionOne(db.personel[0], auth, db.link, { now: () => 42, code: 'k1aaa' }));
+    assert.deepEqual(r, { status: 'created', uid: 'uid1', email: 'ali.veli' + D });
+    assert.deepEqual(plain(db.personel[0]), { id: 'a1', name: 'Ali Veli', pri: 'ali.veli', uid: 'uid1', authEmail: 'ali.veli' + D, authProvisionedAt: 42 });
+    assert.equal(auth.accounts.get('ali.veli' + D).password, 'k1aaaMdp!');
 });
 
-// ─── Tek hesap ───────────────────────────────────────────────────────────────────────────────────────
-test('provisionOne: hesap açılır, sonra personel kaydına uid/authEmail/authProvisionedAt bağlanır', async () => {
+test('provisionOne: PRI yok → invalid (Auth çağrısı yok); zaten bağlı → already-linked', async () => {
     const S = load();
-    const auth = fakeAuth(), db = fakeDb([{ id: 'a1', name: 'Ali', code: 'k1aaa' }]);
-    const r = plain(await S.provisionOne(db.personel[0], auth, db.link, { now: () => 42 }));
-    assert.deepEqual(r, { status: 'created', uid: 'uid1', email: 'pa1@staff.medipol.local' });
-    assert.deepEqual(plain(db.personel[0]), { id: 'a1', name: 'Ali', code: 'k1aaa', uid: 'uid1', authEmail: 'pa1@staff.medipol.local', authProvisionedAt: 42 });
-    assert.equal(auth.accounts.get('pa1@staff.medipol.local').password, 'k1aaaMdp!');
+    const auth = fakeAuth();
+    assert.equal((await S.provisionOne({ id: 'a', code: 'k1aaa' }, auth, async () => {})).status, 'invalid');
+    assert.equal((await S.provisionOne({ id: 'a', pri: 'a.b', code: 'ab' }, auth, async () => {})).status, 'invalid');
+    assert.equal((await S.provisionOne({ id: 'a', pri: 'a.b', code: 'k1aaa', uid: 'u' }, auth, async () => {})).status, 'already-linked');
+    assert.equal(auth.calls.length, 0);
 });
 
 test('provisionOne: bağlama düştü → link-failed; yeniden çalıştırma aynı hesabı bulup bağlar (relinked, yeni hesap yok)', async () => {
     const S = load();
-    const auth = fakeAuth(), db = fakeDb([{ id: 'a1', code: 'k1aaa' }]);
+    const auth = fakeAuth(), db = fakeDb([{ id: 'a1', pri: 'ali.veli', code: 'k1aaa' }]);
     db.fail = () => true;
     const r1 = plain(await S.provisionOne(db.personel[0], auth, db.link));
     assert.equal(r1.status, 'link-failed');
-    assert.equal(r1.uid, 'uid1');
     db.fail = null;
     const r2 = plain(await S.provisionOne(db.personel[0], auth, db.link));
     assert.equal(r2.status, 'relinked');
     assert.equal(r2.uid, 'uid1');
     assert.equal(auth.accounts.size, 1);
-    assert.equal(db.personel[0].uid, 'uid1');
 });
 
-test('provisionOne: hesap var ama parola farklı (kod değişmiş) → conflict, bağlama yapılmaz', async () => {
+test('provisionOne: PRI adresinde parolası farklı hesap (kendine hesap açan / tahmin edilen PRI) → conflict, bağlama yok', async () => {
     const S = load();
     const auth = fakeAuth();
-    await auth.createAccount('pa1@staff.medipol.local', 'eskiKodMdp!');
-    const db = fakeDb([{ id: 'a1', code: 'yeni1' }]);
-    const r = plain(await S.provisionOne(db.personel[0], auth, db.link));
+    await auth.createAccount('ali.veli' + D, 'saldirganMdp!');
+    const db = fakeDb([{ id: 'a1', pri: 'ali.veli' }]);
+    const r = plain(await S.provisionOne(db.personel[0], auth, db.link, { code: 'yeni1' }));
     assert.equal(r.status, 'conflict');
-    assert.match(r.reason, /firebase-admin/);
+    assert.match(r.reason, /PRI/);
     assert.equal(db.personel[0].uid, undefined);
+    assert.match(S.describe(r).text, /PRI/);
 });
 
-test('provisionOne: zaten bağlı → hiçbir Auth çağrısı yok; geçersiz → invalid', async () => {
+test('provisionOne: kota / kapalı sign-up ProvisioningStop; diğer hatalar error', async () => {
     const S = load();
     const auth = fakeAuth();
-    assert.equal((await S.provisionOne({ id: 'a', code: 'k1aaa', uid: 'u' }, auth, async () => {})).status, 'already-linked');
-    assert.equal((await S.provisionOne({ id: 'a', code: 'ab' }, auth, async () => {})).status, 'invalid');
-    assert.equal(auth.calls.length, 0);
-});
-
-test('provisionOne: kota / kapalı sign-up toplu işi durduran ProvisioningStop fırlatır; diğer hatalar error döner', async () => {
-    const S = load();
-    const auth = fakeAuth();
+    const p = { id: 'a', pri: 'a.b', code: 'k1aaa' };
     auth.fault = () => 'too-many-requests';
-    await assert.rejects(S.provisionOne({ id: 'a', code: 'k1aaa' }, auth, async () => {}), e => e.name === 'ProvisioningStop' && e.code === 'rate-limited');
+    await assert.rejects(S.provisionOne(p, auth, async () => {}), e => e.name === 'ProvisioningStop' && e.code === 'rate-limited');
     auth.fault = () => 'admin-restricted-operation';
-    await assert.rejects(S.provisionOne({ id: 'a', code: 'k1aaa' }, auth, async () => {}), e => e.code === 'signup-disabled');
+    await assert.rejects(S.provisionOne(p, auth, async () => {}), e => e.code === 'signup-disabled');
     auth.fault = () => 'network-request-failed';
-    assert.deepEqual(plain(await S.provisionOne({ id: 'a', code: 'k1aaa' }, auth, async () => {})),
-        { status: 'error', email: 'pa@staff.medipol.local', reason: 'network-request-failed' });
+    assert.deepEqual(plain(await S.provisionOne(p, auth, async () => {})), { status: 'error', email: 'a.b' + D, reason: 'network-request-failed' });
 });
 
-// ─── Toplu ───────────────────────────────────────────────────────────────────────────────────────────
-test('provisionMissing: eksikleri sırayla açar; ikinci koşu hiçbir şey yapmaz (idempotent)', async () => {
+// ─── J7 hesabının taşınması ──────────────────────────────────────────────────────────────────────────
+test('moveLegacyAccount: p<id>@ hesabı uid korunarak <pri>@ adresine taşınır ve bağlanır', async () => {
     const S = load();
     const auth = fakeAuth();
-    const db = fakeDb(Array.from({ length: 6 }, (_, i) => ({ id: 'p' + i, code: 'kod' + i + 'x' })).concat([{ id: 'zz', code: 'ab' }]));
+    const uid = await auth.createAccount('pa1' + D, 'k1aaaMdp!');
+    const db = fakeDb([{ id: 'a1', name: 'Ali Veli', code: 'k1aaa', uid, authEmail: 'pa1' + D }]);
+    const r = plain(await S.moveLegacyAccount({ ...db.personel[0], pri: 'ali.veli' }, auth, db.link, { now: () => 7 }));
+    assert.deepEqual(r, { status: 'moved', uid, email: 'ali.veli' + D });
+    assert.ok(!auth.accounts.has('pa1' + D) && auth.accounts.get('ali.veli' + D).uid === uid, 'aynı hesap, yeni e-posta');
+    assert.deepEqual(plain(db.personel[0]), { id: 'a1', name: 'Ali Veli', code: 'k1aaa', uid, authEmail: 'ali.veli' + D, pri: 'ali.veli', authProvisionedAt: 7 });
+});
+
+test('moveLegacyAccount: hedef adreste hesap var / parola tutmuyor / başka uid → conflict; e-posta değişikliği kapalı → durur', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const uid = await auth.createAccount('pa1' + D, 'k1aaaMdp!');
+    await auth.createAccount('ali.veli' + D, 'baskaMdp!');
+    const person = { id: 'a1', code: 'k1aaa', uid, authEmail: 'pa1' + D, pri: 'ali.veli' };
+    assert.match((await S.moveLegacyAccount(person, auth, async () => {})).reason, /farklı bir PRI/);
+    assert.equal((await S.moveLegacyAccount({ ...person, pri: 'ali.veli2', code: 'yanlis' }, auth, async () => {})).status, 'conflict');
+    assert.match((await S.moveLegacyAccount({ ...person, pri: 'ali.veli2', uid: 'baska-uid' }, auth, async () => {})).reason, /bu personele bağlı hesap değil/);
+    auth.fault = op => (op === 'move' ? 'operation-not-allowed' : null);
+    await assert.rejects(S.moveLegacyAccount({ ...person, pri: 'ali.veli3' }, auth, async () => {}), e => e.name === 'ProvisioningStop' && e.code === 'email-change-blocked');
+    assert.ok(auth.accounts.has('pa1' + D), 'başarısız denemeler hesabı taşımadı');
+});
+
+// ─── Göç planı ve uygulama ───────────────────────────────────────────────────────────────────────────
+test('planAccounts: PRI atama (bağlı olanınki korunur, çakışana numara) ve işlem türleri; plan kod içermez', () => {
+    const S = load();
+    const plan = plain(S.planAccounts([
+        { id: 'p1', name: 'Ayşe Yılmaz', pri: 'ayse.yilmaz', uid: 'u1', authEmail: 'ayse.yilmaz' + D, code: 'gizli1' },   // ok
+        { id: 'p2', name: 'Ayşe Yılmaz', code: 'gizli2' },                                                              // create, ayse.yilmaz2
+        { id: 'p3', name: 'Mehmet Ali Kaya', uid: 'u3', authEmail: 'pp3' + D, code: 'gizli3' },                         // move
+        { id: 'p4', name: 'Kodsuz Kişi' },                                                                              // no-code
+        { id: 'p5', name: 'Eski Kodsuz', uid: 'u5', authEmail: 'pp5' + D },                                             // blocked (kod yok)
+        { id: 'p6', name: 'Paylaşan Bir', uid: 'u7', authEmail: 'x' + D, code: 'gizli6' },                              // blocked (uid paylaşılıyor)
+        { id: 'p7', name: 'Paylaşan İki', uid: 'u7', authEmail: 'y' + D, code: 'gizli7' },                              // blocked
+        { id: 'p8', name: 'Tanınmayan', uid: 'u8', authEmail: 'baska@medipol.local', code: 'gizli8' },                 // blocked
+        { id: 'p9', name: 'Ayşe Yılmaz', pri: 'ayse.yilmaz', code: 'gizli9' },                                          // PRI çakışıyor → yeni
+        null, { name: 'İdsiz' },
+    ]));
+    const by = Object.fromEntries(plan.rows.map(r => [r.id, r]));
+    assert.deepEqual([by.p1.action, by.p1.pri, by.p1.priChange], ['ok', 'ayse.yilmaz', false]);
+    assert.deepEqual([by.p2.action, by.p2.pri, by.p2.priChange], ['create', 'ayse.yilmaz2', true]);
+    assert.deepEqual([by.p3.action, by.p3.pri], ['move', 'mehmet.kaya']);
+    assert.deepEqual([by.p4.action, by.p4.pri], ['no-code', 'kodsuz.kisi']);
+    assert.equal(by.p5.action, 'blocked');
+    assert.match(by.p5.reason, /firebase-admin/);
+    assert.equal(by.p6.action, 'blocked');
+    assert.equal(by.p7.action, 'blocked');
+    assert.match(by.p8.reason, /tanınmıyor/);
+    assert.equal(by.p9.pri, 'ayse.yilmaz3', 'PRI çakışan ikinci kayıt yeni PRI alır (bağlı olan korunur)');
+    assert.equal(new Set(plan.rows.map(r => r.pri)).size, plan.rows.length, 'tüm PRI\'ler tekil');
+    assert.deepEqual(plan.counts, { total: 9, ok: 1, create: 2, move: 1, 'no-code': 1, blocked: 4, priWrites: 8 });
+    assert.ok(!/gizli/.test(JSON.stringify(plan)), 'plan kod içermez');
+});
+
+test('applyAccounts: plan uygulanır; ikinci plan yalnız "ok" (eşleme yenileme) çıkarır — idempotent', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const legacyUid = await auth.createAccount('pp3' + D, 'gizli3Mdp!');
+    const db = fakeDb([
+        { id: 'p2', name: 'Ayşe Yılmaz', code: 'gizli2' },
+        { id: 'p3', name: 'Mehmet Ali Kaya', uid: legacyUid, authEmail: 'pp3' + D, code: 'gizli3' },
+        { id: 'p4', name: 'Kodsuz Kişi' },
+    ]);
     const progress = [];
-    const r = plain(await S.provisionMissing(db.personel, auth, db.link, { onProgress: (d, t) => progress.push(`${d}/${t}`) }));
-    assert.deepEqual(r.counts, { created: 6 });
-    assert.equal(r.remaining, 0);
+    const plan = S.planAccounts(db.personel);
+    const r = plain(await S.applyAccounts(plan, db.byId(), auth, db.link, { writePri: db.writePri, onProgress: (d, t) => progress.push(`${d}/${t}`) }));
+    assert.deepEqual(r.counts, { created: 1, moved: 1, 'pri-written': 1 });
     assert.equal(r.stopped, null);
-    assert.equal(r.plan.invalid.length, 1);
-    assert.deepEqual(progress, ['1/6', '2/6', '3/6', '4/6', '5/6', '6/6']);
-    assert.ok(db.personel.slice(0, 6).every(p => p.uid && p.authEmail === S.staffEmail(p.id)));
-    const again = plain(await S.provisionMissing(db.personel, auth, db.link));
-    assert.equal(again.plan.toCreate.length, 0);
-    assert.equal(again.results.length, 0);
-    assert.equal(auth.accounts.size, 6);
+    assert.deepEqual(progress, ['1/3', '2/3', '3/3']);
+    assert.equal(db.personel[0].authEmail, 'ayse.yilmaz' + D);
+    assert.equal(db.personel[1].uid, legacyUid, 'taşınan hesabın uid\'si aynı');
+    assert.equal(db.personel[2].pri, 'kodsuz.kisi');
+    const again = S.planAccounts(db.personel);
+    assert.deepEqual(plain(again.counts), { total: 3, ok: 2, create: 0, move: 0, 'no-code': 1, blocked: 0, priWrites: 0 });
+    const r2 = plain(await S.applyAccounts(again, db.byId(), auth, db.link, { writePri: db.writePri }));
+    assert.deepEqual(r2.counts, { ok: 2 });
+    assert.equal(auth.accounts.size, 2, 'yeni hesap açılmadı');
 });
 
-test('provisionMissing: kota dolunca durur, kalanı bildirir; kota açılınca kaldığı yerden tamamlar', async () => {
+test('applyAccounts: kota dolunca durur, kalanı bildirir; taze kayıt bulunamazsa atlar', async () => {
     const S = load();
     const auth = fakeAuth();
-    const db = fakeDb(Array.from({ length: 5 }, (_, i) => ({ id: 'p' + i, code: 'kod' + i + 'x' })));
+    const db = fakeDb(Array.from({ length: 4 }, (_, i) => ({ id: 'p' + i, name: 'Kişi No' + i, code: 'kod' + i + 'x' })));
     let created = 0;
     auth.fault = op => (op === 'create' && ++created > 2 ? 'too-many-requests' : null);
-    const r1 = plain(await S.provisionMissing(db.personel, auth, db.link));
-    assert.equal(r1.stopped.code, 'rate-limited');
-    assert.deepEqual(r1.counts, { created: 2 });
-    assert.equal(r1.remaining, 3);
-    auth.fault = null;
-    const r2 = plain(await S.provisionMissing(db.personel, auth, db.link));
-    assert.deepEqual(r2.counts, { created: 3 });
-    assert.equal(r2.remaining, 0);
-    assert.ok(db.personel.every(p => p.uid));
+    const plan = S.planAccounts(db.personel);
+    const fresh = db.byId(); fresh.delete('p0');
+    const r = plain(await S.applyAccounts(plan, fresh, auth, db.link, { writePri: db.writePri }));
+    assert.equal(r.stopped.code, 'rate-limited');
+    assert.deepEqual(r.counts, { skipped: 1, created: 2 });
+    assert.equal(r.remaining, 1);
+});
+
+test('accountsFingerprint: ad / PRI / hesap bağı / kodun varlığı değişince değişir; kodun değeri iz bırakmaz', () => {
+    const S = load();
+    const base = [{ id: 'p1', name: 'Ali', pri: 'ali', uid: 'u', authEmail: 'ali' + D, code: 'k1aaa' }];
+    const f = S.accountsFingerprint(base);
+    assert.equal(S.accountsFingerprint([{ ...base[0], code: 'baska' }]), f, 'kod değeri parmak izine girmez');
+    for (const ch of [{ name: 'Veli' }, { pri: 'ali2' }, { uid: 'u2' }, { authEmail: 'x' + D }, { code: null }])
+        assert.notEqual(S.accountsFingerprint([{ ...base[0], ...ch }]), f, JSON.stringify(ch));
+    assert.ok(!f.includes('k1aaa'));
 });
 
 test('describe: her sonuç için mesaj; giriş kodu/parola hiçbir mesajda yok', () => {
@@ -224,7 +316,7 @@ test('describe: her sonuç için mesaj; giriş kodu/parola hiçbir mesajda yok',
     }
 });
 
-test('createAuthProvisioner: ikincil app "provisioner" bellek içi kalıcılıkla bir kez kurulur; her işlemden sonra signOut', async () => {
+test('createAuthProvisioner: ikincil app "provisioner" bellek içi kalıcılıkla bir kez kurulur; taşıma = giriş + updateEmail; her işlemden sonra signOut', async () => {
     const S = load();
     const log = [];
     const fns = {
@@ -235,99 +327,15 @@ test('createAuthProvisioner: ikincil app "provisioner" bellek içi kalıcılıkl
         connectAuthEmulator: (a, url) => log.push(['emulator', url]),
         createUserWithEmailAndPassword: async (a, e) => ({ user: { uid: 'U-' + e } }),
         signInWithEmailAndPassword: async (a, e) => ({ user: { uid: 'S-' + e } }),
+        updateEmail: async (user, e) => log.push(['updateEmail', user.uid, e]),
         signOut: async a => log.push(['signOut', a.app.name]),
     };
     const p = S.createAuthProvisioner({ fns, options: { apiKey: 'k' }, emulatorUrl: 'http://127.0.0.1:9099' });
     assert.equal(await p.createAccount('x@y', 'pw1234'), 'U-x@y');
     assert.equal(await p.findAccount('x@y', 'pw1234'), 'S-x@y');
+    assert.equal(await p.moveAccount('old@y', 'pw1234', 'new@y'), 'S-old@y');
     assert.deepEqual(log, [
         ['initializeApp', 'provisioner'], ['initializeAuth', 'provisioner', 'MEMORY'], ['emulator', 'http://127.0.0.1:9099'],
-        ['signOut', 'provisioner'], ['signOut', 'provisioner'],
+        ['signOut', 'provisioner'], ['signOut', 'provisioner'], ['updateEmail', 'S-old@y', 'new@y'], ['signOut', 'provisioner'],
     ]);
-});
-
-// ─── J7.5 · giriş kodu değiştirme (Auth parolası + personel.code) ──────────────────────────────────────
-async function withAccount(S, auth, person) {
-    const uid = await auth.createAccount(S.staffEmail(person.id), S.staffPassword(person.code));
-    return { ...person, uid };
-}
-
-test('changeStaffCode: hesabı olan kişi → parola yeni koda taşınır, sonra yalnız code yazılır (uid aynı)', async () => {
-    const S = load();
-    const auth = fakeAuth();
-    const person = await withAccount(S, auth, { id: 'a1', code: 'eski1' });
-    const writes = [];
-    const r = plain(await S.changeStaffCode(person, ' yeni2 ', auth, async (p, f) => writes.push(f)));
-    assert.deepEqual(r, { status: 'changed', uid: person.uid, email: 'pa1@staff.medipol.local' });
-    assert.deepEqual(plain(writes), [{ code: 'yeni2' }], 'kod kırpılarak yazılır; bağlı hesapta uid yeniden yazılmaz');
-    assert.equal(auth.accounts.get('pa1@staff.medipol.local').password, 'yeni2Mdp!');
-});
-
-test('changeStaffCode: hesabı olmayan kişi → yalnız kod değişir (changed-code-only); sonra hesap yeni kodla açılabilir', async () => {
-    const S = load();
-    const auth = fakeAuth();
-    const writes = [];
-    const r = plain(await S.changeStaffCode({ id: 'b1', code: 'eski1' }, 'yeni2', auth, async (p, f) => writes.push(f)));
-    assert.equal(r.status, 'changed-code-only');
-    assert.deepEqual(plain(writes), [{ code: 'yeni2' }]);
-    assert.equal(auth.accounts.size, 0);
-});
-
-test('changeStaffCode: hesap var ama bağlanmamış (J7 link-failed) → parola taşınır VE uid bağlanır', async () => {
-    const S = load();
-    const auth = fakeAuth();
-    const { uid } = await withAccount(S, auth, { id: 'c1', code: 'eski1' });
-    const writes = [];
-    const r = plain(await S.changeStaffCode({ id: 'c1', code: 'eski1' }, 'yeni2', auth, async (p, f) => writes.push(f), { now: () => 7 }));
-    assert.equal(r.status, 'changed');
-    assert.deepEqual(plain(writes), [{ code: 'yeni2', uid, authEmail: 'pc1@staff.medipol.local', authProvisionedAt: 7 }]);
-});
-
-test('changeStaffCode: kayıt yazılamazsa parola ESKİ koda geri alınır (Auth ile Firestore tutarlı kalır)', async () => {
-    const S = load();
-    const auth = fakeAuth();
-    const person = await withAccount(S, auth, { id: 'd1', code: 'eski1' });
-    const r = plain(await S.changeStaffCode(person, 'yeni2', auth, async () => { throw Object.assign(new Error('x'), { code: 'permission-denied' }); }));
-    assert.equal(r.status, 'write-failed');
-    assert.equal(r.reverted, true);
-    assert.equal(auth.accounts.get('pd1@staff.medipol.local').password, 'eski1Mdp!');
-});
-
-test('changeStaffCode: geri alma da düşerse (parola yeni, kayıt eski) aynı yeni kodla tekrar uygulamak tamamlar', async () => {
-    const S = load();
-    const auth = fakeAuth();
-    const person = await withAccount(S, auth, { id: 'e1', code: 'eski1' });
-    let changes = 0;
-    auth.fault = op => (op === 'change' && ++changes === 2 ? 'network-request-failed' : null);   // 2. change = geri alma
-    const r1 = plain(await S.changeStaffCode(person, 'yeni2', auth, async () => { throw new Error('ağ'); }));
-    assert.equal(r1.status, 'write-failed');
-    assert.equal(r1.reverted, false);
-    assert.match(r1.reason, /aynı yeni kodla tekrar/);
-    assert.equal(auth.accounts.get('pe1@staff.medipol.local').password, 'yeni2Mdp!');
-    auth.fault = null;
-    const writes = [];
-    const r2 = plain(await S.changeStaffCode(person, 'yeni2', auth, async (p, f) => writes.push(f)));
-    assert.equal(r2.status, 'changed', 'eski parola tutmaz → yeni parola zaten geçerli → yalnız kayıt yazılır');
-    assert.deepEqual(plain(writes), [{ code: 'yeni2' }]);
-});
-
-test('changeStaffCode: bağlı hesap iki parolayla da açılmıyor → auth-out-of-sync, HİÇBİR şey yazılmaz', async () => {
-    const S = load();
-    const auth = fakeAuth();
-    await auth.createAccount('pf1@staff.medipol.local', 'baskaParolaMdp!');
-    const writes = [];
-    const r = plain(await S.changeStaffCode({ id: 'f1', code: 'eski1', uid: 'u' }, 'yeni2', auth, async (p, f) => writes.push(f)));
-    assert.equal(r.status, 'auth-out-of-sync');
-    assert.deepEqual(writes, []);
-});
-
-test('changeStaffCode: kota → ProvisioningStop; geçersiz yeni kod → invalid (Auth çağrısı yok)', async () => {
-    const S = load();
-    const auth = fakeAuth();
-    auth.fault = () => 'too-many-requests';
-    await assert.rejects(S.changeStaffCode({ id: 'g1', code: 'eski1' }, 'yeni2', auth, async () => {}), e => e.code === 'rate-limited');
-    auth.fault = null;
-    auth.calls.length = 0;
-    assert.equal((await S.changeStaffCode({ id: 'g1', code: 'eski1' }, 'ab', auth, async () => {})).status, 'invalid');
-    assert.equal(auth.calls.length, 0);
 });

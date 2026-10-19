@@ -1,10 +1,14 @@
 rules_version = '2';
 // =============================================================================
-// Rules v2 · Aşama A (Faz 4 · J1) — bugünkü anonim personel modeliyle uyumlu sıkılaştırma.
-// Kaynak: Master Plan Ek C/D + Faz 4 Uygulama Planı §4 · Testler: tests/rules/rules.test.mjs (npm run test:rules)
-// Bilinçli sınırlamalar (Aşama B · Faz 4B'de kapanır): personel kodları oturumlu herkese okunur; personelin
-// requests/purchaseOrders dokümanlarında sahiplik denetimi yok; kod girmemiş ziyaretçi = personel (ikisi de anonim).
-// DİKKAT: Kurallar proje geneli (canlı + demo). Yayın yalnız yeni istemciyle AYNI deploy'da (plan §8, M16).
+// Rules v2 · Aşama B (Faz 4B · J10, PRI revizyonu) — personel başına Firebase Auth hesabı; anonim oturum YOK.
+// Kaynak: Faz 4 Uygulama Planı §6 + GPT-6 J10 kuralları · Testler: tests/rules/rules.test.mjs (npm run test:rules)
+// Kimlikler: yönetici (admin@medipol.local, e-posta/parola) · personel (<pri>@staff.medipol.local; staffAccounts/{uid} eşlemesi
+// + personel kaydında AYNI uid ve AYNI PRI) · ziyaretçi (oturumsuz ya da bağsız hesap): HİÇBİR ŞEY okuyamaz (KVKK; giriş
+// ekranı veritabanını okumaz — oturumsuz giriş rehberi kaldırıldı).
+// Bilinçli sınırlamalar: yönetici yazmaları kısıtlanmaz (göç, geri yükleme) — istemci muhafızından geçer; akış başlatılırken
+// talep sahibinin seçtiği onaylayıcı adı ile uid'nin aynı kişi olduğu kuralla doğrulanamaz (liste; bkz. J10 notu).
+// DİKKAT: Kurallar proje geneli (canlı + demo). Yayın yalnız J10 istemcisiyle AYNI deploy'da ve personel hesapları açıldıktan
+// sonra (VIP "PRI / Hesap Göç Aracı" — staffAccounts eşlemesini de o yazar); anonim sağlayıcı Console'da kapatılır.
 // =============================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -18,17 +22,41 @@ service cloud.firestore {
         && request.auth.token.firebase.sign_in_provider == 'password';
     }
 
+    // J10 · personel: e-posta/parola oturumu, kurumsal kimlik e-postası (<pri>@staff.medipol.local) ve — asıl kanıt — yöneticinin
+    // yazdığı hesap eşlemesi (staffAccounts/{uid} → personelId) ile o personel kaydındaki uid ve PRI'nin bu oturumla aynı olması.
+    // Alan adı tek başına yetmez (istemciden hesap açma açıkken herkes kendine @staff.medipol.local hesabı açabilir; PRI'ler addan
+    // tahmin edilebilir). Eşleme tek başına da yetmez: personel kaydının bağı kaldırılırsa (uid silinir) / PRI değişirse erişim biter.
+    // PRI deseni istemcideki StaffProvisioning.PRI_RE ile aynı. Maliyet: personel isteği başına +2 doküman okuması.
+    function staffPri() {
+      return request.auth.token.email.lower().replace('@staff[.]medipol[.]local$', '');
+    }
+    function staffAccount(root) { return /databases/$(database)/documents/$(root)/staffAccounts/items/$(request.auth.uid); }
+    function staffPersonOk(root, pid) {
+      let p = /databases/$(database)/documents/$(root)/personel/items/$(pid);
+      return exists(p) && get(p).data.get('uid', '') == request.auth.uid && get(p).data.get('pri', '') == staffPri();
+    }
+    function isStaff(root) {
+      return signedIn()
+        && request.auth.token.firebase.sign_in_provider == 'password'
+        && request.auth.token.get('email', '').lower().matches('[a-z0-9]+([._-][a-z0-9]+)*@staff[.]medipol[.]local')
+        && exists(staffAccount(root))
+        && get(staffAccount(root)).data.get('personelId', '') is string
+        && get(staffAccount(root)).data.get('personelId', '') != ''
+        && staffPersonOk(root, get(staffAccount(root)).data.personelId);
+    }
+    function member(root) { return isAdmin() || isStaff(root); }
+
     // T1: canlı kök lifeserver_master (28.09.2026'dan beri) + localhost/demo kökü. inventory_v2 aşağıda ayrı (KJ-2).
     function validRoot(r) { return r in ['lifeserver_master', 'inventory_demo']; }
 
-    // firebase-handler COLLECTIONS + doğrudan erişilen system_config ve workflowTemplates. auditLogs ayrı blokta.
+    // firebase-handler COLLECTIONS + doğrudan erişilen system_config ve workflowTemplates. auditLogs ve staffAccounts ayrı blokta.
     function knownCol(c) {
       return c in ['b1', 'b2', 'b3', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords',
                    'staff', 'units', 'locations', 'tasks', 'requests', 'assignments',
                    'system_config', 'workflowTemplates'];
     }
 
-    // Personelin (anonim oturum) yazabildiği iş akışı koleksiyonları. assignments/serviceRecords yalnız admin (T7).
+    // Personelin yazabildiği iş akışı koleksiyonları. assignments/serviceRecords yalnız admin (T7).
     function staffWritable(c) { return c in ['purchaseOrders', 'requests', 'tasks']; }
 
     // RULE-05: bakım modu sunucu tarafında. Personel yazması başına +1 doküman okuması.
@@ -38,7 +66,6 @@ service cloud.firestore {
     }
 
     // XSS savunma derinliği: "<harf", "</", "<!", "<?" reddedilir; "<5mm", "a < b" serbest (istemci: html.js hasTagLike).
-    // Yalnız üst seviye alanlar — iç içe diziler kurallarla denetlenemez; birincil savunma istemci kaçışı (escapeHtml).
     function noTag(v) { return !(v is string) || !v.matches('(?s).*<[a-zA-Z/!?].*'); }
 
     function textOk(c, d) {
@@ -55,17 +82,121 @@ service cloud.firestore {
              && noTag(d.get('oncelik', '')) && noTag(d.get('createdByName', ''))));
     }
 
-    // Faz 4B · J9: sahiplik uid'leri (GPT-6 kural 1). Personel yeni kayıtta yalnız KENDİ uid'sini yazabilir (ya da hiç);
-    // var olan kayıtta sahiplik alanını değiştiremez, silemez, sonradan ekleyemez (ilk yazım = yönetici / Sahiplik Göç Aracı).
-    // Yönetici kuralı bilerek kısıtlanmadı (göç ve yedekten geri yükleme); yönetici yazmaları istemci muhafızından geçer.
+    // ─── Sahiplik (J9 alanları; J10'da ZORUNLU) ──────────────────────────────────────────────────────────
     function ownerField(c) {
-      return c == 'requests' ? 'personelUid' : (c == 'purchaseOrders' ? 'createdByUid' : (c == 'tasks' ? 'creatorUid' : ''));
+      return c == 'requests' ? 'personelUid' : (c == 'purchaseOrders' ? 'createdByUid' : 'creatorUid');
     }
-    function ownerOnCreate(c, d) {
-      return ownerField(c) == '' || d.get(ownerField(c), null) == null || d.get(ownerField(c), null) == request.auth.uid;
+    function ownerUnchanged(c, d, old) { return d.get(ownerField(c), null) == old.get(ownerField(c), null); }
+    // Liste yalnız sona ekleme ile büyüyebilir (geçmiş / akış kayıtları). Not: kurallar dilinde BOŞ dilim ([0:0]) hata verir —
+    // boş durum ayrıca karşılanır.
+    function appendOnly(a, b) { return b.size() >= a.size() && (a.size() == 0 || b[0:a.size()] == a); }
+
+    // Yeni / taslak akış adımı: karar verilmemiş ve onaylayıcısı talep sahibinin kendisi değil. Kurallar liste üzerinde
+    // döngü kuramadığı için adım sayısı en fazla 10 ve her indeks açıkça denetlenir (istemci de 10 ile sınırlar).
+    function stepFresh(s, i, owner) {
+      return i >= s.size() || (!(s[i].get('status', 'pending') in ['approved', 'rejected']) && s[i].get('userUid', '') != owner);
     }
-    function ownerUnchanged(c, d, old) {
-      return ownerField(c) == '' || d.get(ownerField(c), null) == old.get(ownerField(c), null);
+    function freshSteps(s, owner) {
+      return s.size() <= 10
+        && stepFresh(s, 0, owner) && stepFresh(s, 1, owner) && stepFresh(s, 2, owner) && stepFresh(s, 3, owner)
+        && stepFresh(s, 4, owner) && stepFresh(s, 5, owner) && stepFresh(s, 6, owner) && stepFresh(s, 7, owner)
+        && stepFresh(s, 8, owner) && stepFresh(s, 9, owner);
+    }
+
+    // ─── Envanter talebi (requests) ───────────────────────────────────────────────────────────────────────
+    function requestCreateOk(d) {
+      return d.get('personelUid', '') == request.auth.uid && d.get('durum', '') in ['Beklemede', 'draft'];
+    }
+    // Sahibi: bekleyen/taslak talebi düzenler, geri çeker (draft), yeniden gönderir (Beklemede); onaylanmışı teslim alır (completed).
+    // Onaylama / reddetme / zimmet alanları yalnız yönetici.
+    function requestUpdateOk(old, d) {
+      return old.get('personelUid', '') == request.auth.uid && (
+        (old.get('durum', '') in ['', 'Beklemede', 'Bekliyor', 'BEKLEMEDE', 'pending', 'draft']
+          && d.get('durum', '') in ['Beklemede', 'draft']
+          && d.diff(old).affectedKeys().hasOnly(['ürün', 'adet', 'talepTuru', 'oncelik', 'not', 'iadeTarihi', 'durum', 'tarih']))
+        || (old.get('durum', '') == 'approved' && d.get('durum', '') == 'completed'
+          && d.diff(old).affectedKeys().hasOnly(['durum', 'teslimTarihi'])));
+    }
+
+    // ─── Satın alma (purchaseOrders) ──────────────────────────────────────────────────────────────────────
+    function poCreateOk(d) {
+      let wf = d.get('workflow', {});
+      return d.get('createdByUid', '') == request.auth.uid
+        && d.get('durum', '') in ['Onay Bekliyor', 'Taslak']
+        && wf.get('started', false) != true && wf.get('finished', false) != true
+        && freshSteps(wf.get('steps', []), request.auth.uid);
+    }
+    // Sahibi, akış BAŞLAMAMIŞKEN: düzenler, akışı başlatır (adımlar kararsız, kendisi onaylayıcı değil), iptal eder.
+    function poDraftOk(old, d) {
+      let wf = old.get('workflow', {});
+      let nwf = d.get('workflow', {});
+      return wf.get('started', false) != true
+        && old.get('durum', '') in ['Onay Bekliyor', 'Taslak', '']
+        && d.get('durum', '') in ['Onay Bekliyor', 'Taslak', 'İptal Edildi']
+        && freshSteps(nwf.get('steps', []), request.auth.uid)
+        && nwf.get('currentStep', 0) == 0
+        && (nwf.get('finished', false) != true || d.get('durum', '') == 'İptal Edildi')
+        && (nwf.get('started', false) != true || d.get('durum', '') == 'Onay Bekliyor')
+        && appendOnly(wf.get('history', []), nwf.get('history', []))
+        && appendOnly(old.get('akis', []), d.get('akis', []));
+    }
+    // Sahibi, akış SÜRERKEN: yalnız geri çeker (taslağa döner; içerik değişmez, geçmiş korunur).
+    function poWithdrawOk(old, d) {
+      let wf = old.get('workflow', {});
+      let nwf = d.get('workflow', {});
+      return wf.get('started', false) == true && wf.get('finished', false) != true
+        && d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis'])
+        && d.get('durum', '') == 'Taslak'
+        && nwf.get('started', true) == false && nwf.get('finished', true) == false
+        && nwf.get('steps', [1]).size() == 0 && nwf.get('currentStep', -1) == 0
+        && appendOnly(wf.get('history', []), nwf.get('history', []))
+        && appendOnly(old.get('akis', []), d.get('akis', []));
+    }
+    // ONAY ADIMI (GPT-6): yalnız SIRASI GELMİŞ adımın onaylayıcısı (steps[currentStep].userUid == auth.uid; talep sahibi olamaz),
+    // yalnız o adımın karar alanlarını (status/date/actor/note) değiştirir. Diğer adımlar birebir aynı kalır (dilim eşitliği),
+    // onaylayıcı kimliği (user/userUid) değişemez, geçmiş ve akış kayıtları yalnız sona eklenir, sıra / bitiş / durum kararla tutarlı.
+    function poApprovalOk(old, d) {
+      let wf = old.get('workflow', {});
+      let nwf = d.get('workflow', {});
+      let cs = wf.get('currentStep', -1);
+      let n = wf.get('steps', []).size();
+      let st = nwf.get('steps', [])[cs].get('status', '');
+      return wf.get('started', false) == true && wf.get('finished', false) != true && wf.get('currentState', '') != 'suspended'
+        && cs is int && cs >= 0 && cs < n
+        && wf.steps[cs].get('userUid', '') == request.auth.uid
+        && old.get('createdByUid', '') != request.auth.uid
+        && d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis'])
+        && nwf.diff(wf).affectedKeys().hasOnly(['steps', 'currentStep', 'finished', 'currentState', 'history', 'started'])
+        && nwf.get('started', false) == true
+        && nwf.steps.size() == n
+        && (cs == 0 || nwf.steps[0:cs] == wf.steps[0:cs])
+        && (cs + 1 == n || nwf.steps[cs + 1:n] == wf.steps[cs + 1:n])
+        && nwf.steps[cs].diff(wf.steps[cs]).affectedKeys().hasOnly(['status', 'date', 'actor', 'note'])
+        && appendOnly(wf.get('history', []), nwf.get('history', []))
+        && appendOnly(old.get('akis', []), d.get('akis', []))
+        && ((st == 'approved' && nwf.get('currentStep', -1) == cs + 1 && nwf.get('finished', false) == (cs + 1 == n)
+              && d.get('durum', '') == (cs + 1 == n ? 'Onaylandı' : 'Onay Bekliyor'))
+          || (st == 'rejected' && nwf.get('currentStep', -1) == cs && nwf.get('finished', false) == true
+              && d.get('durum', '') == 'Reddedildi'));
+    }
+    function poUpdateOk(old, d) {
+      return (old.get('createdByUid', '') == request.auth.uid && (poDraftOk(old, d) || poWithdrawOk(old, d)))
+        || poApprovalOk(old, d);
+    }
+
+    // ─── Görev (tasks) ────────────────────────────────────────────────────────────────────────────────────
+    // Oluşturan: her alanı (sahiplik hariç). Atanan: yalnız durum / mesaj / alt madde. Havuz görevleri yönetici atar.
+    function taskUpdateOk(old, d) {
+      return old.get('creatorUid', '') == request.auth.uid
+        || (old.get('assigneeUid', '') == request.auth.uid
+            && d.diff(old).affectedKeys().hasOnly(['status', 'interactions', 'checklist', 'updatedAt']));
+    }
+
+    // ─── Personel kayıtları: giriş kodu (düz metin) yeniden YAZILAMAZ (J10 · kod temizliği) ─────────────────
+    // Yeni kayıtta kod yok; güncellemede var olan kod yalnız aynen kalabilir ya da silinebilir (Kod Temizliği aracı).
+    function personelCodeOk(d) {
+      return !d.keys().hasAny(['code'])
+        || (resource != null && resource.data.keys().hasAny(['code']) && d.code == resource.data.code);
     }
 
     // KJ-5: yalnız inventory_demo'da, akış testlerinin __flowtest__ işaretli dokümanlarının temizliği.
@@ -78,29 +209,45 @@ service cloud.firestore {
     }
 
     match /{root}/{col}/items/{docId} {
-      allow read:  if validRoot(root) && knownCol(col) && signedIn();
+      // Ek D "Ziyaretçi ✗": oturumsuz / anonim / personele bağlı olmayan hesap hiçbir şey okuyamaz.
+      allow read: if validRoot(root) && knownCol(col) && member(root);
 
-      // Admin: tüm bilinen koleksiyonlar (system_config dahil); bakım modundan etkilenmez.
-      allow write: if validRoot(root) && knownCol(col) && isAdmin();
+      // Admin: tüm bilinen koleksiyonlar; bakım modundan etkilenmez. Personel kaydına düz metin kod yeniden giremez.
+      allow create, update: if validRoot(root) && knownCol(col) && isAdmin()
+        && (col != 'personel' || personelCodeOk(request.resource.data));
+      allow delete: if validRoot(root) && knownCol(col) && isAdmin();
 
-      // Personel: yalnız iş akışı koleksiyonları, bakım kapalıyken, etiketsiz metinle; sahiplik uid'si J9 kuralına uygun.
-      allow create: if validRoot(root) && signedIn() && !isAdmin()
+      // Personel: yalnız iş akışı koleksiyonları, bakım kapalıyken, etiketsiz metinle; sahiplik zorunlu ve değişmez.
+      allow create: if validRoot(root) && !isAdmin() && isStaff(root)
         && staffWritable(col) && !maintenanceOn(root) && textOk(col, request.resource.data)
-        && ownerOnCreate(col, request.resource.data);
-      allow update: if validRoot(root) && signedIn() && !isAdmin()
+        && ((col == 'requests' && requestCreateOk(request.resource.data))
+            || (col == 'purchaseOrders' && poCreateOk(request.resource.data))
+            || (col == 'tasks' && request.resource.data.get('creatorUid', '') == request.auth.uid));
+      allow update: if validRoot(root) && !isAdmin() && isStaff(root)
         && staffWritable(col) && !maintenanceOn(root) && textOk(col, request.resource.data)
-        && ownerUnchanged(col, request.resource.data, resource.data);
+        && ownerUnchanged(col, request.resource.data, resource.data)
+        && ((col == 'requests' && requestUpdateOk(resource.data, request.resource.data))
+            || (col == 'purchaseOrders' && poUpdateOk(resource.data, request.resource.data))
+            || (col == 'tasks' && taskUpdateOk(resource.data, request.resource.data)));
 
-      // Silme: personel yalnız görev; talepler, satın almalar, zimmet ve servis kayıtları admin'e ait.
-      allow delete: if validRoot(root) && signedIn() && col == 'tasks' && !maintenanceOn(root);
-      allow delete: if root == 'inventory_demo' && signedIn()
-        && col in ['requests', 'purchaseOrders', 'assignments', 'serviceRecords'] && resource != null && isTestDoc(resource.data);
+      // Silme: personel yalnız KENDİ oluşturduğu görevi; talepler, satın almalar, zimmet ve servis kayıtları admin'e ait.
+      allow delete: if validRoot(root) && !isAdmin() && isStaff(root) && col == 'tasks' && !maintenanceOn(root)
+        && resource.data.get('creatorUid', '') == request.auth.uid;
+      allow delete: if root == 'inventory_demo' && isStaff(root)
+        && col in ['requests', 'purchaseOrders', 'assignments', 'serviceRecords', 'tasks'] && resource != null && isTestDoc(resource.data);
+    }
+
+    // J10 · personel hesap eşlemesi (uid → personelId, pri): isStaff'ın dayanağı. Yalnız yönetici okur / yazar; personel kendi
+    // eşlemesini yazamaz (kendine hesap açan biri kendini personele bağlayamaz). Kurallar get() ile okur (okuma izninden bağımsız).
+    // Oturumsuz giriş rehberi (staffDirectory) KALDIRILDI: eşleşen kural yok → herkese kapalı.
+    match /{root}/staffAccounts/items/{uid} {
+      allow read, write: if validRoot(root) && isAdmin();
     }
 
     // Denetim günlüğü (4.7 · KJ-7): yalnız ekleme, katı şema, sunucu saati, kendi uid'i; admin dahil kimse düzeltemez/silemez.
     match /{root}/auditLogs/items/{logId} {
       allow read: if validRoot(root) && isAdmin();
-      allow create: if validRoot(root) && signedIn()
+      allow create: if validRoot(root) && member(root)
         && request.resource.data.keys().hasOnly(['id', 'type', 'refCol', 'refId', 'item', 'qty', 'actorName',
              'actorPersonelId', 'uid', 'authKind', 'result', 'reason', 'page', 'ts'])
         && request.resource.data.result in ['blocked', 'approved', 'cancelled']

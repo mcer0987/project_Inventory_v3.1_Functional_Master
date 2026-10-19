@@ -17,6 +17,17 @@ const EMU = process.argv.includes('--emu');
 const HEADED = process.argv.includes('--headed');
 // Yalnız emülatör Auth'unda geçerli sahte admin parolası (scratch/emu-seed.mjs ile aynı; gerçek parola DEĞİLDİR; ≥12 karakter).
 const EMU_ADMIN_CODE = 'emu-yonetici-0001';
+// Faz 4B · J10: anonim oturum yok — testler bir PERSONEL HESABIYLA giriş yapar: kurumsal kimlik (PRI) + kod. Emülatörde
+// scratch/emu-seed.mjs'in açtığı test personeli; gerçek demoda yalnız ortam değişkenleriyle (FT_STAFF_PRI / FT_STAFF_CODE;
+// betiğe/depoya yazılmaz).
+const FT_STAFF2 = EMU ? { id: 'ft_staff2', pri: 'flow.onaylayici', code: 'ftkod88' } : null;   // onaylayıcı (yalnız emülatör)
+// Emülatörde gerçek YÖNETİCİ oturumunda koşan senaryolar: yönetici işini (onay, durdurma, toplu yazma) istemci kapısını taklit ederek
+// sınıyorlar; Aşama B'de personel oturumunun bu yazmaları kurallarca reddedilir (doğru davranış). Senaryo öncesi ana sayfa
+// yöneticiyle girer, sonrası test personeline döner.
+const ADMIN_SCENARIOS = new Set(['adminRequestActions', 'requestApprovalStock', 'ebysStartStop', 'saveDataV2', 'itemApi', 'ebysH2', 'hotfixBulkLock', 'hotfixDeviceUsesMemo']);
+const FT_STAFF = EMU ? { id: 'ft_staff', pri: 'flow.personel', code: 'ftkod77' }
+    : (process.env.FT_STAFF_PRI && process.env.FT_STAFF_CODE ? { pri: process.env.FT_STAFF_PRI.trim().toLowerCase(), code: process.env.FT_STAFF_CODE } : null);
+const staffEmailOf = staff => `${staff.pri}@staff.medipol.local`;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 const csp = CSP.createCollector();
@@ -33,8 +44,55 @@ function startServer() {
 }
 
 // Runs inside the page. Helpers are exposed on window.__ft.
+// J10 PRI: giriş ekranında kurumsal kimlik + kodla giriş (gerçek handleLogin). Sayfa bağlamında; düzenek ve __ft.backToStaff kullanır.
+async function staffLoginPage(page, staff) {
+    const ok = await page.evaluate(async (staff) => {
+        const wait = async (fn, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 150)); } return false; };
+        if (!(await wait(async () => !!document.getElementById('login-pri') && typeof window.handleLogin === 'function' && !!window.StaffProvisioning, 20000))) return 'page';
+        document.getElementById('login-pri').value = staff.pri;
+        window._dx._b['access-val-node'] = staff.code;
+        await window.handleLogin();
+        return (await wait(async () => document.body.classList.contains('logged-in') && window.isFirebaseLoaded === true
+            && !!window.getActiveUser() && (window.data.personel || []).length > 0, 25000)) ? 'ok' : 'login';
+    }, staff);
+    if (ok !== 'ok') throw new Error(`ABORT: test personeli girişi başarısız (${ok}) — emülatörde: npm run emu:seed`);
+}
+
+// J10: oturumsuz index hazır = Firebase oturum durumunu bildirdi + giriş kutuları ve modülleri yüklü. Anonim oturum olmadığından
+// oturumsuz sayfada isFirebaseLoaded / userAuth beklenmez (veri yalnız girişten sonra gelir; giriş ekranı veritabanını okumaz).
+const LOGIN_READY = () => typeof window.whenAuthKnown === 'function' && !!document.getElementById('login-pri')
+    && typeof window.handleLogin === 'function' && !!window.StaffProvisioning && !!window._dx;
+async function indexIdle(p, ms = 25000) {
+    const ok = await p.waitForFunction(LOGIN_READY, { timeout: ms, polling: 250 }).then(() => true, () => false);
+    if (ok) await p.evaluate(() => window.whenAuthKnown().then(() => true));
+    return ok;
+}
+// Ana test sayfası test personelinin oturumunda mı? Değilse (önceki senaryo sayfayı yeniden yükledi ya da oturumu kapattı) yeniden
+// girilir ve yardımcılar kurulur — bir senaryonun bıraktığı bozuk oturum sonrakileri zincirleme düşürmesin. true: onarım yapıldı.
+async function ensureMainSession(page) {
+    // Firebase oturumu esas alınır: senaryolar görünen kimliği setActiveUser fikstürleriyle değiştirir (oturum aynı kalır).
+    const st = await page.evaluate(email => ({
+        helpers: !!window.__ft,
+        session: !!window.userAuth && String(window.userAuth.email || '').toLowerCase() === email && window.isFirebaseLoaded === true && !window.isDbAdmin(),
+    }), staffEmailOf(FT_STAFF)).catch(() => ({}));
+    if (st.helpers && st.session) return false;
+    if (!st.session) await staffLoginPage(page, FT_STAFF);
+    if (!st.helpers) await installHelpers(page);
+    return true;
+}
+
+// J10 PRI: gerçek giriş ekranıyla personel girişi (kurumsal kimlik + kod → handleLogin). Sonuç: giriş oldu mu + durum mesajı.
+const staffLoginVia = (p, staff) => p.evaluate(async staff => {
+    document.getElementById('login-pri').value = staff.pri;
+    window._dx._b['access-val-node'] = staff.code;
+    await window.handleLogin();
+    const u = window.getActiveUser(), st = document.getElementById('loginStatus');
+    return { ok: document.body.classList.contains('logged-in') && !!u && !!window.userAuth && window.userAuth.email === `${staff.pri}@staff.medipol.local`
+        && (staff.id === undefined || String(u.id) === String(staff.id)), status: st ? st.innerText.trim() : '' };
+}, staff);
+
 async function installHelpers(page) {
-    await page.evaluate(async (MARKER, EMU, EMU_ADMIN_CODE) => {
+    await page.evaluate(async (MARKER, EMU, EMU_ADMIN_CODE, FT_STAFF, FT_STAFF2) => {
         if (window.COLLECTION_ROOT !== 'inventory_demo') throw new Error('ABORT: COLLECTION_ROOT=' + window.COLLECTION_ROOT);
         if (EMU && !(window.AppEnv && window.AppEnv.EMULATOR)) throw new Error('ABORT: --emu verildi ama sayfa emülatöre bağlanmadı');
         const fs = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
@@ -58,20 +116,41 @@ async function installHelpers(page) {
                 if (!(await window.SecurityConfig.authenticate(EMU_ADMIN_CODE))) throw new Error('emülatör admin girişi başarısız (npm run emu:seed?)');
                 return this.waitFor(async () => window.isDbAdmin(), 8000);
             },
-            async backToAnonymous() {
-                await window.SecurityConfig.logout();
-                return this.waitFor(async () => !!(window.userAuth && window.userAuth.isAnonymous), 8000);
+            // J10: yönetici işleminden sonra anonim oturuma değil test personelinin hesabına dönülür (anonim oturum yok).
+            staff: FT_STAFF, staff2: FT_STAFF2,
+            _inAdmin: false,
+            // Belirli bir personel hesabıyla giriş (gerçek giriş ekranı yolu). Önceki oturum kapatılır.
+            async loginAs(staff) {
+                if (window.userAuth) { await window.SecurityConfig.logout(); await this.waitFor(async () => !window.userAuth, 8000); }
+                window.clearSession();
+                document.getElementById('login-pri').value = staff.pri;
+                window._dx._b['access-val-node'] = staff.code;
+                await window.handleLogin();
+                return this.waitFor(async () => !!window.userAuth && !window.isDbAdmin() && window.isFirebaseLoaded === true
+                    && window.userAuth.email === `${staff.pri}@staff.medipol.local` && !!window.getActiveUser()
+                    && String(window.getActiveUser().uid || '') === window.userAuth.uid, 25000);
             },
+            async backToStaff() { this._inAdmin = false; return this.loginAs(FT_STAFF); },
             // Faz 4 · J1: yönetici işlemi. Emülatörde gerçek admin oturumu (Rules v2 yüklü); gerçek demoda yayındaki eski
             // kurallar anonim yazmaya izin verdiği için yalnız istemci kapısı (isDbAdmin) taklit edilir.
             async asAdmin(fn) {
                 if (this.emulator) {
+                    if (this._inAdmin) return fn();   // yönetici senaryosu içinde: zaten yönetici oturumu (iç içe giriş/çıkış yok)
+                    this._inAdmin = true;
                     await this.adminLogin();
-                    try { return await fn(); } finally { await this.backToAnonymous(); }
+                    try { return await fn(); } finally { await this.backToStaff(); }
                 }
                 const real = window.isDbAdmin; window.isDbAdmin = () => true;
                 try { return await fn(); } finally { window.isDbAdmin = real; }
             },
+        };
+        // J10: senaryolar görünen kimliği (işaretli ad) setActiveUser ile kurar. Aşama B'de oturum kimliği Auth'tan gelir: oturum bir
+        // personel hesabıysa sahte kullanıcıya oturumun GERÇEK uid'si eklenir (sahiplik alanları Auth'tan yazılsın; kural bunu ister).
+        const realSetActiveUser = window.setActiveUser;
+        window.setActiveUser = u => {
+            const a = window.userAuth;
+            const staffUid = a && window.AppModules.Session.isStaffAccountSession(a) ? a.uid : null;
+            return realSetActiveUser(u && staffUid && !u.uid ? { ...u, uid: staffUid } : u);
         };
         // Faz 4 kapanışı: Rules v2 gerçek projede de yayında mı? (eski kök /system_config bloğu yalnız eski kurallarda vardı).
         // Deploy'dan sonra "gerçek demo" modu artık eski kuralları varsayamaz; kurala bağlı beklentiler bu bayrağa göre dallanır.
@@ -83,7 +162,7 @@ async function installHelpers(page) {
             window.__ft.realAppendAuditLog = window.appendAuditLog;
             window.appendAuditLog = async e => { window.__auditStub.push(JSON.parse(JSON.stringify(e))); return { ok: true, id: 'stub' }; };
         }
-    }, MARKER, EMU, EMU_ADMIN_CODE);
+    }, MARKER, EMU, EMU_ADMIN_CODE, FT_STAFF, FT_STAFF2);
 }
 
 // Faz 5 · K2 (5.8 · B1/B2 şema sözleşmesi) — b1WriteContract/b2WriteContract'ın içinde page.evaluate(fn, repo) ile
@@ -294,10 +373,9 @@ const SCENARIOS = {
             await window.sendDraftInventoryRequest(id);
             out.sendDraft = await ft.waitFor(async () => (await durum()) === 'Beklemede') ? 'Beklemede ✔' : await durum();
 
-            // simulate admin approval on the request only (staff may write requests)
-            window.data.requests[idx()].durum = 'approved';
-            await window.saveData('requests', window.data.requests);
-            await ft.waitFor(async () => (await durum()) === 'approved');
+            // J10: yönetici onayı gerçek yönetici oturumunda (Aşama B'de personel kendi talebini onaylayamaz)
+            await ft.asAdmin(() => window.updateItem('requests', id, { durum: 'approved' }));
+            await ft.waitFor(async () => (await durum()) === 'approved' && idx() !== -1 && window.data.requests[idx()].durum === 'approved');
 
             const b3Before = (await ft.readAll('b3')).length;
             await window.receiveProduct(id);
@@ -313,18 +391,21 @@ const SCENARIOS = {
     async ebysApprovalGuard(page) {
         return page.evaluate(async () => {
             const ft = window.__ft, out = {};
+            if (!ft.emulator) return { skipped: 'J10: onaylayıcı hesapları yalnız --emu' };
+            // J10: onaylayıcılar GERÇEK personel hesapları (steps[].userUid); kayıt yönetici oturumunda açılır.
+            const per = id => (window.data.personel || []).find(p => String(p.id) === id) || {};
+            const A = per(ft.staff.id), B = per(ft.staff2.id);
             const id = Date.now();
             const rec = {
                 id, baslik: 'EBYS ' + ft.MARKER, durum: 'Onay Bekliyor', akis: [],
                 workflow: { id: 'wf_' + id, started: true, finished: false, currentStep: 0, currentState: 'initiation', history: [],
-                    steps: [{ user: 'Flow Onay A', tip: 'Yönetici', status: 'pending' }, { user: 'Flow Onay B', tip: 'Finans', status: 'pending' }] },
+                    steps: [{ user: A.name, userUid: A.uid, tip: 'Yönetici', status: 'pending' }, { user: B.name, userUid: B.uid, tip: 'Finans', status: 'pending' }] },
             };
-            await window.saveData('purchaseOrders', [...(window.data.purchaseOrders || []), rec]);
-            await ft.waitFor(async () => (window.data.purchaseOrders || []).some(x => x.id === id));
+            await ft.asAdmin(() => window.applyItemOps([{ op: 'set', col: 'purchaseOrders', item: rec }]));
+            await ft.waitFor(async () => (window.data.purchaseOrders || []).some(x => x.id === id), 10000);
             const dbStep = async () => { const d = (await ft.readMarked('purchaseOrders'))[0]; return d && { step: d.workflow.currentStep, finished: d.workflow.finished, approvals: (d.akis || []).filter(a => String(a.islem).startsWith('✅')).length }; };
 
-            // EBYS-01: stale "Onayla" binding must not survive into a new request
-            window.setActiveUser({ name: 'Flow Onay A' });
+            // EBYS-01: stale "Onayla" binding must not survive into a new request (A = sırası gelen onaylayıcı, oturumda)
             window.openPurchaseDetail(id, 'view');
             const saveBtn = document.getElementById('purSaveBtn');
             out.viewModeHasApprove = /Onayla/.test(saveBtn.innerHTML) && typeof saveBtn.onclick === 'function';
@@ -338,20 +419,21 @@ const SCENARIOS = {
             };
             window.closePurchaseModal();
 
-            // EBYS-02: wrong person is denied
-            window.setActiveUser({ name: 'Flow Onay B' });
+            // EBYS-02 / J10: sırası gelmemiş onaylayıcı (B) uid ile reddedilir — adla değil
+            out.loginB = await ft.loginAs(ft.staff2);
             await window.approveStep(id);
             await ft.sleep(1500);
             out.wrongUserDenied = (await dbStep()).step === 0;
 
-            // right person (name normalised) advances one step
-            window.setActiveUser({ name: '  flow onay a ' });
+            // sırası gelen onaylayıcı (A) bir adım ilerletir
+            out.loginA = await ft.loginAs(ft.staff);
+            await ft.waitFor(async () => (window.data.purchaseOrders || []).some(x => x.id === id), 10000);
             await window.approveStep(id);
             out.ownerApproved = await ft.waitFor(async () => (await dbStep()).step === 1);
 
-            // double click by next owner advances only once
-            window.setActiveUser({ name: 'Flow Onay B' });
-            await ft.waitFor(async () => (window.data.purchaseOrders.find(x => x.id === id)?.workflow.currentStep) === 1);
+            // sonraki onaylayıcının çift tıklaması yalnız bir kez ilerletir
+            await ft.loginAs(ft.staff2);
+            await ft.waitFor(async () => (window.data.purchaseOrders.find(x => x.id === id)?.workflow.currentStep) === 1, 10000);
             await Promise.all([window.approveStep(id), window.approveStep(id)]);
             await ft.waitFor(async () => (await dbStep()).finished === true);
             out.afterDoubleClick = await dbStep();
@@ -360,6 +442,9 @@ const SCENARIOS = {
             out.ipStored = JSON.stringify(final.workflow.history || []).includes('"ip"');
             out.finalState = final.workflow.currentState;
             out.ipifyRequested = performance.getEntriesByType('resource').some(r => r.name.includes('ipify'));
+            out.backToStaff = await ft.loginAs(ft.staff);
+            out.ok = out.wrongUserDenied && out.ownerApproved && out.afterDoubleClick && out.afterDoubleClick.step === 2 && out.afterDoubleClick.approvals === 2;
+            if (!out.ok) throw new Error('ebysApprovalGuard: ' + JSON.stringify(out));
             return out;
         });
     },
@@ -402,7 +487,7 @@ const SCENARIOS = {
             out.draftRefused = (await db(3)).durum === 'draft';
 
             window.setActiveUser({ name: 'Personel B ' + ft.MARKER });
-            window.isDbAdmin = realIsAdmin;   // personel kendi talebi: gerçek kapı (J4: engel + 'blocked' günlüğü)
+            window.isDbAdmin = () => false;   // J10: personel istemci kapısı (senaryo yönetici oturumunda; Aşama B'de personel talep onaylayamaz)
             await window.confirmRequest(base + 2);
             await ft.sleep(800);
             out.selfApprovalBlocked = (await db(2)).durum === 'Beklemede';
@@ -1332,6 +1417,7 @@ const SCENARIOS = {
             await window.viewWorkflow(L2.id); window.closeWorkflowModal();
             window.upsertItem = realUpsert;
             out.viewNoWrite = upserts === 0;
+            const _realAdm = window.isDbAdmin; window.isDbAdmin = () => false;   // J10: senaryo yönetici oturumunda; personel kapısı
             out.migrationSkippedForStaff = await window.fixAllWorkflowData() === 0;
 
             // EBYS-12: stranger denied; view-mode file list has no delete button; owner withdraw works
@@ -1343,6 +1429,7 @@ const SCENARIOS = {
             window.openPurchaseDetail(A.id, 'view');
             out.viewModeNoFileDelete = !document.querySelector('#purUploadedFilesList button[onclick*="deleteRequestFile"]');
             window.closePurchaseModal();
+            window.isDbAdmin = _realAdm;
 
             window.setActiveUser(owner);
             await window.cancelPurchaseRequest(A.id);
@@ -1660,7 +1747,7 @@ const SCENARIOS = {
             await window.saveData('tasks', [...(window.data.tasks || []), { id: 'task_' + reqId, title: P + ft.MARKER, description: P, priority: P, type: 'task', status: 'pending', assigneeId: 'pool', checklist: [{ text: P, done: false }], interactions: [{ user: P, message: P }] }]);
             await window.saveData('purchaseOrders', [...(window.data.purchaseOrders || []), { id: poId, urun: P + ft.MARKER, evrakNo: P, talepEden: P, birim: P, tarih: P, durum: 'Taslak', akis: [] }]);
             await ft.waitFor(async () => (await ft.readMarked('requests')).length && (await ft.readMarked('tasks')).length && (await ft.readMarked('purchaseOrders')).length);
-            if (ft.emulator) await ft.backToAnonymous();
+            if (ft.emulator) await ft.backToStaff();
             return { reqId, poId, anonPayloadRejected };
         });
         if (ids.skipped) return ids;
@@ -2136,9 +2223,12 @@ const SCENARIOS = {
             try {
                 document.getElementById('b1StatusFilter').value = 'active';
                 document.getElementById('searchB1').value = '';
+                // Tek zaman damgası: varsayılan sıralama lastUpdate'e göre; döngü milisaniye sınırını geçerse sonraki kayıtlar başa
+                // geçip k2tbl_5/6'yı ilk sayfanın dışına itiyordu (zamanlamaya bağlı yanlış alarm).
+                const t0 = Date.now();
                 window.data.b1 = Array.from({ length: 60 }, (_, i) => ({
                     id: 'k2tbl_' + i, ürün: 'K2 Ürün ' + i, tür: 'Test', raf: 'R', sütun: 'S',
-                    marka: 'X', adet: 5, durumu: 'Kullanıma Hazır', açıklama: '', isDemirbas: false, lastUpdate: Date.now(),
+                    marka: 'X', adet: 5, durumu: 'Kullanıma Hazır', açıklama: '', isDemirbas: false, lastUpdate: t0,
                 }));
                 window._firstDataRendered = true;   // main.js'in "ilk yükleme" dalını atlaması için (switchTab tetiklemesin)
 
@@ -2207,9 +2297,11 @@ const SCENARIOS = {
                 const orig = {
                     b1: window.data.b1, b2: window.data.b2, personel: window.data.personel, types: window.data.productTypes,
                     append: window.appendItem, isDbAdmin: window.isDbAdmin, checkIsAdmin: window.checkIsAdmin, alert: window.showAppAlert,
-                    provision: window.provisionStaffAccount,
+                    provision: window.provisionStaffAccount, confirm: window.showCustomConfirm,
                 };
                 window.isDbAdmin = () => true; window.checkIsAdmin = () => true; window.showAppAlert = () => {};
+                // J10: hesap açılınca kod yöneticiye bir kez gösterilir ("Kodu aldım" beklenir) — pencere yakalanır
+                const dialogs = []; window.showCustomConfirm = async (title, msg) => { dialogs.push({ title: String(title), msg: String(msg) }); return true; };
                 // appendItem gerçek applyItemOps'un _applyLocal'ını taklit eder: window.data[col]'a id'li kayıt eklenir.
                 const captured = []; let idSeq = 0;
                 window.appendItem = async (col, item) => {
@@ -2270,6 +2362,9 @@ const SCENARIOS = {
                     await window.inventoryManagementModule._saveQuickPersonnel();
                     o.personnelCreated = captured.some(c => c.col === 'personel' && c.item.name === 'K3 Test Personel');
                     o.personnelAccountRequested = provisioned.length === 1 && provisioned[0].name === 'K3 Test Personel' && captured.some(c => c.col === 'personel' && String(c.item.id) === String(provisioned[0].id));
+                    const qpCode = document.getElementById('qpCode').value;
+                    o.personnelCodeShownOnce = dialogs.length === 1 && dialogs[0].title === 'Giriş Kodu' && !!qpCode && dialogs[0].msg.includes(qpCode)
+                        && !captured.some(c => c.col === 'personel' && 'code' in c.item);
                     const selPersonVal = document.getElementById('assignPersonnel')?.value;
                     o.personnelAutoSelected = !!selPersonVal && window.data.personel.some(p => String(p.id) === selPersonVal && p.name === 'K3 Test Personel');
 
@@ -2287,7 +2382,7 @@ const SCENARIOS = {
                     const prodRowVal = document.querySelector('#assignRowsContainer .assign-product-sel')?.value;
                     o.productRowAutoSelected = !!createdProduct && prodRowVal === createdProduct.item.id;
                 } finally {
-                    Object.assign(window, { appendItem: orig.append, isDbAdmin: orig.isDbAdmin, checkIsAdmin: orig.checkIsAdmin, showAppAlert: orig.alert, provisionStaffAccount: orig.provision });
+                    Object.assign(window, { appendItem: orig.append, isDbAdmin: orig.isDbAdmin, checkIsAdmin: orig.checkIsAdmin, showAppAlert: orig.alert, provisionStaffAccount: orig.provision, showCustomConfirm: orig.confirm });
                     window.data.b1 = orig.b1; window.data.b2 = orig.b2; window.data.personel = orig.personel; window.data.productTypes = orig.types;
                     window.inventoryManagementModule.closeAssignModal();
                     window.inventoryManagementModule.closeQuickPersonnelModal?.();
@@ -2303,7 +2398,7 @@ const SCENARIOS = {
         out.ok = out.tableExistsAfterFirstRender && out.cardAfterFirst && out.tableExistsAfterSecondRender && out.cardUpdatedAfterSecond
             && out.hasAdminTabsApi && out.inventoryTabHookFired && out.workflowTabHookFired
             && out.vipActiveClassAdded === true && out.vipActiveClassRemoved === true
-            && out.personnelModalOpened && out.personnelCreated && out.personnelAccountRequested && out.personnelAutoSelected
+            && out.personnelModalOpened && out.personnelCreated && out.personnelAccountRequested && out.personnelCodeShownOnce && out.personnelAutoSelected
             && out.productModalOpened && out.productTypeOptionsOnlyDemirbas && out.productCreated && out.productIsDemirbas
             && (out.productSchemaErrors || []).length === 0 && out.productRowAutoSelected
             && out.adminPageErrors.length === 0;
@@ -3055,16 +3150,17 @@ const SCENARIOS = {
         return page.evaluate(async () => {
             const ft = window.__ft;
             if (!ft.emulator) return { skipped: 'yalnız --emu ile' };
-            const out = { anonymousAtStart: !!window.userAuth?.isAnonymous, seededB1: (window.data.b1 || []).length };
+            // J10: başlangıç oturumu test personelinin hesabı (anonim değil); personel b1'e yazamaz
+            const out = { staffAccountAtStart: window.AppModules.Session.isStaffAccountSession() && !window.userAuth.isAnonymous, seededB1: (window.data.b1 || []).length };
             const fs = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
             const ref = fs.doc(window.fireDb, window.COLLECTION_ROOT, 'b1', 'items', 'j0_' + Date.now());
             const tryWrite = async () => { try { await fs.setDoc(ref, { id: ref.id, ürün: 'J0 ' + ft.MARKER }); return 'ALLOWED'; } catch (e) { return e.code; } };
-            out.anonB1Write = await tryWrite();
+            out.staffB1Write = await tryWrite();
             out.adminLogin = await ft.adminLogin();
             out.isDbAdmin = window.isDbAdmin();
             out.adminB1Write = await tryWrite();
             out.adminB1Delete = await fs.deleteDoc(ref).then(() => 'ALLOWED', e => e.code);
-            out.backToAnonymous = await ft.backToAnonymous();
+            out.backToStaff = await ft.backToStaff();
             out.syncAfterLogout = await ft.waitFor(async () => (window.data.b1 || []).length === out.seededB1, 8000);
             return out;
         });
@@ -3083,16 +3179,17 @@ const SCENARIOS = {
             const has = async (col, id) => (await ft.readAll(col)).some(d => String(d.id) === String(id));
             try {
                 window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
-                out.anonymous = !!window.userAuth?.isAnonymous;
+                out.staffAccount = window.AppModules.Session.isStaffAccountSession();   // J10: anonim değil, personel hesabı
+                const uid = window.userAuth.uid;
 
-                // M1 · personel silme kapıları (kayıt yerinde kalır, anlaşılır mesaj)
-                const po = { id: window.makeId(), urun: 'J1 ' + ft.MARKER, aciklama: ft.MARKER, createdBy: '00001', createdByName: 'Flow Test ' + ft.MARKER, durum: 'Onay Bekliyor' };
+                // M1 · personel silme kapıları (kayıt yerinde kalır, anlaşılır mesaj). J10: kayıtlar sahiplik alanıyla açılır.
+                const po = { id: window.makeId(), urun: 'J1 ' + ft.MARKER, aciklama: ft.MARKER, createdBy: 'ft_staff', createdByName: 'Flow Test ' + ft.MARKER, createdByUid: uid, durum: 'Onay Bekliyor', workflow: { started: false, steps: [] } };
                 await window.appendItem('purchaseOrders', po);
                 await ft.waitFor(async () => (window.data.purchaseOrders || []).some(p => String(p.id) === String(po.id)));
                 await window.deletePurchaseRequest(po.id);
                 out.staffDeletePurchase = { kept: await has('purchaseOrders', po.id), alert: take() };
 
-                const rq = { id: window.makeId(), ürün: 'J1 ' + ft.MARKER, adet: 1, durum: 'Beklemede', personel: 'Flow Test ' + ft.MARKER };
+                const rq = { id: window.makeId(), ürün: 'J1 ' + ft.MARKER, adet: 1, durum: 'Beklemede', personel: 'Flow Test ' + ft.MARKER, personelUid: uid };
                 await window.appendItem('requests', rq);
                 await ft.waitFor(async () => (window.data.requests || []).some(r => String(r.id) === String(rq.id)));
                 await window.deleteRequest(rq.id);
@@ -3126,7 +3223,7 @@ const SCENARIOS = {
                 await window.saveRequest(new Event('submit'));
                 out.formLessThanAllowed = await ft.waitFor(async () => (await ft.readMarked('requests')).length === before + 1);
                 take();
-                out.directTagWrite = { code: await direct(window.appendItem('requests', { id: window.makeId(), ürün: '<b>x</b> ' + ft.MARKER })), alert: take() };
+                out.directTagWrite = { code: await direct(window.appendItem('requests', { id: window.makeId(), ürün: '<b>x</b> ' + ft.MARKER, durum: 'Beklemede', personelUid: window.userAuth.uid })), alert: take() };
 
                 // M2 · bakım: personel yazması Firestore'a gitmeden durur, bakım mesajı (sunucu tarafı kural matrisinde)
                 const cfg = window.data.config;
@@ -3145,7 +3242,7 @@ const SCENARIOS = {
                 await window.removeItem('requests', unmarked.id);
                 out.adminDeleteUnmarked = !(await has('requests', unmarked.id));
                 take();
-                out.backToAnonymous = await ft.backToAnonymous();
+                out.backToStaff = await ft.backToStaff();
             } finally {
                 window.showAppAlert = origAlert; window.showCustomConfirm = origConfirm;
             }
@@ -3332,7 +3429,7 @@ const SCENARIOS = {
             const uid = window.userAuth && window.userAuth.uid;
             const saved = { visa: localStorage.getItem('admin_auth'), end: S.endAdminSession, loaded: window.isFirebaseLoaded };
             o.midLength = { result: await S.authenticate('abcdefgh'), message: S.lastErrorMessage,
-                authUnchanged: !!window.userAuth && window.userAuth.uid === uid && window.userAuth.isAnonymous, visaWritten: Sess.getAdminVisaRemaining() !== null };
+                authUnchanged: !!window.userAuth && window.userAuth.uid === uid && !window.isDbAdmin(), visaWritten: Sess.getAdminVisaRemaining() !== null };
             const ended = []; S.endAdminSession = async r => { ended.push(r); };
             try {
                 localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 1000 }));
@@ -3366,7 +3463,7 @@ const SCENARIOS = {
         const lockState = p => p.evaluate(() => {
             const m = document.getElementById('adminLockModal'), left = window.AppModules.Session.getAdminVisaRemaining();
             return { locked: !!m && m.style.display === 'flex', title: (document.getElementById('adminLockTitle') || {}).textContent?.trim(),
-                isDbAdmin: window.isDbAdmin(), anon: !!(window.userAuth && window.userAuth.isAnonymous), visa: left === null ? null : left > 0 ? 'valid' : 'expired',
+                isDbAdmin: window.isDbAdmin(), signedIn: !!window.userAuth, visa: left === null ? null : left > 0 ? 'valid' : 'expired',
                 user: (window.getActiveUser() || {}).name || null,
                 fbSession: Object.keys(sessionStorage).some(k => k.startsWith('firebase:authUser:')), fbLocal: Object.keys(localStorage).some(k => k.startsWith('firebase:authUser:')) };
         });
@@ -3378,9 +3475,9 @@ const SCENARIOS = {
             p.on('pageerror', e => ctxErrors.push(e.message));
             await p.evaluateOnNewDocument(() => { localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })); sessionStorage.setItem('adminVizesi', 'true'); });
             await p.goto(`${base}/index.html${q}`, { waitUntil: 'domcontentloaded' });
-            await waitFn(p, () => !!window.userAuth && window.isFirebaseLoaded === true);
+            await indexIdle(p);
             await sleep(1000);
-            out.noVirtualAdminIndex = await p.evaluate(() => ({ user: window.getActiveUser(), navbar: !!document.getElementById('userDisplay'), checkIsAdmin: window.checkIsAdmin(),
+            out.noVirtualAdminIndex = await p.evaluate(() => ({ user: window.getActiveUser(), signedIn: !!window.userAuth, navbar: !!document.getElementById('userDisplay'), checkIsAdmin: window.checkIsAdmin(),
                 loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none' }));
 
             // M8 (iki ortam): geçerli vize ama bu sekmede Firebase admin oturumu yok → kilit kartı; paylaşılan vize silinmez
@@ -3396,7 +3493,8 @@ const SCENARIOS = {
             e.on('pageerror', x => ctxErrors.push(x.message));
             await e.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 5000 })));
             await e.goto(`${base}/admin.html${q}`, { waitUntil: 'domcontentloaded' });
-            await waitFn(e, () => document.getElementById('adminLockModal').style.display === 'flex' && !!window.userAuth);
+            await waitFn(e, () => document.getElementById('adminLockModal').style.display === 'flex' && typeof window.whenAuthKnown === 'function');
+            await e.evaluate(() => window.whenAuthKnown().then(() => true));
             await sleep(1500);
             out.adminExpiredOnLoad = await lockState(e);
             await ctx2.close();
@@ -3414,7 +3512,8 @@ const SCENARIOS = {
             const err = document.getElementById('lockErrorMsg');
             return { error: err.style.display !== 'none' ? err.textContent : null };
         }, pass);
-        const lockedAnon = p => waitFn(p, () => document.getElementById('adminLockModal').style.display === 'flex' && !!window.userAuth && window.userAuth.isAnonymous);
+        // J10: kilit = oturum KAPALI (eskiden anonim oturuma dönülürdü)
+        const lockedOut = p => waitFn(p, () => document.getElementById('adminLockModal').style.display === 'flex' && !window.userAuth);
         const restorePassword = p => p.evaluate(async (AUTH, LONG, CODE) => {
             const sdk = await import(AUTH), auth = sdk.getAuth(window.firebaseApp);
             if (!(auth.currentUser && !auth.currentUser.isAnonymous)) { if (!(await window.SecurityConfig.authenticate(LONG))) return 'not-needed-or-failed'; }
@@ -3424,7 +3523,7 @@ const SCENARIOS = {
         try {
             // 1 · gerçek giriş yolu: index "Yönetici Paneli" → admin.html (aynı sekme)
             a = await open(`${base}/index.html?emu=1`);
-            await waitFn(a, () => window.isFirebaseLoaded === true && !!window.userAuth);
+            await indexIdle(a);
             const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
             await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
             await nav;
@@ -3433,8 +3532,8 @@ const SCENARIOS = {
 
             // 2 · "tarayıcı kapat-aç" eşdeğeri: aynı profilde YENİ sekme (sessionStorage taşınmaz; localStorage/IndexedDB paylaşılır)
             const b = await open(`${base}/index.html?emu=1`);
-            await waitFn(b, () => !!window.userAuth && window.isFirebaseLoaded === true);
-            emu.newTabIndex = await b.evaluate(() => ({ anon: window.userAuth.isAnonymous, isDbAdmin: window.isDbAdmin(),
+            await indexIdle(b);
+            emu.newTabIndex = await b.evaluate(() => ({ signedIn: !!window.userAuth, isDbAdmin: window.isDbAdmin(),
                 loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none' }));
             const c = await open(`${base}/admin.html?emu=1`);
             await waitFn(c, () => document.getElementById('adminLockModal').style.display === 'flex');
@@ -3449,7 +3548,7 @@ const SCENARIOS = {
 
             // 4 · vize dolumu (aralık kontrolü) → signOut → kilit kartı; kilitliyken etkinlik vizeyi canlandırmaz
             await a.evaluate(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 1000 })));
-            emu.expiry = { reached: await lockedAnon(a), ...(await lockState(a)) };
+            emu.expiry = { reached: await lockedOut(a), ...(await lockState(a)) };
             await a.mouse.move(40, 40); await a.mouse.move(90, 120); await a.keyboard.press('Shift'); await sleep(2500);
             emu.activityWhileLocked = await lockState(a);
 
@@ -3473,7 +3572,7 @@ const SCENARIOS = {
             await a.evaluate(async (AUTH, LONG) => { const sdk = await import(AUTH); await sdk.updatePassword(sdk.getAuth(window.firebaseApp).currentUser, LONG); }, AUTH, LONG);
             rotated = true;
             await a.evaluate(() => { window.showCustomConfirm = async () => true; window.adminLogout(); });
-            emu.secureExit = { reached: await lockedAnon(a), ...(await lockState(a)) };
+            emu.secureExit = { reached: await lockedOut(a), ...(await lockState(a)) };
             emu.unlockOldCodeAfterRotation = { ...(await unlock(a, EMU_ADMIN_CODE)), ...(await lockState(a)) };
             emu.unlockLong = await unlock(a, LONG);
             emu.unlockLongOk = await waitFn(a, () => window.isDbAdmin());
@@ -3482,16 +3581,16 @@ const SCENARIOS = {
             // 7 · F5 + dolmuş vize, admin token'ı canlıyken: vize canlanmaz, Firebase oturumu kapanır
             await a.evaluate(() => { localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() - 1000 })); location.reload(); }).catch(() => {});
             await sleep(1500);
-            emu.reloadExpired = { reached: await lockedAnon(a), ...(await lockState(a)) };
+            emu.reloadExpired = { reached: await lockedOut(a), ...(await lockState(a)) };
 
-            // 8 · "Oturumu Kapat" → index; anonim oturum yerel kalıcılıkta
+            // 8 · "Oturumu Kapat" → index; J10: oturumsuz giriş ekranı (anonim oturum açılmaz)
             await unlock(a, EMU_ADMIN_CODE);
             await waitFn(a, () => window.isDbAdmin());
             const nav2 = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
             await a.evaluate(() => { window.adminForceLogout(); });
             await nav2;
-            await waitFn(a, () => !!window.userAuth && window.isFirebaseLoaded === true);
-            emu.logoutToIndex = { path: await a.evaluate(() => location.pathname), ...(await a.evaluate(() => ({ anon: window.userAuth.isAnonymous, user: window.getActiveUser(),
+            await indexIdle(a);
+            emu.logoutToIndex = { path: await a.evaluate(() => location.pathname), ...(await a.evaluate(() => ({ signedIn: !!window.userAuth, user: window.getActiveUser(),
                 visa: window.AppModules.Session.getAdminVisaRemaining(), loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none',
                 fbSession: Object.keys(sessionStorage).some(k => k.startsWith('firebase:authUser:')), fbLocal: Object.keys(localStorage).some(k => k.startsWith('firebase:authUser:')) }))) };
 
@@ -3509,9 +3608,10 @@ const SCENARIOS = {
                 return auth.currentUser.email;
             }, cfg, AUTH, EMU_ADMIN_CODE);
             await d.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
-            await waitFn(d, () => !!window.userAuth && window.userAuth.isAnonymous && window.isFirebaseLoaded === true);
+            await indexIdle(d);
+            await waitFn(d, () => !window.userAuth, 10000);   // bayat kalıcı admin oturumu kapatılır
             await sleep(1000);
-            emu.legacyPersistentAdmin = await d.evaluate(() => ({ anon: !!window.userAuth?.isAnonymous, isDbAdmin: window.isDbAdmin(), user: window.getActiveUser(),
+            emu.legacyPersistentAdmin = await d.evaluate(() => ({ signedIn: !!window.userAuth, isDbAdmin: window.isDbAdmin(), user: window.getActiveUser(),
                 navbar: !!document.getElementById('userDisplay'), loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none' }));
         } finally {
             if (rotated && a) emu.passwordRestoreFinally = await restorePassword(a);
@@ -3558,13 +3658,20 @@ const SCENARIOS = {
                     purchaseByCode: S.isSelfApproval({ actor: me, kind: 'purchase', record: { createdBy: '12345', createdByName: 'X' } }),
                     purchaseByName: S.isSelfApproval({ actor: me, kind: 'purchase', record: { createdBy: 'unknown', talepEden: 'ismail kaya' } }),
                     purchaseOther: S.isSelfApproval({ actor: me, kind: 'purchase', record: { createdBy: '99999', createdByName: 'Ali' } }),
+                    // J10: sahiplik uid'si ve personel id'si (kod temizliğinden sonra oturumda kod yok)
+                    purchaseByUid: S.isSelfApproval({ actor: { name: 'X', uid: 'u1' }, kind: 'purchase', record: { createdByUid: 'u1', createdByName: 'Başkası' } }),
+                    purchaseById: S.isSelfApproval({ actor: { name: 'X', id: 'p1' }, kind: 'purchase', record: { createdBy: 'p1', createdByName: 'Başkası' } }),
+                    requestByUid: S.isSelfApproval({ actor: { name: 'X', id: 'p1', uid: 'u1' }, kind: 'request', record: { personelUid: 'u1', personelId: 'p2', personel: 'Başkası' } }),
+                    otherUidStillByName: S.isSelfApproval({ actor: { name: 'Ali Veli', uid: 'u1' }, kind: 'purchase', record: { createdByUid: 'u2', createdByName: 'ali veli' } }),
                 };
 
                 // Personel kendi satın alma adımını onaylayamaz → engel + 'blocked', kayıt yazılmaz
+                // J10: adım onaylayıcısı ve talep sahibi aynı GERÇEK hesap (uid) — istemci adımı bu kişiye açar, J4 kapısı durdurur
                 const staff = { name: 'J4 Personel ' + ft.MARKER, code: '00004' };
                 window.setActiveUser(staff); window.currentUser = staff;
-                const po = { id: 'po_' + TOKEN, urun: TOKEN + ' Toner <b>', adet: 2, createdBy: staff.code, createdByName: staff.name, talepEden: staff.name, durum: 'Onay Bekliyor', akis: [],
-                    workflow: { id: 'wf_' + TOKEN, started: true, finished: false, currentStep: 0, currentState: 'initiation', history: [], steps: [{ user: staff.name, tip: 'Yönetici', status: 'pending' }] } };
+                const me4 = window.userAuth.uid;
+                const po = { id: 'po_' + TOKEN, urun: TOKEN + ' Toner <b>', adet: 2, createdBy: staff.code, createdByName: staff.name, createdByUid: me4, talepEden: staff.name, durum: 'Onay Bekliyor', akis: [],
+                    workflow: { id: 'wf_' + TOKEN, started: true, finished: false, currentStep: 0, currentState: 'initiation', history: [], steps: [{ user: staff.name, userUid: me4, tip: 'Yönetici', status: 'pending' }] } };
                 window.data.purchaseOrders = [...(orig.po || []), po];
                 let upserts = 0; window.upsertItem = async () => { upserts++; return { written: 1 }; };
                 await window.approveStep(po.id);
@@ -3572,7 +3679,7 @@ const SCENARIOS = {
 
                 // Personel kendi talebini onaylayamaz (onay penceresi hiç açılmaz); başkasının talebinde yönetici kapısı
                 let modals = 0; window.showRequestApprovalModal = async () => { modals++; return null; };
-                const rq = { id: 'rq_' + TOKEN, ürün: TOKEN + ' Mouse', adet: 1, personel: staff.name, durum: 'Beklemede' };
+                const rq = { id: 'rq_' + TOKEN, ürün: TOKEN + ' Mouse', adet: 1, personel: staff.name, personelUid: me4, durum: 'Beklemede' };
                 const other = { id: 'rq2_' + TOKEN, ürün: TOKEN + ' Klavye', adet: 1, personel: 'Başka Personel', durum: 'Beklemede' };
                 window.data.requests = [...(orig.req || []), rq, other];
                 await window.confirmRequest(rq.id);
@@ -3660,7 +3767,7 @@ const SCENARIOS = {
             return { update: await fsm.updateDoc(ref, { result: 'approved' }).then(() => 'ALLOWED', e => e.code), delete: await fsm.deleteDoc(ref).then(() => 'ALLOWED', e => e.code) };
         }, emu.sanitizedWrite.id);
         await page.evaluate(() => { window.__j4Restore(); document.getElementById('userDisplay')?.remove(); });
-        emu.indexBackToAnonymous = await page.evaluate(() => window.__ft.backToAnonymous());
+        emu.indexBackToStaff = await page.evaluate(() => window.__ft.backToStaff());
 
         // 2 · admin.html (ayrı sekme / bağlam): giriş → kendi satın alma adımı → parola → 'approved'; rapor iki sayfanın kayıtlarını gösterir
         const ctx = await browser.createBrowserContext();
@@ -3669,7 +3776,7 @@ const SCENARIOS = {
             const base = page.url().split('/index.html')[0];
             const a = await ctx.newPage(); a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
             await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
-            await a.waitForFunction(() => window.isFirebaseLoaded === true && !!window.userAuth, { timeout: 20000 });
+            await indexIdle(a);
             const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
             await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
             await nav;
@@ -3707,18 +3814,20 @@ const SCENARIOS = {
         return out;
     },
 
+    // Faz 3.5 odak izolasyonu, J10 PRI giriş ekranıyla: odak kararı oturum olmadığı kesinleşince verilir (anonim oturum / personel
+    // snapshot'ı yok) ve kurumsal kimlik kutusuna gider; kullanıcı önce sayfayla etkileştiyse odak çekilmez; giriş durumu yeniden
+    // değerlendirilince (checkAuth) odak tekrar çekilmez. Oturumsuz yeni bağlamlarda (iki ortam).
     async hotfixLoginFocus(page, browser) {
         const url = page.url();
-        const probe = async (beforeEnable) => {
+        const probe = async (beforeReady) => {
             const p = await (await browser.createBrowserContext()).newPage();
             await p.goto(url, { waitUntil: 'domcontentloaded' });
             let early = null;
-            if (beforeEnable) {
-                early = await p.evaluate(() => ({ dataLoaded: window.isFirebaseLoaded === true }));
-                await beforeEnable(p);
+            if (beforeReady) {
+                early = await p.evaluate(() => ({ focusDecided: document.activeElement?.id === 'login-pri' }));
+                await beforeReady(p);
             }
-            // personel snapshot'ı geldi (odak kararı bu anda verilir) ve kutu etkin
-            await p.waitForFunction(() => { const i = document.getElementById('access-val-node'); return window.isFirebaseLoaded === true && i && !i.disabled; }, { timeout: 20000 });
+            await indexIdle(p);
             await new Promise(r => setTimeout(r, 300));
             const r = await p.evaluate(() => ({ active: document.activeElement?.id || document.activeElement?.tagName }));
             return { p, early, ...r };
@@ -3726,25 +3835,26 @@ const SCENARIOS = {
         const out = {};
         const a = await probe(null);
         out.noInteraction = a.active;
-        // senkron yeniden başlar → personel snapshot'ı yine gelir → odak tekrar çekilmemeli
-        out.afterResync = await a.p.evaluate(async () => {
-            document.getElementById('access-val-node').blur();
-            window.isFirebaseLoaded = false;   // yeniden senkron: personel snapshot'ı bayrağı tekrar true yapar
-            window.startRealtimeSync();
-            const t = Date.now();
-            while (Date.now() - t < 10000) { await new Promise(r => setTimeout(r, 250)); const i = document.getElementById('access-val-node'); if (window.isFirebaseLoaded === true && i && !i.disabled) break; }
+        // giriş durumu yeniden değerlendirilir → odak tekrar çekilmemeli (sayfa başına bir kez)
+        out.afterReload = await a.p.evaluate(async () => {
+            document.activeElement?.blur();
+            if (typeof window.checkAuth === 'function') window.checkAuth();
             await new Promise(r => setTimeout(r, 300));
             return document.activeElement?.id || document.activeElement?.tagName;
         });
         await a.p.browserContext().close();
 
         const b = await probe(async p => { await p.keyboard.press('Shift'); });
-        out.keyBeforeData = { dataWasLoaded: b.early.dataLoaded, active: b.active };
+        out.keyBeforeData = { focusAlreadyDecided: b.early.focusDecided, active: b.active };
         await b.p.browserContext().close();
 
         const c = await probe(async p => { await p.mouse.click(5, 5); });
-        out.clickBeforeData = { dataWasLoaded: c.early.dataLoaded, active: c.active };
+        out.clickBeforeData = { focusAlreadyDecided: c.early.focusDecided, active: c.active };
         await c.p.browserContext().close();
+        out.ok = out.noInteraction === 'login-pri' && out.afterReload === 'BODY'
+            && (out.keyBeforeData.focusAlreadyDecided || out.keyBeforeData.active === 'BODY')
+            && (out.clickBeforeData.focusAlreadyDecided || out.clickBeforeData.active === 'BODY');
+        if (!out.ok) throw new Error('hotfixLoginFocus beklenen sözleşmede değil: ' + JSON.stringify(out));
         return out;
     },
 
@@ -3758,36 +3868,45 @@ const SCENARIOS = {
         const statusVisible = p => p.evaluate(() => { const el = document.getElementById('loginStatus'); return { visible: !!el && getComputedStyle(el).display !== 'none' && el.offsetParent !== null, text: el ? el.innerText.trim() : null }; });
         const errs = [], out = {};
         const open = async (ctx, url) => { const p = await ctx.newPage(); p.on('pageerror', e => errs.push(e.message)); p.on('dialog', d => d.dismiss()); await p.goto(url, { waitUntil: 'domcontentloaded' }); return p; };
-        const staffOnce = (p, code) => p.evaluate(async code => {
-            window._dx._b['access-val-node'] = code;
+        // J10 PRI: personel = kurumsal kimlik + kod (Firebase Auth). Test personeli (emülatörde ft_staff2; gerçek demoda FT_STAFF).
+        const T = FT_STAFF2 || FT_STAFF;
+        const staffOnce = (p, staff) => p.evaluate(async staff => {
+            document.getElementById('login-pri').value = staff.pri;
+            window._dx._b['access-val-node'] = staff.code;
             const t = Date.now(); let sawWaiting = false;
-            const watch = setInterval(() => { const el = document.getElementById('loginStatus'); if (el && /hazırlanıyor/.test(el.innerText) && getComputedStyle(el).display !== 'none') sawWaiting = true; }, 50);
+            const watch = setInterval(() => { const el = document.getElementById('loginStatus'); if (el && /yükleniyor|hazırlanıyor/.test(el.innerText) && getComputedStyle(el).display !== 'none') sawWaiting = true; }, 50);
             await window.handleLogin();   // TEK tıklama
             clearInterval(watch);
-            return { ok: document.body.classList.contains('logged-in') && !!window.getActiveUser(), ms: Date.now() - t, sawWaitingMessage: sawWaiting };
-        }, code);
+            return { ok: document.body.classList.contains('logged-in') && !!window.getActiveUser() && !!window.userAuth && window.userAuth.email === `${staff.pri}@staff.medipol.local`, ms: Date.now() - t, sawWaitingMessage: sawWaiting };
+        }, staff);
 
         // ── İki ortam: mesaj görünürlüğü + personel yolu ──
         const ctx = await browser.createBrowserContext();
         try {
             const p = await open(ctx, `${base}/index.html${q}`);
-            await settle(p, () => window.isFirebaseLoaded === true && (window.data.personel || []).length > 0);
-            await sleep(4800);   // "Sistem Hazır" mesajının gizlendiği an geçti
-            out.wrongCodeAfter4s = await p.evaluate(async () => { window._dx._b['access-val-node'] = '00000x'; await window.handleLogin(); return null; }).then(() => statusVisible(p));
-            const code = await p.evaluate(() => { const x = (window.data.personel || []).find(p => p.code && p.name && !/Muhammed Cer|^Admin$/.test(p.name)); return x && String(x.code); });
-            out.doubleClick = await p.evaluate(async code => {
-                window._dx._b['access-val-node'] = code; let n = 0; const real = window.setActiveUser; window.setActiveUser = u => { n++; return real(u); };
+            await indexIdle(p);
+            await sleep(4800);   // ilk mesajların gizlendiği an geçti
+            out.wrongCodeAfter4s = await p.evaluate(async pri => { document.getElementById('login-pri').value = pri; window._dx._b['access-val-node'] = '00000x'; await window.handleLogin(); return null; }, T.pri).then(() => statusVisible(p));
+            out.doubleClick = await p.evaluate(async staff => {
+                document.getElementById('login-pri').value = staff.pri;
+                window._dx._b['access-val-node'] = staff.code; let n = 0; const real = window.setActiveUser; window.setActiveUser = u => { n++; return real(u); };
                 await Promise.all([window.handleLogin(), window.handleLogin()]); window.setActiveUser = real; return { setActiveUserCalls: n, loggedIn: !!window.getActiveUser() };
-            }, code);
+            }, T);
             await slow(p);
             await p.evaluate(() => window.handleLogout('manual'));
-            out.staffRelogin = await staffOnce(p, code);   // çıkışın hemen ardından, F5'siz, tek tıklama
+            out.staffRelogin = await staffOnce(p, T);   // çıkışın hemen ardından, F5'siz, tek tıklama
             out.staffRelogin.afterVisible = await statusVisible(p);
             await p.evaluate(() => window.handleLogout('manual'));
             out.oldFiveDigitAdminCode = await p.evaluate(async () => { window._dx._b['access-val-node'] = '12345'; const a = []; const r = window.showAppAlert; window.showAppAlert = (m, t) => a.push(m); await window.checkAdminAndGo(); window.showAppAlert = r; return { alert: a.join(' | '), isDbAdmin: window.isDbAdmin() }; });
         } finally { await ctx.close(); }
 
-        if (!EMU) { out.emulator = 'skipped (admin yolları yalnız --emu)'; out.pageErrors = errs; return out; }
+        const staffOk = () => out.wrongCodeAfter4s.visible && /giriş kodu hatalı/i.test(out.wrongCodeAfter4s.text || '')
+            && out.doubleClick.loggedIn && out.staffRelogin.ok && out.oldFiveDigitAdminCode.isDbAdmin === false && errs.length === 0;
+        if (!EMU) {
+            out.emulator = 'skipped (admin yolları yalnız --emu)'; out.pageErrors = errs;
+            if (!staffOk()) throw new Error('j6PostLogoutRelogin beklenen sözleşmede değil: ' + JSON.stringify(out));
+            return out;
+        }
 
         // ── Emülatör: admin yolları, yavaş ağda, tek tıklama ──
         const adminCtx = await browser.createBrowserContext();
@@ -3801,7 +3920,7 @@ const SCENARIOS = {
                 const st = await a.evaluate(() => ({ path: location.pathname, isDbAdmin: window.isDbAdmin(), anon: !!(window.userAuth && window.userAuth.isAnonymous), locked: document.getElementById('adminLockModal')?.style.display === 'flex' })).catch(e => ({ err: e.message }));
                 out[label] = { navigated, admin, ...st };
             };
-            await settle(a, () => window.isFirebaseLoaded === true);
+            await indexIdle(a);
             await adminFromIndex('adminFirstLogin');
             await slow(a);
             // (a) admin.html "Oturumu Kapat" → index → hemen admin girişi
@@ -3825,6 +3944,9 @@ const SCENARIOS = {
             await adminFromIndex('indexLogoutImmediateAdmin');
         } finally { await adminCtx.close(); }
         out.pageErrors = errs;
+        const adm = k => out[k] && out[k].navigated && out[k].admin && !out[k].anon && !out[k].locked;
+        if (!(staffOk() && adm('adminFirstLogin') && adm('afterLogoutButtonImmediateAdmin') && adm('indexLogoutImmediateAdmin') && out.lockImmediateUnlock.ok))
+            throw new Error('j6PostLogoutRelogin beklenen sözleşmede değil: ' + JSON.stringify(out));
         return out;
     },
 
@@ -3870,11 +3992,12 @@ const SCENARIOS = {
     // düzeyinde sınıyordu). İki ortam: gerçek personel girişi → modal + yazma → çıkış → tekrar giriş → zaman aşımı → tekrar
     // giriş; mobil otomatik kart görünümü. Yalnız emülatör (kural 7: VIP komutları yalnız emülatörde): yönetici mesajı bir kez,
     // force logout bir kez + tekrar giriş, bakım modu (personel kilitlenir / admin kilitlenmez / bakım ekranından admin girişi).
-    // Faz 4B · J7 (4.6 / K4) — personel hesabı açma, gerçek UI fonksiyonlarıyla ve gerçek admin oturumuyla (yalnız --emu):
-    //   A · index: "Yeni Personel" (openPersonelModal → addPersonel) kaydı + hesap açar; admin oturumu düşmez; açılan hesapla
-    //       e-posta/parola girişi aynı uid'yi verir. Test personeli sonunda silinir.
-    //   B · admin.html (index "Yönetici Paneli" girişiyle): VIP "Auth Göç Aracı" önizleme → onay → tüm personel bağlanır; ikinci
-    //       çalıştırma hiçbir şey açmaz; önizleme/uyarı/log metinlerinde giriş kodu geçmez; düğme etiketi geri gelir.
+    // Faz 4B · J7 → J10 PRI — personel hesabı ve kurumsal kimlik (PRI), gerçek UI fonksiyonlarıyla ve gerçek admin oturumuyla (yalnız --emu):
+    //   A · index "Yeni Personel": PRI addan önerilir (ad yazıldıkça), yönetici elle değiştirebilir (öneri artık ezmez); başka
+    //       personelin PRI'si reddedilir; kayıt kodsuz + PRI'li, <pri>@ hesabı açılır, admin oturumu düşmez; PRI ve kod yöneticiye
+    //       bir kez gösterilir; açılan hesapla giriş aynı uid'yi verir; hesap açıkken düzenlemede PRI kilitlidir. Test personeli silinir.
+    //   B · admin.html VIP "PRI / Hesap Göç Aracı" (sihirbaz): önizleme kod göstermez ve yazmaz; uygulama bağı kopmuş personeli aynı
+    //       hesaba yeniden bağlar; ikinci çalıştırma hesap açmaz (yalnız kimlik eşlemelerini yeniler); uyarılarda kod geçmez.
     async j7StaffProvisioning(page, browser) {
         const out = {};
         if (!EMU) return { emulator: 'skipped (gerçek admin ve Auth emülatörü yalnız --emu)', ok: true };
@@ -3883,7 +4006,7 @@ const SCENARIOS = {
         // ── A · index: personel ekleme akışı ──
         // (sayfa içinde eval yok: CSP 'unsafe-eval' vermez — doğrulayıcı her evaluate'te satır içi)
         out.add = await page.evaluate(async (APP, AUTH) => {
-            const ft = window.__ft, o = {};
+            const ft = window.__ft, o = {}, SP = window.StaffProvisioning;
             const verify = async (APP, AUTH, email, password) => {
                 const appMod = await import(APP), authMod = await import(AUTH);
                 const app = appMod.getApps().find(x => x.name === 'j7verify') || appMod.initializeApp(window.firebaseApp.options, 'j7verify');
@@ -3892,30 +4015,53 @@ const SCENARIOS = {
                 const cred = await authMod.signInWithEmailAndPassword(auth, email, password);
                 const uid = cred.user.uid; await authMod.signOut(auth); return uid;
             };
-            const alerts = [], realAlert = window.showAppAlert;
+            const type = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input')); };
+            // J10: kod personel kaydına yazılmaz; PRI ve kod yöneticiye BİR KEZ gösterilir ("Giriş Kodu" penceresi, "Kodu aldım")
+            const alerts = [], dialogs = [], real = { alert: window.showAppAlert, confirm: window.showCustomConfirm };
             window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
+            window.showCustomConfirm = async (title, msg, opts) => { dialogs.push({ title: String(title), msg: String(msg), confirmText: opts && opts.confirmText }); return true; };
             try {
                 await ft.asAdmin(async () => {
                     const adminUid = window.userAuth.uid;
                     const name = `J7 Personel ${ft.MARKER}`;
+                    // başka personelin PRI'si reddedilir (kayıt yazılmaz)
                     window.openPersonelModal('add');
-                    document.getElementById('personelName').value = name;
+                    type('personelName', 'Kopya Kimlik ' + ft.MARKER);
+                    type('personelPri', 'flow.personel');
+                    const before = (window.data.personel || []).length;
+                    await document.getElementById('personelForm').onsubmit({ preventDefault() {} });
+                    o.duplicateRejected = (window.data.personel || []).length === before && alerts.some(a => /başka bir personelde/.test(a.m));
+                    // öneri + elle düzenleme
+                    window.openPersonelModal('add');
+                    type('personelName', name);
+                    o.suggested = document.getElementById('personelPri').value === SP.generateStaffPri(name, SP.takenPris(window.data.personel));
+                    const manual = 'J7.Elle' + Date.now().toString(36), manualPri = manual.toLowerCase();   // her koşuda tekil (Auth'ta kalan hesapla çakışmasın)
+                    type('personelPri', manual);
+                    type('personelName', name + ' x');
+                    o.manualKept = document.getElementById('personelPri').value === manual;
+                    type('personelName', name);
                     const code = document.getElementById('personelCode').value;
                     document.getElementById('personelForm').onsubmit({ preventDefault() {} });
-                    o.alerted = await ft.waitFor(async () => alerts.some(a => /Personel eklendi/.test(a.m)), 20000);
+                    o.alerted = await ft.waitFor(async () => dialogs.some(d => /Personel eklendi/.test(d.msg)), 20000);
                     const doc = (await ft.readAll('personel')).find(d => d.name === name);
-                    o.alert = alerts.find(a => /Personel eklendi/.test(a.m));
-                    o.linked = !!(doc && doc.uid) && doc.authEmail === window.StaffProvisioning.staffEmail(doc.id);
+                    const dlg = dialogs.find(d => /Personel eklendi/.test(d.msg));
+                    o.codeDialog = !!dlg && dlg.title === 'Giriş Kodu' && dlg.confirmText === 'Kodu aldım' && dlg.msg.includes(code)
+                        && dlg.msg.includes('Kurumsal kimlik: ' + manualPri) && /Giriş hesabı açıldı/.test(dlg.msg) && /SAKLANMAZ/.test(dlg.msg) && dialogs.length === 1;
+                    o.priIsManual = !!doc && doc.pri === manualPri;
+                    o.linked = !!(doc && doc.uid) && doc.authEmail === manualPri + '@staff.medipol.local' && doc.authEmail === SP.accountEmailOf(doc);
+                    o.codeNotStored = !!doc && !('code' in doc);
                     o.adminKept = window.isDbAdmin() && window.userAuth.uid === adminUid && window.userAuth.email === 'admin@medipol.local';
-                    o.loginUidMatches = doc ? (await verify(APP, AUTH, doc.authEmail, window.StaffProvisioning.staffPassword(code))) === doc.uid : false;
+                    o.loginUidMatches = doc ? (await verify(APP, AUTH, doc.authEmail, SP.staffPassword(code))) === doc.uid : false;
                     o.codeNotInAlert = !alerts.some(a => a.m.includes(code));
+                    // hesap açıkken PRI kilitli (e-posta istemciden değiştirilemez)
+                    if (doc) { window.openPersonelModal('edit', doc.id); o.priLockedWhenLinked = document.getElementById('personelPri').readOnly === true; window.closePersonelModal(); }
                     if (doc) await window.removeItem('personel', doc._docId);
                 });
-            } finally { window.showAppAlert = realAlert; }
+            } finally { window.showAppAlert = real.alert; window.showCustomConfirm = real.confirm; }
             return o;
         }, APP, AUTH);
 
-        // ── B · admin.html: VIP Auth Göç Aracı ──
+        // ── B · admin.html: VIP PRI / Hesap Göç Aracı ──
         const ctx = await browser.createBrowserContext();
         const errs = [];
         const base = `http://127.0.0.1:${PORT}`;
@@ -3924,373 +4070,245 @@ const SCENARIOS = {
             const a = await ctx.newPage();
             a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
             await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
-            await waitFn(a, () => window.isFirebaseLoaded === true && !!window.userAuth);
+            await indexIdle(a);
             const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
             await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
             await nav;
             out.adminReady = await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && (window.data.personel || []).length > 0);
-            out.vip = await a.evaluate(async (APP, AUTH) => {
-                const o = {};
+            out.vip = await a.evaluate(async (APP, AUTH, KEEP) => {
+                const o = {}, SP = window.StaffProvisioning;
                 const verify = async (APP, AUTH, email, password) => {
-                const appMod = await import(APP), authMod = await import(AUTH);
-                const app = appMod.getApps().find(x => x.name === 'j7verify') || appMod.initializeApp(window.firebaseApp.options, 'j7verify');
-                const auth = window.__j7auth || (window.__j7auth = authMod.initializeAuth(app, { persistence: authMod.inMemoryPersistence }));
-                if (!window.__j7emu) { authMod.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true }); window.__j7emu = true; }
-                const cred = await authMod.signInWithEmailAndPassword(auth, email, password);
-                const uid = cred.user.uid; await authMod.signOut(auth); return uid;
-            };
+                    const appMod = await import(APP), authMod = await import(AUTH);
+                    const app = appMod.getApps().find(x => x.name === 'j7verify') || appMod.initializeApp(window.firebaseApp.options, 'j7verify');
+                    const auth = window.__j7auth || (window.__j7auth = authMod.initializeAuth(app, { persistence: authMod.inMemoryPersistence }));
+                    if (!window.__j7emu) { authMod.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true }); window.__j7emu = true; }
+                    const cred = await authMod.signInWithEmailAndPassword(auth, email, password);
+                    const uid = cred.user.uid; await authMod.signOut(auth); return uid;
+                };
+                const wait = async (fn, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 200)); } return false; };
                 const btn = document.querySelector('button[onclick*="vipMigrateStaffAuth"]');
-                o.button = !!btn;
-                const labelBefore = btn && btn.textContent.trim();
+                o.button = !!btn && /PRI \/ Hesap Göç Aracı/.test(btn.textContent);
                 const adminUid = window.userAuth.uid;
-                // Önceki koşulardan kalan bağları sıfırla (Auth hesapları emülatörde kalır → bu koşuda "relinked" beklenir)
-                for (const p of (window.data.personel || []).filter(p => p.uid)) await window.updateItem('personel', p.id, { uid: null, authEmail: null });
-                const codes = (window.data.personel || []).map(p => String(p.code || '')).filter(c => c.length >= 3);
-                const alerts = [], confirms = [];
-                const real = { alert: window.showAppAlert, confirm: window.showCustomConfirm };
+                // Kodlu personelin bağı kaldırılır (Auth hesapları emülatörde kalır → bu koşuda "yeniden bağlanan" beklenir).
+                // Düzeneğin test personeli korunur (kodları kayıtta yok; araç onları yeniden bağlayamaz).
+                const reset = (window.data.personel || []).filter(p => p.uid && SP.staffPassword(p.code) && !KEEP.includes(String(p.id)));
+                for (const p of reset) await window.updateItem('personel', p.id, { uid: null, authEmail: null });
+                o.reset = reset.length;
+                await wait(async () => !(window.data.personel || []).some(p => reset.some(r => r.id === p.id) && p.uid));
+                const codes = (window.data.personel || []).map(p => String(p.code || '')).filter(c => c.length >= 4);
+                const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const alerts = [], real = { alert: window.showAppAlert, confirm: window.showCustomConfirm };
                 window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
-                window.showCustomConfirm = async (title, msg) => { confirms.push(String(msg)); return true; };
+                window.showCustomConfirm = async () => true;
+                let writes = 0;
+                const wrapped = ['applyStaffAccounts', 'provisionStaffAccount', 'updateItem', 'applyItemOps'].map(k => [k, window[k]]);
                 try {
-                    const plan = window.StaffProvisioning.planProvisioning(window.data.personel);
-                    o.planned = plan.toCreate.length;
-                    await window.vipMigrateStaffAuth(btn);
-                    o.preview = confirms[0] && { counts: /açılacak: \d+/.test(confirms[0]), noCode: !codes.some(c => confirms[0].includes(c)), adminNote: /yönetici oturumunuz etkilenmez/.test(confirms[0]) };
-                    o.result = alerts.at(-1);
-                    o.allLinked = await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((window.data.personel || []).filter(p => window.StaffProvisioning.staffPassword(p.code)).every(p => p.uid)) return true; await new Promise(r => setTimeout(r, 250)); } return false; })();
+                    wrapped.forEach(([k, f]) => { window[k] = async (...x) => { writes++; return f(...x); }; });
+                    let ctl = window.vipMigrateStaffAuth(btn);
+                    let ov = document.getElementById('staffAccountWizard');
+                    const leaves = [...ov.querySelectorAll('*')].filter(e => !e.children.length).map(e => e.textContent);
+                    o.preview = {
+                        state: ov.dataset.state, create: ctl.plan.counts.create, blocked: ctl.plan.counts.blocked,
+                        rows: ov.querySelectorAll('[data-role="rows"] tr[data-id]').length === ctl.plan.rows.length,
+                        noCode: !codes.some(c => leaves.some(t => new RegExp(`(^|[^0-9A-Za-z])${esc(c)}([^0-9A-Za-z]|$)`).test(t))),
+                        applyEnabled: !document.getElementById('pawApply').disabled, btnDisabledWhileOpen: btn.disabled, noWrites: writes === 0,
+                    };
+                    wrapped.forEach(([k, f]) => { window[k] = f; });
+                    const res = await ctl.run();
+                    o.result = { state: ov.dataset.state, status: ov.querySelector('[data-role="result"]')?.dataset.status, counts: res && res.counts, stopped: res && res.stopped };
+                    document.getElementById('pawClose').click();
+                    o.closed = !document.getElementById('staffAccountWizard') && !btn.disabled;
+                    o.allLinked = await wait(async () => reset.every(r => (window.data.personel || []).some(p => p.id === r.id && p.uid === r.uid && p.authEmail === SP.accountEmailOf(p))));
                     o.adminKept = window.isDbAdmin() && window.userAuth.uid === adminUid;
-                    o.labelRestored = btn.textContent.trim() === labelBefore && !btn.disabled;
-                    const one = (window.data.personel || []).find(p => p.uid);
-                    o.loginUidMatches = one ? (await verify(APP, AUTH, one.authEmail, window.StaffProvisioning.staffPassword(one.code))) === one.uid : false;
-                    // ikinci çalıştırma: açılacak kimse yok, onay bile sorulmaz
-                    const c0 = confirms.length;
-                    await window.vipMigrateStaffAuth(btn);
-                    o.secondRun = { noConfirm: confirms.length === c0, msg: alerts.at(-1) && alerts.at(-1).m };
+                    const one = (window.data.personel || []).find(p => p.uid && SP.staffPassword(p.code));
+                    o.loginUidMatches = one ? (await verify(APP, AUTH, SP.staffEmail(one.pri), SP.staffPassword(one.code))) === one.uid : false;
+                    // ikinci çalıştırma: hesap açılmaz / taşınmaz, yalnız kimlik eşlemeleri yenilenir
+                    ctl = window.vipMigrateStaffAuth(btn);
+                    o.secondPlan = { create: ctl.plan.counts.create, move: ctl.plan.counts.move, priWrites: ctl.plan.counts.priWrites };
+                    const res2 = await ctl.run();
+                    o.secondCounts = res2 && res2.counts;
+                    document.getElementById('pawClose').click();
                     o.noCodeInAlerts = !alerts.some(a => codes.some(c => a.m.includes(c)));
-                } finally { window.showAppAlert = real.alert; window.showCustomConfirm = real.confirm; }
+                } finally { wrapped.forEach(([k, f]) => { window[k] = f; }); window.showAppAlert = real.alert; window.showCustomConfirm = real.confirm; }
                 return o;
-            }, APP, AUTH);
+            }, APP, AUTH, [FT_STAFF.id, FT_STAFF2.id]);
         } finally {
             out.adminPageErrors = errs;
             await ctx.close();
         }
 
         const A = out.add, V = out.vip || {};
-        out.ok = A.alerted && /Giriş hesabı açıldı/.test(A.alert && A.alert.m) && A.alert.t === 'success' && A.linked && A.adminKept && A.loginUidMatches && A.codeNotInAlert
-            && out.adminReady && V.button && V.planned > 0 && V.preview && V.preview.counts && V.preview.noCode && V.preview.adminNote
-            && /Auth göçü: açılan \d+ · yeniden bağlanan \d+/.test(V.result && V.result.m) && V.result.t === 'success'
-            && V.allLinked && V.adminKept && V.labelRestored && V.loginUidMatches
-            && V.secondRun.noConfirm && /giriş hesabı var/.test(V.secondRun.msg || '') && V.noCodeInAlerts
+        out.ok = A.duplicateRejected && A.suggested && A.manualKept && A.alerted && A.codeDialog && A.priIsManual && A.linked && A.codeNotStored
+            && A.adminKept && A.loginUidMatches && A.codeNotInAlert && A.priLockedWhenLinked
+            && out.adminReady && V.button && V.reset > 0
+            && V.preview && V.preview.state === 'preview' && V.preview.create === V.reset && V.preview.blocked === 0 && V.preview.rows && V.preview.noCode
+            && V.preview.applyEnabled && V.preview.btnDisabledWhileOpen && V.preview.noWrites
+            && V.result.state === 'done' && V.result.status === 'done' && !V.result.stopped && V.result.counts.relinked === V.reset
+            && V.closed && V.allLinked && V.adminKept && V.loginUidMatches
+            && V.secondPlan.create === 0 && V.secondPlan.move === 0 && V.secondPlan.priWrites === 0
+            && Object.keys(V.secondCounts || {}).join() === 'ok' && V.noCodeInAlerts
             && out.adminPageErrors.length === 0;
         if (!out.ok) throw new Error('j7StaffProvisioning beklenen sözleşmede değil: ' + JSON.stringify(out));
         return out;
     },
 
-    // Faz 4B · J7.5 — kod benzersizliği: katı kural (ekleme/düzenleme/hızlı ekleme) + VIP Kod Benzersizleştirme sihirbazı.
-    //   A · index (yazmalar taklit, Firestore'a gitmez): ortak kodlu kişi düzenlenemez; yeni kişi var olan kodla eklenemez.
-    //   B · admin.html, gerçek admin (yalnız --emu): aynı kodlu iki test personeli (biri hesaplı) → sihirbaz grubu bulur;
-    //       satır içi denetim (var olan kod ✗, iki kişi kodu korursa ✗, Uygula kapalı); hesaplı kişinin kodu değişir →
-    //       Firestore'da yeni kod, eski parola geçersiz, yeni parola aynı uid; ortak kodla hızlı ekleme engellenir.
-    async j75CodeWizard(page, browser) {
+    // Faz 4B · J10 PRI (GPT-6 madde 1, revize) — personel girişi: kurumsal kimlik (PRI, ad.soyad) + kod → doğrudan
+    // signInWithEmailAndPassword(<pri>@staff.medipol.local, kod + dolgu). Giriş ekranında personel listesi / arama yok; girişten önce
+    // veritabanı okunmaz (KVKK); anonim oturum yok.
+    //   A · iki ortam (ana sayfa, ağa gitmeden): giriş formunda yalnız iki kutu (PRI metin, kod parola); liste / rehber API'si yok.
+    //   B · --emu, oturumsuz yeni bağlam: ziyaretçi sayfası Firestore'a hiç istek atmaz; ziyaretçi personel / rehber okuyamaz;
+    //       kimlik boş / biçimsiz / bilinmeyen, yanlış kod, başkasının kodu, kısa kod → giriş yok (bilinmeyen kimlik ile yanlış kod
+    //       AYNI mesaj: hesap varlığı sızmaz); Firebase hata kodları (deneme sınırı, devre dışı, ağ) mesaja çevrilir; büyük harfli /
+    //       Türkçe harfli yazım normalize edilir; doğru giriş → uid personel kaydına bağlı, kod oturumda / depoda yok, kimlik kutusu
+    //       temizlenir; F5 oturumu korur; çıkış kapatır; personel kaydından bağı kaldırılmış hesap Auth'u geçse de kapanır.
+    async j10StaffLogin(page, browser) {
         const out = {};
-        out.index = await page.evaluate(async () => {
-            const o = {}, ops = [], alerts = [];
-            const orig = { p: window.data.personel, alert: window.showAppAlert, adm: window.isDbAdmin, val: window.validateAdminAction,
-                api: ['appendItem', 'updateItem', 'removeItem', 'provisionStaffAccount'].map(k => [k, window[k]]) };
-            ['appendItem', 'updateItem', 'removeItem', 'provisionStaffAccount'].forEach(k => { window[k] = async (...a) => { ops.push(k); return { written: 1, status: 'created' }; }; });
-            window.isDbAdmin = () => true; window.validateAdminAction = () => true;
-            window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
-            try {
-                window.data.personel = [{ id: 'j75a', name: 'Ortak A', code: 'ortak5' }, { id: 'j75b', name: 'Ortak B', code: ' ortak5 ' }, { id: 'j75c', name: 'Tekil', code: 'tekil5' }];
-                // düzenleme: ortak kodlu kişi → durur
-                window.openPersonelModal('edit', 'j75a');
-                document.getElementById('personelName').value = 'Ortak A (yeni ad)';
-                document.getElementById('personelForm').requestSubmit();
-                await new Promise(r => setTimeout(r, 80));
-                o.editBlocked = ops.length === 0 && /Kod Benzersizleştirme/.test(alerts.at(-1) && alerts.at(-1).m);
-                // tekil kişinin düzenlemesi serbest
-                window.openPersonelModal('edit', 'j75c');
-                document.getElementById('personelName').value = 'Tekil (yeni ad)';
-                document.getElementById('personelForm').requestSubmit();
-                await new Promise(r => setTimeout(r, 80));
-                o.editUniqueAllowed = ops.includes('updateItem');
-                // ekleme: var olan kod (kırpılmış hâliyle de) → durur; kısa kod → durur
-                ops.length = 0;
-                for (const code of ['tekil5', ' ortak5', 'ab1']) {
-                    window.openPersonelModal('add');
-                    document.getElementById('personelName').value = 'Yeni Kişi';
-                    document.getElementById('personelCode').value = code;
-                    document.getElementById('personelForm').requestSubmit();
-                    await new Promise(r => setTimeout(r, 60));
-                }
-                o.addBlocked = ops.length === 0;
-                o.addMessages = alerts.slice(-3).map(a => a.m);
-                o.messagesHideCode = !alerts.some(a => /tekil5|ortak5/.test(a.m));
-                // öneri: listede olmayan, 5 karakter
-                const s = window.getRandomCode();
-                o.suggestion = s.length === 5 && window.StaffCodeRegistry.validateCode(s, window.data.personel).ok;
-            } finally {
-                window.data.personel = orig.p;
-                orig.api.forEach(([k, f]) => { window[k] = f; });
-                Object.assign(window, { showAppAlert: orig.alert, isDbAdmin: orig.adm, validateAdminAction: orig.val });
-                document.getElementById('personelModal').style.display = 'none';
-            }
-            return o;
+        out.ui = await page.evaluate(() => {
+            const pri = document.getElementById('login-pri'), code = document.getElementById('access-val-node');
+            return {
+                noList: !document.getElementById('login-staff-select') && !document.getElementById('login-staff-filter') && !document.querySelector('#loginModal select'),
+                priText: !!pri && pri.type === 'text' && pri.placeholder === 'ad.soyad', codePassword: !!code && code.type === 'password',
+                inputs: document.querySelectorAll('#loginForm input').length,
+                noDirectoryApi: typeof window.loadStaffDirectory === 'undefined' && typeof window.loadLoginDirectory === 'undefined' && typeof window.syncStaffDirectory === 'undefined',
+            };
         });
-
-        if (EMU) {
-            const ctx = await browser.createBrowserContext();
-            const errs = [];
-            const base = `http://127.0.0.1:${PORT}`;
-            const waitFn = async (p, fn, ms = 25000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn)) return true; } catch (e) { } await new Promise(r => setTimeout(r, 250)); } return false; };
-            try {
-                const a = await ctx.newPage();
-                a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
-                await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
-                await waitFn(a, () => window.isFirebaseLoaded === true && !!window.userAuth);
-                const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
-                await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
-                await nav;
-                out.adminReady = await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && (window.data.personel || []).length > 0);
-                out.wizard = await a.evaluate(async MARKER => {
-                    const o = {}, R = window.StaffCodeRegistry, SP = window.StaffProvisioning;
-                    const wait = async (fn, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 200)); } return false; };
-                    const login = async (email, password) => {
-                        const appMod = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
-                        const authMod = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
-                        const app = appMod.getApps().find(x => x.name === 'j75verify') || appMod.initializeApp(window.firebaseApp.options, 'j75verify');
-                        if (!window.__j75auth) { window.__j75auth = authMod.initializeAuth(app, { persistence: authMod.inMemoryPersistence }); authMod.connectAuthEmulator(window.__j75auth, 'http://127.0.0.1:9099', { disableWarnings: true }); }
-                        try { const c = await authMod.signInWithEmailAndPassword(window.__j75auth, email, password); const uid = c.user.uid; await authMod.signOut(window.__j75auth); return uid; } catch (e) { return null; }
-                    };
-                    const alerts = [], real = { alert: window.showAppAlert, confirm: window.showCustomConfirm };
-                    window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
-                    window.showCustomConfirm = async () => true;
-                    const adminUid = window.userAuth.uid;
-                    const shared = R.suggestCode(window.data.personel);
-                    const A = { id: window.makeId(), name: `J75 Hesaplı ${MARKER}`, code: shared };
-                    const B = { id: window.makeId(), name: `J75 Hesapsız ${MARKER}`, code: shared };
-                    try {
-                        // Kurulum: katı kuralı bilerek aşan eski veri taklidi — veri katmanına doğrudan yazılır
-                        await window.appendItem('personel', A);
-                        await window.appendItem('personel', B);
-                        const prov = await window.provisionStaffAccount(A);
-                        o.setup = prov.status === 'created';
-                        const uidA = prov.uid;
-
-                        // Ortak kodla hızlı ekleme engellenir (katı kural)
-                        window.inventoryManagementModule.quickAddPersonnel();
-                        document.getElementById('qpName').value = `J75 Hızlı ${MARKER}`;
-                        document.getElementById('qpCode').value = shared;
-                        const before = window.data.personel.length;
-                        await window.inventoryManagementModule._saveQuickPersonnel();
-                        o.quickAddBlocked = window.data.personel.length === before && /başka bir personelde/.test(alerts.at(-1) && alerts.at(-1).m);
-                        window.inventoryManagementModule.closeQuickPersonnelModal();
-
-                        // Sihirbaz
-                        const btn = document.querySelector('button[onclick*="vipDedupeStaffCodes"]');
-                        o.button = !!btn;
-                        const ctl = window.vipDedupeStaffCodes(btn);
-                        const ov = document.getElementById('staffCodeWizard');
-                        const rowA = ov && ov.querySelector(`[data-id="${A.id}"]`), rowB = ov && ov.querySelector(`[data-id="${B.id}"]`);
-                        const q = (row, role) => row.querySelector(`[data-role="${role}"]`);
-                        const apply = document.getElementById('scwApply');
-                        const fire = el => el.dispatchEvent(new Event(el.type === 'checkbox' ? 'change' : 'input'));
-                        o.opened = !!(ctl && rowA && rowB);
-                        o.defaults = { keepsAccountHolder: !q(rowA, 'change').checked, otherChanges: q(rowB, 'change').checked, suggested: R.validateCode(q(rowB, 'new-code').value, window.data.personel).ok, applyEnabled: !apply.disabled };
-
-                        // Satır içi denetim: var olan bir kod → ✗, Uygula kapalı; mesajda kod yok
-                        const existing = window.data.personel.find(p => p.code && String(p.id) !== String(A.id) && String(p.id) !== String(B.id)).code;
-                        q(rowB, 'new-code').value = existing; fire(q(rowB, 'new-code'));
-                        o.inlineDuplicate = { bad: rowB.dataset.valid === 'bad', applyDisabled: apply.disabled, msgHidesCode: !q(rowB, 'msg').textContent.includes(existing) };
-                        // İki kişi de kodunu korursa grup ✗
-                        q(rowB, 'change').checked = false; fire(q(rowB, 'change'));
-                        const grp = rowA.closest('fieldset').querySelector('[data-role="group-status"]');
-                        o.groupRule = { groupBad: grp.dataset.ok === '0', applyDisabled: apply.disabled };
-                        // Karar: hesaplı A'nın kodu değişsin, B korusun
-                        q(rowA, 'change').checked = true; fire(q(rowA, 'change'));
-                        const newCode = R.suggestCode(window.data.personel, { reserved: [shared] });
-                        q(rowA, 'new-code').value = newCode; fire(q(rowA, 'new-code'));
-                        o.ready = { aValid: rowA.dataset.valid === 'ok', groupOk: grp.dataset.ok === '1', applyEnabled: !apply.disabled };
-
-                        apply.click();
-                        o.done = await wait(async () => ov.dataset.state === 'done', 20000);
-                        o.rowResult = rowA.dataset.result;
-                        const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');   // admin.html'de __ft yok: sunucudan doğrudan oku
-                        const snap = await fsm.getDoc(fsm.doc(window.fireDb, window.COLLECTION_ROOT, 'personel', 'items', String(A.id))); const fresh = snap.exists() ? snap.data() : null;
-                        o.firestoreCode = !!fresh && fresh.code === newCode && fresh.uid === uidA;
-                        o.oldPasswordDead = (await login(SP.staffEmail(A.id), SP.staffPassword(shared))) === null;
-                        o.newPasswordSameUid = (await login(SP.staffEmail(A.id), SP.staffPassword(newCode))) === uidA;
-                        o.resolved = R.resolveLoginCode(window.data.personel, shared).status === 'unique' && R.resolveLoginCode(window.data.personel, newCode).status === 'unique';
-                        o.adminKept = window.isDbAdmin() && window.userAuth.uid === adminUid;
-                        o.alertHidesCodes = !alerts.some(x => x.m.includes(shared) || x.m.includes(newCode));
-                        document.getElementById('scwCancel').click();
-                        o.closed = !document.getElementById('staffCodeWizard') && !btn.disabled;
-                    } finally {
-                        window.showAppAlert = real.alert; window.showCustomConfirm = real.confirm;
-                        for (const p of [A, B]) { try { await window.removeItem('personel', p.id); } catch (e) { } }
-                    }
-                    return o;
-                }, '__flowtest__');
-            } finally {
-                out.adminPageErrors = errs;
-                await ctx.close();
-            }
-        } else {
-            out.emulator = 'skipped B (gerçek admin + Auth emülatörü yalnız --emu)';
+        const uiOk = out.ui.noList && out.ui.priText && out.ui.codePassword && out.ui.inputs === 2 && out.ui.noDirectoryApi;
+        if (!EMU) {
+            out.emulator = 'skipped B (oturumsuz bağlam ve test hesapları yalnız --emu)';
+            if (!uiOk) throw new Error('j10StaffLogin beklenen sözleşmede değil: ' + JSON.stringify(out));
+            return out;
         }
 
-        const I = out.index, W = out.wizard;
-        out.ok = I.editBlocked && I.editUniqueAllowed && I.addBlocked && I.messagesHideCode && I.suggestion
-            && (!EMU || (out.adminReady && W.setup && W.quickAddBlocked && W.button && W.opened
-                && W.defaults.keepsAccountHolder && W.defaults.otherChanges && W.defaults.suggested && W.defaults.applyEnabled
-                && W.inlineDuplicate.bad && W.inlineDuplicate.applyDisabled && W.inlineDuplicate.msgHidesCode
-                && W.groupRule.groupBad && W.groupRule.applyDisabled
-                && W.ready.aValid && W.ready.groupOk && W.ready.applyEnabled
-                && W.done && W.rowResult === 'changed' && W.firestoreCode && W.oldPasswordDead && W.newPasswordSameUid
-                && W.resolved && W.adminKept && W.alertHidesCodes && W.closed && out.adminPageErrors.length === 0));
-        if (!out.ok) throw new Error('j75CodeWizard beklenen sözleşmede değil: ' + JSON.stringify(out));
-        return out;
-    },
+        const ctx = await browser.createBrowserContext();
+        const errs = [];
+        const base = `http://127.0.0.1:${PORT}`;
+        const waitFn = async (p, fn, ms = 20000, arg) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch (e) { } await new Promise(r => setTimeout(r, 250)); } return false; };
+        let unlinked = null;
+        try {
+            const s = await ctx.newPage();
+            s.on('pageerror', e => errs.push(e.message)); s.on('dialog', d => d.dismiss());
+            await s.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+            out.ready = await indexIdle(s);
+            await new Promise(r => setTimeout(r, 1500));
 
-    // Faz 4B · J8 (4.6 / K4) — hibrit personel girişi, gerçek giriş ekranıyla (handleLogin):
-    //   A · ana sayfa, Firestore'a yazmadan (iki modda): ortak kod → red + 'blocked' denetim kaydı (ilk eşleşmeye düşmez);
-    //       hesapsız personel hibritte eski yoldan (anonim oturum) girer; yalnız-hesap modunda reddedilir; oturum nesnesinde ve
-    //       localStorage'da giriş kodu yok; personel tablosunda kod admin dışında maskeli.
-    //   B · --emu: hesaplı personel e-posta/parola ile girer (uid = personel.uid, anonim değil), kurallar altında yazar,
-    //       F5'te oturum Firebase kalıcılığıyla geri gelir (K5), çıkışta anonime döner; 'anonymous' modunda hesap kullanılmaz.
-    async j8HybridLogin(page, browser) {
-        const out = {};
-        out.a = await page.evaluate(async () => {
-            const o = {}, ft = window.__ft;
-            const statusText = () => (document.getElementById('loginStatus') || {}).textContent || '';
-            const login = async code => { window._dx._b['access-val-node'] = code; await window.handleLogin(); };
-            const orig = { p: window.data.personel, cfg: window.data.config, alert: window.showAppAlert };
-            o.readyAtStart = { auth: !!window.userAuth, anon: !!window.userAuth?.isAnonymous, loaded: window.isFirebaseLoaded === true, personel: Array.isArray(window.data.personel) ? window.data.personel.length : null, activeUser: !!window.getActiveUser(), loggedIn: document.body.classList.contains('logged-in') };
-            const auditBefore = (window.__auditStub || []).length;
-            window.showAppAlert = () => {};
-            // Önceki senaryoların bıraktığı yerel oturum (setActiveUser fikstürleri) temizlenir; Firebase oturumu anonim kalır
-            if (window.getActiveUser()) window.clearSession();
-            document.body.classList.remove('logged-in');
-            try {
-                const base = (window.data.personel || []).filter(p => !String(p.id).startsWith('j8_'));
-                const uniq = () => window.StaffCodeRegistry.suggestCode(window.data.personel);
-                const shared = uniq();
-                window.data.personel = [...base, { id: 'j8_dupA', name: 'J8 Ortak A', code: shared }, { id: 'j8_dupB', name: 'J8 Ortak B', code: shared }];
-                // 1) ortak kod → red
-                await login(shared);
-                o.ambiguous = { rejected: !window.getActiveUser(), message: /yöneticiye başvurun/.test(statusText()), anon: !!window.userAuth?.isAnonymous };
-                if (!ft.emulator) o.ambiguous.audit = (window.__auditStub || []).slice(auditBefore).some(a => a.type === 'login-ambiguous' && a.result === 'blocked' && !JSON.stringify(a).includes(shared));
-                // 2) hesapsız personel, hibrit → eski yol (anonim oturum)
-                const legacyCode = uniq();
-                window.data.personel = [...base, { id: 'j8_legacy', name: 'J8 Hesapsız', code: legacyCode }];
-                window.data.config = { ...(orig.cfg || {}), staffAuthMode: 'hybrid' };
-                await login(legacyCode);
-                const u = window.getActiveUser();
-                o.legacy = { loggedIn: !!u && u.id === 'j8_legacy' && document.body.classList.contains('logged-in'), anon: !!window.userAuth?.isAnonymous,
-                             noCodeInSession: !!u && !('code' in u) && !('code' in (window.currentUser || {})),
-                             noCodeInStorage: !(localStorage.getItem('activeUser') || '').includes(legacyCode) && !JSON.stringify(window.AppModules.Session.unmaskUserData(localStorage.getItem('activeUser'))).includes(legacyCode) };
-                // personel tablosu: admin olmayan oturumda kod maskeli
-                window.renderPersonelTable();
-                const cells = [...document.querySelectorAll('#tablePersonel tbody tr td:nth-child(3)')].map(td => td.textContent.trim());
-                o.tableMasked = cells.length > 0 && cells.every(c => c === '•••••');
-                await window.handleLogout('manual');
-                await ft.waitFor(async () => !!window.userAuth?.isAnonymous && !window.getActiveUser() && window.isFirebaseLoaded === true, 15000);
-                await ft.sleep(1500);   // çıkışla yeniden başlayan senkron bellekteki personel/ayar kopyasını ezer — oturduktan sonra kur
-                // 3) yalnız-hesap modu: hesapsız personel reddedilir
-                window.data.personel = [...base, { id: 'j8_legacy', name: 'J8 Hesapsız', code: legacyCode }];
-                window.data.config = { ...(orig.cfg || {}), staffAuthMode: 'accounts' };
-                await login(legacyCode);
-                o.accountsModeRejectsLegacy = !window.getActiveUser() && /hesabınız henüz tanımlı değil/.test(statusText());
-                // 4) yanlış kod
-                await login(uniq());
-                o.invalidCode = !window.getActiveUser() && /Hatalı Giriş Kodu/.test(statusText());
-            } finally {
-                window.data.personel = orig.p; window.data.config = orig.cfg; window.showAppAlert = orig.alert;
-                if (window.getActiveUser()) { await window.handleLogout('manual'); }
-                await ft.waitFor(async () => !!window.userAuth?.isAnonymous, 8000);
-            }
-            return o;
-        });
+            // 1 · ziyaretçi: giriş sayfası Firestore'a istek atmaz; doğrudan okuma denemeleri reddedilir
+            out.visitorFirestoreRequests = await s.evaluate(() => performance.getEntriesByType('resource').filter(r => /127\.0\.0\.1:8080\//.test(r.name)).length);
+            out.visitor = await s.evaluate(async id => {
+                const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+                const code = p => p.then(() => 'ok', e => e.code);
+                const ref = (col, x) => fsm.doc(window.fireDb, window.COLLECTION_ROOT, col, 'items', x);
+                return {
+                    signedIn: !!window.userAuth, loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none',
+                    noData: !(window.data.personel || []).length,
+                    personelRead: await code(fsm.getDoc(ref('personel', id))),
+                    personelList: await code(fsm.getDocs(fsm.collection(window.fireDb, window.COLLECTION_ROOT, 'personel', 'items'))),
+                    directoryRead: await code(fsm.getDoc(ref('staffDirectory', 'current'))),
+                };
+            }, FT_STAFF.id);
 
-        if (EMU) {
-            // Kurulum (ana sayfa, gerçek admin): hesaplı test personeli
-            const setup = await page.evaluate(async () => {
-                const ft = window.__ft;
-                let person = null;
+            // 2 · reddedilen girişler (oturum açılmaz)
+            const attempt = (pri, code) => s.evaluate(async (pri, code) => {
+                document.getElementById('login-pri').value = pri;
+                window._dx._b['access-val-node'] = code;
+                await window.handleLogin();
+                const st = document.getElementById('loginStatus'), u = window.getActiveUser();
+                return { status: st ? st.innerText.trim() : '', loggedIn: document.body.classList.contains('logged-in'), signedIn: !!window.userAuth,
+                    userId: u ? String(u.id) : null, priLeft: document.getElementById('login-pri').value };
+            }, pri, code);
+            out.noPri = await attempt('', FT_STAFF.code);
+            out.badFormat = await attempt('flow personel', FT_STAFF.code);
+            out.unknownPri = await attempt('olmayan.kisi', FT_STAFF.code);
+            out.wrongCode = await attempt(FT_STAFF.pri, 'yanlis9');
+            out.othersCode = await attempt(FT_STAFF2.pri, FT_STAFF.code);
+            out.shortCode = await attempt(FT_STAFF.pri, 'ab1');
+
+            // 3 · Firebase'in standart hata kodları → mesaj (emülatör deneme sınırı uygulamadığı için Auth çağrısı taklit edilir)
+            out.errorMapping = await s.evaluate(async pri => {
+                const real = window.signInStaffAccount, r = {};
+                try {
+                    for (const c of ['auth/too-many-requests', 'auth/user-disabled', 'auth/network-request-failed', 'auth/internal-error']) {
+                        window.signInStaffAccount = async () => { throw Object.assign(new Error(c), { code: c }); };
+                        document.getElementById('login-pri').value = pri;
+                        window._dx._b['access-val-node'] = 'kod12';
+                        await window.handleLogin();
+                        r[c.replace('auth/', '')] = document.getElementById('loginStatus').innerText.trim();
+                    }
+                } finally { window.signInStaffAccount = real; }
+                r.signedIn = !!window.userAuth;
+                return r;
+            }, FT_STAFF.pri);
+
+            // 4 · doğru giriş (büyük harf + boşlukla yazılmış kimlik normalize edilir) → oturum bağlı; kod oturumda / depoda yok
+            out.success = await attempt('  Flow.PERSONEL ', FT_STAFF.code);
+            await waitFn(s, () => window.isFirebaseLoaded === true && (window.data.personel || []).length > 0, 15000);
+            const sessionState = () => s.evaluate(code => {
+                const u = window.getActiveUser(), Sess = window.AppModules.Session, raw = localStorage.getItem('activeUser') || '';
+                return { email: window.userAuth && window.userAuth.email, uidBound: !!u && !!window.userAuth && u.uid === window.userAuth.uid, userId: u && String(u.id),
+                    staffSession: Sess.isStaffAccountSession(), isDbAdmin: window.isDbAdmin(),
+                    loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none',
+                    codeInSession: !!u && 'code' in u, codeInStorage: raw.includes(code) || JSON.stringify(Sess.unmaskUserData(raw) || '').includes(code) };
+            }, FT_STAFF.code);
+            out.session = await sessionState();
+            await s.reload({ waitUntil: 'domcontentloaded' });
+            out.reloadRestored = await waitFn(s, id => document.body.classList.contains('logged-in') && !!window.getActiveUser() && String(window.getActiveUser().id) === id
+                && getComputedStyle(document.getElementById('loginModal')).display === 'none', 20000, FT_STAFF.id);
+            await new Promise(r => setTimeout(r, 1500));   // giriş ekranı sonradan yeniden açılmıyor mu?
+            out.afterReload = await sessionState();
+            await s.evaluate(() => window.handleLogout('manual'));
+            out.logout = await waitFn(s, () => !window.userAuth && !window.getActiveUser() && getComputedStyle(document.getElementById('loginModal')).display !== 'none', 15000);
+            out.priEmptyAfterLogout = await s.evaluate(() => document.getElementById('login-pri').value === '');
+
+            // 5 · Türkçe harfle yazılan kimlik (ı → i) aynı hesaba gider
+            out.turkishInput = await attempt('Flow.Onaylayıcı', FT_STAFF2.code);
+            await s.evaluate(() => window.handleLogout('manual'));
+            await waitFn(s, () => !window.userAuth, 15000);
+
+            // 6 · personel kaydından bağı kaldırılmış hesap: Auth kodu kabul eder, kurallar reddeder → oturum kapanır
+            unlinked = await page.evaluate(async MARKER => {
+                const ft = window.__ft, SP = window.StaffProvisioning; let r = null;
                 await ft.asAdmin(async () => {
                     const code = window.StaffCodeRegistry.suggestCode(window.data.personel);
-                    person = { id: window.makeId(), name: `J8 Hesaplı ${ft.MARKER}`, code };
+                    const pri = 'j10.bagsiz' + Date.now().toString(36);
+                    const person = { id: window.makeId(), name: `J10 Bağsız ${MARKER}`, birim: 'Test', pri };
                     await window.appendItem('personel', person);
-                    const r = await window.provisionStaffAccount(person);
-                    person.uid = r.uid; person.authEmail = r.email; person.status = r.status;
+                    const p = await window.provisionStaffAccount(person, { code });
+                    await ft.waitFor(async () => (window.data.personel || []).some(x => String(x.id) === String(person.id) && x.uid), 10000);
+                    await window.updateItem('personel', person.id, { uid: null });
+                    r = { id: String(person.id), pri, code, status: p.status, emailOk: p.email === SP.staffEmail(pri) };
                 });
-                return person;
-            });
-            out.setup = { status: setup && setup.status };
-            const ctx = await browser.createBrowserContext();
-            const errs = [];
-            const base = `http://127.0.0.1:${PORT}`;
-            const waitFn = async (p, fn, ms = 25000, arg) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch (e) { } await new Promise(r => setTimeout(r, 250)); } return false; };
-            const ready = p => waitFn(p, () => window.isFirebaseLoaded === true && !!window.userAuth && (window.data.personel || []).length > 0);
-            const state = p => p.evaluate(() => {
-                const u = window.getActiveUser();
-                return { uid: window.userAuth && window.userAuth.uid, anon: !!(window.userAuth && window.userAuth.isAnonymous), email: window.userAuth && window.userAuth.email,
-                         userId: u && String(u.id), loggedIn: document.body.classList.contains('logged-in'),
-                         loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none',
-                         codeInSession: !!u && 'code' in u, staffSession: window.AppModules.Session.isStaffAccountSession(), isDbAdmin: window.isDbAdmin() };
-            });
-            try {
-                const s = await ctx.newPage();
-                s.on('pageerror', e => errs.push(e.message)); s.on('dialog', d => d.dismiss());
-                await s.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
-                await ready(s);
-                await waitFn(s, id => (window.data.personel || []).some(p => String(p.id) === id && p.uid), 15000, String(setup.id));
-                // 1) hesapla giriş
-                await s.evaluate(async code => { window._dx._b['access-val-node'] = code; await window.handleLogin(); }, setup.code);
-                await waitFn(s, () => document.body.classList.contains('logged-in'), 15000);
-                out.accountLogin = await state(s);
-                // 2) kurallar altında personel yazması (Aşama A: oturumlu personel talep açabilir)
-                out.staffWrite = await s.evaluate(async MARKER => {
-                    const r = await window.appendItem('requests', { personel: 'J8 ' + MARKER, ürün: 'J8 test ' + MARKER, adet: 1, durum: 'Beklemede', not: MARKER }).then(() => 'ok', e => e.code);
-                    return r;
-                }, '__flowtest__');
-                // 3) F5 → oturum Firebase kalıcılığıyla geri gelir (K5)
-                await s.reload({ waitUntil: 'domcontentloaded' });
-                await ready(s);
-                await waitFn(s, () => document.body.classList.contains('logged-in') && !!window.getActiveUser() && getComputedStyle(document.getElementById('loginModal')).display === 'none', 20000);
-                await new Promise(r => setTimeout(r, 1500));   // modal sonradan yeniden açılmıyor mu?
-                out.afterReload = await state(s);
-                // 4) çıkış → anonim
-                await s.evaluate(() => window.handleLogout('manual'));
-                await waitFn(s, () => !!window.userAuth && window.userAuth.isAnonymous && !window.getActiveUser(), 15000);
-                out.afterLogout = await state(s);
-                // 5) 'anonymous' modu: hesap kullanılmaz (bellek içi mod; sunucu ayarına dokunulmaz)
-                await s.evaluate(async code => { window.data.config = { ...(window.data.config || {}), staffAuthMode: 'anonymous' }; window._dx._b['access-val-node'] = code; await window.handleLogin(); }, setup.code);
-                await waitFn(s, () => document.body.classList.contains('logged-in'), 15000);
-                out.anonymousMode = await state(s);
-                await s.evaluate(() => window.handleLogout('manual'));
-                await waitFn(s, () => !!window.userAuth && window.userAuth.isAnonymous, 15000);
-            } finally {
-                out.staffPageErrors = errs;
-                await ctx.close();
-                await page.evaluate(async id => { await window.__ft.asAdmin(async () => { try { await window.removeItem('personel', id); } catch (e) { } }); }, setup.id);
-            }
-            const A = out.accountLogin, R = out.afterReload;
-            out.b = A && R && setup
-                && setup.status === 'created'
-                && A.loggedIn && !A.anon && A.staffSession && A.uid === setup.uid && A.email === setup.authEmail && A.userId === String(setup.id) && !A.codeInSession && !A.isDbAdmin && !A.loginModal
-                && out.staffWrite === 'ok'
-                && R.loggedIn && R.uid === setup.uid && R.userId === String(setup.id) && !R.loginModal && !R.codeInSession
-                && out.afterLogout.anon && !out.afterLogout.userId
-                && out.anonymousMode.loggedIn && out.anonymousMode.anon && out.anonymousMode.userId === String(setup.id)
-                && out.staffPageErrors.length === 0;
+                return r;
+            }, '__flowtest__');
+            out.unlinkedSetup = unlinked && { status: unlinked.status, emailOk: unlinked.emailOk };
+            out.unlinkedLogin = await attempt(unlinked.pri, unlinked.code);
+            out.unlinkedLogin.signedInAfter = await s.evaluate(() => !!window.userAuth);
+        } finally {
+            out.pageErrors = errs;
+            await ctx.close();
+            if (unlinked) await page.evaluate(async id => {
+                await window.__ft.asAdmin(async () => { try { await window.removeItem('personel', id); } catch (e) { } });
+            }, unlinked.id);
         }
 
-        const a = out.a;
-        out.ok = a.ambiguous.rejected && a.ambiguous.message && a.ambiguous.anon && (a.ambiguous.audit !== false)
-            && a.legacy.loggedIn && a.legacy.anon && a.legacy.noCodeInSession && a.legacy.noCodeInStorage && a.tableMasked
-            && a.accountsModeRejectsLegacy && a.invalidCode
-            && (!EMU || out.b === true);
-        if (!out.ok) throw new Error('j8HybridLogin beklenen sözleşmede değil: ' + JSON.stringify(out));
+        const V = out.visitor, S = out.session, R = out.afterReload, E = out.errorMapping;
+        const INVALID = /Kurumsal kimlik ya da giriş kodu hatalı/;
+        const refused = (x, re) => x && !x.loggedIn && !x.signedIn && !x.userId && re.test(x.status);
+        out.ok = uiOk && out.ready && out.visitorFirestoreRequests === 0
+            && !V.signedIn && V.loginModal && V.noData
+            && V.personelRead === 'permission-denied' && V.personelList === 'permission-denied' && V.directoryRead === 'permission-denied'
+            && refused(out.noPri, /Kurumsal kimliğinizi/) && refused(out.badFormat, /ad\.soyad biçiminde/)
+            && refused(out.unknownPri, INVALID) && refused(out.wrongCode, INVALID) && refused(out.othersCode, INVALID) && refused(out.shortCode, INVALID)
+            && out.unknownPri.status === out.wrongCode.status && out.wrongCode.priLeft === FT_STAFF.pri
+            && /Çok fazla deneme/.test(E['too-many-requests']) && /devre dışı/.test(E['user-disabled'])
+            && /Sunucuya bağlanılamadı/.test(E['network-request-failed']) && /yöneticiye başvurun/.test(E['internal-error']) && !E.signedIn
+            && out.success.loggedIn && out.success.userId === FT_STAFF.id && out.success.priLeft === ''
+            && S.email === `${FT_STAFF.pri}@staff.medipol.local` && S.uidBound && S.staffSession && !S.isDbAdmin && !S.loginModal && !S.codeInSession && !S.codeInStorage
+            && out.reloadRestored && R.uidBound && R.userId === FT_STAFF.id && !R.loginModal && !R.codeInSession
+            && out.logout && out.priEmptyAfterLogout
+            && out.turkishInput.loggedIn && out.turkishInput.userId === FT_STAFF2.id
+            && out.unlinkedSetup.status === 'created' && out.unlinkedSetup.emailOk
+            && !out.unlinkedLogin.loggedIn && !out.unlinkedLogin.signedInAfter && /yöneticiye başvurun/.test(out.unlinkedLogin.status)
+            && out.pageErrors.length === 0;
+        if (!out.ok) throw new Error('j10StaffLogin beklenen sözleşmede değil: ' + JSON.stringify(out));
         return out;
     },
 
@@ -4304,7 +4322,8 @@ const SCENARIOS = {
         out.a = await page.evaluate(async () => {
             const o = {}, code = p => p.then(() => 'ok', e => e.code);
             o.loaded = !!window.Ownership && typeof window.planOwnershipMigration === 'function' && typeof window.applyOwnershipMigration === 'function';
-            o.anonSelfUid = window.userAuth && window.userAuth.isAnonymous ? window.Ownership.selfUid() === null : 'not-anon';
+            // J10: ana sayfa personel hesabıyla açık (anonim oturum yok) → sahiplik uid'si oturumun Auth uid'si
+            o.staffSelfUid = window.AppModules.Session.isStaffAccountSession() && window.Ownership.selfUid() === window.userAuth.uid;
             const realAlert = window.showAppAlert; window.showAppAlert = () => {};
             const stamp = 'j9_' + Date.now();
             const owned = { id: stamp + '_a', personelUid: 'u-owner', ürün: 'J9 muhafız __flowtest__' };
@@ -4332,7 +4351,7 @@ const SCENARIOS = {
             a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
             if (EMU) {
                 await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
-                await waitFn(a, () => window.isFirebaseLoaded === true && !!window.userAuth);
+                await indexIdle(a);
                 const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
                 await a.evaluate(c => { window._dx._b['access-val-node'] = c; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
                 await nav;
@@ -4375,24 +4394,26 @@ const SCENARIOS = {
 
             if (EMU) {
                 // ── Kurulum (yönetici): hesaplı test personeli + J9 öncesi biçimde eski talep ──
+                // J10: personel kaydı kodsuz, PRI'li (her koşuda tekil); hesap parametreyle verilen kodla <pri>@ adresinde açılır
                 out.setup = await a.evaluate(async MARKER => {
                     const code = window.StaffCodeRegistry.suggestCode(window.data.personel);
-                    const person = { id: window.makeId(), name: `J9 Sahip ${MARKER}`, code };
+                    const person = { id: window.makeId(), name: `J9 Sahip ${MARKER}`, pri: 'j9.sahip' + Date.now().toString(36) };
                     await window.appendItem('personel', person);
-                    const r = await window.provisionStaffAccount(person);
+                    const r = await window.provisionStaffAccount(person, { code });
+                    const t = Date.now(); while (Date.now() - t < 10000 && !(window.data.personel || []).some(p => String(p.id) === String(person.id) && p.uid)) await new Promise(x => setTimeout(x, 200));
                     const legacy = { id: 'j9_legacy_' + Date.now(), personel: person.name, personelId: person.id, ürün: `J9 eski talep ${MARKER}`, adet: 1, durum: 'Beklemede' };
                     await window.applyItemOps([{ op: 'set', col: 'requests', item: legacy }]);
-                    return { ...person, uid: r.uid, status: r.status, legacyId: legacy.id };
+                    return { ...person, id: String(person.id), code, uid: r.uid, status: r.status, legacyId: legacy.id };
                 }, '__flowtest__');
 
-                // ── Personel: gerçek formlarla kayıt aç ──
+                // ── Personel: listeden ad + kod ile giriş, gerçek formlarla kayıt aç ──
                 const s = await ctx.newPage();
                 s.on('pageerror', e => errs.push(e.message)); s.on('dialog', d => d.dismiss());
                 await s.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
-                await waitFn(s, () => window.isFirebaseLoaded === true && !!window.userAuth && (window.data.personel || []).length > 0);
-                await waitFn(s, id => (window.data.personel || []).some(p => String(p.id) === id && p.uid), 15000, String(out.setup.id));
-                await s.evaluate(async c => { window._dx._b['access-val-node'] = c; await window.handleLogin(); }, out.setup.code);
-                await waitFn(s, () => document.body.classList.contains('logged-in') && !window.userAuth.isAnonymous, 15000);
+                await indexIdle(s);
+                out.staffLogin = (await staffLoginVia(s, { id: out.setup.id, pri: out.setup.pri, code: out.setup.code })).ok;
+                delete out.setup.code;   // çıktıya yazılmaz
+                await waitFn(s, () => document.body.classList.contains('logged-in') && window.isFirebaseLoaded === true && !window.userAuth.isAnonymous, 15000);
                 out.staff = await s.evaluate(async MARKER => {
                     const o = { uid: window.userAuth.uid, selfUid: window.Ownership.selfUid() };
                     window.showAppAlert = () => {}; window.alert = () => {};
@@ -4470,10 +4491,10 @@ const SCENARIOS = {
         }
 
         const A = out.a, P = out.preview;
-        out.ok = A.loaded && A.anonSelfUid === true && A.changeOwner === 'owner-immutable' && A.staffFirstWrite === 'owner-first-write'
+        out.ok = A.loaded && A.staffSelfUid === true && A.changeOwner === 'owner-immutable' && A.staffFirstWrite === 'owner-first-write'
             && A.createForOther === 'owner-uid-mismatch' && A.saveDataChange === 'owner-immutable'
             && P.opened && P.summaryRows === 4 && P.noWrites && P.noCodesShown && P.closed
-            && (!EMU || (out.setup.status === 'created'
+            && (!EMU || (out.setup.status === 'created' && out.staffLogin === true
                 && out.staff.selfUid === out.staff.uid && out.staff.request === out.staff.uid && out.staff.purchase === out.staff.uid
                 && out.staff.task.creatorUid === out.staff.uid && out.staff.task.assigneeUid === out.staff.uid
                 && out.staff.afterUpsert === out.staff.uid && out.staff.clientChange === 'owner-immutable' && out.staff.rulesChange === 'permission-denied'
@@ -4492,39 +4513,41 @@ const SCENARIOS = {
         const settle = async (p, fn, ms = 25000, arg) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch (e) { } await sleep(300); } return false; };
         const errs = [];
         const open = async (ctx, url) => { const p = await ctx.newPage(); p.on('pageerror', e => errs.push(e.message)); p.on('dialog', d => d.dismiss()); await p.goto(url, { waitUntil: 'domcontentloaded' }); return p; };
+        // J10: oturumlu sayfa hazır (veri geldi) / oturumsuz sayfa hazır (giriş listesi) ayrı; personel = listeden ad + kod
         const ready = p => settle(p, () => window.isFirebaseLoaded === true && !!window.userAuth && (window.data.personel || []).length > 0);
-        const staffLogin = (p, code) => p.evaluate(async code => {
-            window._dx._b['access-val-node'] = code; await window.handleLogin();
-            const inv = document.getElementById('inventory-screen');
-            return { loggedIn: document.body.classList.contains('logged-in'), loginHidden: getComputedStyle(document.getElementById('loginModal')).display === 'none',
-                unblurred: !inv.style.filter, user: (window.getActiveUser() || {}).name };
-        }, code);
+        const staffLogin = async (p, staff) => {
+            const r = await staffLoginVia(p, staff);
+            return p.evaluate(ok => {
+                const inv = document.getElementById('inventory-screen');
+                return { loggedIn: ok && document.body.classList.contains('logged-in'), loginHidden: getComputedStyle(document.getElementById('loginModal')).display === 'none',
+                    unblurred: !inv.style.filter, user: (window.getActiveUser() || {}).name };
+            }, r.ok);
+        };
         const modalAndWrite = (p, MARKER) => p.evaluate(async MARKER => {
             window.openRequestModal(false);
             const modalOpens = getComputedStyle(document.getElementById('requestModal')).display !== 'none';
             window.closeRequestModal();
-            const write = await window.appendItem('requests', { id: window.makeId(), ürün: 'J6 ' + MARKER, adet: 1, durum: 'Beklemede', personel: (window.getActiveUser() || {}).name }).then(() => 'ok', e => e.code || e.message);
+            const write = await window.appendItem('requests', { id: window.makeId(), ürün: 'J6 ' + MARKER, adet: 1, durum: 'Beklemede', personel: (window.getActiveUser() || {}).name,
+                personelUid: window.userAuth && window.userAuth.uid }).then(() => 'ok', e => e.code || e.message);
             return { modalOpens, write };
         }, MARKER);
-        const loginScreen = p => p.evaluate(() => ({ loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none', activeUser: !!window.getActiveUser(), anon: !!(window.userAuth && window.userAuth.isAnonymous) }));
+        const loginScreen = p => p.evaluate(() => ({ loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none', activeUser: !!window.getActiveUser(), signedIn: !!window.userAuth }));
 
         const out = {};
         const sctx = await browser.createBrowserContext();
         let s = await open(sctx, `${base}/index.html${q}`);
-        let staff = null;
+        const staff = FT_STAFF2 || FT_STAFF;   // emülatörde ikinci test personeli (ana sayfanın oturumundan ayrı hesap)
         try {
-            await ready(s);
-            staff = await s.evaluate(() => { const p = (window.data.personel || []).find(x => x && x.code && x.name && !/Muhammed Cer|^Admin$/.test(x.name)); return p ? { code: String(p.code), id: p.id != null ? String(p.id) : null, name: p.name } : null; });
-            if (!staff) return { skipped: 'personel kaydı yok' };
-            out.staff = staff.name;
+            await indexIdle(s);
 
             // Ek A · Giriş/Oturum: giriş → modal + yazma → çıkış → tekrar giriş → modallar ve yazma
-            out.login = await staffLogin(s, staff.code);
+            out.login = await staffLogin(s, staff);
+            out.staff = out.login.user;
             out.afterLogin = await modalAndWrite(s, MARKER);
             await s.evaluate(() => window.handleLogout('manual'));
-            out.logout = { reachedLogin: await settle(s, () => getComputedStyle(document.getElementById('loginModal')).display !== 'none' && window.isFirebaseLoaded === true), ...(await loginScreen(s)),
+            out.logout = { reachedLogin: await settle(s, () => getComputedStyle(document.getElementById('loginModal')).display !== 'none' && !window.userAuth), ...(await loginScreen(s)),
                 syncRunning: await s.evaluate(() => window.getSyncHealth().running) };
-            out.relogin = await staffLogin(s, staff.code);
+            out.relogin = await staffLogin(s, staff);
             out.afterRelogin = await modalAndWrite(s, MARKER);
 
             // 3 dk zaman aşımı (süre kısaltılır) → giriş ekranı → tekrar giriş → modallar
@@ -4532,7 +4555,7 @@ const SCENARIOS = {
             await sleep(4500);
             out.timeout = await loginScreen(s);
             await s.evaluate(() => Object.assign(window.SessionConfig, window.__j6Cfg));
-            out.timeoutRelogin = { ...(await staffLogin(s, staff.code)), ...(await modalAndWrite(s, MARKER)) };
+            out.timeoutRelogin = { ...(await staffLogin(s, staff)), ...(await modalAndWrite(s, MARKER)) };
 
             // Mobil (≤768 px) otomatik kart görünümü
             await s.setViewport({ width: 390, height: 844 });
@@ -4546,12 +4569,12 @@ const SCENARIOS = {
             const actx = await browser.createBrowserContext();
             try {
                 const a = await open(actx, `${base}/index.html?emu=1`);
-                await ready(a);
+                await indexIdle(a);
                 const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
                 await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
                 await nav;
                 await settle(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && typeof window.vipToggleKillSwitch === 'function');
-                const target = { id: staff.id || staff.code, name: staff.name, demo: false };
+                const target = { id: staff.id, name: out.staff, demo: false };
 
                 // Yönetici mesajı hedefe bir kez düşer (yeniden yüklemede tekrar gösterilmez)
                 await a.evaluate((target, TOKEN) => { _currentTargetUser = target; document.getElementById('uapSystemMessage').value = 'J6 mesaj ' + TOKEN; return window.vipSendSystemMessage(); }, target, TOKEN);
@@ -4560,21 +4583,26 @@ const SCENARIOS = {
                 await ready(s); await sleep(4000);
                 out.messageNotRepeatedAfterReload = !(await s.evaluate(t => document.body.innerText.includes(t), TOKEN));
 
-                // Force logout: hedef bir kez çıkar, tekrar girebilir (yeniden atılmaz)
-                await staffLogin(s, staff.code);
+                // Force logout: hedef bir kez çıkar, tekrar girebilir (yeniden atılmaz). F5 oturumu korudu (K5) → yeniden giriş gerekmez.
+                out.sessionAfterReload = await s.evaluate(id => document.body.classList.contains('logged-in') && String((window.getActiveUser() || {}).id) === id, staff.id);
+                if (!out.sessionAfterReload) await staffLogin(s, staff);
                 await a.evaluate(target => { _currentTargetUser = target; return window.vipForceLogout(); }, target);
                 out.forceLogout = { kicked: await settle(s, () => getComputedStyle(document.getElementById('loginModal')).display !== 'none' && !window.getActiveUser(), 10000) };
-                // çıkış dinleyicileri yeniden başlatır; personel listesi gelene kadar giriş 'Veriler henüz hazır değil' der (bilinen davranış)
-                out.forceLogout.dataReadyAgain = await ready(s);
-                out.forceLogout.relogin = await staffLogin(s, staff.code);
+                // J10: çıkıştan sonra oturum kapalı; giriş listesi hazır
+                out.forceLogout.loginReadyAgain = await indexIdle(s);
+                out.forceLogout.relogin = await staffLogin(s, staff);
                 await sleep(4000);
                 out.forceLogout.stillLoggedInAfter4s = await s.evaluate(() => !!window.getActiveUser() && document.body.classList.contains('logged-in'));
                 out.forceLogout.adminSelfTargetRefused = await a.evaluate(async () => { const me = window.getActiveUser(); _currentTargetUser = { id: me.code || me.name, name: me.name, demo: false }; const alerts = []; const real = window.showAppAlert; window.showAppAlert = (m) => alerts.push(m); await window.vipForceLogout(); window.showAppAlert = real; return { refused: alerts.some(m => /Kendi oturumunuzu/.test(m)), stillAdmin: window.isDbAdmin() }; });
 
-                // Bakım modu: personel bakım ekranına alınır, admin alınmaz; bakım ekranından admin girişi
+                // Bakım modu: personel bakım ekranına alınır, admin alınmaz; bakım ekranından admin girişi.
+                // Bakım açılınca personel sayfası BİR KEZ yeniden yüklenir: yeniden yüklenmiş sayfa beklenir (işaret kaybolur), yoksa
+                // bakım ekranındaki giriş denemesi yeniden yüklemeye denk gelip kaybolabiliyordu (test yarışı).
+                await s.evaluate(() => { window.__j6BeforeMaintenance = true; });
                 await a.evaluate(() => { window.showCustomConfirm = async () => true; window.alert = () => { }; return window.vipToggleKillSwitch(); });
                 out.maintenance = {
-                    staffLocked: await settle(s, () => !!document.getElementById('maintenanceOverlay'), 20000),
+                    staffLocked: await settle(s, () => !window.__j6BeforeMaintenance && document.readyState === 'complete' && !!document.getElementById('maintenanceOverlay')
+                        && !!document.getElementById('maintenanceCode') && typeof window.adminBypassMaintenance === 'function' && !!window.SecurityConfig, 20000),
                     adminNotLocked: await a.evaluate(() => !document.getElementById('maintenanceOverlay') && window.isDbAdmin() && localStorage.getItem('system_maintenance_mode') !== 'true'),
                 };
                 await s.evaluate(code => { document.getElementById('maintenanceForm').style.display = 'block'; document.getElementById('maintenanceCode').value = code; window.adminBypassMaintenance(); }, EMU_ADMIN_CODE).catch(() => { });
@@ -4592,16 +4620,168 @@ const SCENARIOS = {
             }
             // Bakım kapanınca personel ekranı normale döner (yeni oturum, bayrak yok)
             const p2 = await open(sctx, `${base}/index.html?emu=1`);
-            await ready(p2); await sleep(1500);
+            await indexIdle(p2); await sleep(1500);
             out.maintenance = out.maintenance || {};
             out.maintenance.normalAfterOff = await p2.evaluate(() => !document.getElementById('maintenanceOverlay') && localStorage.getItem('system_maintenance_mode') !== 'true');
-            // Ana test sayfası bakımda iki kez yeniden yüklendi → yardımcıları yeniden kur
+            // Ana test sayfası bakımda iki kez yeniden yüklendi → personel oturumu (yerel kalıcılık) geri gelir; yardımcıları yeniden kur
             out.mainPageRecovered = await settle(page, () => !document.getElementById('maintenanceOverlay') && window.isFirebaseLoaded === true && !!window.userAuth, 30000);
-            await installHelpers(page);
+            await ensureMainSession(page);
         } finally {
             await sctx.close();
             out.pageErrors = errs;
         }
+        const F = out.forceLogout || {}, M = out.maintenance || {};
+        out.ok = out.login.loggedIn && out.login.loginHidden && out.login.unblurred && out.afterLogin.modalOpens && out.afterLogin.write === 'ok'
+            && out.logout.reachedLogin && !out.logout.activeUser && !out.logout.signedIn
+            && out.relogin.loggedIn && out.afterRelogin.write === 'ok'
+            && out.timeout.loginModal && !out.timeout.activeUser && out.timeoutRelogin.loggedIn && out.timeoutRelogin.write === 'ok'
+            && out.mobileCards.active && out.mobileCards.visible
+            && (!EMU || (out.messageShown && out.messageNotRepeatedAfterReload
+                && F.kicked && F.relogin && F.relogin.loggedIn && F.stillLoggedInAfter4s && F.adminSelfTargetRefused.refused && F.adminSelfTargetRefused.stillAdmin
+                && M.staffLocked && M.adminNotLocked && M.bypassToAdmin && M.normalAfterOff && out.mainPageRecovered && !out.maintenanceResetError))
+            && out.pageErrors.length === 0;
+        if (!out.ok) throw new Error('j6EkASession beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
+
+    // Faz 4B · J10 (GPT-6 madde 2) — VIP "Kod Temizliği", gerçek yönetici oturumuyla (yalnız --emu; gerçek demoda yazma yok).
+    // Önizleme hiçbir şey yazmaz ve kod göstermez; önkoşul yokken (sahiplik göçü bekleyen kayıt) "Kodları Sil" kapalıdır ve çalışmaz;
+    // Sahiplik Göç Aracından sonra açılır; uygulama personel.code ve requests.personelKodu alanlarını siler, uid bağlarına dokunmaz;
+    // kurallar kodun geri yazılmasını reddeder; temizlenen personel AYNI koduyla giriş ekranından girer (Auth); ikinci açılışta
+    // temizlenecek bir şey kalmaz. EN SONDA koşar: kodlar bu emülatör koşusunda geri gelmez (sonraki koşudan önce npm run emu:seed).
+    async j10CodeCleanse(page, browser) {
+        if (!EMU) return { emulator: 'skipped (yönetici oturumu ve yazma yalnız --emu)' };
+        const out = {}, errs = [];
+        const base = `http://127.0.0.1:${PORT}`;
+        const waitFn = async (p, fn, ms = 25000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn)) return true; } catch (e) { } await new Promise(r => setTimeout(r, 250)); } return false; };
+        const ctx = await browser.createBrowserContext();
+        let probe = null;   // temizlenecek bir personelin id + kodu: yalnız girişi doğrulamak için; çıktıya yazılmaz
+        try {
+            const a = await ctx.newPage();
+            a.on('pageerror', e => errs.push(e.message)); a.on('dialog', d => d.dismiss());
+            await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+            await indexIdle(a);
+            const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
+            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await nav;
+            out.adminReady = await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true
+                && (window.data.personel || []).length > 0 && typeof window.vipCodeCleanse === 'function');
+
+            // Kurulum: J9 öncesi biçimde, eski kod kopyası taşıyan bir talep → sahiplik göçü bekler (önkoşul engeli)
+            const legacyId = await a.evaluate(async (FT2, MARKER) => {
+                const legacy = { id: 'j10_legacy_' + Date.now(), personel: FT2.name, personelId: FT2.id, personelKodu: 'eski5', ürün: `J10 eski talep ${MARKER}`, adet: 1, durum: 'Beklemede' };
+                await window.applyItemOps([{ op: 'set', col: 'requests', item: legacy }]);
+                const t = Date.now(); while (Date.now() - t < 10000 && !(window.data.requests || []).some(r => r.id === legacy.id)) await new Promise(r => setTimeout(r, 200));
+                return legacy.id;
+            }, { id: FT_STAFF2.id, name: 'Flow Test Onaylayıcı' }, '__flowtest__');
+            await new Promise(r => setTimeout(r, 1500));   // tüm koleksiyon snapshot'ları otursun
+
+            const res = await a.evaluate(async (legacyId, keepIds) => {
+                const o = {};
+                const fsm = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+                const ref = (col, id) => fsm.doc(window.fireDb, window.COLLECTION_ROOT, col, 'items', String(id));
+                const read = async (col, id) => { const sn = await fsm.getDoc(ref(col, id)); return sn.exists() ? sn.data() : null; };
+                const personel = window.data.personel || [];
+                const coded = personel.filter(p => p.code).map(p => String(p.id));
+                const codes = personel.map(p => String(p.code || '')).filter(c => c.length >= 4);
+                const pp = personel.find(p => p.code && p.uid && String(p.code).trim().length >= 4 && !keepIds.includes(String(p.id)));
+                const probe = pp ? { id: String(pp.id), pri: pp.pri, code: String(pp.code).trim(), uid: pp.uid } : null;
+                o.codedBefore = coded.length;
+                const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const showsCode = ov => { const leaves = [...ov.querySelectorAll('*')].filter(e => !e.children.length).map(e => e.textContent);
+                    return codes.some(c => leaves.some(t => new RegExp(`(^|[^0-9A-Za-z])${esc(c)}([^0-9A-Za-z]|$)`).test(t))); };
+                const real = { confirm: window.showCustomConfirm, alert: window.showAppAlert };
+                window.showCustomConfirm = async () => true; window.showAppAlert = () => { };
+                const wrapped = ['applyItemOps', 'saveData', 'applyCodeCleanse', 'applyOwnershipMigration', 'updateItem'].map(k => [k, window[k]]);
+                const btn = document.querySelector('button[onclick*="vipCodeCleanse"]');
+                const apply = () => document.getElementById('ccwApply');
+                o.button = !!btn;
+                try {
+                    // 1 · önizleme: yazma yok, kod yok; önkoşul eksik → kapalı ve çalışmaz
+                    let writes = 0;
+                    wrapped.forEach(([k, f]) => { window[k] = async (...x) => { writes++; return f(...x); }; });
+                    let ctl = window.vipCodeCleanse(btn), ov = document.getElementById('codeCleanseWizard');
+                    o.first = { state: ov && ov.dataset.state, total: ctl.plan.total, pending: ctl.plan.blockers.ownershipPending, noAccount: ctl.plan.blockers.noAccount,
+                        legacyListed: ctl.plan.requests.some(r => r.id === legacyId), applyDisabled: apply().disabled, noCodesShown: !showsCode(ov), btnDisabledWhileOpen: !!btn && btn.disabled };
+                    o.blockedRunRefused = (await ctl.run()) === null;
+                    o.previewNoWrites = writes === 0;
+                    document.getElementById('ccwClose').click();
+                    o.closed = !document.getElementById('codeCleanseWizard') && !btn.disabled;
+                    wrapped.forEach(([k, f]) => { window[k] = f; });
+
+                    // 2 · önkoşul: Sahiplik Göç Aracı (yöneticinin belgelenmiş yolu)
+                    const own = window.vipOwnershipMigration(document.querySelector('button[onclick*="vipOwnershipMigration"]'));
+                    const ores = await own.run();
+                    o.ownership = { status: ores && ores.status, legacyWritten: !!ores && ores.written.some(w => w.id === legacyId) };
+                    document.getElementById('owwClose').click();
+                    const t = Date.now(); while (Date.now() - t < 10000 && window.planCodeCleanse().blockers.ownershipPending) await new Promise(r => setTimeout(r, 200));
+
+                    // 3 · uygula
+                    ctl = window.vipCodeCleanse(btn); ov = document.getElementById('codeCleanseWizard');
+                    o.second = { state: ov.dataset.state, ready: ctl.plan.ready, total: ctl.plan.total, personel: ctl.plan.personel.length, requests: ctl.plan.requests.length,
+                        pending: ctl.plan.blockers.ownershipPending, noAccount: ctl.plan.blockers.noAccount, applyDisabled: apply().disabled };
+                    const r = await ctl.run();
+                    o.applied = r && { written: r.written, failed: r.failed, notAttempted: r.notAttempted, error: r.error, state: ov.dataset.state,
+                        result: ov.querySelector('[data-role="result"]') && ov.querySelector('[data-role="result"]').dataset.status };
+                    document.getElementById('ccwClose').click();
+
+                    // 4 · sunucu: kodlar silindi, uid bağları duruyor; kod geri yazılamaz
+                    const docs = await Promise.all(coded.map(id => read('personel', id)));
+                    o.codesGone = docs.every(d => d && !('code' in d));
+                    o.uidsKept = docs.filter(d => d && d.uid).length === personel.filter(p => p.code && p.uid).length;
+                    const leg = await read('requests', legacyId);
+                    o.legacyCopyGone = !!leg && !('personelKodu' in leg) && !!leg.personelUid;
+                    o.localCleared = !(window.data.personel || []).some(p => p.code) && !(window._dbMirror.personel || []).some(p => p.code);
+
+                    // 5 · tekrar: temizlenecek bir şey yok
+                    ctl = window.vipCodeCleanse(btn);
+                    o.third = { total: ctl.plan.total, applyDisabled: apply().disabled, status: document.querySelector('#codeCleanseWizard [data-role="status"]').textContent };
+                    document.getElementById('ccwClose').click();
+
+                    // 6 · kurallar kodun geri yazılmasını reddeder (yönetici dahil). Firestore SDK reddedilen yazmayı yerel önbellekte
+                    //     önce uygular, ret gelince geri alır → yerel kopya da kodsuz kalmalı.
+                    o.rewriteDenied = await fsm.updateDoc(ref('personel', coded[0]), { code: 'geri1' }).then(() => 'ALLOWED', e => e.code);
+                    const t2 = Date.now(); while (Date.now() - t2 < 5000 && (window.data.personel || []).some(p => p.code)) await new Promise(r => setTimeout(r, 100));
+                    o.localRevertedAfterDenied = !(window.data.personel || []).some(p => p.code);
+                } finally {
+                    wrapped.forEach(([k, f]) => { window[k] = f; });
+                    window.showCustomConfirm = real.confirm; window.showAppAlert = real.alert;
+                }
+                return { o, probe };
+            }, legacyId, [FT_STAFF.id, FT_STAFF2.id]);
+            out.wizard = res.o;
+            probe = res.probe;
+
+            // 6 · temizlenen personel aynı koduyla giriş ekranından girer (oturumsuz ayrı bağlam)
+            if (probe) {
+                const sctx = await browser.createBrowserContext();
+                try {
+                    const s = await sctx.newPage();
+                    s.on('pageerror', e => errs.push(e.message)); s.on('dialog', d => d.dismiss());
+                    await s.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+                    await indexIdle(s);
+                    const r = await staffLoginVia(s, probe);
+                    out.loginAfterCleanse = { ok: r.ok, uidMatches: await s.evaluate(uid => !!window.userAuth && window.userAuth.uid === uid, probe.uid) };
+                } finally { await sctx.close(); }
+            }
+        } finally {
+            out.adminPageErrors = errs;
+            await ctx.close();
+        }
+
+        const W = out.wizard || {};
+        if (W.codedBefore === 0) throw new Error('j10CodeCleanse: emülatörde temizlenecek kod yok — kodlar önceki bir koşuda silinmiş. Önce: npm run emu:seed');
+        out.ok = out.adminReady && W.button && W.codedBefore > 0
+            && W.first.state === 'blocked' && W.first.pending > 0 && W.first.noAccount.length === 0 && W.first.legacyListed && W.first.applyDisabled
+            && W.first.noCodesShown && W.first.btnDisabledWhileOpen && W.blockedRunRefused && W.previewNoWrites && W.closed
+            && W.ownership.status === 'done' && W.ownership.legacyWritten
+            && W.second.state === 'preview' && W.second.ready && !W.second.applyDisabled && W.second.personel === W.codedBefore && W.second.requests >= 1
+            && W.applied && W.applied.failed === 0 && !W.applied.error && W.applied.written === W.second.total && W.applied.state === 'done' && W.applied.result === 'done'
+            && W.codesGone && W.uidsKept && W.legacyCopyGone && W.localCleared && W.rewriteDenied === 'permission-denied' && W.localRevertedAfterDenied
+            && W.third.total === 0 && W.third.applyDisabled && /Temizlenecek kod yok/.test(W.third.status)
+            && out.loginAfterCleanse && out.loginAfterCleanse.ok && out.loginAfterCleanse.uidMatches
+            && out.adminPageErrors.length === 0;
+        if (!out.ok) throw new Error('j10CodeCleanse beklenen sözleşmede değil: ' + JSON.stringify(out));
         return out;
     },
 };
@@ -4622,8 +4802,9 @@ const SCENARIOS = {
     page.on('dialog', d => d.dismiss());
     let failed = false;
     try {
+        if (!FT_STAFF) throw new Error('ABORT: J10 sonrası testler bir personel hesabıyla giriş yapar. Gerçek demoda FT_STAFF_PRI ve FT_STAFF_CODE ortam değişkenlerini verin (ya da --emu).');
         await page.goto(`http://127.0.0.1:${PORT}/index.html${EMU ? '?emu=1' : ''}`, { waitUntil: 'domcontentloaded' });
-        await new Promise(r => setTimeout(r, 7000));
+        await staffLoginPage(page, FT_STAFF);
         await installHelpers(page);
         const pre = await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
         console.log(`pre-cleanup removed: ${pre}`);
@@ -4632,9 +4813,16 @@ const SCENARIOS = {
             // İlerleme satırı senaryo BAŞLARKEN yazılır (takılan senaryo hemen görünsün). İzleme: Select-String '^\['
             console.log(`\n[${i + 1}/${wanted.length}] ${name} başladı · ${clock()} · geçen ${elapsed()} · hata ${fails}`);
             try {
+                if (await ensureMainSession(page)) console.log('  (ana sayfa test personeli oturumu yeniden kuruldu)');
                 await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
                 await new Promise(r => setTimeout(r, 1500));
-                console.log(`\n=== ${name} ===\n` + JSON.stringify(await SCENARIOS[name](page, browser), null, 1));
+                const asAdmin = EMU && ADMIN_SCENARIOS.has(name);
+                if (asAdmin) await page.evaluate(async () => { await window.__ft.adminLogin(); window.__ft._inAdmin = true; });
+                try {
+                    console.log(`\n=== ${name} ===\n` + JSON.stringify(await SCENARIOS[name](page, browser), null, 1));
+                } finally {
+                    if (asAdmin) await page.evaluate(async () => { window.isDbAdmin = window.AppModules.Session.isDbAdmin; await window.__ft.backToStaff(); });
+                }
             } catch (e) { failed = true; fails++; console.log(`\n=== ${name} FAILED: ${e.message}`); }
         }
         console.log(`\n■ bitti · ${wanted.length} senaryo · ${fails} hata · süre ${elapsed()}`);

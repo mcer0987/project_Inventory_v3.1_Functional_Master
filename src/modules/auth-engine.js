@@ -273,8 +273,8 @@ export const checkAuth = function () {
         const list = window.data && window.data.personel;
         if (!window.isFirebaseLoaded || !Array.isArray(list)) { _recheckAuthWhenPersonelLoaded(); return; }
         const person = list.find(p => p && p.uid && String(p.uid) === String(uid));
-        if (!person || window.AppModules.Session.getStaffAuthMode() === 'anonymous') {
-            console.warn('🔒 [auth-engine] Personel hesabı oturumu geçersiz (' + (person ? 'mod anonim' : 'personele bağlı değil') + ') — kapatılıyor.');
+        if (!person) {
+            console.warn('🔒 [auth-engine] Personel hesabı oturumu geçersiz (personele bağlı değil) — kapatılıyor.');
             if (S) S.endAdminSession('stale');
             return;
         }
@@ -385,18 +385,31 @@ function setLoginStatus(html) {
     if (html) el.dataset.loginMsg = '1'; else delete el.dataset.loginMsg;   // firebase-handler bu mesajın üstüne "Sistem Hazır" yazmaz
 }
 
-const LOGIN_READY_TIMEOUT_MS = 15000;
-const isLoginReady = () => !!window.userAuth && window.isFirebaseLoaded === true && !!(window.data && window.data.personel);
-async function waitForLoginReady() {
-    if (isLoginReady()) return true;
-    setLoginStatus("<span style='color:var(--warning-color)'>⏳ Oturum hazırlanıyor, lütfen bekleyin…</span>");
-    const t = Date.now();
-    while (Date.now() - t < LOGIN_READY_TIMEOUT_MS) {
-        await new Promise(r => setTimeout(r, 150));
-        if (isLoginReady()) { setLoginStatus(''); return true; }
+// ─── Personel girişi: kurumsal kimlik (PRI) + kod (Faz 4B · J10, PRI revizyonu) ──────────────────────────
+// [WHY]: Anonim oturum kaldırıldı (Aşama B). J10'un ilk sürümündeki oturumsuz "adını seç" listesi KVKK ve kullanım açısından
+//        iptal edildi: giriş ekranı veritabanından hiçbir şey okumaz, personel listesi gösterilmez.
+// [HOW]: İki kutu: kurumsal kimlik (#login-pri, ör. ayse.yilmaz) ve giriş kodu (#access-val-node, maskeli). Giriş doğrudan
+//        signInWithEmailAndPassword(<pri>@staff.medipol.local, kod + dolgu) — PRI, üretimdeki normalizasyonla (Türkçe harfler
+//        arındırılır, küçük harf) okunur. Yönetici aynı kod kutusuna parolasını yazıp "Yönetici Paneli"ne basar (değişmedi).
+
+// Faz 3.5 · otomatik odak izolasyonu: odak yalnız kullanıcı sayfayla henüz etkileşmediyse ve sayfa başına bir kez verilir;
+// giriş alanlarının kendisine tıklamak etkileşim sayılmaz. J10 PRI: odak, oturum olmadığı kesinleşince kimlik kutusuna gider.
+let _userInteracted = false;
+let _loginAutoFocused = false;
+const _loginFieldIds = ['login-pri', 'access-val-node'];
+function _markUserInteraction(e) {
+    if (e && e.target && _loginFieldIds.includes(e.target.id)) return;
+    _userInteracted = true;
+    ['pointerdown', 'keydown'].forEach(t => document.removeEventListener(t, _markUserInteraction, true));
+}
+['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, _markUserInteraction, true));
+function _autoFocusLogin() {
+    const el = document.getElementById('login-pri');
+    const active = document.activeElement;
+    if (!_loginAutoFocused && !_userInteracted && el && el.offsetParent !== null && (!active || active === document.body)) {
+        _loginAutoFocused = true;
+        try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
     }
-    setLoginStatus("<span style='color:var(--danger-color)'>⚠️ Sunucuya bağlanılamadı. Bağlantınızı kontrol edip tekrar deneyin.</span>");
-    return false;
 }
 
 let _loginInFlight = false;
@@ -405,34 +418,42 @@ let _loginInFlight = false;
 // handleLogin
 // ─────────────────────────────────────────────────────────────────────────────
 /**
- * @function handleLogin
- * @param {Event} event - Form submit eventi
- *
- * [WHY]: Personel girişi. Admin girişi ayrı akıştadır (checkAdminAndGo).
- * [HOW]: Kod personel listesinde aranır; bulunursa Session Store'a yazılır. Oturum/veri hazır değilse beklenir.
- *        Biyometrik adım ENABLE_BIOMETRIC_LOGIN ile kontrol edilir.
+ * @function handleLogin — personel girişi (J10 PRI): kurumsal kimlik + kod → Firebase Auth (signInWithEmailAndPassword).
+ * Veritabanı okunmaz. Admin girişi ayrı akıştadır (checkAdminAndGo; aynı parola kutusunu kullanır).
  */
 export const handleLogin = async function (event) {
     if (event) { event.preventDefault(); event.stopPropagation(); }
 
+    const priInput = document.getElementById('login-pri');
     const codeInput = document.getElementById('access-val-node');
     const loginModal = document.getElementById('loginModal');
 
     // [R-SYS]: Güvenli kod maskeleyiciden değeri al; yoksa input'tan oku.
     const code = window._dx ? window._dx._g('access-val-node') : (codeInput ? codeInput.value.trim() : '');
 
-    // GÜVENLİK KONTROLÜ: Veriler yüklenmeden giriş yaptırma — reddetmek yerine hazır olmasını bekle (kapanış hotfix'i)
     if (_loginInFlight) return;
     _loginInFlight = true;
     try {
-        if (!(await waitForLoginReady())) return;
-        await completeStaffLogin(code, { codeInput, loginModal });
+        const SP = window.StaffProvisioning;
+        if (!SP) { setLoginStatus(_LOGIN_MSG.contact); return; }
+        const pri = SP.normalizePri(priInput ? priInput.value : '');
+        if (!pri) {
+            setLoginStatus(_LOGIN_MSG.pri);
+            if (priInput) priInput.focus();
+            return;
+        }
+        if (!SP.isValidPri(pri)) {
+            setLoginStatus(_LOGIN_MSG.priFormat);
+            if (priInput) priInput.focus();
+            return;
+        }
+        await completeStaffLogin(pri, code, { priInput, codeInput, loginModal });
     } finally {
         _loginInFlight = false;
     }
 };
 
-// Hatalı/reddedilen giriş: modal açık kalır, kutu sarsılır ve temizlenir.
+// Hatalı/reddedilen giriş: modal açık kalır, kod kutusu sarsılır ve temizlenir (kurumsal kimlik korunur).
 function _rejectStaffLogin(html, codeInput) {
     setLoginStatus(html);
     if (codeInput) {
@@ -445,153 +466,85 @@ function _rejectStaffLogin(html, codeInput) {
     }
 }
 const _LOGIN_MSG = {
-    invalid: "<span style='color:var(--danger-color); font-weight:bold;'>❌ Hatalı Giriş Kodu!</span>",
+    pri: "<span style='color:var(--warning-color); font-weight:bold;'>👤 Kurumsal kimliğinizi (ad.soyad) girin.</span><br><span style='font-size:12px;'>Yönetici iseniz yalnız parolayı girip \"Yönetici Paneli\"ne basın.</span>",
+    priFormat: "<span style='color:var(--warning-color); font-weight:bold;'>👤 Kurumsal kimlik ad.soyad biçiminde olmalı (ör. ayse.yilmaz).</span>",
+    invalid: "<span style='color:var(--danger-color); font-weight:bold;'>❌ Kurumsal kimlik ya da giriş kodu hatalı!</span>",
     contact: "<span style='color:var(--danger-color); font-weight:bold;'>⚠️ Giriş yapılamadı, lütfen yöneticiye başvurun.</span>",
-    noAccount: "<span style='color:var(--danger-color); font-weight:bold;'>⚠️ Giriş hesabınız henüz tanımlı değil, lütfen yöneticiye başvurun.</span>",
+    disabled: "<span style='color:var(--danger-color); font-weight:bold;'>⛔ Giriş hesabınız devre dışı. Lütfen yöneticiye başvurun.</span>",
     rateLimited: "<span style='color:var(--danger-color); font-weight:bold;'>⏳ Çok fazla deneme yapıldı. Birkaç dakika sonra tekrar deneyin.</span>",
     network: "<span style='color:var(--danger-color)'>⚠️ Sunucuya bağlanılamadı. Bağlantınızı kontrol edip tekrar deneyin.</span>",
 };
-const _auditLogin = (type, reason) => {
-    if (typeof window.appendAuditLog === 'function') window.appendAuditLog({ type, result: 'blocked', reason }).catch(() => { });
-};
+// Firebase Auth hata kodu → kullanıcı mesajı. Yanlış kod ile var olmayan kimlik aynı mesajı alır (hesap varlığı sızdırılmaz).
+function _staffLoginError(code) {
+    const c = String(code || '').replace(/^auth\//, '');
+    if (['invalid-credential', 'invalid-login-credentials', 'wrong-password', 'user-not-found', 'invalid-email', 'invalid-password'].includes(c)) return _LOGIN_MSG.invalid;
+    if (c === 'too-many-requests') return _LOGIN_MSG.rateLimited;
+    if (c === 'user-disabled') return _LOGIN_MSG.disabled;
+    if (c === 'network-request-failed' || c === 'unavailable') return _LOGIN_MSG.network;
+    return _LOGIN_MSG.contact;
+}
 
-async function completeStaffLogin(code, { codeInput, loginModal }) {
-
-    // [WHY]: Her personel girişi admin hesabına bir parola denemesi yapıyordu (AUTH-04).
-    // [HOW]: Bu form yalnız personel kodunu doğrular; admin girişi yalnız "Yönetici Paneli" (checkAdminAndGo) akışındadır.
-    // [WHY]: Faz 4B · J8 (4.6 / K4) — giriş "listede ilk eşleşen" kişiyi alıyordu (aynı kodu paylaşan iki kişiden biri diğerinin
-    //        oturumuna girebiliyordu) ve her zaman anonim oturumla kalıyordu.
-    // [HOW]: StaffCodeRegistry.planStaffLogin: kod birden fazla kişide → RED (ilk eşleşmeye düşülmez, denetim günlüğüne
-    //        'blocked'); STAFF_AUTH_MODE ('hybrid' varsayılan) ve personelin hesabına göre: hesabı olan → ana Auth örneğinde
-    //        e-posta/parola ile giriş (kod + dolgu; uid personel.uid ile doğrulanır), hesabı olmayan → eski yol (anonim oturum).
-    //        'accounts' modunda hesabı olmayan giremez; 'anonymous' modunda hesaplar kullanılmaz.
+async function completeStaffLogin(pri, code, { priInput, codeInput, loginModal }) {
+    // [WHY]: Faz 4B · J10 — kod veritabanında aranmaz, kişi listeden seçilmez; kodlar personel kaydından silinebilir (Kod Temizliği).
+    // [HOW]: <pri>@staff.medipol.local hesabına kod + dolgu ile ANA Auth örneğinde giriş. Firebase'in kendi hata ve deneme sınırı
+    //        (too-many-requests) işletilir. Girişten sonra personel listesi gelince checkAuth (K5) oturumu uid ile personel
+    //        kaydına bağlar; bağ yoksa (hesap personele bağlı değil) kurallar okumayı reddeder → oturum kapanır.
+    //        Biyometrik adım (ENABLE_BIOMETRIC_LOGIN) personel girişinde yok (K2-b kaydı yapılmadı).
     const Session = window.AppModules.Session;
-    const R = window.StaffCodeRegistry;
-    const mode = Session.getStaffAuthMode();
-    const plan = R.planStaffLogin({ personel: window.data.personel || [], code, mode });
+    const SP = window.StaffProvisioning;
+    const email = SP.staffEmail(pri);
+    const password = SP.staffPassword(code);
+    if (!email || !password) { _rejectStaffLogin(_LOGIN_MSG.invalid, codeInput); return; }
 
-    if (plan.action === 'reject') {
-        if (plan.reason === 'ambiguous') {
-            console.warn('🔒 [auth-engine] Giriş reddedildi: kod ' + plan.count + ' personelde kayıtlı (belirsiz).');
-            _auditLogin('login-ambiguous', 'giriş kodu ' + plan.count + ' personelde ortak');
-            _rejectStaffLogin(_LOGIN_MSG.contact, codeInput);
-        } else {
-            _rejectStaffLogin(plan.reason === 'no-account' ? _LOGIN_MSG.noAccount : _LOGIN_MSG.invalid, codeInput);
-        }
+    setLoginStatus("<span style='color:var(--warning-color)'>⏳ Giriş yapılıyor…</span>");
+    // Aynı sekmede açık kalmış başka bir oturum (başka personel / yönetici) önce kapatılır: kimlikler karışmasın.
+    if (window.userAuth && window.SecurityConfig) await window.SecurityConfig.logout();
+    try {
+        await window.signInStaffAccount(email, password);
+    } catch (e) {
+        console.warn('🔒 [auth-engine] Personel girişi reddedildi:', e && e.code);
+        _rejectStaffLogin(_staffLoginError(e && e.code), codeInput);
         return;
     }
 
-    const user = plan.person;
-    if (plan.action === 'account') {
-        setLoginStatus("<span style='color:var(--warning-color)'>⏳ Giriş yapılıyor…</span>");
-        try {
-            const fbUser = await window.signInStaffAccount(plan.email, window.StaffProvisioning.staffPassword(code));
-            if (user.uid && String(fbUser.uid) !== String(user.uid)) {
-                // Hesap başka bir personele ait: oturum hemen kapatılır (yanlış kimlikle tek bir yazma bile yapılmaz)
-                console.error('🔒 [auth-engine] Hesap uid personel kaydıyla eşleşmiyor — oturum kapatılıyor.');
-                await window.SecurityConfig.logout();
-                _auditLogin('login-uid-mismatch', 'hesap uid personel kaydıyla eşleşmiyor');
-                _rejectStaffLogin(_LOGIN_MSG.contact, codeInput);
-                return;
-            }
-        } catch (e) {
-            const pol = R.accountFailurePolicy(mode, e && e.code);
-            if (pol.action === 'reject') {
-                console.warn('🔒 [auth-engine] Hesapla giriş reddedildi:', pol.reason, e && e.code);
-                if (pol.reason === 'account-out-of-sync') _auditLogin('login-account-out-of-sync', 'hesap parolası giriş koduyla eşleşmiyor');
-                _rejectStaffLogin(pol.reason === 'rate-limited' ? _LOGIN_MSG.rateLimited : pol.reason === 'network' ? _LOGIN_MSG.network : _LOGIN_MSG.contact, codeInput);
-                return;
-            }
-            // Hibrit: hesap senkronu bozuk → eski yoldan (giriş başarısız olunca anonim oturum değişmez)
-            console.warn('⚠️ [auth-engine] Hesapla giriş başarısız (' + (e && e.code) + '); hibrit modda eski yoldan devam ediliyor.');
-        }
-    } else if (Session.isStaffAccountSession()) {
-        // Eski yol: önceki bir personel hesabı oturumu açık kaldıysa kapatılır, anonim oturumla devam edilir
-        await window.SecurityConfig.logout();
-        const t = Date.now();
-        while (!(window.userAuth && window.userAuth.isAnonymous) && Date.now() - t < 10000) await new Promise(r => setTimeout(r, 100));
+    // Kimlik: personel listesi gelince checkAuth K5 yolu setActiveUser(personel) yapar (uid eşleşmesiyle).
+    const bound = () => {
+        const u = window.getActiveUser();
+        return !!(u && window.userAuth && Session.isStaffAccountSession() && String(u.uid || '') === String(window.userAuth.uid));
+    };
+    const t = Date.now();
+    while (!bound() && window.userAuth && Date.now() - t < 20000) await new Promise(r => setTimeout(r, 100));
+    if (!bound()) {
+        console.warn('🔒 [auth-engine] Hesap bir personel kaydına bağlanamadı; oturum kapatılıyor.');
+        if (window.userAuth && window.SecurityConfig) await window.SecurityConfig.logout();
+        _rejectStaffLogin(_LOGIN_MSG.contact, codeInput);
+        return;
+    }
+    const user = window.getActiveUser();
+
+    // ─── BAŞARILI GİRİŞ ───
+    setLoginStatus('');
+    if (codeInput) { codeInput.value = ''; if (window._dx) window._dx._r('access-val-node'); }
+    if (priInput) priInput.value = '';   // ortak bilgisayarda bir sonraki kişiye önceki kimlik görünmesin
+    document.body.classList.add('logged-in');
+    if (typeof window.startSessionTimer === 'function') window.startSessionTimer();
+    if (loginModal) loginModal.style.setProperty('display', 'none', 'important');
+
+    const inventoryScreen = document.getElementById('inventory-screen');
+    const lpView = document.getElementById('launchpad-view');
+    if (lpView) lpView.style.display = 'none';   // [DECOMMISSIONED] Launchpad kaldırıldı
+    if (inventoryScreen) {
+        inventoryScreen.style.setProperty('display', 'block', 'important');
+        inventoryScreen.style.removeProperty('filter');
+        inventoryScreen.style.removeProperty('pointer-events');
+        inventoryScreen.style.removeProperty('user-select');
+        if (typeof window.switchTab === 'function') window.switchTab('b1');
     }
 
-    if (user) {
-        // [SECURITY_GUARD]: K2 kararına kadar biyometrik adım bayrakla kapalı (bkz. ENABLE_BIOMETRIC_LOGIN).
-        if (ENABLE_BIOMETRIC_LOGIN) {
-            if (typeof window.verifyBiometrics !== 'function') {
-                console.error('[auth-engine] Biometric module not loaded!');
-                setLoginStatus("<span style='color:var(--danger-color)'>❌ Güvenlik modülü yüklenemedi!</span>");
-                return;
-            }
-
-            // [BUGFIX] Bug 8: WebAuthn iptal/başarısızlıkta oturum tamamen geri alınır.
-            let biometricSuccess = false;
-            try {
-                biometricSuccess = await window.verifyBiometrics({ timeout: 60000 });
-            } catch (error) {
-                console.error('[auth-engine] WebAuthn exception during login verification:', error);
-                biometricSuccess = false;
-            }
-
-            if (!biometricSuccess) {
-                setLoginStatus("<span style='color:var(--danger-color)'>❌ Biyometrik doğrulama başarısız!</span>");
-                if (codeInput) {
-                    codeInput.value = '';
-                    codeInput.focus();
-                }
-                if (typeof window.handleLogout === 'function') {
-                    await window.handleLogout('manual');
-                } else if (typeof window.logout === 'function') {
-                    await window.logout('manual');
-                }
-                if (typeof window.showAppAlert === 'function') {
-                    window.showAppAlert('Yetkili oturum açmanız gerekmektedir.', 'error');
-                } else {
-                    alert('Yetkili oturum açmanız gerekmektedir.');
-                }
-                return;
-            }
-        }
-
-        // ─── BAŞARILI GİRİŞ (KOD + BIYOMETRIK) ───
-        window.setActiveUser(user);
-        setLoginStatus('');
-
-        document.body.classList.add('logged-in');
-
-        // Güvenlik timer'ını başlat (timer.js)
-        if (typeof window.startSessionTimer === 'function') {
-            window.startSessionTimer();
-        }
-
-        if (loginModal) loginModal.style.setProperty('display', 'none', 'important');
-
-        const inventoryScreen = document.getElementById('inventory-screen');
-        const lpView = document.getElementById('launchpad-view');
-
-        // [DECOMMISSIONED] Launchpad kaldırıldı
-        if (lpView) lpView.style.display = 'none';
-
-        if (inventoryScreen) {
-            // [WHY]: Giriş formundan başarılı submit sonrası ekran bulanıklığını kaldır
-            //        ve kullanıcı etkileşimini (pointer, select) yeniden etkinleştir.
-            // [HOW]: setProperty override'ları removeProperty ile temizlenir.
-            inventoryScreen.style.setProperty('display', 'block', 'important');
-            inventoryScreen.style.removeProperty('filter');
-            inventoryScreen.style.removeProperty('pointer-events');
-            inventoryScreen.style.removeProperty('user-select');
-            if (typeof window.switchTab === 'function') window.switchTab('b1');
-        }
-
-        updateNavbarUI(window.getActiveUser() || user);
-        setupUI();
-
-        // Şablon motoru varsa yükle
-        if (typeof window.loadTemplates === 'function') {
-            await window.loadTemplates();
-        }
-
-        if (typeof window.showAppAlert === 'function') {
-            window.showAppAlert(`Hoş geldin, ${user.name}`, 'success');
-        }
-    }
+    updateNavbarUI(user);
+    setupUI();
+    if (typeof window.loadTemplates === 'function') await window.loadTemplates();
+    if (typeof window.showAppAlert === 'function') window.showAppAlert(`Hoş geldin, ${user.name}`, 'success');
 }
 
 // [COMPATIBILITY_BRIDGE]: index.html'deki login formu onsubmit="window.handleLogin(event)" çağırır.
@@ -617,8 +570,7 @@ export const checkAdminAndGo = async function () {
     if (_loginInFlight) return;
     _loginInFlight = true;
     try {
-        // Kapanış hotfix'i: çıkıştan hemen sonra oturum ve personel listesi (yönetici kimliği için) hazır olana kadar beklenir.
-        if (!(await waitForLoginReady())) return;
+        // J10: giriş öncesi veri yok; oturum durumunun yerleşmesini SecurityConfig.authenticate kendisi bekler (waitForAuthSettled).
         await completeAdminLogin(code);
     } finally {
         _loginInFlight = false;
@@ -632,6 +584,9 @@ async function completeAdminLogin(code) {
     const isAdminPass = await window.SecurityConfig.authenticate(code);
 
     if (isAdminPass) {
+        // J10: personel listesi ancak oturum açıldıktan sonra gelir — yönetici kimliği için en fazla 10 sn beklenir.
+        const t0 = Date.now();
+        while (!(window.isFirebaseLoaded === true && Array.isArray(window.data && window.data.personel)) && Date.now() - t0 < 10000) await new Promise(r => setTimeout(r, 100));
         // [WHY]: Personel listesinde admin kaydı yoksa (ör. boş demo DB) giriş sessizce hiçbir şey yapmıyordu.
         const user = window.SecurityConfig.resolveAdminIdentity();
 
@@ -692,6 +647,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 2. GERÇEK AUTH KONTROLÜ
     checkAuth();
+
+    // 3. J10 PRI: oturum olmadığı kesinleşince (Firebase durumu bildirdi, kullanıcı yok) kurumsal kimlik kutusuna odak
+    if (document.getElementById('login-pri')) {
+        const focusWhenSignedOut = () => {
+            if (typeof window.whenAuthKnown !== 'function') { setTimeout(focusWhenSignedOut, 100); return; }
+            window.whenAuthKnown().then(u => { if (!u) _autoFocusLogin(); });
+        };
+        focusWhenSignedOut();
+    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

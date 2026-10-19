@@ -1442,24 +1442,19 @@
                             <i class="fas fa-dna me-2"></i>Şema Göçü (B3)
                         </button>
                         <button class="btn w-100 fw-bold" onclick="window.vipMigrateStaffAuth(this)"
-                            title="Hesabı olmayan personele Firebase giriş hesabı açar; önizleme + onay (Faz 4B · J7)"
+                            title="Personele kurumsal kimlik (PRI) atar; <pri>@ giriş hesabını açar ya da J7 hesabını uid korunarak taşır; önizleme + onay (Faz 4B · J10)"
                             style="background: rgba(56,189,248,0.1); color: #38bdf8; border: 1px solid #38bdf8; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-user-shield me-2"></i>Auth Göç Aracı
-                        </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipDedupeStaffCodes(this)"
-                            title="Aynı giriş kodunu paylaşan personeli bulur; yeni kod seçtirir, hesap parolasını da günceller (Faz 4B · J7.5)"
-                            style="background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid #10b981; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-key me-2"></i>Kod Benzersizleştirme
-                        </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipCycleStaffAuthMode(this)" id="vipStaffAuthModeBtn"
-                            title="Personel girişinin hesapla mı (Firebase Auth) yoksa eski kod + anonim oturumla mı yapılacağı (Faz 4B · J8)"
-                            style="background: rgba(99,102,241,0.1); color: #818cf8; border: 1px solid #818cf8; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-id-badge me-2"></i><span data-role="label">Giriş Modu: …</span>
+                            <i class="fas fa-user-shield me-2"></i>PRI / Hesap Göç Aracı
                         </button>
                         <button class="btn w-100 fw-bold" onclick="window.vipOwnershipMigration(this)"
                             title="Talep, satın alma, görev ve şablonlara sahiplik uid'lerini önizlemeyle ekler (Faz 4B · J9)"
                             style="background: rgba(244,114,182,0.1); color: #f472b6; border: 1px solid #f472b6; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-fingerprint me-2"></i>Sahiplik Göç Aracı
+                        </button>
+                        <button class="btn w-100 fw-bold" onclick="window.vipCodeCleanse(this)"
+                            title="Düz metin giriş kodlarını veritabanından siler; önkoşullar sağlanmadan çalışmaz (Faz 4B · J10)"
+                            style="background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid #ef4444; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-eraser me-2"></i>Kod Temizliği
                         </button>
                     </div>
                 </div>

@@ -23,9 +23,10 @@ function load() {
     return { O: window.Ownership, SP: window.StaffProvisioning, window };
 }
 
-// Personel: hesap e-postası J7 biçiminde (staffEmail(id)); 'Ali Veli' iki kişide (Türkçe katlama ile: ALİ VELİ), Can'ın hesabı yok.
+// Personel: hesap e-postası PRI adresi (J10: <pri>@…; burada PRI = id); 'Ali Veli' iki kişide (Türkçe katlama ile: ALİ VELİ),
+// Can'ın hesabı yok.
 function people(SP) {
-    const acc = (id, name, code, uid) => ({ id, name, code, uid, authEmail: SP.staffEmail(id) });
+    const acc = (id, name, code, uid) => ({ id, name, code, uid, pri: id, authEmail: SP.staffEmail(id) });
     return [
         acc('p_ayse', 'Ayşe Yılmaz', 'ayse1', 'uid-ayse'),
         acc('p_ali1', 'Ali Veli', 'aliv1', 'uid-ali1'),
@@ -35,7 +36,7 @@ function people(SP) {
         { id: 'p_bad', name: 'Bozuk Bağ', code: 'bad01', uid: 'uid-bad', authEmail: 'baska@staff.medipol.local' },
     ];
 }
-const idx = (O, SP, list) => O.buildPersonIndex(list || people(SP), { staffEmail: SP.staffEmail });
+const idx = (O, SP, list) => O.buildPersonIndex(list || people(SP), { accountEmail: SP.accountEmailOf });
 
 // ─── Kişi çözümü ────────────────────────────────────────────────────────────────────────────────────
 test('resolveOwner: id yetkili (ad değişmiş olsa da); listede olmayan id ada DÜŞMEZ', () => {
@@ -69,8 +70,11 @@ test('resolveOwner: hesapsız → no-account; e-posta uyumsuz ya da paylaşılan
     const I = idx(O, SP);
     assert.equal(O.resolveOwner(I, { names: ['Can Demir'] }).status, 'no-account');
     assert.equal(O.resolveOwner(I, { names: ['Bozuk Bağ'] }).status, 'account-inconsistent');
-    const shared = [...people(SP), { id: 'p_x', name: 'İkinci', code: 'x0001', uid: 'uid-ayse', authEmail: SP.staffEmail('p_x') }];
+    const shared = [...people(SP), { id: 'p_x', name: 'İkinci', code: 'x0001', uid: 'uid-ayse', pri: 'p_x', authEmail: SP.staffEmail('p_x') }];
     assert.equal(O.resolveOwner(idx(O, SP, shared), { id: 'p_ayse' }).status, 'account-inconsistent');
+    // J10 PRI: J7 adresinde kalmış (taşınmamış) hesap güvenilmez — önce PRI / Hesap Göç Aracı
+    const j7 = [...people(SP), { id: 'p_j7', name: 'J7 Kişi', code: 'j7kod', uid: 'uid-j7', pri: 'j7.kisi', authEmail: SP.legacyStaffEmail('p_j7') }];
+    assert.equal(O.resolveOwner(idx(O, SP, j7), { id: 'p_j7' }).status, 'account-inconsistent');
     for (const s of ['Admin', 'Sistem', 'pool', 'Havuz', 'system', 'unknown']) assert.equal(O.resolveOwner(I, { names: [s] }).status, 'system', s);
     assert.equal(O.resolveOwner(I, {}).status, 'unmatched');
     assert.equal(O.uidForName(I, 'Ali Veli'), null);
@@ -117,7 +121,7 @@ test('planMigration (önizleme): girdiyi değiştirmez, giriş kodunu rapora ç�
         tasks: [], workflowTemplates: [{ id: 'w1', steps: [{ user: 'Ayşe Yılmaz' }] }],
     };
     const before = JSON.stringify(data), pers = people(SP), persBefore = JSON.stringify(pers);
-    const plan = plain(O.planMigration({ data, personel: pers, staffEmail: SP.staffEmail }));
+    const plan = plain(O.planMigration({ data, personel: pers, accountEmail: SP.accountEmailOf }));
     assert.equal(JSON.stringify(data), before, 'önizleme kayıtları değiştirmez');
     assert.equal(JSON.stringify(pers), persBefore);
     assert.deepEqual(plan.items.map(i => `${i.col}/${i.id}`).sort(), ['purchaseOrders/5', 'requests/1', 'workflowTemplates/w1']);
@@ -164,7 +168,7 @@ const fixture = SP => ({
 });
 const planOf = (O, SP, store) => {
     const read = col => [...store.db].filter(([k]) => k.startsWith(col + '/')).map(([, v]) => clone(v));
-    return O.planMigration({ data: { requests: read('requests'), purchaseOrders: read('purchaseOrders'), tasks: read('tasks'), workflowTemplates: read('workflowTemplates') }, personel: read('personel'), staffEmail: SP.staffEmail });
+    return O.planMigration({ data: { requests: read('requests'), purchaseOrders: read('purchaseOrders'), tasks: read('tasks'), workflowTemplates: read('workflowTemplates') }, personel: read('personel'), accountEmail: SP.accountEmailOf });
 };
 
 test('applyMigration: yalnız uid alanlarını yazar; ikinci koşu hiçbir şey planlamaz (idempotent); tx başına ≤ parça boyutu', async () => {
@@ -173,7 +177,7 @@ test('applyMigration: yalnız uid alanlarını yazar; ikinci koşu hiçbir şey 
     const before = clone(store.db.get('purchaseOrders/po1'));
     const plan = planOf(O, SP, store);
     assert.equal(plan.items.length, 10);
-    const res = plain(await O.applyMigration({ plan, store, staffEmail: SP.staffEmail, chunkSize: 4 }));
+    const res = plain(await O.applyMigration({ plan, store, accountEmail: SP.accountEmailOf, chunkSize: 4 }));
     assert.equal(res.status, 'done');
     assert.equal(res.written.length, 10);
     assert.equal(store.txCount, 3, '10 kayıt / 4 = 3 transaction');
@@ -195,7 +199,7 @@ test('applyMigration: önizlemeden sonra değişen kayıt ATLANIR (changed-since
     store.db.set('requests/r1', { ...store.db.get('requests/r1'), personelId: 'p_seher' });   // sahip değişti
     store.db.delete('requests/r2');
     store.db.set('requests/r3', { ...store.db.get('requests/r3'), personelUid: 'uid-ayse' });  // başka bir koşu doldurdu
-    const res = plain(await O.applyMigration({ plan, store, staffEmail: SP.staffEmail }));
+    const res = plain(await O.applyMigration({ plan, store, accountEmail: SP.accountEmailOf }));
     const why = Object.fromEntries(res.skipped.map(s => [s.id, s.reason]));
     assert.deepEqual(why, { r1: 'changed-since-preview', r2: 'deleted', r3: 'already' });
     assert.equal(store.db.get('requests/r1').personelUid, undefined, 'değişen kayda yazılmaz');
@@ -207,7 +211,7 @@ test('applyMigration: personel listesi önizlemeden sonra değiştiyse HİÇ yaz
     const store = memStore(fixture(SP));
     const plan = planOf(O, SP, store);
     store.db.set('personel/p_new', { id: 'p_new', name: 'Ayşe Yılmaz', code: 'new01' });
-    const res = plain(await O.applyMigration({ plan, store, staffEmail: SP.staffEmail }));
+    const res = plain(await O.applyMigration({ plan, store, accountEmail: SP.accountEmailOf }));
     assert.equal(res.status, 'aborted');
     assert.equal(res.error.code, 'personel-changed');
     assert.equal(res.notAttempted, plan.items.length);
@@ -219,7 +223,7 @@ test('applyMigration: kısmi hata gizlenmez — düşen parça, yazılanlar ve d
     const store = memStore(fixture(SP));
     const plan = planOf(O, SP, store);
     store.fault = n => n === 1;   // 2. transaction düşer
-    const res = plain(await O.applyMigration({ plan, store, staffEmail: SP.staffEmail, chunkSize: 4 }));
+    const res = plain(await O.applyMigration({ plan, store, accountEmail: SP.accountEmailOf, chunkSize: 4 }));
     assert.equal(res.status, 'stopped');
     assert.equal(res.written.length, 4);
     assert.equal(res.failed.length, 4);
@@ -227,7 +231,7 @@ test('applyMigration: kısmi hata gizlenmez — düşen parça, yazılanlar ve d
     assert.equal(res.error.code, 'unavailable');
     assert.equal(res.failed[0].id, plan.items[4].id);
     store.fault = null;
-    const again = plain(await O.applyMigration({ plan: planOf(O, SP, store), store, staffEmail: SP.staffEmail, chunkSize: 4 }));
+    const again = plain(await O.applyMigration({ plan: planOf(O, SP, store), store, accountEmail: SP.accountEmailOf, chunkSize: 4 }));
     assert.equal(again.status, 'done');
     assert.equal(again.written.length, 6);
     assert.equal(planOf(O, SP, store).items.length, 0);
@@ -238,7 +242,7 @@ test('applyMigration: transaction yeniden denendiğinde sonuç iki kez sayılmaz
     const store = memStore(fixture(SP));
     store.retryFirst = true;
     const plan = planOf(O, SP, store);
-    const res = plain(await O.applyMigration({ plan, store, staffEmail: SP.staffEmail }));
+    const res = plain(await O.applyMigration({ plan, store, accountEmail: SP.accountEmailOf }));
     assert.equal(store.attempts, 2);
     assert.equal(res.written.length, plan.items.length);
 });
@@ -252,7 +256,7 @@ test('applyMigration: transaction içinde dayanılan personel kaydı değişirse
         store.db.set('personel/p_ayse', { ...store.db.get('personel/p_ayse'), uid: 'uid-yeni', authEmail: SP.staffEmail('p_ayse') });
         return fn(tx);
     });
-    const res = plain(await O.applyMigration({ plan, store, staffEmail: SP.staffEmail }));
+    const res = plain(await O.applyMigration({ plan, store, accountEmail: SP.accountEmailOf }));
     assert.equal(res.status, 'stopped');
     assert.equal(res.error.code, 'personel-changed');
     assert.equal(res.written.length, 0);
@@ -310,4 +314,26 @@ test('selfUid / actorUid: uid yalnız Auth\'tan — anonim ve hesabı aktif kull
     window.isDbAdmin = () => true;
     assert.equal(O.selfUid(), null, 'yönetici personel adına sahip olmaz');
     assert.equal(O.actorUid(), 'u-admin');
+});
+
+// ─── J10 · kod temizliği planı ──────────────────────────────────────────────────────────────────────────
+test('planCodeCleanse: hesabı olmayan personel ve bekleyen sahiplik göçü ENGEL; eski kod kopyaları bulunur, adlar dokunulmaz', () => {
+    const { O, SP } = load();
+    const pers = people(SP);
+    const plan = plain(O.planCodeCleanse({
+        personel: pers, accountEmail: SP.accountEmailOf, ownershipPendingItems: 2, ownershipIssues: 1,
+        requests: [{ id: 'r1', personelKodu: '00000', personel: 'Seher Kaya' }, { id: 'r2', personel: 'Ayşe Yılmaz' }],
+        purchaseOrders: [{ id: 'po1', createdBy: '00000' }, { id: 'po2', createdBy: 'p_ayse' }, { id: 'po3', createdBy: 'Seher Kaya' },
+            { id: 'po4', createdBy: 'zz999' }, { id: 'po5', createdBy: 'unknown' }, { id: 'po6', createdBy: 'aliv1' }],
+    }));
+    assert.equal(plan.ready, false);
+    assert.deepEqual(plan.blockers.noAccount.sort(), ['Bozuk Bağ', 'Can Demir']);
+    assert.equal(plan.blockers.ownershipPending, 2);
+    assert.equal(plan.personel.length, pers.length, 'tüm kodlu personel');
+    assert.deepEqual(plan.requests.map(r => r.id), ['r1']);
+    assert.deepEqual(plan.purchaseOrders.map(p => [p.id, p.replaceWith]), [['po1', 'p_seher'], ['po4', 'unknown'], ['po6', 'p_ali1']],
+        'kod → personel id; kimsenin kodu olmayan kod biçimi → unknown; id / ad / unknown dokunulmaz');
+    assert.ok(!JSON.stringify(plan).match(/00000|aliv1|zz999|ayse1/), 'plan çıktısı kod değerini içermez');
+    const ok = plain(O.planCodeCleanse({ personel: pers.filter(p => p.uid && p.id !== 'p_bad'), accountEmail: SP.accountEmailOf, requests: [], purchaseOrders: [] }));
+    assert.equal(ok.ready, true);
 });

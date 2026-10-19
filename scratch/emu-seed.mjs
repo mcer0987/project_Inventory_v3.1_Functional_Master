@@ -3,10 +3,12 @@
 // [HOW]: pull → gerçek inventory_demo'yu anonim oturumla SALT-OKUNUR çeker, scratch/emu-data/inventory_demo.json'a yazar
 //        (git dışı). push → çalışan emülatöre (npm run emu) bu kopyayı kural atlamalı yazar ve Auth emülatöründe
 //        EMU-ONLY admin hesabını açar. Canlı köke (lifeserver_master) hiçbir koşulda dokunmaz; gerçek projeye yazmaz.
-// Kullanım: node scratch/emu-seed.mjs pull | push
+// Kullanım: node scratch/emu-seed.mjs pull | push [--legacy]
+//   --legacy: tohum personeli J7 biçiminde (p<id>@ hesap, PRI yok) bırakılır — VIP "PRI / Hesap Göç Aracı"nı elle denemek için.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const HANDLER = readFileSync(resolve(ROOT_DIR, 'src/services/firebase-handler.js'), 'utf8');
@@ -20,6 +22,10 @@ const EMU = { host: '127.0.0.1', firestore: 8080, auth: 9099 };
 // dalı kaldırıldı). Giriş ekranına olduğu gibi yazılır. Aynı sabit scratch/flow-tests.js'te (EMU_ADMIN_CODE) kullanılır.
 const EMU_ADMIN_EMAIL = 'admin@medipol.local';
 const EMU_ADMIN_CODE = 'emu-yonetici-0001';
+// J10: akış testlerinin giriş yaptığı personel (yalnız emülatör; kodu personel kaydında TUTULMAZ). scratch/flow-tests.js ile aynı.
+// PRI'ler addan üretilen değerle aynı (ilk + son kelime): flow.personel, flow.onaylayici.
+const FT_STAFF = { id: 'ft_staff', name: 'Flow Test Personel', birim: 'Test', pri: 'flow.personel', code: 'ftkod77' };
+const FT_STAFF2 = { id: 'ft_staff2', name: 'Flow Test Onaylayıcı', birim: 'Test', pri: 'flow.onaylayici', code: 'ftkod88' };   // onay adımı senaryoları
 
 function parseConfig() {
     const block = HANDLER.match(/const firebaseConfig = \{([\s\S]*?)\};/);
@@ -95,7 +101,49 @@ async function push() {
     await authEmu(`/identitytoolkit.googleapis.com/v1/accounts:signUp?key=emu`, {
         method: 'POST', body: JSON.stringify({ email: EMU_ADMIN_EMAIL, password: EMU_ADMIN_CODE, returnSecureToken: true }),
     });
-    console.log(`✔ emülatör tohumlandı (${dump.pulledAt} kopyası) · EMU admin parolası: ${EMU_ADMIN_CODE}`);
+
+    // Faz 4B · J10 PRI: anonim oturum yok — her tohum personeline kurumsal kimlik (PRI, uygulamanın kendi üreticisiyle) ve
+    // <pri>@staff.medipol.local hesabı açılır; personel kaydına (uid / authEmail / pri) ve kuralların eşlemesine
+    // (staffAccounts/{uid}) bağlanır. Akış testleri için kodsuz iki test personeli eklenir. --legacy: tohum personeli J7
+    // biçiminde bırakılır (p<id>@ hesap, PRI ve eşleme yok; giriş yapamazlar) — göç aracını elle denemek için.
+    // Kodlar yalnız emülatörde; tohum personelinin kodları J10 öncesi veriyi temsil eder.
+    const LEGACY = process.argv.includes('--legacy');
+    globalThis.window = globalThis.window || {};
+    vm.runInThisContext(readFileSync(resolve(ROOT_DIR, 'src/services/staff-provisioning.js'), 'utf8'), { filename: 'staff-provisioning.js' });
+    const SP = globalThis.window.StaffProvisioning;
+    const demo = Object.entries(dump.collections.personel || {}).map(([id, d]) => ({ id, ...decode(d) }));
+    const tests = [FT_STAFF, FT_STAFF2].map(t => ({ ...t, __test: true }));
+    const used = new Set(tests.map(t => t.pri));
+    const links = [], skipped = [];
+    for (const p of [...tests, ...demo]) {
+        const pri = p.__test ? p.pri : SP.generateStaffPri(p.name || p.adSoyad, used);
+        used.add(pri);
+        const legacy = LEGACY && !p.__test;
+        const password = SP.staffPassword(p.code);
+        const email = legacy ? SP.legacyStaffEmail(p.id) : SP.staffEmail(pri);
+        if (!password || !email) { skipped.push(`${p.name || p.id} (${!password ? 'kod yok/kısa' : 'e-posta yok'})`); links.push({ p, pri: legacy ? null : pri }); continue; }
+        const r = await authEmu(`/identitytoolkit.googleapis.com/v1/accounts:signUp?key=emu`, {
+            method: 'POST', body: JSON.stringify({ email, password, returnSecureToken: true }),
+        });
+        links.push({ p, pri: legacy ? null : pri, uid: r.localId, email });
+    }
+    const env2 = await initializeTestEnvironment({ projectId: PROJECT_ID, firestore: { host: EMU.host, port: EMU.firestore } });
+    await env2.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        const { setDoc, updateDoc } = await import('firebase/firestore');
+        for (const { p, pri, uid, email } of links) {
+            const ref = doc(db, SOURCE_ROOT, 'personel', 'items', String(p.id));
+            const fields = { ...(pri ? { pri } : {}), ...(uid ? { uid, authEmail: email, authProvisionedAt: Date.now() } : {}) };
+            if (p.__test) await setDoc(ref, { id: p.id, name: p.name, birim: p.birim, ...fields });
+            else if (Object.keys(fields).length) await updateDoc(ref, fields);
+            if (uid && pri) await setDoc(doc(db, SOURCE_ROOT, 'staffAccounts', 'items', uid), { personelId: String(p.id), pri, linkedAt: Date.now() });
+        }
+    });
+    await env2.cleanup();
+    const opened = links.filter(l => l.uid);
+    console.log(`  personel hesapları: ${opened.length} açıldı${LEGACY ? ' (tohum personeli J7 biçiminde — PRI yok; VIP → PRI / Hesap Göç Aracı)' : ''}${skipped.length ? ' · hesapsız: ' + skipped.join(', ') : ''}`);
+    if (!LEGACY) console.log('  kurumsal kimlikler: ' + links.filter(l => !l.p.__test && l.pri).map(l => `${l.p.name || l.p.id} → ${l.pri}`).join(' · '));
+    console.log(`✔ emülatör tohumlandı (${dump.pulledAt} kopyası) · EMU admin parolası: ${EMU_ADMIN_CODE} · test personeli: ${FT_STAFF.pri} / ${FT_STAFF.code} · ${FT_STAFF2.pri} / ${FT_STAFF2.code}`);
     process.exit(0);
 }
 

@@ -5,7 +5,8 @@ Uygulamayı ve testleri **gerçek veriye hiç dokunmadan**, kendi bilgisayarın�
 ## Emülatör nedir?
 Firebase'in (veritabanı + giriş sistemi) bilgisayarınızda çalışan **sahte bir kopyası**. Burada yapılan her kayıt, silme ve
 giriş yalnız sizin makinenizde kalır; canlı sistem (`lifeserver_master`) ve bulut demo verisi etkilenmez. Emülatör
-kapatılınca içindeki veri silinir. Bu yüzden her açılıştan sonra bir kez test verisi yüklenir (`emu:seed`).
+kapatılınca içindeki veri silinir. Bu yüzden her açılıştan sonra (ve her tam test koşusundan önce) test verisi yüklenir
+(`emu:seed`).
 
 ## Bir kerelik kurulum
 | Gerekli | Kontrol komutu | Beklenen |
@@ -25,18 +26,26 @@ $env:JAVA_TOOL_OPTIONS = "-Xmx4g"; npm run emu
 ```
 `All emulators ready!` yazısını bekleyin. Bu terminal açık kaldıkça emülatör çalışır.
 
-**Terminal 2: Test verisini yükle** (emülatör her açıldığında bir kez)
+**Terminal 2: Test verisini yükle** (emülatör her açıldığında bir kez **ve her tam test koşusundan önce**)
 ```powershell
 npm run emu:seed
 ```
-`✔ emülatör tohumlandı` yazısı görünmeli.
+`✔ emülatör tohumlandı` yazısı görünmeli. Tohum, her personele bir **kurumsal kimlik** (PRI, ör. `ihale.ofisi`) ve giriş hesabı açar;
+PRI'ler çıktıda listelenir.
+
+Göç aracını elle denemek için eski durumu yükleyin: `node scratch/emu-seed.mjs push --legacy`. Bu durumda tohum personelinin
+PRI'si yoktur ve hesapları eski (J7) adrestedir; giriş yapamazlar. Yönetici → VIP → **PRI / Hesap Göç Aracı** ile taşınırlar.
 
 **Terminal 3: Uygulamayı aç**
 ```powershell
 npm run serve
 ```
 Ardından tarayıcıda: **http://127.0.0.1:5500/index.html?emu=1**
-- Yönetici paneli parolası (yalnız emülatörde geçerli): `emu-yonetici-0001`
+- **Personel girişi:** üst kutuya kurumsal kimliği (`ad.soyad`), alt kutuya kodu yazın, **Sisteme Giriş Yap**. Emülatördeki test
+  personeli: `flow.personel` / `ftkod77` ve `flow.onaylayici` / `ftkod88` (yalnız emülatörde geçerli). Büyük harf ya da
+  Türkçe harf (ör. `Flow.Onaylayıcı`) da kabul edilir.
+- **Yönetici girişi:** kimlik kutusunu boş bırakıp alt kutuya `emu-yonetici-0001` yazın, **Yönetici Paneli** (yalnız emülatörde geçerli).
+- Giriş yapmadan hiçbir veri görünmez (anonim oturum yok); bu beklenen davranıştır.
 - Doğru bağlandığınızı tarayıcı konsolunda (F12) görürsünüz: `ACTIVE DATABASE ROOT: inventory_demo @ EMULATOR`
 - Adresin sonunda `?emu=1` **yoksa** uygulama buluttaki demo verisine bağlanır.
 
@@ -53,8 +62,9 @@ Ardından tarayıcıda: **http://127.0.0.1:5500/index.html?emu=1**
 5500 doluysa (ör. Live Server açık): `npm run serve -- --port 5501` ve adreste 5501 kullanın.
 
 ## Otomatik testleri çalıştırma
-Ajanların ve geliştiricilerin yazdığı senaryolar `scratch/flow-tests.js` içinde (53 senaryo, temiz emülatörde ~8 dk).
-Emülatör (Terminal 1) açık ve veri yüklenmiş (Terminal 2) olmalı.
+Ajanların ve geliştiricilerin yazdığı senaryolar `scratch/flow-tests.js` içinde (54 senaryo, temiz emülatörde ~8 dk).
+Emülatör (Terminal 1) açık ve veri **bu koşudan hemen önce** yüklenmiş (Terminal 2) olmalı: son senaryo (Kod Temizliği)
+emülatördeki giriş kodlarını siler; seed'siz ikinci koşuda o senaryo "önce npm run emu:seed" diyerek düşer.
 
 > **Önce bir kez (her yeni terminalde):** `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`
 > Bu satır olmadan çıktı dosyasındaki Türkçe karakterler ve `■` işareti bozuk kaydedilir; ilerleme filtresi bitiş satırını göremez.
@@ -62,8 +72,9 @@ Emülatör (Terminal 1) açık ve veri yüklenmiş (Terminal 2) olmalı.
 | Ne yapmak istiyorum | Komut |
 |---|---|
 | Tüm senaryolar, emülatörde | `node scratch/flow-tests.js --emu *> scratch/flow-emu.out` |
-| Tek/birkaç senaryo | `node scratch/flow-tests.js --emu j8HybridLogin j7StaffProvisioning` |
+| Tek/birkaç senaryo | `node scratch/flow-tests.js --emu j10StaffLogin j7StaffProvisioning` |
 | Testin tarayıcısını **ekranda izlemek** | sona `--headed` ekleyin. Açılan Chrome'a **tıklamayın** (test bozulur); F12 ile konsolu izleyebilirsiniz |
+| Bulut demo verisinde (yalnız okuma ağırlıklı, işaretli test kayıtları) | Testler bir personel hesabıyla girer: `$env:FT_STAFF_PRI='<ad.soyad>'; $env:FT_STAFF_CODE='<kod>'; node scratch/flow-tests.js`. Kod dosyaya / depoya yazılmaz. J10 kuralları ve istemcisi buluta yayınlanmadan bu mod kullanılamaz |
 
 **Senaryo adlarını listelemek:**
 ```powershell
@@ -74,10 +85,10 @@ Select-String -Path scratch/flow-tests.js -Pattern '^    async (\w+)\(page' | Fo
 ```powershell
 Get-Content scratch/flow-emu.out -Wait | Select-String "^\[|FAILED|■"
 ```
-Her senaryo başlarken bir satır çıkar: `[12/53] j8HybridLogin başladı · 15:42:10 · geçen 9dk 3sn · hata 0`.
+Her senaryo başlarken bir satır çıkar: `[51/54] j10StaffLogin başladı · 15:42:10 · geçen 9dk 3sn · hata 0`.
 Aynı satır 5 dakikadan uzun süre değişmiyorsa o senaryo takılmıştır (aşağıya bakın).
 
-**Sonucu okumak:** En sonda `■ bitti · 53 senaryo · 0 hata` ve `csp violations: 0` görünmeli. Hata varsa
+**Sonucu okumak:** En sonda `■ bitti · 54 senaryo · 0 hata` ve `csp violations: 0` görünmeli. Hata varsa
 `=== senaryoAdı FAILED: …` satırı neyin beklendiği gibi olmadığını söyler. Bu satırı geliştiriciye iletin.
 
 **Diğer test paketleri** (kısa sürer, emülatörü kendileri açıp kapatır; Terminal 1'deki emülatörle çakışmaz):
@@ -85,7 +96,7 @@ Aynı satır 5 dakikadan uzun süre değişmiyorsa o senaryo takılmıştır (a�
 |---|---|---|
 | `npm run test:unit` | İş kuralları (tarayıcısız) | saniyeler |
 | `npm run test:rules` | Veritabanı güvenlik kuralları (kim neyi okuyup yazabilir) | ~1 dk |
-| `npm run test:staff:emu` | Personel giriş hesapları | ~1 dk |
+| `npm run test:staff:emu` | Personel giriş hesapları, kurumsal kimlik (PRI) ve eski hesapların taşınması | ~1 dk |
 | `npm run test:atomic:emu` | Toplu yazma / yedekten geri yükleme güvenliği | ~1 dk |
 | `npm run test:ownership:emu` | Kayıt sahipliği (uid) göçü ve değiştirilemezlik | ~1 dk |
 
@@ -93,6 +104,8 @@ Aynı satır 5 dakikadan uzun süre değişmiyorsa o senaryo takılmıştır (a�
 | Belirti | Çözüm |
 |---|---|
 | 5500 adresi açılmıyor | Terminal 3'te `npm run serve` çalışıyor mu? |
+| "Kurumsal kimlik ya da giriş kodu hatalı" | PRI'yi `npm run emu:seed` çıktısındaki gibi yazın (ör. `flow.personel`); hâlâ olmuyorsa tohumu yeniden yükleyin |
+| Test başında `ABORT: test personeli girişi başarısız` ya da `j10CodeCleanse: … önce npm run emu:seed` | `npm run emu:seed` çalıştırıp testi yeniden başlatın |
 | Testler peş peşe `timed out` ile düşüyor | Emülatörün belleği dolmuş olabilir. Kontrol: `(Select-String -Path firestore-debug.log -Pattern OutOfMemoryError).Count` 0'dan büyükse Terminal 1'de Ctrl+C, emülatörü yeniden başlatın ve `npm run emu:seed` çalıştırın |
 | `port taken` / `EADDRINUSE` | Önceki emülatör hâlâ açık. `Get-Process java` ile bulun, `Stop-Process -Id <numara>` ile kapatın |
 | Emülatör çalışıyor mu? | `Get-Process java` (satır yoksa kapalıdır) ve http://127.0.0.1:4000 açılıyor mu |

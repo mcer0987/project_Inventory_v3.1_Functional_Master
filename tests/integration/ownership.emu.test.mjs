@@ -48,11 +48,12 @@ function store(db, { fault } = {}) {
 async function readCol(db, col) { const s = await getDocs(collection(db, ROOT, col, 'items')); return s.docs.map(d => ({ id: d.id, ...d.data() })); }
 async function plan(db) {
     const [requests, purchaseOrders, tasks, workflowTemplates, personel] = await Promise.all(['requests', 'purchaseOrders', 'tasks', 'workflowTemplates', 'personel'].map(c => readCol(db, c)));
-    return O.planMigration({ data: { requests, purchaseOrders, tasks, workflowTemplates }, personel, staffEmail: SP.staffEmail });
+    return O.planMigration({ data: { requests, purchaseOrders, tasks, workflowTemplates }, personel, accountEmail: SP.accountEmailOf });
 }
 const get = async (col, id) => (await getDoc(ref(adminDb(), col, id))).data();
 
-const acc = (id, name, code, uid) => ({ id, name, code, uid, authEmail: SP.staffEmail(id) });
+// J10 PRI: hesap e-postası PRI adresi (burada PRI = id); kurallar personeli staffAccounts/{uid} eşlemesiyle tanır
+const acc = (id, name, code, uid) => ({ id, name, code, uid, pri: id, authEmail: SP.staffEmail(id) });
 const SEED = {
     personel: [acc('p_ayse', 'Ayşe Yılmaz', 'ayse1', 'uid-ayse'), acc('p_ali1', 'Ali Veli', 'aliv1', 'uid-ali1'), acc('p_ali2', 'ALİ VELİ', 'aliv2', 'uid-ali2'),
         { id: 'p_can', name: 'Can Demir', code: 'can01' }, acc('p_seher', 'Seher Kaya', '00000', 'uid-seher')],
@@ -66,6 +67,7 @@ const SEED = {
         workflow: { started: true, currentStep: 1, steps: [{ user: 'Ayşe Yılmaz', status: 'approved', note: 'ok' }, { user: 'Ali Veli', status: 'pending' }] } }],
     tasks: [{ id: 't1', title: 'Görev', creatorId: 'Admin', assigneeId: 'Seher Kaya' }, { id: 't2', title: 'Görev 2', creatorId: 'Ayşe Yılmaz', assigneeId: 'pool' }],
     workflowTemplates: [{ id: 'w1', name: 'Şablon', steps: [{ user: 'Seher Kaya', tip: 'Paraf' }, { user: 'Sistem', tip: 'Bilgi' }] }],
+    staffAccounts: [{ id: 'uid-ayse', personelId: 'p_ayse', pri: 'p_ayse' }],
 };
 
 before(async () => {
@@ -90,7 +92,7 @@ test('emülatör: önizleme yazmaz; uygulama yalnız kesin eşlenen BOŞ alanlar
         'po1:steps[1].userUid:ambiguous', 'r_amb:personelUid:ambiguous', 'r_noacc:personelUid:no-account',
         't1:creatorUid:system', 'w1:steps[1].userUid:system']);
 
-    const res = plain(await O.applyMigration({ plan: p, store: store(db), staffEmail: SP.staffEmail, chunkSize: 3 }));
+    const res = plain(await O.applyMigration({ plan: p, store: store(db), accountEmail: SP.accountEmailOf, chunkSize: 3 }));
     assert.equal(res.status, 'done');
     assert.equal(res.written.length, p.items.length);
     assert.equal((await get('requests', 'r0')).personelUid, 'uid-ayse');
@@ -113,7 +115,7 @@ test('emülatör: önizleme ile uygulama arasında değişen kayıt yazılmaz (c
     const db = adminDb();
     const p = await plan(db);
     await updateDoc(ref(adminDb(), 'requests', 'r1'), { personelId: 'p_seher', personel: 'Seher Kaya' });   // başka bir oturum sahibini değiştirdi
-    const res = plain(await O.applyMigration({ plan: p, store: store(db), staffEmail: SP.staffEmail }));
+    const res = plain(await O.applyMigration({ plan: p, store: store(db), accountEmail: SP.accountEmailOf }));
     assert.equal(res.status, 'done');
     assert.deepEqual(res.skipped, [{ col: 'requests', id: 'r1', reason: 'changed-since-preview' }]);
     assert.equal((await get('requests', 'r1')).personelUid, undefined);
@@ -125,8 +127,8 @@ test('emülatör: önizleme ile uygulama arasında değişen kayıt yazılmaz (c
 test('emülatör: personel listesi önizlemeden sonra değişti → hiçbir şey yazılmaz', async () => {
     const db = adminDb();
     const p = await plan(db);
-    await setDoc(ref(adminDb(), 'personel', 'p_ayse2'), { id: 'p_ayse2', name: 'ayşe yılmaz', code: 'ayse2' });   // aynı adlı yeni personel
-    const res = plain(await O.applyMigration({ plan: p, store: store(db), staffEmail: SP.staffEmail }));
+    await setDoc(ref(adminDb(), 'personel', 'p_ayse2'), { id: 'p_ayse2', name: 'ayşe yılmaz' });   // J10: kodsuz   // aynı adlı yeni personel
+    const res = plain(await O.applyMigration({ plan: p, store: store(db), accountEmail: SP.accountEmailOf }));
     assert.equal(res.status, 'aborted');
     assert.equal(res.error.code, 'personel-changed');
     for (const r of SEED.requests) assert.equal((await get('requests', r.id)).personelUid, undefined);
@@ -135,14 +137,14 @@ test('emülatör: personel listesi önizlemeden sonra değişti → hiçbir şey
 test('emülatör: kısmi hata (2. parça düşer) gizlenmez; yazılanlar kalıcı, kalanlar yazılmadı; yeniden koşu tamamlar', async () => {
     const db = adminDb();
     const p = await plan(db);
-    const res = plain(await O.applyMigration({ plan: p, store: store(db, { fault: k => k === 1 }), staffEmail: SP.staffEmail, chunkSize: 3 }));
+    const res = plain(await O.applyMigration({ plan: p, store: store(db, { fault: k => k === 1 }), accountEmail: SP.accountEmailOf, chunkSize: 3 }));
     assert.equal(res.status, 'stopped');
     assert.equal(res.written.length, 3);
     assert.equal(res.failed.length, 3);
     assert.equal(res.notAttempted, p.items.length - 6);
     for (const w of res.written) assert.ok((await get(w.col, w.id))[O.OWNER_FIELDS[w.col]] || w.col === 'workflowTemplates', `${w.col}/${w.id} yazıldı`);
     for (const f of res.failed) assert.equal((await get(f.col, f.id))[O.OWNER_FIELDS[f.col]], undefined, `${f.col}/${f.id} yazılmadı`);
-    const rest = plain(await O.applyMigration({ plan: await plan(db), store: store(db), staffEmail: SP.staffEmail }));
+    const rest = plain(await O.applyMigration({ plan: await plan(db), store: store(db), accountEmail: SP.accountEmailOf }));
     assert.equal(rest.status, 'done');
     assert.equal(rest.written.length, p.items.length - 3);
     assert.equal((await plan(db)).items.length, 0);
@@ -150,7 +152,7 @@ test('emülatör: kısmi hata (2. parça düşer) gizlenmez; yazılanlar kalıc�
 
 test('emülatör + üretim kuralları: personel oturumu göçü çalıştıramaz (kurallar ilk yazımı reddeder), hiçbir şey yazılmaz', async () => {
     const p = await plan(adminDb());
-    const res = plain(await O.applyMigration({ plan: p, store: store(staffDb()), staffEmail: SP.staffEmail }));
+    const res = plain(await O.applyMigration({ plan: p, store: store(staffDb()), accountEmail: SP.accountEmailOf }));
     assert.equal(res.status, 'stopped');
     assert.equal(res.error.code, 'permission-denied');
     assert.equal(res.written.length, 0);
@@ -159,7 +161,7 @@ test('emülatör + üretim kuralları: personel oturumu göçü çalıştıramaz
 
 test('emülatör + üretim kuralları: göçten sonra sahiplik alanı personel tarafından değiştirilemez ve silinemez', async () => {
     const db = adminDb();
-    await O.applyMigration({ plan: await plan(db), store: store(db), staffEmail: SP.staffEmail });
+    await O.applyMigration({ plan: await plan(db), store: store(db), accountEmail: SP.accountEmailOf });
     const s = staffDb();
     await assert.rejects(updateDoc(ref(s, 'requests', 'r0'), { personelUid: 'uid-baska' }), e => /PERMISSION_DENIED|permission/i.test(e.code + e.message));
     await assert.rejects(setDoc(ref(s, 'requests', 'r0'), { id: 'r0', ürün: 'ezme' }), e => /PERMISSION_DENIED|permission/i.test(e.code + e.message));

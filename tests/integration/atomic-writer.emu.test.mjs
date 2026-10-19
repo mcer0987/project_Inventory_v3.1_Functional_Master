@@ -157,7 +157,8 @@ test('emülatör: 2 parça yazıldıktan sonra bağlantı tamamen koptu → kili
 test('emülatör + üretim kuralları: yönetici olmayan oturum toplu yazmayı başlatamaz, hiçbir şey yazılmaz', async () => {
     const db = anonDb();
     const before = await snapshot(adminDb(), 'b1');
-    await assert.rejects(run(store(db), target()), e => e.code === 'prepare-failed');
+    // Aşama B (J10): anonim oturum günlüğü okurken bile reddedilir — yazmaya hiç başlanmaz
+    await assert.rejects(run(store(db), target()), e => e.code === 'prepare-failed' || e.code === 'permission-denied');
     assert.deepEqual(await snapshot(adminDb(), 'b1'), before);
     assert.deepEqual(await journalState(adminDb()), { journal: [], lock: null });
 });

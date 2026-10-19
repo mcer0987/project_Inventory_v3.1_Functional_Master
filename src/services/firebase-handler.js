@@ -10,9 +10,9 @@
 // 1. MODÜLER FIREBASE IMPORTLARI (Versiyon 10+)
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
-    initializeAuth, onAuthStateChanged, signInAnonymously, connectAuthEmulator, setPersistence,
+    initializeAuth, onAuthStateChanged, connectAuthEmulator, setPersistence,
     browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
-    createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updatePassword
+    createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateEmail
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
     initializeFirestore,
@@ -125,7 +125,8 @@ export const checkAdminAuth = function () {
         return;
     }
 
-    whenAuthReady().then(() => {
+    // J10: anonim oturum yok — oturumsuz yeni sekmede whenAuthReady hiç çözülmezdi; kilit kartı oturum durumu BELLİ olunca gösterilir.
+    whenAuthKnown().then(() => {
         const S = window.SecurityConfig;
         if (S.isSignInPending()) return;
         if (!window.isDbAdmin()) {
@@ -318,6 +319,13 @@ export const reportListenerError = window.reportListenerError = function (name, 
             return;
         }
         console.error(`⛔ [Güvenlik] ${name}: Firestore okuma yetkisi reddedildi.`, err);
+        // J10: personel hesabıyla açılmış ama personel kaydına bağlı olmayan (ya da bağı kaldırılmış) oturum hiçbir şey okuyamaz.
+        //      Boş ekranda "yetki yok" bandıyla beklemek yerine oturum kapatılır ve neden söylenir.
+        if (name === 'personel' && window.AppModules && window.AppModules.Session && window.AppModules.Session.isStaffAccountSession()) {
+            if (typeof window.showAppAlert === 'function') window.showAppAlert('Giriş hesabınız bir personel kaydına bağlı değil. Lütfen yöneticiye başvurun.', 'error');
+            if (window.SecurityConfig) window.SecurityConfig.endAdminSession('stale');
+            return;
+        }
         _deniedListeners.add(name);
         _renderSyncHealth();
         return;
@@ -349,6 +357,19 @@ export const whenAuthReady = window.whenAuthReady = function () {
     if (window.userAuth) return Promise.resolve(window.userAuth);
     return new Promise(resolve => _authReadyResolvers.push(resolve));
 };
+// J10: anonim oturum kalktı → sayfa oturumsuz da açılabilir. Firebase oturum durumunu İLK kez bildirdiğinde (kullanıcı ya da null)
+// çözülür; "oturum yerleşti mi" sorusu (yönetici girişi, admin.html kapısı) artık buna bakar.
+let _authKnown = false;
+let _authKnownResolvers = [];
+export const whenAuthKnown = window.whenAuthKnown = function () {
+    if (_authKnown) return Promise.resolve(window.userAuth);
+    return new Promise(resolve => _authKnownResolvers.push(resolve));
+};
+function _markAuthKnown() {
+    _authKnown = true;
+    const rs = _authKnownResolvers; _authKnownResolvers = [];
+    rs.forEach(r => { try { r(window.userAuth); } catch (e) { } });
+}
 
 /**
  * @function startRealtimeSync
@@ -367,34 +388,12 @@ export const stopRealtimeSync = window.stopRealtimeSync = function () {
     _syncStopping = false;
 };
 
-// Faz 3.5 · giriş kodu otomatik odağının izolasyonu (denetim bulgusu): odak yalnız kullanıcı sayfayla henüz etkileşmediyse
-// verilir. Etkileşim = giriş kutusu dışında bir yere tıklama/dokunma ya da tuş (kutu disabled iken odak alamadığı için ona
-// tıklamak sayılmaz). Kutuya sayfa başına en fazla bir kez odaklanılır; personel listesinin sonraki her snapshot'ı odağı
-// tekrar çalmaz.
-let _userInteracted = false;
-let _loginAutoFocused = false;
-const _loginFieldIds = ['loginCode', 'access-val-node'];
-function _markUserInteraction(e) {
-    if (e && e.target && _loginFieldIds.includes(e.target.id)) return;
-    _userInteracted = true;
-    ['pointerdown', 'keydown'].forEach(t => document.removeEventListener(t, _markUserInteraction, true));
-}
-['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, _markUserInteraction, true));
-
 window.startRealtimeSync = function () {
     stopRealtimeSync();
     _syncRunning = true;
     _syncUid = window.userAuth ? window.userAuth.uid : null;
 
-    const statusDiv = document.getElementById('loginStatus');
-    // [WHY]: Support 'access-val-node' ID which is used in index.html for security obfuscation.
-    // [HOW]: Query both ID possibilities to retrieve the actual login input element.
-    const loginInput = document.getElementById('loginCode') || document.getElementById('access-val-node');
-
-    if (loginInput) {
-        loginInput.disabled = true;
-        loginInput.placeholder = "Veriler senkronize ediliyor...";
-    }
+    // J10: senkron yalnız oturum açıldıktan sonra çalışır; giriş ekranı (rehber, kutu, odak) auth-engine'de yönetilir.
 
     // A. ENVANTER VERİLERİNİ DİNLE (COLLECTION_ROOT alt koleksiyonları)
     // [ENV_GUARD] Sabit "inventory_v2" yerine COLLECTION_ROOT kullanılıyor.
@@ -455,32 +454,6 @@ window.startRealtimeSync = function () {
             // Personel koleksiyonu yüklendiğinde sistemi hazır hale getir
             if (colName === 'personel' && items.length >= 0) {
                 window.isFirebaseLoaded = true;
-
-                // Faz 4 kapanış hotfix'i: "Sistem Hazır" yalnız senkronun ilk yüklemesinde ve giriş mesajı yokken; gizleme
-                // zamanlayıcısı kayıtlı (auth-engine setLoginStatus iptal eder). Eskiden her personel güncellemesi kutuyu yeniden
-                // yazıp 4 sn sonra kalıcı olarak gizliyordu — sonraki giriş mesajları görünmüyordu.
-                if (statusDiv && isInitialLoad && statusDiv.dataset.loginMsg !== '1') {
-                    statusDiv.style.display = '';
-                    statusDiv.innerHTML = '✅ Sistem Hazır.';
-                    statusDiv.style.color = "#27ae60";
-                    clearTimeout(window._loginStatusHideTimer);
-                    window._loginStatusHideTimer = setTimeout(() => { statusDiv.style.display = 'none'; }, 4000);
-                }
-
-                if (loginInput) {
-                    // [WHY]: Re-enable access code input and present a descriptive, premium placeholder.
-                    // [HOW]: Set disabled to false and update placeholder text.
-                    loginInput.disabled = false;
-                    loginInput.placeholder = "Erişim Kodu Giriniz";
-                    // Giriş modalı görünürken koda otomatik odaklan (input senkron bitene kadar disabled olduğu için odak ancak
-                    // burada verilebilir). Kullanıcı başka bir alana odaklandıysa ya da sayfayla etkileştiyse odak çalınmaz;
-                    // sayfa başına bir kez (Faz 3.5).
-                    const active = document.activeElement;
-                    if (!_loginAutoFocused && !_userInteracted && loginInput.offsetParent !== null && (!active || active === document.body)) {
-                        _loginAutoFocused = true;
-                        try { loginInput.focus({ preventScroll: true }); } catch (e) { loginInput.focus(); }
-                    }
-                }
             }
         }, (err) => reportListenerError(colName, err)));
     });
@@ -494,8 +467,6 @@ window.startRealtimeSync = function () {
             console.log("⚙️ Hash updated.");
             // VIP-07: kill switch butonu her zaman sunucudaki gerçek durumu gösterir (admin.html'de tanımlı).
             if (typeof window.renderKillSwitchButton === 'function') window.renderKillSwitchButton(data.maintenance === true);
-            // Faz 4B · J8: VIP 'Personel Giriş Modu' düğmesi sunucudaki gerçek modu gösterir
-            if (typeof window.renderStaffAuthModeButton === 'function') window.renderStaffAuthModeButton(window.AppModules.Session.getStaffAuthMode());
 
             // Launchpad bayrağı artık dinlenmez (VIP-10 / K9-a); eski istemcilerdeki kopyası temizlenir.
             localStorage.removeItem('launchpadDisabledGlobal');
@@ -1081,19 +1052,17 @@ onAuthStateChanged(auth, async (user) => {
             window.checkAuth();
         }
     } else {
+        // [WHY]: Faz 4B · J10 (Aşama B) — anonim oturum kaldırıldı: kurallar ziyaretçiye hiçbir şey açmaz (J10 PRI: giriş veritabanını okumaz) ve
+        //        anonim sağlayıcı Console'da kapatılır. Eskiden burada her oturumsuz sayfa anonim oturum açıyordu.
+        // [HOW]: Oturum yok → senkron durur, giriş ekranı gösterilir (checkAuth). Giriş = personel hesabı ya da yönetici.
         window.userAuth = null;
-        console.warn("⚠️ [Auth] Oturum Yok Veya Kapandı. Anonim oturum başlatılıyor...");
-        // [WHY]: Normal personeller giriş yapmadan personel listesini çekemiyordu. 'Veriler Senkronize Ediliyor' kilidini açmak zorundayız.
-        // [HOW]: Kullanıcının aktif bir token'ı yoksa, sadece okuma yetkisine sahip bir Anonim Oturum (Anonymous Auth) başlatıyoruz.
-        try {
-            // AUTH-05: personel (anonim) oturumu sekmeye değil tarayıcıya bağlı kalsın — admin çıkışı/kilidi sonrası da.
-            await setPersistence(auth, browserLocalPersistence);
-            await signInAnonymously(auth);
-            console.log("✅ [Auth] Anonim Oturum (Okuma Yetkili) başarıyla açıldı.");
-        } catch (error) {
-            console.error("❌ [Auth] Anonim oturum açılamadı:", error.message);
-        }
+        console.warn("⚠️ [Auth] Oturum yok — giriş bekleniyor (anonim oturum açılmaz).");
+        if (_syncRunning) stopRealtimeSync();
+        isSyncStarted = false;
+        window.isFirebaseLoaded = false;
+        if (typeof window.checkAuth === 'function') window.checkAuth();
     }
+    _markAuthKnown();
 });
 
 // window.addEventListener("load", () => {
@@ -1480,64 +1449,87 @@ window.addEventListener('onAuthReady', () => {
 // ─── Personel Auth hesabı açma (Faz 4B · J7 · 4.6 / K4) ─────────────────────────────────────────────
 // [WHY]: Aşama B'de her personelin kendi Firebase Auth hesabı olacak. Ana Auth örneğiyle hesap açmak, Firebase'in yeni
 //        hesapla oturum açması demek — admin oturumu düşerdi.
-// [HOW]: Hesaplar staff-provisioning.js'in ikincil app örneğinde ('provisioner', bellek içi kalıcılık) açılır; bağlama
-//        (personel.uid / authEmail / authProvisionedAt) ana oturumdaki admin yazmasıdır (updateItem). Yalnız Firebase admin.
-//        Bu tur giriş akışına ve kurallara dokunmaz (J8/J10); hesaplar açılır ama henüz giriş için kullanılmaz.
+// [HOW]: Hesaplar staff-provisioning.js'in ikincil app örneğinde ('provisioner', bellek içi kalıcılık) açılır. Bağlama ana
+//        oturumdaki admin yazmasıdır, sırası bilinçli:
+//          1) ${root}/staffAccounts/items/{uid} → { personelId, pri } — kuralların isStaff eşlemesi (PRI e-postasından personel
+//             kaydının id'si türetilemez; uid → personel). Yalnız yönetici yazar ve okur.
+//          2) personel.uid / authEmail / pri / authProvisionedAt (updateItem).
+//        2. adım düşerse eşleme tek başına yetki vermez: kural personel kaydındaki uid ve PRI'yi de doğrular. Yalnız Firebase admin.
 let _staffProvisioner = null;
 const _getStaffProvisioner = () => _staffProvisioner || (_staffProvisioner = window.StaffProvisioning.createAuthProvisioner({
-    fns: { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updatePassword },
+    fns: { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateEmail },
     options: firebaseConfig,
     emulatorUrl: EMULATOR_MODE ? `http://${EMULATOR_HOST}:9099` : null,
 }));
-const _linkStaffAccount = (person, fields) => updateItem('personel', person.id, fields);
+const _staffAccountRef = uid => doc(fireDb, COLLECTION_ROOT, 'staffAccounts', 'items', String(uid));
+async function _linkStaffAccount(person, fields) {
+    if (fields.uid) await setDoc(_staffAccountRef(fields.uid), { personelId: String(person.id), pri: fields.pri || person.pri, linkedAt: Date.now() });
+    // Yalnız değişen alanlar yazılır (göç aracının "eşlemeyi yenile" geçişi personel kaydını gereksiz yere yazmasın)
+    const live = (window.data.personel || []).find(_sameId(person.id)) || person;
+    const changed = {};
+    for (const [k, v] of Object.entries(fields)) if (k !== 'authProvisionedAt' && live[k] !== v) changed[k] = v;
+    if (!Object.keys(changed).length) return;
+    if (fields.authProvisionedAt !== undefined) changed.authProvisionedAt = fields.authProvisionedAt;
+    await updateItem('personel', person.id, changed);
+}
 function _requireProvisioningAdmin() {
     if (!window.StaffProvisioning) throw new SaveDataError('write-failed', 'Hesap açma modülü (staff-provisioning.js) yüklenmemiş.');
     if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Personel hesabı yalnız yönetici oturumuyla açılabilir.');
 }
-
-/** Tek personele hesap açar/bağlar. Dönüş: StaffProvisioning.provisionOne sonucu; kota/kapalı sign-up → status 'stopped'. */
-export const provisionStaffAccount = window.provisionStaffAccount = async function (person) {
-    _requireProvisioningAdmin();
+// [WHY]: J10 istemcisi J10 kuralları yayınlanmamış bir projeye bağlıyken hesap AÇILIYOR ama eşleme yazılamıyordu (eski kurallarda
+//        staffAccounts yok → permission-denied): Firebase Auth'ta bağsız, gerçek hesaplar kalıyordu (saha bulgusu).
+// [HOW]: Hesap açmadan / taşımadan ÖNCE yönetici eşleme koleksiyonunu okuyabiliyor mu bakılır (J10 kuralı: yalnız admin okur).
+//        Okuyamıyorsa hiçbir Auth işlemi yapılmaz. Başarı oturum boyunca hatırlanır.
+let _staffRulesReady = false;
+async function _requireStaffRules() {
+    if (_staffRulesReady) return;
     try {
-        return await window.StaffProvisioning.provisionOne(person, _getStaffProvisioner(), _linkStaffAccount);
+        await getDoc(_staffAccountRef('kural-denetimi'));
+        _staffRulesReady = true;
+    } catch (e) {
+        const denied = e && e.code === 'permission-denied';
+        throw new SaveDataError(denied ? 'rules-not-deployed' : 'write-failed', denied
+            ? `Bu ortamın (${COLLECTION_ROOT}) Firestore kuralları J10 (PRI) sürümü değil; hesap AÇILMADI. Önce kurallar yayınlanmalı (emülatörde: adres ?emu=1 ile mi?).`
+            : `Kurallar denetlenemedi (${(e && (e.code || e.message)) || 'bilinmeyen hata'}); hesap açılmadı.`);
+    }
+}
+
+/** Tek personele <pri>@ hesabı açar/bağlar. Dönüş: StaffProvisioning.provisionOne sonucu; kota/kapalı sign-up → status 'stopped'. */
+export const provisionStaffAccount = window.provisionStaffAccount = async function (person, { code } = {}) {
+    _requireProvisioningAdmin();
+    await _requireStaffRules();
+    try {
+        // J10: kod personel kaydında tutulmaz; yönetici yeni kodu burada verir (verilmezse eski kayıttaki kod — kod temizliğinden önce)
+        return await window.StaffProvisioning.provisionOne(person, _getStaffProvisioner(), _linkStaffAccount, { code });
     } catch (e) {
         if (e && e.name === 'ProvisioningStop') return { status: 'stopped', code: e.code, reason: e.message };
         throw e;
     }
 };
 
-/** Hesabı olmayan tüm personele hesap açar (VIP Auth Göç Aracı). */
-export const provisionMissingStaffAccounts = window.provisionMissingStaffAccounts = async function (opts = {}) {
+// ─── PRI / Hesap Göç Aracı (J10 PRI revizyonu) ──────────────────────────────────────────────────────────
+// [WHY]: Var olan personelin PRI'si yok; J7'de açılmış hesaplar p<id>@ adresinde. Hepsi <pri>@ adresine geçmeli (uid korunarak).
+// [HOW]: Önizleme yerel veriden, YAZMADAN (StaffProvisioning.planAccounts). Uygulama personel listesini sunucudan TAZE okur;
+//        önizlemeden sonra değiştiyse hiç yazmadan durur (J9 kuralı). Satırlar sırayla; kota / kapalı özellikte durur, kalan
+//        sayı bildirilir; yeniden çalıştırmak güvenlidir (bağlı ve PRI'si doğru personel yalnız eşlemesi yenilenerek geçilir).
+export const planStaffAccounts = window.planStaffAccounts = function () {
     _requireProvisioningAdmin();
-    return window.StaffProvisioning.provisionMissing(window.data.personel || [], _getStaffProvisioner(), _linkStaffAccount, opts);
+    return window.StaffProvisioning.planAccounts(window.data.personel || []);
+};
+export const applyStaffAccounts = window.applyStaffAccounts = async function (plan, { onProgress } = {}) {
+    _requireProvisioningAdmin();
+    await _requireStaffRules();
+    const SP = window.StaffProvisioning;
+    const snap = await getDocs(collection(fireDb, COLLECTION_ROOT, 'personel', 'items'));
+    const fresh = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (SP.accountsFingerprint(fresh) !== plan.fingerprint) {
+        return { aborted: true, results: [], counts: {}, stopped: { code: 'personel-changed', message: 'Personel listesi önizlemeden sonra değişti; aracı yeniden açın.' }, remaining: plan.rows.length };
+    }
+    const byId = new Map(fresh.map(p => [String(p.id), p]));
+    const writePri = (person, pri) => updateItem('personel', person.id, { pri });
+    return SP.applyAccounts(plan, byId, _getStaffProvisioner(), _linkStaffAccount, { writePri, onProgress });
 };
 
-// ─── Giriş kodu değiştirme (Faz 4B · J7.5 · VIP Kod Benzersizleştirme) ─────────────────────────────
-// [WHY]: Aynı kodu paylaşan personel J8'de "kod → hesap" eşlemesini belirsiz bırakır; kod değişince J7'de açılan hesabın
-//        parolası da değişmeli (aksi hâlde hesap eski kodla kalır). İstemci SDK'sı başka kullanıcının parolasını değiştiremez.
-// [HOW]: Parti önce StaffCodeRegistry.planCodeChanges ile doğrulanır (yeni kod hiçbir mevcut/partideki kodla çakışmaz →
-//        sıralı uygulamada ara çakışma yok). Her kişi için StaffProvisioning.changeStaffCode: ikincil örnekte eski parolayla
-//        giriş → updatePassword → signOut, sonra personel.code (admin yazması). Kotada durur, kalan sayıyı bildirir.
-export const changeStaffCodes = window.changeStaffCodes = async function (changes, { onProgress } = {}) {
-    _requireProvisioningAdmin();
-    if (!window.StaffCodeRegistry) throw new SaveDataError('write-failed', 'Kod sicili (staff-code-registry.js) yüklenmemiş.');
-    const plan = window.StaffCodeRegistry.planCodeChanges(window.data.personel || [], changes);
-    if (!plan.ok) return { ok: false, errors: plan.errors, results: [], stopped: null, remaining: 0 };
-    const write = (person, fields) => updateItem('personel', person.id, fields);
-    const results = [];
-    let stopped = null;
-    for (let i = 0; i < plan.changes.length; i++) {
-        const { person, newCode } = plan.changes[i];
-        try {
-            results.push({ id: String(person.id), ...(await window.StaffProvisioning.changeStaffCode(person, newCode, _getStaffProvisioner(), write)) });
-        } catch (e) {
-            if (e && e.name === 'ProvisioningStop') { stopped = { code: e.code, message: e.message }; break; }
-            results.push({ id: String(person.id), status: 'error', reason: (e && e.message) || 'bilinmeyen hata' });
-        }
-        if (onProgress) onProgress(i + 1, plan.changes.length);
-    }
-    return { ok: true, errors: [], results, stopped, remaining: plan.changes.length - results.length, unresolved: plan.unresolved };
-};
 
 // ─── Personel hesabıyla giriş (Faz 4B · J8 · 4.6 / K4) ─────────────────────────────────────────────
 // [WHY]: J7 hesapları açtı; giriş hâlâ anonim oturumla yapılıyordu. Hesapla giriş, kurallara "kim" bilgisini taşır (J10) ve
@@ -1545,6 +1537,8 @@ export const changeStaffCodes = window.changeStaffCodes = async function (change
 // [HOW]: ANA Auth örneğinde (J7'deki ikincil örnek değil) yerel kalıcılıkla giriş: anonim oturum yerini personel hesabına
 //        bırakır, Firestore dinleyicileri yeni kimlikle sürer (anonim → admin geçişindeki gibi). onAuthStateChanged'in
 //        window.userAuth'u güncellemesi beklenir; çağıran uid bağını (personel.uid) ayrıca doğrular.
+//        J10 PRI: giriş ekranı adresi kullanıcının yazdığı kurumsal kimlikten kurar (<pri>@staff.medipol.local); öncesinde
+//        veritabanı okunmaz.
 export const signInStaffAccount = window.signInStaffAccount = async function (email, password) {
     await setPersistence(auth, browserLocalPersistence);
     const cred = await signInWithEmailAndPassword(auth, email, password);
@@ -1554,14 +1548,6 @@ export const signInStaffAccount = window.signInStaffAccount = async function (em
     return cred.user;
 };
 
-/** VIP: personel giriş modunu sunucuya yazar (admin_settings.staffAuthMode; tüm istemciler dinler). Yalnız Firebase admin. */
-export const setStaffAuthMode = window.setStaffAuthMode = async function (mode) {
-    const S = window.AppModules.Session;
-    if (!S.STAFF_AUTH_MODES.includes(mode)) throw new SaveDataError('invalid-argument', `Geçersiz giriş modu: ${mode}`);
-    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Giriş modunu yalnız yönetici değiştirebilir.');
-    await setDoc(systemConfigRef('admin_settings'), { staffAuthMode: mode }, { merge: true });
-    return mode;
-};
 
 // ─── Sahiplik Göç Aracı (Faz 4B · J9) ─────────────────────────────────────────────────────────────────
 // [WHY]: J9 öncesi kayıtların (talep, satın alma, görev, şablon/akış adımları) sahiplik uid'leri yok; J10 kuralları bunlar
@@ -1590,7 +1576,7 @@ export const planOwnershipMigration = window.planOwnershipMigration = function (
     return window.Ownership.planMigration({
         data: { requests: d.requests || [], purchaseOrders: d.purchaseOrders || [], tasks: d.tasks || [], workflowTemplates: d.workflowTemplates || [] },
         personel: d.personel || [],
-        staffEmail: window.StaffProvisioning ? window.StaffProvisioning.staffEmail : null,
+        accountEmail: window.StaffProvisioning ? window.StaffProvisioning.accountEmailOf : null,
     });
 };
 
@@ -1600,7 +1586,7 @@ export const applyOwnershipMigration = window.applyOwnershipMigration = async fu
     if (_bulkLockBlocks(['requests', 'purchaseOrders', 'tasks'])) throw new SaveDataError('bulk-locked', BULK_LOCK_MESSAGE);
     const res = await window.Ownership.applyMigration({
         plan, store: _ownershipStore(), onProgress,
-        staffEmail: window.StaffProvisioning ? window.StaffProvisioning.staffEmail : null,
+        accountEmail: window.StaffProvisioning ? window.StaffProvisioning.accountEmailOf : null,
     });
     // Yazılanları yerel kopyaya hemen işle (snapshot beklenmeden; sonraki önizleme tutarlı olsun)
     res.written.forEach(w => {
@@ -1610,5 +1596,55 @@ export const applyOwnershipMigration = window.applyOwnershipMigration = async fu
         if (i !== -1) list[i] = { ...list[i], ...w.patch };
     });
     console.log(`🪪 Sahiplik göçü: ${res.status} · yazılan ${res.written.length} · atlanan ${res.skipped.length} · düşen ${res.failed.length} · denenmeyen ${res.notAttempted}`);
+    return res;
+};
+
+// ─── Kod temizliği (Faz 4B · J10) ──────────────────────────────────────────────────────────────────────
+// [WHY]: Giriş yalnız Firebase Auth ile yapılıyor; düz metin kodlar (personel.code, requests.personelKodu, eski
+//        purchaseOrders.createdBy) veritabanında durmamalı. Kurallar kodun yeniden yazılmasını zaten reddeder.
+// [HOW]: Plan Ownership.planCodeCleanse (saf). Önkoşul: tüm personelin geçerli hesabı var ve sahiplik göçünde yazılmamış kayıt
+//        kalmadı. Yazma 400'lük batch'lerle (deleteField); her batch kendi içinde atomik, düşen batch ve sonrası raporlanır,
+//        yeniden çalıştırma kalanları siler (idempotent). Yalnız Firebase admin.
+export const planCodeCleanse = window.planCodeCleanse = function () {
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Kod temizliği yalnız yönetici oturumuyla yapılabilir.');
+    const own = planOwnershipMigration();
+    const d = window.data || {};
+    return window.Ownership.planCodeCleanse({
+        personel: d.personel || [], requests: d.requests || [], purchaseOrders: d.purchaseOrders || [],
+        accountEmail: window.StaffProvisioning ? window.StaffProvisioning.accountEmailOf : null,
+        ownershipPendingItems: own.items.length, ownershipIssues: own.issues.length,
+    });
+};
+export const applyCodeCleanse = window.applyCodeCleanse = async function (plan, { onProgress } = {}) {
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Kod temizliği yalnız yönetici oturumuyla yapılabilir.');
+    if (!plan || !plan.ready) throw new SaveDataError('invalid-argument', 'Kod temizliği önkoşulları sağlanmadı.');
+    const ops = [
+        ...plan.personel.map(x => ({ col: 'personel', id: x.id, data: { code: deleteField() } })),
+        ...plan.requests.map(x => ({ col: 'requests', id: x.id, data: { personelKodu: deleteField() } })),
+        ...plan.purchaseOrders.map(x => ({ col: 'purchaseOrders', id: x.id, data: { createdBy: x.replaceWith } })),
+    ];
+    const res = { written: 0, failed: 0, notAttempted: 0, error: null };
+    for (let i = 0; i < ops.length; i += 400) {
+        const chunk = ops.slice(i, i + 400);
+        try {
+            const b = writeBatch(fireDb);
+            chunk.forEach(o => b.update(_docRef(o.col, o.id), o.data));
+            await b.commit();
+        } catch (e) {
+            res.failed = chunk.length; res.notAttempted = ops.length - i - chunk.length;
+            res.error = { code: (e && e.code) || 'write-failed', message: (e && e.message) || 'bilinmeyen hata' };
+            break;
+        }
+        res.written += chunk.length;
+        chunk.forEach(o => {
+            for (const store of [window.data, window._dbMirror]) {
+                const it = (store[o.col] || []).find(_sameId(o.id));
+                if (!it) continue;
+                if (o.col === 'personel') delete it.code; else if (o.col === 'requests') delete it.personelKodu; else it.createdBy = o.data.createdBy;
+            }
+        });
+        if (onProgress) onProgress(res.written, ops.length);
+    }
+    console.log(`🧹 Kod temizliği: ${res.written} yazıldı · ${res.failed} düştü · ${res.notAttempted} denenmedi`);
     return res;
 };
