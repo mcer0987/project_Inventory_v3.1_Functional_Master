@@ -11,7 +11,8 @@
 |---|---|
 | Dal | `feat/phase-4b-identity-model` |
 | Taban commit | `d35c919e318e1237d566c2529e25ab4f9c11d351` (J10 · "enterprise PRI identity model…") |
-| **Son test edilen commit (J11.5)** | **`6958aa352813025e6476b4ede6d5f976c021d831`**: J11'in üstünde, bağımsız denetimin 3 zero-trust bulgusunun düzeltmesi. Ayrıntı ve sonuçlar **§11**'de. Push / merge / deploy yapılmadı. |
+| **Son test edilen commit (J11.6)** | **`86963dea999a9585ca13e5c68e8b0b9e0ea00678`**: J11.5'in üstünde, bağımsız denetimin 2 final P1 bulgusunun düzeltmesi. Ayrıntı ve sonuçlar **§12**'de. Push / merge / deploy yapılmadı. |
+| J11.5 commit'i | `6958aa352813025e6476b4ede6d5f976c021d831`: 3 zero-trust bulgusu, **§11**. |
 | **Test edilen J11 commit'i** | **`06afc6f53da260bdc829e04b8b709c68fb2d706e`** — yalnız bu dalda, yerel commit. Push, merge ve deploy **yapılmadı**; üçü de proje sahibinin onayını bekliyor (madde 10). Testler commit'ten hemen önce aynı çalışma ağacında koşuldu; commit'ten sonra J11 dosyalarında çalışma ağacıyla fark kalmadığı `git diff HEAD` ile doğrulandı. Bu rapor ve Mega Fix dosyası ayrı bir belge commit'iyle eklendi. |
 | Test tarihi | 20.10.2026, yerel makine (Windows 11), Firebase Emulator (Firestore + Auth) |
 | Gerçek ortam | **Dokunulmadı.** Canlı (`lifeserver_master`) ve demo (`inventory_demo`) projelerine hiçbir test yazmadı. Deploy ya da göç yapılmadı. |
@@ -380,7 +381,7 @@ Hiçbiri gerçek Firebase projesine yazmaz. `test:*:emu` ve `test:rules` kendi g
 ayrıca açılır.
 
 ```bash
-git checkout 6958aa352813025e6476b4ede6d5f976c021d831   # J11.5 (son); yalnız J11 için: 06afc6f
+git checkout 86963dea999a9585ca13e5c68e8b0b9e0ea00678   # J11.6 (son); J11.5: 6958aa3 · J11: 06afc6f
 npm run test:unit
 npm run test:rules
 npm run test:staff:emu
@@ -402,7 +403,7 @@ ve aynı komutlar orada koşulur.
 
 ## 10. Proje sahibinin kararını bekleyenler
 
-1. **Push / merge / deploy.** J11 ve J11.5 yalnız yerel `feat/phase-4b-identity-model` dalında commit'li (`06afc6f`, `6958aa3`). Deploy, §5'teki
+1. **Push / merge / deploy.** J11, J11.5 ve J11.6 yalnız yerel `feat/phase-4b-identity-model` dalında commit'li (`06afc6f`, `6958aa3`, `86963de`). Deploy, §5'teki
    sırayla ve kurallar + istemci birlikte yapılmalı.
 2. **Gerçek ortamda göç.** §5 adım 4–5; kök başına (canlı ve demo ayrı).
 3. **Açık risk 1 (yeni kaydın tarihi istemci saati).** Kabul mü, yoksa Faz 2'de sunucu saatli karar alanı (`kararlar.<adım>.at
@@ -521,3 +522,128 @@ olmadığı için etiket savunması aynı kalır. Bu alanlardan birini değişti
 3. **Yalnız yeni kayıtlar denetlenir.** J11.5 öncesi uid'siz kayıtlar geçerli kalır; eski kayıtlar değiştirilemez
    (`appendOnly`).
 4. **Canlı veride çözülemeyen `createdBy`.** Kilidin açılmasını engeller (11.1). Yönetici elle düzeltir.
+
+
+---
+
+## 12. Tur J11.6 — Final zero-trust sözleşme düzeltmeleri (bağımsız denetim, 84/100, NO-GO)
+
+Commit: **`86963dea999a9585ca13e5c68e8b0b9e0ea00678`** (J11.5 `6958aa3`'ün üstünde; yalnız bu dal, yerel). Push, merge, deploy
+ve gerçek veri göçü yapılmadı.
+
+**Sıra:** Önce saldırı testleri yazıldı ve **değiştirilmemiş J11.5 koduna karşı** koşuldu (bulgunun varlığı). Sonra düzeltme
+yapıldı. Hiçbir mevcut test beklentisi gevşetilmedi.
+
+**Değişen dosyalar:**
+- `src/utils/ownership.js`: yalnız `planCodeCleanse` içindeki `createdBy` sınıflandırması ve açıklaması.
+- `firestore.rules`: yalnız `poCreateOk`, `poDraftOk`, `poWithdrawOk`.
+- Testler: `tests/unit/ownership.test.mjs`, `tests/integration/ownership.emu.test.mjs`, `tests/rules/rules.test.mjs`,
+  `scratch/flow-tests.js` (`j11ApprovalAudit`).
+
+### 12.1 Kod / kimlik çakışması (P1, `ownership.js`)
+
+- **Doğrulama:** `planCodeCleanse`, `createdBy` bir personel id'si, adı ya da sistem değeriyle eşleşirse kod kontrolüne
+  **hiç bakmadan** "güvenli" sayıyordu (J11.5 satır 431). Bir personelin geçerli kodu `admin`, başka birinin id'si ya da adıyla
+  aynıysa dönüşüm atlanıyordu. Kod Temizliği `personel.code`'u silince değerin kod olduğu bir daha bilinemiyordu ve
+  `planStaffAccessClosure` temiz sonuç veriyordu.
+- **Düzeltme:** Dört eşleşme **birlikte** değerlendirilir: `byId`, `byName`, sistem değeri ve `byCode` (tam eşleşme; kodlar
+  büyük / küçük harfe duyarlı).
+  - Geçerli bir kod **farklı** bir kişiyi ya da bir sistem değerini de gösteriyorsa `purchaseOrderUnresolved` engeli oluşur.
+    Gerekçe "kod / kimlik çakışması"dır; rapor değeri içermez. Otomatik dönüşüm yapılmaz.
+  - Engel olduğu için plan hazır sayılmaz ve `applyCodeCleanse` `not-ready` ile **hiçbir şey yazmaz**. Kodlar silinmeden durur;
+    çakışmanın izi yeniden çalıştırmalarda da kalır. Kapanış (`purchaseOrderCodes`) engelli olduğu için kilit açılamaz.
+  - Tüm anlamlar **aynı** kişiyi gösteriyorsa (kod = kendi id'si ya da adı) değer tek anlamlıdır ve dokunulmaz; id / ad
+    kalıcıdır.
+  - Kod içermeyen tek anlamlı id / ad / sistem değerleri ve tekil koda indirgenen değerler önceki gibi işlenir. Aynı adlı iki
+    kişi gibi **kodsuz** belirsizlikler kod silmeyle bilgi kaybetmediği için engellenmez (kapsam korunur).
+- İki aşamalı kod temizliği, AtomicWriter ve fail-closed kilit değişmedi.
+
+### 12.2 Talep sahibinin sahte `workflow.currentState`'i (P1, `firestore.rules`)
+
+- **Doğrulama:** Admin listesi, başlamış ve `currentState == 'completed'` olan akışı **"Tamamlandı"** gösterir
+  (`admin-purchase-render.js` `getWorkflowStatus`). `poCreateOk`, `poDraftOk` ve `poWithdrawOk` `currentState`'i
+  sınırlamıyordu; sahip, onaysız talebini `completed` durumunda başlatabiliyordu. Bu, E2E'de J11.5 kurallarıyla **yazıldı**
+  (§12.3).
+- **Düzeltme:** Değerler istemcinin gerçek yazdıklarından ve WorkflowEngine'den alındı; keyfi bir liste kullanılmadı.
+
+  | Sahibin işlemi | İstemci (kaynak) | Kural |
+  |---|---|---|
+  | Oluşturma | `savePurchaseRequest` alanı yazmaz; motor başlangıcı `INITIATION` sayar | alan yok ya da `initiation` |
+  | Başlatma | `confirmStartWorkflow` / `createWorkflowFromTemplate`: `INITIATION` | `initiation` |
+  | Düzenleme / ek silme | `workflow`'a dokunmaz | değişmez (yoksa eklenemez) |
+  | İptal | `CANCELLED` | `cancelled`; eski durum `WorkflowEngine.transitions`'ta `cancelled`'a geçebilen bir durum (yoksa `initiation` sayılır) |
+  | Geri çekme | `INITIATION` (taslağa sıfırlama, motor geçişi değil) | `initiation`; eski durum sınırlanmaz |
+
+  Geri çekmede eski durum sınırlanmadı. Motorun geçiş tablosunda `hr`, `finance` ve `director`'dan `initiation`'a geçiş yok; bu
+  tabloyu uygulamak bu durumlardan yapılan meşru geri çekmeyi kırardı.
+- **Alanların rolleri ayrı kaldı:**
+  - `durum` (üst düzey): mevcut listeler.
+  - `steps[].status`: `freshSteps` → `pending`.
+  - `started` / `finished`: mevcut bağlar.
+- `ownerEventOk` ve `poApprovalOk` (J11.5) değişmedi.
+
+### 12.3 Saldırı testleri: önce / sonra
+
+| Test | J11.5 kodu (`6958aa3`) | J11.6 |
+|---|---|---|
+| Unit — `admin` sistem değeri = geçerli kod | ✖ (güvenli sayıldı, plan hazır) | ✔ engel |
+| Unit — kod = başka personelin id'si | ✖ | ✔ |
+| Unit — kod = başka personelin adı | ✖ | ✔ |
+| Unit — kapanış: çakışma çözülmeden kilit açılamaz | ✖ (`purchaseOrderCodes` 0) | ✔ |
+| Unit — tek anlamlı değerler (kod = kendi id'si / adı) | ✔ | ✔ (gereksiz engel yok) |
+| Unit — kodlar dururken çakışmasız id / ad / sistem değeri | ✔ | ✔ |
+| Emülatör — çakışma → kodlar silinmeden durur, kapanış ve kilit engelli; yönetici çözünce kısmi göç (kod silme 2. parçada düşer) → yeniden çalıştırma → temiz kapanış | ✖ (`ready: true`) | ✔ |
+| Rules — oluşturmada sahte durum (6 değer) | ✖ | ✔ |
+| Rules — başlatmada sahte `completed` / ilgisiz durum | ✖ | ✔ |
+| Rules — düzenlemede durum değiştirme | ✖ | ✔ |
+| Rules — iptalde `cancelled` dışı durum | ✖ | ✔ |
+| Rules — geri çekmede `initiation` dışı durum | ✖ | ✔ |
+| Rules — KABUL: başlat → 10 adımı sırayla onayla → `completed` / `Onaylandı` | ✔ | ✔ |
+
+- **Toplamlar:** J11.5 koduna karşı unit dosyası 27/31, ownership emülatörü 16/17 ve rules 198/203 sonuç verdi. Başarısız olan
+  testlerin hepsi J11.6 saldırı testleri.
+- **E2E (gerçek istemci + gerçek kurallar, `j11ApprovalAudit`):** Talep sahibi; olayları, uid'si ve adımları meşru olan, yalnız
+  `currentState`'i farklı bir başlatma yazmayı denedi.
+  - **J11.5 kuralları:** sahte `completed` başlatma **yazıldı**; sunucu belgesi değişti (`ownerForgedServerUnchanged: false`)
+    ve ardından gelen meşru başlatma reddedildi.
+  - **J11.6 kuralları:** `completed`, `cancelled` ve `suspended` üçü de `forbidden`; sunucu belgesi değişmedi; meşru başlatma
+    yazıldı; onay ve red akışı sürdü.
+  - **Not (gizlenmedi):** J11.5 koşusunda `cancelled` / `suspended` denemeleri yalnız sahte `completed` zaten yazıldığı için
+    reddedildi; bu koşuda kanıt sayılmazlar. Bu değerlerin J11.5'teki açığını rules testleri gösterir.
+  - Önce koşusu için kural dosyası geçici olarak `6958aa3` sürümüyle değiştirildi ve sonra geri yüklendi; bayt düzeyinde
+    karşılaştırıldı (`cmp`).
+
+### 12.4 Regresyon (J11.6 commit'i, 20.10.2026; hepsi emülatörde)
+
+| Paket | J11.5 | J11.6 |
+|---|---|---|
+| `npm run test:unit` | 114 | **120/120** |
+| `npm run test:rules` | 197 | **203/203** |
+| `npm run test:staff:emu` | 15 | **15/15** |
+| `npm run test:ownership:emu` | 16 | **17/17** |
+| `npm run test:atomic:emu` | 5 | **5/5** |
+| E2E `flow-tests --emu` (temiz emülatör + `emu:seed`) | 55 | **55/55**, 0 CSP ihlali, 0 sayfa hatası, temizlik 1 kayıt |
+| `npm run lint:xss` · `hosting-files.js` | 0 · 55 | **0 izinsiz · 55/55** |
+
+**İfade bütçesi** (`scratch/_budget.sh`; pay = eklenebilen `&& request.time != null` sayısı):
+
+| İstek | J11.5 | J11.6 |
+|---|---|---|
+| 10 adımlı başlatma | 12'den fazla | **12'den fazla** |
+| 10. adım onayı | 12'den fazla | **12'den fazla** |
+| 10. adım reddi | 6–8 | **6–8** |
+
+### 12.5 Açık kalanlar
+
+Önceki kabul edilmiş riskler genişletilmedi.
+
+1. **Kod silindikten sonra çakışma tespit edilemez.** J11.6 bunu silmeden **önce** durdurur. Ancak kodlar daha önce
+   (J11.6 öncesi bir koşuda ya da konsoldan) silinmişse, o koda dayanan bir `createdBy` artık id / ad / sistem değeri olarak
+   görünür ve geriye dönük tespit edilemez. Canlıda Kod Temizliği henüz çalıştırılmadığı için bu durum beklenmiyor.
+2. **Operasyonel etki.** Canlıda bir personelin kodu `admin`, `system`, başka bir personelin id'si ya da adıyla aynıysa, o
+   değeri taşıyan her satın alma kaydı kilidi engeller; yönetici kaydı elle düzeltir. Bu fail-closed tasarımın sonucudur.
+   Emülatördeki demo kopyasında böyle bir çakışma yok (`j10CodeCleanse` geçti).
+3. **İptalde eski durum WorkflowEngine'e bağlı.** J11 öncesi beklenmedik bir durumda (`completed`, `cancelled` …) kalmış bir
+   taslağı sahip iptal edemez, yönetici iptal eder (güvenli tarafta).
+4. **Değişmeyenler.** §8 açık riskleri (yeni kaydın tarihi istemci saati vb.) ile §11.6 madde 2–4 değişmedi. §11.6 madde 1
+   ("sahibin taslak / iptal / geri çekme yolunda `currentState` serbest") J11.6 ile **kapatıldı**.
