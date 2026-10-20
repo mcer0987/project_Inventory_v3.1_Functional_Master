@@ -1255,7 +1255,7 @@
     const _GATE_CHECK = {
         personelCodes: ['Personel kaydında düz metin giriş kodu', 'Kod Temizliği'],
         requestCodes: ['Taleplerde eski kod kopyası (personelKodu)', 'Kod Temizliği'],
-        purchaseOrderCodes: ['Satın almalarda kod biçimli "oluşturan" alanı', 'Kod Temizliği'],
+        purchaseOrderCodes: ['Satın almalarda kodlu ya da çözülemeyen "oluşturan" alanı', 'Kod Temizliği'],
         accountsMissing: ['Giriş hesabı olmayan personel', 'PRI / Hesap Göç Aracı ya da tabloda "Hesap Aç"'],
         accountsInconsistent: ['Hesabı tutarsız / PRI adresinde olmayan personel (J7 dahil)', 'PRI / Hesap Göç Aracı'],
         accountMapMismatch: ['Kimlik eşlemesi (staffAccounts) eksik / tutarsız', 'PRI / Hesap Göç Aracı (eşlemeyi yeniler)'],

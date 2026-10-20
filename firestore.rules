@@ -111,11 +111,18 @@ service cloud.firestore {
     // Liste yalnız sona ekleme ile büyüyebilir (geçmiş / akış kayıtları). Not: kurallar dilinde BOŞ dilim ([0:0]) hata verir —
     // boş durum ayrıca karşılanır.
     function appendOnly(a, b) { return b.size() >= a.size() && (a.size() == 0 || b[0:a.size()] == a); }
-    // J11 · P1 #7: liste ya AYNEN kalır ya da sona TEK kayıt eklenir (önek korunur) ve eklenen kaydın aktör alanı (f) "me".
-    // Sahibin taslak / başlatma / geri çekme / iptal işlemleri istemcide en fazla bir history ve bir akış kaydı ekler.
-    function appendOneBy(a, b, f, me) {
+    // J11 · P1 #7 + J11.5 (bağımsız denetim): liste ya AYNEN kalır ya da sona TEK kayıt eklenir (önek korunur). Eklenen kayıt:
+    //   - aktör alanı (f) sahibin adı (me),
+    //   - uid'si oturumun uid'si (request.auth.uid — ek get() yok),
+    //   - türü (tf alanı: history 'action', akış 'islem') o işlemin istemcide ürettiği türlerden biri (kinds). kinds boşsa o işlem
+    //     o listeye HİÇ kayıt ekleyemez (ör. taslak düzenleme history'ye yazmaz).
+    // Sahibin taslak / başlatma / geri çekme / iptal işlemleri istemcide en fazla bir history ve bir akış kaydı ekler; sahibin
+    // kendi taslağına "Onaylandı" ya da başkasının uid'siyle olay eklemesi böylece reddedilir.
+    function ownerEventOk(a, b, f, me, tf, kinds) {
       let k = a.size();
-      return b.size() == k ? b == a : (b.size() == k + 1 && b[k].get(f, '') == me && (k == 0 || b[0:k] == a));
+      return b.size() == k ? b == a
+        : (b.size() == k + 1 && b[k].get(f, '') == me && b[k].get('uid', '') == request.auth.uid
+           && b[k].get(tf, '') in kinds && (k == 0 || b[0:k] == a));
     }
 
     // ─── J11 · P1 #5/#7: oturum sahibinin GERÇEK personel kimliği ─────────────────────────────────────────
@@ -187,7 +194,7 @@ service cloud.firestore {
         && d.get('createdByName', '') == me && d.get('talepEden', '') == me
         && string(d.get('createdBy', '')) == staffPid(root)
         && wf.get('history', []).size() == 0
-        && appendOneBy([], d.get('akis', []), 'yapan', me);
+        && ownerEventOk([], d.get('akis', []), 'yapan', me, 'islem', ['Talep Oluşturuldu']);
     }
     // Sahibi, akış BAŞLAMAMIŞKEN: düzenler, akışı başlatır (adımlar kararsız, kendisi onaylayıcı değil), iptal eder.
     // J11 · P1 #7: talep sahibinin görünen kimliği (createdBy / createdByName / talepEden) taslakta da DEĞİŞTİRİLEMEZ. Sahibin her
@@ -208,8 +215,9 @@ service cloud.firestore {
         && nwf.get('currentStep', 0) == 0
         && (nwf.get('finished', false) != true || d.get('durum', '') == 'İptal Edildi')
         && (nwf.get('started', false) != true || d.get('durum', '') == 'Onay Bekliyor')
-        && appendOneBy(wf.get('history', []), nwf.get('history', []), 'actor', me)
-        && appendOneBy(old.get('akis', []), d.get('akis', []), 'yapan', me);
+        && ownerEventOk(wf.get('history', []), nwf.get('history', []), 'actor', me, 'action', nwf.get('started', false) == true ? ['create'] : [])
+        && ownerEventOk(old.get('akis', []), d.get('akis', []), 'yapan', me, 'islem', nwf.get('started', false) == true ? ['İş akışı başlatıldı']
+             : (d.get('durum', '') == 'İptal Edildi' ? ['Talep İptal Edildi'] : ['Talep güncellendi', 'Ek dosya silindi']));
     }
     // Sahibi, akış SÜRERKEN: yalnız geri çeker (taslağa döner; içerik değişmez, geçmiş korunur).
     function poWithdrawOk(old, d) {
@@ -221,8 +229,8 @@ service cloud.firestore {
         && d.get('durum', '') == 'Taslak'
         && nwf.get('started', true) == false && nwf.get('finished', true) == false
         && nwf.get('steps', [1]).size() == 0 && nwf.get('currentStep', -1) == 0
-        && appendOneBy(wf.get('history', []), nwf.get('history', []), 'actor', me)
-        && appendOneBy(old.get('akis', []), d.get('akis', []), 'yapan', me);
+        && ownerEventOk(wf.get('history', []), nwf.get('history', []), 'actor', me, 'action', ['withdraw'])
+        && ownerEventOk(old.get('akis', []), d.get('akis', []), 'yapan', me, 'islem', ['Talep Geri Çekildi (Taslak Moduna Alındı)']);
     }
     // ONAY ADIMI (GPT-6 + J11 · P1 #5): yalnız SIRASI GELMİŞ adımın onaylayıcısı (steps[currentStep].userUid == auth.uid; talep
     // sahibi olamaz), yalnız o adımın karar alanlarını (status/date/actor/note) değiştirir. Diğer adımlar birebir aynı kalır
@@ -288,6 +296,14 @@ service cloud.firestore {
               && d.get('durum', '') == (cs + 1 == n ? 'Onaylandı' : 'Onay Bekliyor')
               && nwf.steps[cs].get('note', '') == wf.steps[cs].get('note', '')
               && nwf.history[hSize].get('to', '') != 'cancelled'
+              // J11.5 · P1 (bağımsız denetim): onaylayıcı akışın genel durumunu sahte bir değere (cancelled / suspended / …)
+              // çekemez. Son adımda 'completed'; değilse approveStep'in durum makinesinin TEK meşru ardılı (eski durumdan):
+              // initiation → manager → hr → finance → director → (completed, fixWorkflowCurrentStep ile) initiation. Boş /
+              // hatalı 'completed' eski durum istemcide initiation sayılır (onarım) → manager_approval.
+              && nwf.get('currentState', '') == (cs + 1 == n ? 'completed'
+                   : {'': 'manager_approval', 'initiation': 'manager_approval', 'completed': 'manager_approval',
+                      'manager_approval': 'hr_approval', 'hr_approval': 'finance_approval',
+                      'finance_approval': 'director_approval', 'director_approval': 'initiation'}.get(wf.get('currentState', ''), '-'))
               && d.get('akis', []).size() == aSize + 1
               && d.akis[aSize].get('yapan', '') == me && d.akis[aSize].get('uid', '') == uid
               && d.akis[aSize].get('islem', '').matches('✅ Onaylandı: .*'))
@@ -352,12 +368,17 @@ service cloud.firestore {
                 && request.resource.data.get('creatorId', '') == staffName(root)));
       // J11 · P1 #5: textOk onay dalında değerlendirilmez — onaylayıcı textOk'un baktığı hiçbir alanı değiştiremez
       // (poApprovalOk: affectedKeys yalnız workflow / durum / akis); kazanılan ifade bütçesi kayıt içerik denetimlerine gider.
+      // J11.5: sahibin satın alma yolunda textOk yalnız textOk'un baktığı alanlardan biri DEĞİŞİYORSA çalışır (başlatma / geri
+      // çekme / iptal bu alanlara dokunmaz). Değişmeyen değer sahibin bu yazmada getirdiği yeni metin değildir; etiket savunması
+      // aynı kalır. Kazanılan bütçe 10 adımlı başlatmadaki sahibin olay türü / uid denetimine (ownerEventOk) gider.
       allow update: if validRoot(root) && !isAdmin() && isStaff(root)
         && staffWritable(col) && !maintenanceOn(root)
         && ownerUnchanged(col, request.resource.data, resource.data)
         && (col == 'requests' ? textOk(col, request.resource.data) && requestUpdateOk(resource.data, request.resource.data)
             : col == 'purchaseOrders' ? (resource.data.get('createdByUid', '') == request.auth.uid
-                ? textOk(col, request.resource.data) && poOwnerUpdateOk(resource.data, request.resource.data)
+                ? (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['id', 'urun', 'aciklama', 'talepEden', 'birim', 'tur',
+                      'evrakNo', 'oncelik', 'createdByName']) || textOk(col, request.resource.data))
+                  && poOwnerUpdateOk(resource.data, request.resource.data)
                 : poApprovalOk(root, resource.data, request.resource.data))
             : textOk(col, request.resource.data) && taskUpdateOk(resource.data, request.resource.data));
 

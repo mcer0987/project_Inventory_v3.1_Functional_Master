@@ -597,6 +597,7 @@ window.confirmStartWorkflow = async function () {
                 {
                     action: 'create',
                     actor: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'system',
+                    uid: window.userAuth?.uid || '',   // J11.5: kurallar sahibin kaydında request.auth.uid ile eşler
                     timestamp: new Date().toISOString(),
                     to: window.WorkflowEngine.states.INITIATION
                 }
@@ -638,6 +639,7 @@ window.confirmStartWorkflow = async function () {
     req.akis.push({
         islem: "İş akışı başlatıldı",
         yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name,
+        uid: window.userAuth?.uid || '',   // J11.5
         tarih: new Date().toLocaleString('tr-TR')
     });
 
@@ -1797,6 +1799,7 @@ window.createWorkflowFromTemplate = function (tpl) {
                 from: null,
                 to: window.WorkflowEngine.states.INITIATION,
                 actor: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'system',
+                uid: window.userAuth?.uid || '',   // J11.5
                 timestamp: new Date().toISOString(),
                 action: 'create',
                 note: 'Workflow başlatıldı',

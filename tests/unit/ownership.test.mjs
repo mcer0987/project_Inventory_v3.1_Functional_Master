@@ -364,6 +364,57 @@ test('planCodeCleanse: aynı kod birden fazla personelde ortaksa (göç öncesi 
     assert.equal(plan.purchaseOrders.length, 0, 'ortak kod otomatik yazılmaz');
 });
 
+// J11.5 · P1 (bağımsız denetim): eski tespit yalnız /^[A-Za-z0-9]{4,12}$/ biçimini kod sayıyordu. Tireli / özel karakterli /
+// kısa / uzun eski kodlar (sahibinin kodu silinmişse) "tanınmayan metin" diye ATLANIYOR, kapanış denetimi onları temiz sayıyordu.
+test('J11.5 · planCodeCleanse: biçimine bakılmaksızın ÇÖZÜLEMEYEN her createdBy engeldir (tireli / özel karakterli / kısa / uzun eski kod)', () => {
+    const { O, SP } = load();
+    const pers = people(SP);
+    const odd = ['ab-12', 'x.y_9', 'k#7!', 'q1', 'çok-uzun-eski-kod-2019', 'AB 12'];
+    const plan = plain(O.planCodeCleanse({ personel: pers, accountEmail: SP.accountEmailOf, requests: [],
+        purchaseOrders: odd.map((by, i) => ({ id: 'o' + i, createdBy: by })) }));
+    assert.deepEqual(plan.blockers.purchaseOrderUnresolved.map(x => x.id), odd.map((_, i) => 'o' + i), 'hepsi engel');
+    plan.blockers.purchaseOrderUnresolved.forEach(x => assert.match(x.reason, /çözülemiyor.*bulunamadı/));
+    assert.equal(plan.ready, false);
+    assert.equal(plan.purchaseOrders.length, 0, 'otomatik yazım yok ("unknown" yok)');
+    assert.ok(!odd.some(c => JSON.stringify(plan).includes(c)), 'rapor değeri içermez');
+});
+
+test('J11.5 · planCodeCleanse: özel karakterli kod BUGÜN tekil bir personelde duruyorsa o personelin id\'sine çözülür', () => {
+    const { O, SP } = load();
+    const pers = [{ id: 'p1', name: 'Bir', code: 'ab-12', uid: 'u1', pri: 'p1', authEmail: SP.staffEmail('p1') }];
+    const plan = plain(O.planCodeCleanse({ personel: pers, accountEmail: SP.accountEmailOf, requests: [], purchaseOrders: [{ id: 'po1', createdBy: 'ab-12' }] }));
+    assert.deepEqual(plan.purchaseOrders.map(p => [p.id, p.replaceWith]), [['po1', 'p1']]);
+    assert.equal(plan.blockers.purchaseOrderUnresolved.length, 0);
+});
+
+test('J11.5 · planCodeCleanse: meşru oluşturan değerleri (personel id\'si, sayısal id, bilinen ad, sistem / rol / havuz değeri) engel DEĞİL', () => {
+    const { O, SP } = load();
+    const pers = [...people(SP).filter(p => p.uid && p.id !== 'p_bad'),
+        { id: 1790573516931123, name: 'Sayı Kişi', uid: 'u-num', pri: 'sayi.kisi', authEmail: SP.staffEmail('sayi.kisi') }];
+    const ok = ['p_ayse', '1790573516931123', 'Seher Kaya', 'ayşe yılmaz', 'unknown', 'Admin', 'pool', 'system', 'Yönetici'];
+    const plan = plain(O.planCodeCleanse({ personel: pers.map(p => ({ ...p, code: undefined })), accountEmail: SP.accountEmailOf, requests: [],
+        purchaseOrders: ok.map((by, i) => ({ id: 'm' + i, createdBy: by })) }));
+    assert.deepEqual(plan.blockers.purchaseOrderUnresolved, [], JSON.stringify(plan.blockers.purchaseOrderUnresolved));
+    assert.equal(plan.purchaseOrders.length, 0);
+    assert.equal(plan.ready, true, JSON.stringify(plan.blockers));
+});
+
+test('J11.5 · planStaffAccessClosure: tireli eski kod (sahibinin kodu silinmiş) kapanışı ENGELLER — kilit açılamaz', () => {
+    const { O, SP } = load();
+    const acc = (id, name, uid) => ({ id, name, uid, pri: id, authEmail: SP.staffEmail(id) });
+    const personel = [acc('p_a', 'Ayşe Yılmaz', 'u-a')];
+    const staffAccounts = [{ id: 'u-a', personelId: 'p_a', pri: 'p_a' }];
+    const data = { requests: [], tasks: [], workflowTemplates: [],
+        purchaseOrders: [{ id: 'po1', createdBy: 'ab-12', createdByName: 'Ayşe Yılmaz', talepEden: 'Ayşe Yılmaz', createdByUid: 'u-a' }] };
+    const r = plain(O.planStaffAccessClosure({ data, personel, staffAccounts, accountEmail: SP.accountEmailOf }));
+    assert.equal(r.checks.purchaseOrderCodes, 1, JSON.stringify(r.checks));
+    assert.equal(r.ready, false);
+    assert.ok(!JSON.stringify(r).includes('ab-12'), 'rapor değeri içermez');
+    // Yönetici kaydı düzeltince (personel id'si) kapanış temizlenir
+    const fixed = plain(O.planStaffAccessClosure({ data: { ...data, purchaseOrders: [{ ...data.purchaseOrders[0], createdBy: 'p_a' }] }, personel, staffAccounts, accountEmail: SP.accountEmailOf }));
+    assert.equal(fixed.ready, true, JSON.stringify(fixed.checks));
+});
+
 test('planCodeCleanse.fingerprint: kodun KENDİSİNİ içermez (plan çıktısı kuralı fingerprint için de geçerli); ilgili değişiklik iz bırakır, kodun değeri bırakmaz', () => {
     const { O, SP } = load();
     const base = { personel: [{ id: 'p1', name: 'Ali', code: 'abc12', uid: 'u1', pri: 'p1', authEmail: SP.staffEmail('p1') },

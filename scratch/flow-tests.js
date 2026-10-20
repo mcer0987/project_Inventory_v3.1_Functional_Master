@@ -4858,16 +4858,25 @@ const SCENARIOS = {
                 const me = window.Ownership.selfName(), pid = String((window.getActiveUser() || {}).id), uid = window.userAuth.uid;
                 const id = 'j11po_' + Date.now();
                 const po = { id, urun: 'J11 onay denetimi ' + MARKER, adet: 1, durum: 'Taslak', createdBy: pid, createdByName: me, createdByUid: uid, talepEden: me,
-                    akis: [{ islem: 'Talep Oluşturuldu', yapan: me, tarih: new Date().toLocaleString('tr-TR') }],
+                    akis: [{ islem: 'Talep Oluşturuldu', yapan: me, uid, tarih: new Date().toLocaleString('tr-TR') }],
                     workflow: { id: 'wf_' + id, started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [] } };
                 await window.appendItem('purchaseOrders', po);
+                // J11.5 · madde 3: sahip KENDİ taslağına sahte "Onaylandı" olayı / başkasının uid'siyle olay / sahte history ekleyemez
+                const tryW = doc => window.upsertItem('purchaseOrders', doc).then(() => 'yazıldı', e => e.code || e.message);
+                window.__j11OwnerForged = {
+                    approvedEvent: await tryW({ ...po, akis: [...po.akis, { islem: '✅ Onaylandı: Paraf', yapan: me, uid, tarih: 't' }] }),
+                    otherUid: await tryW({ ...po, akis: [...po.akis, { islem: 'Talep güncellendi', yapan: me, uid: approver.uid, tarih: 't' }] }),
+                    fakeHistory: await tryW({ ...po, workflow: { ...po.workflow, history: [{ action: 'transition', actor: me, uid, to: 'completed' }] } }),
+                };
                 const step = tip => ({ user: approver.name, userUid: approver.uid, tip, status: 'pending', note: '', date: '' });
                 await window.upsertItem('purchaseOrders', { ...po, durum: 'Onay Bekliyor',
-                    akis: [...po.akis, { islem: 'Süreç başlatıldı', yapan: me, tarih: new Date().toLocaleString('tr-TR') }],
+                    // J11.5: confirmStartWorkflow ile aynı olay türleri (history 'create', akış "İş akışı başlatıldı") ve uid
+                    akis: [...po.akis, { islem: 'İş akışı başlatıldı', yapan: me, uid, tarih: new Date().toLocaleString('tr-TR') }],
                     workflow: { ...po.workflow, started: true, steps: [step('Paraf'), step('Onay')],
-                        history: [{ id: 'trans_' + Date.now(), from: 'initiation', to: 'initiation', actor: me, uid, timestamp: new Date().toISOString(), action: 'start', note: '' }] } });
+                        history: [{ action: 'create', actor: me, uid, timestamp: new Date().toISOString(), to: 'initiation' }] } });
                 return id;
             }, approver, MARKER);
+            out.ownerForged = await page.evaluate(() => window.__j11OwnerForged);
             out.started = (await emuDoc('purchaseOrders', id))?.workflow?.started === true;
             const visible = await settle(s, id => (window.data.purchaseOrders || []).some(x => String(x.id) === id && x.workflow && x.workflow.started), 20000, id);
 
@@ -4887,6 +4896,25 @@ const SCENARIOS = {
             out.forgedServerUnchanged = afterForged.workflow.steps[0].status === 'pending' && afterForged.workflow.history.length === 1 && afterForged.akis.length === 2;
             await settle(s, id => { const x = window.data.purchaseOrders.find(y => String(y.id) === id); return x && x.workflow.steps[0].status === 'pending'; }, 15000, id);
 
+            // 1b) J11.5 · madde 2: içerik, sayı, uid ve aktörü MEŞRU bir onay; tek fark akışın genel durumu sahte ('cancelled' /
+            //     'suspended') → kurallar reddeder, sunucu değişmez
+            out.forgedState = await s.evaluate(async id => {
+                const res = {};
+                for (const st of ['cancelled', 'suspended']) {
+                    const f = JSON.parse(JSON.stringify(window.data.purchaseOrders.find(x => String(x.id) === id)));
+                    const me = window.Ownership.selfName(), uid = window.userAuth.uid;
+                    f.workflow.steps[0] = { ...f.workflow.steps[0], status: 'approved', actor: me, date: 'd' };
+                    f.workflow.currentStep = 1; f.workflow.currentState = st; f.durum = 'Onay Bekliyor';
+                    f.workflow.history.push({ id: 'trans_2', from: 'initiation', to: 'manager_approval', actor: me, uid, timestamp: 't', action: 'transition', note: 'Paraf onaylandı' });
+                    f.akis.push({ islem: '✅ Onaylandı: Paraf', yapan: me, uid, tarih: 't', note: 'Süreç: x' });
+                    res[st] = await window.upsertItem('purchaseOrders', f).then(() => 'yazıldı', e => e.code || e.message);
+                }
+                return res;
+            }, id);
+            const afterState = await emuDoc('purchaseOrders', id);
+            out.forgedStateServerUnchanged = afterState.workflow.steps[0].status === 'pending' && afterState.workflow.currentState === 'initiation' && afterState.workflow.history.length === 1;
+            await settle(s, id => { const x = window.data.purchaseOrders.find(y => String(y.id) === id); return x && x.workflow.steps[0].status === 'pending'; }, 15000, id);
+
             // 2) Gerçek approveStep (adım 1)
             out.approve = await s.evaluate(async id => {
                 const alerts = [], real = window.showAppAlert;
@@ -4897,7 +4925,8 @@ const SCENARIOS = {
             const a = await emuDoc('purchaseOrders', id);
             const hA = a.workflow.history.at(-1), kA = a.akis.at(-1);
             out.approveServer = { step0: a.workflow.steps[0].status, actor: a.workflow.steps[0].actor, currentStep: a.workflow.currentStep, durum: a.durum,
-                history: a.workflow.history.length, histUid: hA.uid === approver.uid, histAction: hA.action, akis: a.akis.length, akisUid: kA.uid === approver.uid, akisIslem: kA.islem };
+                history: a.workflow.history.length, histUid: hA.uid === approver.uid, histAction: hA.action, akis: a.akis.length, akisUid: kA.uid === approver.uid, akisIslem: kA.islem,
+                state: a.workflow.currentState };
 
             // 3) Gerçek rejectStep (adım 2) — gerekçe istemi taklit edilir
             await settle(s, id => { const x = window.data.purchaseOrders.find(y => String(y.id) === id); return x && x.workflow.currentStep === 1; }, 15000, id);
@@ -4915,7 +4944,11 @@ const SCENARIOS = {
         } finally { await ctx.close(); }
         out.pageErrors = errs;
         const A = out.approveServer || {}, R = out.rejectServer || {};
+        const OF = out.ownerForged || {};
         out.ok = out.approverLogin === true && out.started && !!id && out.forged === 'forbidden' && out.forgedServerUnchanged
+            && OF.approvedEvent === 'forbidden' && OF.otherUid === 'forbidden' && OF.fakeHistory === 'forbidden'
+            && out.forgedState && out.forgedState.cancelled === 'forbidden' && out.forgedState.suspended === 'forbidden' && out.forgedStateServerUnchanged
+            && A.state === 'manager_approval'
             && /success/.test(out.approve) && A.step0 === 'approved' && A.currentStep === 1 && A.durum === 'Onay Bekliyor'
             && A.history === 2 && A.histUid && A.histAction === 'transition' && A.akis === 3 && A.akisUid && /^✅ Onaylandı: /.test(A.akisIslem)
             && /warning: Talep reddedildi/.test(out.reject) && R.step1 === 'rejected' && R.note === 'bütçe yok' && R.durum === 'Reddedildi' && R.finished === true

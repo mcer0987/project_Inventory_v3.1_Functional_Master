@@ -259,6 +259,7 @@ window.savePurchaseRequest = async function (e) {
                 {
                     islem: "Talep Oluşturuldu",
                     yapan: requester.name,
+                    uid: window.userAuth?.uid || '',   // J11.5: kurallar sahibin kaydında request.auth.uid ile eşler
                     tarih: new Date().toLocaleString('tr-TR')
                 }
             ],
@@ -1443,6 +1444,7 @@ window.updatePurchaseRequest = async function (e, id) {
     item.akis.push({
         islem: 'Talep güncellendi',
         yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
+        uid: window.userAuth?.uid || '',   // J11.5
         tarih: new Date().toLocaleString('tr-TR')
     });
 
@@ -1493,6 +1495,7 @@ window.deleteRequestFile = async function (requestId, fileIndex, fileRef) {
     item.akis.push({
         islem: 'Ek dosya silindi',
         yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Admin',
+        uid: window.userAuth?.uid || '',   // J11.5
         tarih: new Date().toLocaleString('tr-TR')
     });
 
@@ -1566,6 +1569,7 @@ window.cancelPurchaseRequest = async function (id) {
                 {
                     action: 'withdraw',
                     actor: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
+                    uid: window.userAuth?.uid || '',   // J11.5
                     timestamp: new Date().toISOString(),
                     from: item.workflow?.currentState || 'active',
                     to: window.WorkflowEngine?.states?.INITIATION || 'initiation',
@@ -1579,6 +1583,7 @@ window.cancelPurchaseRequest = async function (id) {
             {
                 islem: 'Talep Geri Çekildi (Taslak Moduna Alındı)',
                 yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
+                uid: window.userAuth?.uid || '',   // J11.5
                 tarih: new Date().toLocaleString('tr-TR')
             }
         ];
@@ -1615,6 +1620,7 @@ window.cancelPurchaseRequest = async function (id) {
         item.akis.push({
             islem: 'Talep İptal Edildi',
             yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
+            uid: window.userAuth?.uid || '',   // J11.5
             tarih: new Date().toLocaleString('tr-TR')
         });
 

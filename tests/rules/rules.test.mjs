@@ -218,19 +218,27 @@ describe('Envanter talebi (requests) — sahiplik', () => {
 const NAME = { 'uid-s1': 'Ayşe Yılmaz', 'uid-s2': 'Bora Kaya', 'uid-s3': 'Cem Demir' };
 const step = (uid, extra = {}) => ({ user: NAME[uid] || 'Ayşe Yılmaz', userUid: uid, tip: 'Paraf', status: 'pending', note: '', date: '', ...extra });
 const hist = [{ action: 'create', actor: 'Ayşe Yılmaz', timestamp: 't0' }];
-const akis = [{ islem: 'Talep Oluşturuldu', yapan: 'Ayşe Yılmaz', tarih: 't0' }];
+const akis = [{ islem: 'Talep Oluşturuldu', yapan: 'Ayşe Yılmaz', uid: 'uid-s1', tarih: 't0' }];
+// J11.5: sahibin (s1) istemcide ürettiği olaylar — tür, aktör ve uid'si ile (purchase-servises.js / confirmStartWorkflow)
+const ev = (islem, over = {}) => ({ islem, yapan: 'Ayşe Yılmaz', uid: 'uid-s1', tarih: 't', ...over });
+const hev = (action, over = {}) => ({ action, actor: 'Ayşe Yılmaz', uid: 'uid-s1', timestamp: 't', to: 'initiation', ...over });
+const WD = 'Talep Geri Çekildi (Taslak Moduna Alındı)';
 const OWNER = { createdByUid: 'uid-s1', createdBy: 's1', createdByName: 'Ayşe Yılmaz', talepEden: 'Ayşe Yılmaz' };
 const running = (over = {}) => ({
     urun: 'Toner', adet: 1, durum: 'Onay Bekliyor', ...OWNER, akis,
     workflow: { id: 'wf1', started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2'), step('uid-s3')], history: hist },
     ...over,
 });
+// approveStep'in durum makinesi (edm-workflow.js): onaydan sonraki genel durum; director → completed → fixWorkflowCurrentStep → initiation
+const NEXT_STATE = { '': 'manager_approval', initiation: 'manager_approval', completed: 'manager_approval', manager_approval: 'hr_approval',
+    hr_approval: 'finance_approval', finance_approval: 'director_approval', director_approval: 'initiation' };
 // Onaylayıcının istemcide yaptığı geçerli onay (approveStep + transitionWorkflowState ile aynı alanlar; J11 · P1 #5: uid)
 function approved(po, i, wfOver = {}, top = {}) {
     const s = po.workflow.steps[i];
     const steps = po.workflow.steps.map((x, k) => (k === i ? { ...x, status: 'approved', date: '16.10.2026 10:00', actor: x.user } : x));
     const last = i + 1 >= steps.length;
-    const to = last ? 'completed' : 'manager_approval';
+    // durum makinesinin ilerletemediği eski durum (ör. suspended): istemcinin denediği değer — kural o durumda zaten reddeder
+    const to = last ? 'completed' : (NEXT_STATE[po.workflow.currentState || ''] || 'manager_approval');
     return { ...po, durum: last ? 'Onaylandı' : 'Onay Bekliyor',
         akis: [...po.akis, { islem: '✅ Onaylandı: ' + s.tip, yapan: s.user, uid: s.userUid || '', tarih: 't1', note: 'Süreç: x' }],
         workflow: { ...po.workflow, steps, currentStep: i + 1, finished: last, currentState: to,
@@ -264,9 +272,9 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
     });
     test('sahibi taslağı düzenler ve akışı başlatır (adımlar kararsız)', async () => {
         await put('purchaseOrders', 'po2', draft);
-        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { urun: 'Kağıt A3', akis: [...akis, { islem: 'güncellendi', yapan: 'Ayşe Yılmaz' }] }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { urun: 'Kağıt A3', akis: [...akis, ev('Talep güncellendi')] }));
         await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), {
-            durum: 'Onay Bekliyor', workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2'), step('uid-s3')], history: [{ action: 'create', actor: 'Ayşe Yılmaz' }] } }));
+            durum: 'Onay Bekliyor', workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2'), step('uid-s3')], history: [hev('create')] } }));
     });
     test('sahibi akışı kendisini onaylayıcı yaparak / önceden onaylı adımla / 11 adımla başlatamaz', async () => {
         await put('purchaseOrders', 'po2', draft);
@@ -278,8 +286,8 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
     test('en ağır durum: sahibi 10 adımlı akışı başlatır (1000 ifade sınırı içinde), 10. adımın onayı da geçer', async () => {
         await put('purchaseOrders', 'po2', draft);
         const ten = Array.from({ length: 10 }, (_, i) => step(i % 2 ? 'uid-s3' : 'uid-s2'));
-        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { durum: 'Onay Bekliyor', akis: [...akis, { islem: 'başlatıldı', yapan: 'Ayşe Yılmaz' }],
-            workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: ten, history: [{ action: 'create', actor: 'Ayşe Yılmaz' }] } }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { durum: 'Onay Bekliyor', akis: [...akis, ev('İş akışı başlatıldı')],
+            workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: ten, history: [hev('create')] } }));
         let po = running({ workflow: { ...running().workflow, steps: ten, history: Array.from({ length: 12 }, (_, i) => ({ action: 'transition', i })) },
             akis: Array.from({ length: 15 }, (_, i) => ({ islem: 'kayıt ' + i })) });
         for (let i = 0; i < 9; i++) po = approved(po, i);
@@ -304,8 +312,8 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
     test('sahibi akış sürerken geri çeker (taslağa döner, geçmiş korunur)', async () => {
         await put('purchaseOrders', 'po3', running());
         await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po3'), {
-            durum: 'Taslak', akis: [...akis, { islem: 'geri çekildi', yapan: 'Ayşe Yılmaz' }],
-            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', status: 'draft', steps: [], history: [...hist, { action: 'withdraw', actor: 'Ayşe Yılmaz' }] } }));
+            durum: 'Taslak', akis: [...akis, ev(WD)],
+            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', status: 'draft', steps: [], history: [...hist, hev('withdraw')] } }));
     });
     test('geri çekerken geçmişi silemez', async () => {
         await put('purchaseOrders', 'po3', running());
@@ -544,6 +552,102 @@ describe('J11 · P1 #5 kapanışı — aynı sayıda farklı içerikli history /
     });
 });
 
+// ─── J11.5 · bağımsız denetim (GPT-6): zero-trust sözleşme düzeltmeleri ─────────────────────────────────────────────────────
+// Her negatif durum meşru payload'dan TEK alanda sapar; her grubun sonunda meşru payload kabul edilir.
+describe('J11.5 · madde 2 — onaylayıcı akışın genel durumunu (currentState) sahte değere çekemez', () => {
+    const write = (db, data) => setDoc(item(db, LIVE, 'purchaseOrders', 'ps'), { id: 'ps', ...data });
+    const withState = (po, st) => ({ ...po, workflow: { ...po.workflow, currentState: st } });
+    test('ara adım onayında currentState yalnız durum makinesinin ardılı (initiation → manager_approval); cancelled / suspended / completed / başka durum reddedilir', async () => {
+        await put('purchaseOrders', 'ps', running());
+        const ok = approved(running(), 0);
+        assert(ok.workflow.currentState === 'manager_approval');
+        for (const st of ['cancelled', 'suspended', 'completed', 'initiation', 'hr_approval', 'pending', '']) {
+            await assertFails(write(ctx.s2(), withState(ok, st)));
+        }
+        const { currentState, ...noState } = ok.workflow;
+        await assertFails(write(ctx.s2(), { ...ok, workflow: noState }));   // alanı silmek de sahte durumdur
+        await assertSucceeds(write(ctx.s2(), ok));
+    });
+    test('son adım onayında currentState yalnız completed', async () => {
+        const after0 = approved(running(), 0);
+        await put('purchaseOrders', 'ps', after0);
+        const ok = approved(after0, 1);
+        assert(ok.workflow.currentState === 'completed');
+        for (const st of ['cancelled', 'suspended', 'hr_approval', 'initiation']) await assertFails(write(ctx.s3(), withState(ok, st)));
+        await assertSucceeds(write(ctx.s3(), ok));
+    });
+    test('6+ adımlı akışta director_approval sonrası meşru dönüş (completed → initiation) kabul; ara adımda completed reddedilir', async () => {
+        const six = Array.from({ length: 6 }, (_, i) => step(i % 2 ? 'uid-s3' : 'uid-s2'));
+        let po = running({ workflow: { ...running().workflow, steps: six } });
+        for (let i = 0; i < 4; i++) po = approved(po, i);
+        assert(po.workflow.currentState === 'director_approval');
+        await put('purchaseOrders', 'ps', po);
+        const ok = approved(po, 4);   // s2'nin adımı
+        assert(ok.workflow.currentState === 'initiation');
+        await assertFails(write(ctx.s2(), withState(ok, 'completed')));
+        await assertFails(write(ctx.s2(), withState(ok, 'cancelled')));
+        await assertSucceeds(write(ctx.s2(), ok));
+    });
+});
+
+describe('J11.5 · madde 3 — talep sahibi kendi talebine sahte tür / sahte uid ile olay ekleyemez', () => {
+    const draft = { urun: 'Kağıt', aciklama: 'A4', durum: 'Taslak', ...OWNER, akis, workflow: { started: false, currentStep: 0, steps: [], history: [] } };
+    const upd = (id, data) => updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', id), data);
+    const startWf = (akisEv, histEv) => ({ durum: 'Onay Bekliyor', akis: [...akis, akisEv],
+        workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2')], history: histEv ? [histEv] : [] } });
+
+    test('OLUŞTURMA: ilk akış kaydı yalnız "Talep Oluşturuldu", sahibin uid\'siyle', async () => {
+        const mk = a => setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'pc'), { id: 'pc', ...draft, akis: a });
+        await assertFails(mk([{ ...akis[0], islem: '✅ Onaylandı: Paraf' }]));
+        await assertFails(mk([{ ...akis[0], uid: 'uid-s2' }]));
+        const { uid, ...noUid } = akis[0];
+        await assertFails(mk([noUid]));
+        await assertSucceeds(mk(akis));
+    });
+    test('TASLAK DÜZENLEME: sahte "Onaylandı" olayı, başkasının / eksik uid\'si, history kaydı reddedilir; düzenleme ve ek silme kabul', async () => {
+        await put('purchaseOrders', 'pd', draft);
+        await assertFails(upd('pd', { akis: [...akis, ev('✅ Onaylandı: Paraf')] }));
+        await assertFails(upd('pd', { akis: [...akis, ev('❌ REDDEDİLDİ: Paraf')] }));
+        await assertFails(upd('pd', { akis: [...akis, ev('İş akışı başlatıldı')] }));            // başlatma olmadan "başlatıldı"
+        await assertFails(upd('pd', { akis: [...akis, ev('Talep güncellendi', { uid: 'uid-s2' })] }));
+        await assertFails(upd('pd', { akis: [...akis, ev('Talep güncellendi', { uid: '' })] }));
+        await assertFails(upd('pd', { 'workflow.history': [hev('transition', { to: 'completed' })] }));   // düzenleme history'ye yazmaz
+        await assertFails(upd('pd', { 'workflow.history': [hev('create')] }));
+        await assertSucceeds(upd('pd', { urun: 'Kağıt A3', akis: [...akis, ev('Talep güncellendi')] }));
+        await assertSucceeds(upd('pd', { akis: [...akis, ev('Talep güncellendi'), ev('Ek dosya silindi')] }));
+    });
+    test('BAŞLATMA: history yalnız "create" (sahibin uid\'si), akış yalnız "İş akışı başlatıldı"', async () => {
+        await put('purchaseOrders', 'pe', draft);
+        await assertFails(upd('pe', startWf(ev('İş akışı başlatıldı'), hev('transition'))));
+        await assertFails(upd('pe', startWf(ev('İş akışı başlatıldı'), hev('approved'))));
+        await assertFails(upd('pe', startWf(ev('İş akışı başlatıldı'), hev('create', { uid: 'uid-s2' }))));
+        await assertFails(upd('pe', startWf(ev('✅ Onaylandı: Paraf'), hev('create'))));
+        await assertFails(upd('pe', startWf(ev('Talep güncellendi'), hev('create'))));
+        await assertFails(upd('pe', startWf(ev('İş akışı başlatıldı', { uid: 'uid-s3' }), hev('create'))));
+        await assertSucceeds(upd('pe', startWf(ev('İş akışı başlatıldı'), hev('create'))));
+    });
+    test('İPTAL: akış yalnız "Talep İptal Edildi"; history eklenemez', async () => {
+        await put('purchaseOrders', 'pf', draft);
+        const cancel = (a, h = []) => upd('pf', { durum: 'İptal Edildi', akis: [...akis, a], workflow: { started: false, finished: true, currentStep: 0, currentState: 'cancelled', steps: [], history: h } });
+        await assertFails(cancel(ev('Talep güncellendi')));
+        await assertFails(cancel(ev('✅ Onaylandı: Paraf')));
+        await assertFails(cancel(ev('Talep İptal Edildi', { uid: 'uid-s2' })));
+        await assertFails(cancel(ev('Talep İptal Edildi'), [hev('create')]));
+        await assertSucceeds(cancel(ev('Talep İptal Edildi')));
+    });
+    test('GERİ ÇEKME: history yalnız "withdraw", akış yalnız geri çekme kaydı; ikisi de sahibin uid\'siyle', async () => {
+        await put('purchaseOrders', 'pg', running());
+        const wd = (a, h) => upd('pg', { durum: 'Taslak', akis: [...akis, a],
+            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [...hist, h] } });
+        await assertFails(wd(ev(WD), hev('approved')));
+        await assertFails(wd(ev(WD), hev('transition', { to: 'completed' })));
+        await assertFails(wd(ev(WD), hev('withdraw', { uid: 'uid-s2' })));
+        await assertFails(wd(ev('✅ Onaylandı: Paraf'), hev('withdraw')));
+        await assertFails(wd(ev(WD, { uid: 'uid-s3' }), hev('withdraw')));
+        await assertSucceeds(wd(ev(WD), hev('withdraw')));
+    });
+});
+
 describe('Görev (tasks) — oluşturan / atanan', () => {
     test('personel kendi creatorUid\'siyle oluşturur; başkası adına / uid\'siz oluşturamaz', async () => {
         await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'tasks', 't2'), { id: 't2', title: 'Yeni', creatorUid: 'uid-s1', creatorId: 'Ayşe Yılmaz' }));
@@ -654,7 +758,7 @@ describe('J11 · P1 #7 — görünen kimlik oturum sahibinin gerçek personel ka
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, talepEden: 'Bora Kaya' }));
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, createdByName: 'Bora Kaya' }));
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, createdBy: 's2' }));
-        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, akis: [{ islem: 'Talep Oluşturuldu', yapan: 'Bora Kaya' }] }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, akis: [{ ...akis[0], yapan: 'Bora Kaya' }] }));
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, akis: [...akis, { islem: '✅ Müdür onayladı', yapan: 'Ayşe Yılmaz' }] }));
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, workflow: { ...draftPo.workflow, history: [{ action: 'approved', actor: 'Müdür' }] } }));
         await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo }));
@@ -664,19 +768,19 @@ describe('J11 · P1 #7 — görünen kimlik oturum sahibinin gerçek personel ka
         await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { talepEden: 'Bora Kaya' }));
         await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { createdByName: 'Bora Kaya' }));
         await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { createdBy: 's2' }));
-        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { akis: [...akis, { islem: 'güncellendi', yapan: 'Bora Kaya' }] }));
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { akis: [...akis, ev('Talep güncellendi', { yapan: 'Bora Kaya' })] }));
         await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { akis: [...akis, { islem: 'a', yapan: 'Ayşe Yılmaz' }, { islem: 'b', yapan: 'Ayşe Yılmaz' }] }));
-        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { urun: 'Kağıt A3', akis: [...akis, { islem: 'güncellendi', yapan: 'Ayşe Yılmaz' }] }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { urun: 'Kağıt A3', akis: [...akis, ev('Talep güncellendi')] }));
     });
     test('satın alma: iptal (taslak) ve geri çekme meşru kalır; geri çekmede başkası adına kayıt reddedilir', async () => {
         await put('purchaseOrders', 'p3', draftPo);
-        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p3'), { durum: 'İptal Edildi', akis: [...akis, { islem: 'Talep İptal Edildi', yapan: 'Ayşe Yılmaz' }],
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p3'), { durum: 'İptal Edildi', akis: [...akis, ev('Talep İptal Edildi')],
             workflow: { started: false, finished: true, currentStep: 0, currentState: 'cancelled', steps: [], history: [] } }));
         await put('purchaseOrders', 'p4', running());
-        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p4'), { durum: 'Taslak', akis: [...akis, { islem: 'geri çekildi', yapan: 'Cem Demir' }],
-            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [...hist, { action: 'withdraw', actor: 'Ayşe Yılmaz' }] } }));
-        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p4'), { durum: 'Taslak', akis: [...akis, { islem: 'geri çekildi', yapan: 'Ayşe Yılmaz' }],
-            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [...hist, { action: 'withdraw', actor: 'Ayşe Yılmaz' }] } }));
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p4'), { durum: 'Taslak', akis: [...akis, ev(WD, { yapan: 'Cem Demir' })],
+            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [...hist, hev('withdraw')] } }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p4'), { durum: 'Taslak', akis: [...akis, ev(WD)],
+            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [...hist, hev('withdraw')] } }));
     });
     test('SAHTE ONAYLAYICI: adımda "Bora Kaya" yazıp başkasının (s3) uid\'si konursa o kişi adımı ONAYLAYAMAZ; admin onaylar', async () => {
         const fake = running({ workflow: { ...running().workflow, steps: [{ ...step('uid-s3'), user: 'Bora Kaya' }, step('uid-s2')] } });

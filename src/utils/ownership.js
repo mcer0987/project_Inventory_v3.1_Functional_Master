@@ -401,8 +401,8 @@
     //          - Sahiplik Göç Aracı'nın yazmadığı kayıt (ownershipPendingItems)
     //          - sahiplik alanının KENDİSİ çözülemeyen / dolu uid'si bugünkü hesaptan farklı kayıt (ownershipIssues içinden
     //            classifyOwnershipIssues ile ayrılan ENGELLEYİCİ satırlar — onay adımı / atanan gibi UYARI'lar engel değil)
-    //          - createdBy KOD BİÇİMİNDE ama TEKİL bir personele indirgenemiyor (hiç kimsenin kodu değil ya da birden fazla
-    //            kişide ortak): ESKİDEN burada otomatik 'unknown' yazılırdı — bu, bilgiyi geri dönüşsüz siliyordu ve personel.code
+    //          - createdBy personel id'si / bilinen ad / sistem değeri değil ve TEKİL bir personelin koduna indirgenemiyor
+    //            (J11.5: biçimine bakılmaz; hiç kimsenin kodu değil ya da birden fazla kişide ortak): ESKİDEN burada otomatik 'unknown' yazılırdı — bu, bilgiyi geri dönüşsüz siliyordu ve personel.code
     //            daha önce silinmişse (yarım kalmış bir önceki koşudan) HER ZAMAN 'unknown'a düşüyordu (J11 denetim bulgusu).
     //            Artık böyle kayıtlar plan.blockers.purchaseOrderUnresolved'a düşer; yönetici KAYDI ELLE düzeltmeden plan
     //            hazır sayılmaz, hiçbir alan otomatik 'unknown' yapılmaz.
@@ -429,13 +429,16 @@
             if (!po || blank(po.id) || blank(po.createdBy)) return;
             const by = String(po.createdBy).trim();
             if (index.byId.has(by) || isSystemActor(by) || (index.byName.get(norm(by)) || []).length) return;
+            // J11.5 · P1 (bağımsız denetim): eskiden yalnız /^[A-Za-z0-9]{4,12}$/ biçimindeki değerler kod sayılıyordu; tireli /
+            // özel karakterli eski kodlar (ör. "ab-12") "tanınmayan metin" diye atlanıyor, kapanış denetimi onları TEMİZ sayıyordu.
+            // Artık biçime bakılmaz (sıfır güven): personel id'si, bilinen bir ad ya da sistem değeri olarak çözülemeyen HER createdBy
+            // ya tekil bir personelin koduna indirgenir ya da ENGELDİR. Rapor değeri içermez (kod olabilir).
             const hits = index.byCode.get(by) || [];
-            const looksLikeCode = /^[A-Za-z0-9]{4,12}$/.test(by);
-            if (!hits.length && !looksLikeCode) return;   // addır ya da tanınmayan bir metin → kod temizliğinin konusu değil, dokunulmaz
             const lbl = `${po.evrakNo || po.urun || '-'} · ${po.createdByName || po.talepEden || '-'}`;
             if (hits.length === 1) { plan.purchaseOrders.push({ id: String(po.id), label: lbl, replaceWith: String(hits[0].id) }); return; }
-            // J11 · P1: hiç kimsenin kodu değil (silinmiş personel) ya da birden fazla kişide ortak — otomatik YAZILMAZ.
-            plan.blockers.purchaseOrderUnresolved.push({ id: String(po.id), label: lbl, reason: hits.length ? 'bu kod birden fazla personelde ortak' : 'bu kodu taşıyan personel bulunamadı (silinmiş olabilir)' });
+            // Hiç kimsenin kodu değil (silinmiş personel / tanınmayan değer) ya da birden fazla kişide ortak — otomatik YAZILMAZ.
+            plan.blockers.purchaseOrderUnresolved.push({ id: String(po.id), label: lbl, reason: hits.length ? 'bu kod birden fazla personelde ortak'
+                : 'oluşturan değeri hiçbir personel id\'sine, ada, sistem değerine ya da bugünkü bir koda çözülemiyor — taşıyan personel bulunamadı (eski kod ya da silinmiş personel olabilir)' });
         });
         plan.ready = plan.blockers.noAccount.length === 0 && plan.blockers.ownershipPending === 0
             && plan.blockers.ownershipUnresolved.length === 0 && plan.blockers.purchaseOrderUnresolved.length === 0;
@@ -502,7 +505,7 @@
     // [HOW]: SAF — çağıran tüm koleksiyonları SUNUCUDAN taze okuyup verir. Sayılar (rapor için ilk 50 etiket):
     //          personelCodes        personel.code dolu                         (Kod Temizliği)
     //          requestCodes         requests.personelKodu dolu                 (Kod Temizliği)
-    //          purchaseOrderCodes   kod biçimli eski purchaseOrders.createdBy  (Kod Temizliği; planCodeCleanse ile aynı tespit)
+    //          purchaseOrderCodes   kodlu / çözülemeyen purchaseOrders.createdBy (Kod Temizliği; planCodeCleanse ile aynı tespit)
     //          accountsMissing      personelin giriş hesabı yok                (PRI / Hesap Göçü ya da "Hesap Aç")
     //          accountsInconsistent paylaşılan uid / hesap PRI adresinde değil (J7 adresi dahil)
     //          accountMapMismatch   bağlı personelin staffAccounts eşlemesi yok / başka personeli / başka PRI'yi gösteriyor
