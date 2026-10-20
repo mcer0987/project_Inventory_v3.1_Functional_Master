@@ -273,8 +273,10 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
     test('sahibi taslağı düzenler ve akışı başlatır (adımlar kararsız)', async () => {
         await put('purchaseOrders', 'po2', draft);
         await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { urun: 'Kağıt A3', akis: [...akis, ev('Talep güncellendi')] }));
+        // J11.7: başlatma confirmStartWorkflow gibi akış kaydını da taşır (kayıtsız başlatma artık reddedilir)
         await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), {
-            durum: 'Onay Bekliyor', workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2'), step('uid-s3')], history: [hev('create')] } }));
+            durum: 'Onay Bekliyor', akis: [...akis, ev('Talep güncellendi'), ev('İş akışı başlatıldı')],
+            workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2'), step('uid-s3')], history: [hev('create')] } }));
     });
     test('sahibi akışı kendisini onaylayıcı yaparak / önceden onaylı adımla / 11 adımla başlatamaz', async () => {
         await put('purchaseOrders', 'po2', draft);
@@ -705,6 +707,46 @@ describe('J11.6 · talep sahibi workflow.currentState\'i sahte değere çekemez 
             await assertSucceeds(setDoc(item(i % 2 ? ctx.s3() : ctx.s2(), LIVE, 'purchaseOrders', 'pz'), { id: 'pz', ...po }));
         }
         assert(po.workflow.currentState === 'completed' && po.durum === 'Onaylandı' && po.workflow.finished === true);
+    });
+});
+
+// ─── J11.7 · P1 (bağımsız denetim): zorunlu denetim kaydı atlanamaz ──────────────────────────────────────────────────────
+// Gerçek istemci: başlatma +1 history ('create') +1 akış (confirmStartWorkflow), iptal +1 akış (cancelPurchase; history yok),
+// geri çekme +1 history ('withdraw') +1 akış. ownerEventOk "kayıt eklenmemesini" de kabul ettiği için bu işlemler kayıtsız
+// yapılabiliyordu. Düzenleme / ek silme (kaydı isteğe bağlı) DEĞİŞMEZ.
+describe('J11.7 · başlatma / iptal / geri çekme zorunlu history / akış kaydı olmadan yapılamaz', () => {
+    const draft = { urun: 'Kağıt', aciklama: 'A4', durum: 'Taslak', ...OWNER, akis, workflow: { started: false, currentStep: 0, steps: [], history: [] } };
+    const upd = (id, data) => updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', id), data);
+    test('BAŞLATMA: history (create) ve akış (İş akışı başlatıldı) kaydı ZORUNLU', async () => {
+        await put('purchaseOrders', 'pa1', draft);
+        const start = (a, h) => upd('pa1', { durum: 'Onay Bekliyor', akis: a,
+            workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2')], history: h } });
+        await assertFails(start(akis, [hev('create')]));                          // akış kaydı yok
+        await assertFails(start([...akis, ev('İş akışı başlatıldı')], []));         // history kaydı yok
+        await assertFails(start(akis, []));                                        // ikisi de yok
+        await assertSucceeds(start([...akis, ev('İş akışı başlatıldı')], [hev('create')]));
+    });
+    test('İPTAL: akış kaydı (Talep İptal Edildi) ZORUNLU', async () => {
+        await put('purchaseOrders', 'pa2', draft);
+        const cancel = a => upd('pa2', { durum: 'İptal Edildi', akis: a,
+            workflow: { started: false, finished: true, currentStep: 0, currentState: 'cancelled', steps: [], history: [] } });
+        await assertFails(cancel(akis));
+        await assertSucceeds(cancel([...akis, ev('Talep İptal Edildi')]));
+    });
+    test('GERİ ÇEKME: history (withdraw) ve akış kaydı ZORUNLU', async () => {
+        await put('purchaseOrders', 'pa3', running());
+        const wd = (a, h) => upd('pa3', { durum: 'Taslak', akis: a,
+            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: h } });
+        await assertFails(wd(akis, [...hist, hev('withdraw')]));                  // akış kaydı yok
+        await assertFails(wd([...akis, ev(WD)], hist));                           // history kaydı yok
+        await assertFails(wd(akis, hist));                                         // ikisi de yok
+        await assertSucceeds(wd([...akis, ev(WD)], [...hist, hev('withdraw')]));
+    });
+    test('KORUNAN: taslak düzenleme ve ek silme (kayıt eklemeden ya da tek kayıtla) değişmedi', async () => {
+        await put('purchaseOrders', 'pa4', draft);
+        await assertSucceeds(upd('pa4', { urun: 'Kağıt A3' }));
+        await assertSucceeds(upd('pa4', { aciklama: 'A3', akis: [...akis, ev('Talep güncellendi')] }));
+        await assertSucceeds(upd('pa4', { akis: [...akis, ev('Talep güncellendi'), ev('Ek dosya silindi')] }));
     });
 });
 

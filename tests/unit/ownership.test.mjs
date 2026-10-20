@@ -433,15 +433,31 @@ test('J11.6 · planCodeCleanse: bir personelin kodu BAŞKA bir personelin adıyl
     assert.deepEqual(plan2.blockers.purchaseOrderUnresolved.map(x => x.id), ['po2'], 'ad (p_s) ↔ kod (p_k): iki farklı kişi');
     assert.equal(plan2.ready, false);
 });
-test('J11.6 · planCodeCleanse: tüm anlamlar AYNI kişiyi gösteriyorsa (kod = kendi id\'si / kendi adı) tek anlamlıdır, engel değil', () => {
+// J11.7 · P1 (bağımsız denetim): J11.6 bu durumu "tek anlamlı, engel değil" sayıyordu (önceki test bunu iddia ediyordu; bulgu
+// gereği BEKLENTİ BİLİNÇLİ OLARAK TERSİNE ÇEVRİLDİ). Kodun sahibinin kendi id'si / adıyla aynı olması kodun GİZLİ olduğunu
+// göstermez: görünür bir kimlik değeri giriş kodudur. Kodlar silinmeden önce engel; createdBy dönüşümü tek başına yetmez.
+for (const [label, person, by] of [["kendi id'si", ['p1', 'Bir', 'p1'], 'p1'], ['kendi adı', ['p2', 'Iki', 'Iki'], 'Iki']]) {
+    test(`J11.7 · planCodeCleanse: kod = ${label} ve createdBy bu değer → ENGEL (plan hazır değil, kodlar silinmez)`, () => {
+        const { O, SP } = load();
+        const a = accOf(SP);
+        const pers = [a(...person), a('p9', 'Dokuz', 'kod99')];
+        const plan = plain(O.planCodeCleanse({ personel: pers, accountEmail: SP.accountEmailOf, requests: [], purchaseOrders: [{ id: 'po1', createdBy: by }] }));
+        assert.deepEqual(plan.blockers.purchaseOrderUnresolved.map(x => x.id), ['po1']);
+        assert.match(plan.blockers.purchaseOrderUnresolved[0].reason, /görünür kimlik/);
+        assert.equal(plan.purchaseOrders.length, 0, 'otomatik dönüşüm yok');
+        assert.equal(plan.ready, false, 'kodlar silinmeden ÖNCE durur');
+        assert.ok(!JSON.stringify(plan.blockers).includes(by), 'rapor değeri içermez');
+    });
+}
+test("J11.7 · planStaffAccessClosure: kod = kendi id'si çakışması kapanışı engeller (purchaseOrderCodes), kilit açılamaz", () => {
     const { O, SP } = load();
     const a = accOf(SP);
-    const pers = [a('p1', 'Bir', 'p1'), a('p2', 'Iki', 'Iki')];
-    const plan = plain(O.planCodeCleanse({ personel: pers, accountEmail: SP.accountEmailOf, requests: [],
-        purchaseOrders: [{ id: 'po1', createdBy: 'p1' }, { id: 'po2', createdBy: 'Iki' }] }));
-    assert.deepEqual(plan.blockers.purchaseOrderUnresolved, []);
-    assert.equal(plan.purchaseOrders.length, 0, 'id / ad zaten kalıcı kimlik; dönüşüm gerekmez');
-    assert.equal(plan.ready, true, JSON.stringify(plan.blockers));
+    const personel = [a('p1', 'Bir', 'p1', 'u-1')];
+    const staffAccounts = [{ id: 'u-1', personelId: 'p1', pri: 'p1' }];
+    const r = plain(O.planStaffAccessClosure({ personel, staffAccounts, accountEmail: SP.accountEmailOf,
+        data: { requests: [], tasks: [], workflowTemplates: [], purchaseOrders: [{ id: 'po1', createdBy: 'p1', createdByName: 'Bir', talepEden: 'Bir', createdByUid: 'u-1' }] } }));
+    assert.equal(r.checks.purchaseOrderCodes, 1, JSON.stringify(r.checks));
+    assert.equal(r.ready, false);
 });
 test('J11.6 · planCodeCleanse: kodlar DURURKEN çakışmasız meşru değerler (id, ad, sistem değeri) engel değil; kod tekil personele çözülür', () => {
     const { O, SP } = load();

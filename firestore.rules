@@ -228,6 +228,11 @@ service cloud.firestore {
                ? nwf.get('currentState', '') == 'cancelled'
                  && wf.get('currentState', 'initiation') in ['initiation', 'manager_approval', 'hr_approval', 'finance_approval', 'director_approval', 'suspended']
                : nwf.get('currentState', null) == wf.get('currentState', null)))
+        // J11.7 · P1 (bağımsız denetim): ownerEventOk "kayıt eklenmemesini" de kabul eder; başlatma ve iptalde istemcinin ürettiği
+        // kayıt ZORUNLU (başlatma: +1 history 'create' +1 akış; iptal: +1 akış). Düzenleme / ek silme dalı değişmedi.
+        && (nwf.get('started', false) != true
+            || (nwf.get('history', []).size() == wf.get('history', []).size() + 1 && d.get('akis', []).size() == old.get('akis', []).size() + 1))
+        && (d.get('durum', '') != 'İptal Edildi' || d.get('akis', []).size() == old.get('akis', []).size() + 1)
         && ownerEventOk(wf.get('history', []), nwf.get('history', []), 'actor', me, 'action', nwf.get('started', false) == true ? ['create'] : [])
         && ownerEventOk(old.get('akis', []), d.get('akis', []), 'yapan', me, 'islem', nwf.get('started', false) == true ? ['İş akışı başlatıldı']
              : (d.get('durum', '') == 'İptal Edildi' ? ['Talep İptal Edildi'] : ['Talep güncellendi', 'Ek dosya silindi']));
@@ -243,6 +248,8 @@ service cloud.firestore {
         && nwf.get('started', true) == false && nwf.get('finished', true) == false
         && nwf.get('steps', [1]).size() == 0 && nwf.get('currentStep', -1) == 0
         && nwf.get('currentState', '') == 'initiation'
+        // J11.7 · P1: geri çekme kaydı zorunlu (istemci: +1 history 'withdraw' +1 akış); tür / uid / aktör ownerEventOk'ta
+        && nwf.get('history', []).size() == wf.get('history', []).size() + 1 && d.get('akis', []).size() == old.get('akis', []).size() + 1
         && ownerEventOk(wf.get('history', []), nwf.get('history', []), 'actor', me, 'action', ['withdraw'])
         && ownerEventOk(old.get('akis', []), d.get('akis', []), 'yapan', me, 'islem', ['Talep Geri Çekildi (Taslak Moduna Alındı)']);
     }
