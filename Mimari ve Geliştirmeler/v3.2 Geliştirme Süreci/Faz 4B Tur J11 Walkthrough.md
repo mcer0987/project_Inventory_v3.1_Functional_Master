@@ -11,7 +11,8 @@
 |---|---|
 | Dal | `feat/phase-4b-identity-model` |
 | Taban commit | `d35c919e318e1237d566c2529e25ab4f9c11d351` (J10 · "enterprise PRI identity model…") |
-| **Son test edilen commit (J11.6)** | **`86963dea999a9585ca13e5c68e8b0b9e0ea00678`**: J11.5'in üstünde, bağımsız denetimin 2 final P1 bulgusunun düzeltmesi. Ayrıntı ve sonuçlar **§12**'de. Push / merge / deploy yapılmadı. |
+| **Son test edilen commit (J11.7)** | **`e64394995fc60f8611b8fc497d4f2068b25eb7c0`**: kod = kendi kimliği engeli ve zorunlu sahip denetim kayıtları. Ayrıntı **§13**. Push / merge / deploy yapılmadı. |
+| J11.6 commit'i | `86963dea999a9585ca13e5c68e8b0b9e0ea00678`: 2 final P1, **§12**. |
 | J11.5 commit'i | `6958aa352813025e6476b4ede6d5f976c021d831`: 3 zero-trust bulgusu, **§11**. |
 | **Test edilen J11 commit'i** | **`06afc6f53da260bdc829e04b8b709c68fb2d706e`** — yalnız bu dalda, yerel commit. Push, merge ve deploy **yapılmadı**; üçü de proje sahibinin onayını bekliyor (madde 10). Testler commit'ten hemen önce aynı çalışma ağacında koşuldu; commit'ten sonra J11 dosyalarında çalışma ağacıyla fark kalmadığı `git diff HEAD` ile doğrulandı. Bu rapor ve Mega Fix dosyası ayrı bir belge commit'iyle eklendi. |
 | Test tarihi | 20.10.2026, yerel makine (Windows 11), Firebase Emulator (Firestore + Auth) |
@@ -381,7 +382,7 @@ Hiçbiri gerçek Firebase projesine yazmaz. `test:*:emu` ve `test:rules` kendi g
 ayrıca açılır.
 
 ```bash
-git checkout 86963dea999a9585ca13e5c68e8b0b9e0ea00678   # J11.6 (son); J11.5: 6958aa3 · J11: 06afc6f
+git checkout e64394995fc60f8611b8fc497d4f2068b25eb7c0   # J11.7 (son); J11.6: 86963de · J11.5: 6958aa3 · J11: 06afc6f
 npm run test:unit
 npm run test:rules
 npm run test:staff:emu
@@ -403,7 +404,7 @@ ve aynı komutlar orada koşulur.
 
 ## 10. Proje sahibinin kararını bekleyenler
 
-1. **Push / merge / deploy.** J11, J11.5 ve J11.6 yalnız yerel `feat/phase-4b-identity-model` dalında commit'li (`06afc6f`, `6958aa3`, `86963de`). Deploy, §5'teki
+1. **Push / merge / deploy.** J11, J11.5, J11.6 ve J11.7 yalnız yerel `feat/phase-4b-identity-model` dalında commit'li (`06afc6f`, `6958aa3`, `86963de`, `e643949`). Deploy, §5'teki
    sırayla ve kurallar + istemci birlikte yapılmalı.
 2. **Gerçek ortamda göç.** §5 adım 4–5; kök başına (canlı ve demo ayrı).
 3. **Açık risk 1 (yeni kaydın tarihi istemci saati).** Kabul mü, yoksa Faz 2'de sunucu saatli karar alanı (`kararlar.<adım>.at
@@ -647,3 +648,89 @@ yapıldı. Hiçbir mevcut test beklentisi gevşetilmedi.
    taslağı sahip iptal edemez, yönetici iptal eder (güvenli tarafta).
 4. **Değişmeyenler.** §8 açık riskleri (yeni kaydın tarihi istemci saati vb.) ile §11.6 madde 2–4 değişmedi. §11.6 madde 1
    ("sahibin taslak / iptal / geri çekme yolunda `currentState` serbest") J11.6 ile **kapatıldı**.
+
+
+---
+
+## 13. Tur J11.7 — Son cerrahi güvenlik kapanışı
+
+Commit: **`e64394995fc60f8611b8fc497d4f2068b25eb7c0`** (J11.6 `7cb4e10`'un üstünde; yalnız bu dal, yerel). Push, merge, deploy
+ve gerçek veri göçü yapılmadı. Önce saldırı testleri yazıldı ve değiştirilmemiş koda karşı koşuldu; iki bulgu da doğrulandı.
+
+**Değişen dosyalar:**
+- `src/utils/ownership.js`: yalnız `planCodeCleanse`'teki çakışma dalı.
+- `firestore.rules`: yalnız `poDraftOk` ve `poWithdrawOk`; `ownerEventOk` değişmedi.
+- Testler: `tests/unit/ownership.test.mjs`, `tests/rules/rules.test.mjs`.
+
+### 13.1 Kod = kendi kimliği (P1)
+
+- **Doğrulama:** Gerçek saf fonksiyonlarla. Kod kendi id'si (`p1`) ya da kendi adı (`Iki`) olan personelde, `createdBy` bu değeri
+  taşıyorsa J11.6 `people.size === 1` dalı değeri güvenli sayıyordu: plan hazır, kapanış temiz.
+- **Düzeltme:** Bu durum da `purchaseOrderUnresolved` engelidir ve kendi gerekçesini taşır ("kod / görünür kimlik çakışması").
+  `planCodeCleanse.ready` ve `planStaffAccessClosure.ready` `false` olur. Kodlar silinmeden durulur; iki aşamalı göç ve
+  idempotency değişmedi.
+- **Beklenti tersine çevrildi:** J11.6'nın "kod = kendi id'si / adı → engel değil" testi bulgu gereği bilinçli olarak tersine
+  çevrildi ve J11.7 saldırı testine dönüştürüldü.
+- **Açıkça raporlanır — `createdBy` dönüşümü bu durumu çözmez.** Değer zaten id ya da ad olduğu için dönüştürülecek bir şey
+  yoktur. Asıl sorun kodun gizli olmamasıdır: Firebase Auth parolası kod + `"Mdp!"`'dir ve görünür bir kimlikten tahmin
+  edilebilir. Engel yalnız kod silinmeden önce **tespit** sağlar.
+  - Engeli kaldırmak için yönetici kaydı inceleyip ilgili personelin kodunu ele almalıdır.
+  - Kurallar `personel.code`'un yeniden yazılmasına izin vermez; yalnız silmeye izin verir. Kodun silinmesi Auth parolasını
+    **değiştirmez**.
+  - Parola yenileme ve kurtarma mekanizması kapsam dışıdır (sahip kararı). Bu karar sahibe aittir.
+
+### 13.2 Zorunlu denetim kaydı atlanması (P1)
+
+- **Doğrulama:** Emülatörde, `ownerEventOk`'un `b.size() == k ? b == a` dalı nedeniyle şu işlemler **kayıtsız** kabul edildi:
+  - akış kaydı olmadan, history kaydı olmadan ya da ikisi de olmadan başlatma;
+  - akış kaydı olmadan iptal;
+  - kayıtsız geri çekme.
+- **Gerçek istemci:**
+
+  | İşlem | Kaynak | Eklenen kayıt |
+  |---|---|---|
+  | Başlatma | `confirmStartWorkflow` | +1 history (`create`) +1 akış |
+  | İptal | `_savePurchase` | +1 akış, history yok |
+  | Geri çekme | `_savePurchase` | +1 history (`withdraw`) +1 akış |
+
+  `fixWorkflowCurrentStep`'in kayıtsız onarım yazması yalnız yöneticidir (`canRepair`).
+- **Düzeltme:** Yalnız ilgili dallara sayı koşulu eklendi:
+  - `poDraftOk`: başlatmada history +1 ve akış +1; iptalde akış +1.
+  - `poWithdrawOk`: history +1 ve akış +1.
+
+  Eklenen kaydın türü, uid'si ve aktörü `ownerEventOk` ile denetlenmeye devam eder. Taslak düzenleme ve ek silme (kayıtsız
+  ya da tek kayıtla) değişmedi; bu korunan test olarak eklendi.
+- **Fikstür düzeltmesi:** Bir eski rules testi (`sahibi taslağı düzenler ve akışı başlatır`) akışı akış kaydı **olmadan**
+  başlatıyordu. Bu, gerçek istemcinin hiç üretmediği ve artık reddedilen davranıştır. Fikstüre istemcinin akış kaydı
+  eklendi. Beklenti gevşetilmedi; kural sıkılaştı.
+
+### 13.3 Önce / sonra ve regresyon
+
+| | J11.6 kodu (`7cb4e10`) | J11.7 |
+|---|---|---|
+| Unit — ownership dosyası | 30/33 (3 J11.7 saldırı testi başarısız) | **33/33** |
+| Rules | 204/207 (3 J11.7 saldırı testi başarısız; korunan test geçer) | **207/207** |
+| `npm run test:unit` | — | **122/122** |
+| `test:staff:emu` · `test:ownership:emu` · `test:atomic:emu` | — | **15/15 · 17/17 · 5/5** |
+| E2E `flow-tests --emu` (temiz emülatör + `emu:seed`) | — | **55/55**, 0 CSP ihlali, 0 sayfa hatası |
+| `lint:xss` · `hosting-files` | — | **0 izinsiz · 55/55** |
+
+**İfade bütçesi** (`scratch/_budget.sh`):
+
+| İstek | J11.6 | J11.7 |
+|---|---|---|
+| 10 adımlı başlatma | 12'den fazla | **6–8** (yeni sayı koşulları) |
+| 10. adım onayı | 12'den fazla | **12'den fazla** |
+| 10. adım reddi | 6–8 | **6–8** |
+
+### 13.4 Açık riskler
+
+1. **Kod = görünür kimlik olan personelin Auth parolası tahmin edilebilir.** J11.7 kilidi açtırmaz, ama parolayı
+   değiştirmez. Çözüm sahip kararı gerektirir; parola sistemi kapsam dışıdır.
+2. **Kişi düzeyinde tespit yok.** Kodu kendi id'si ya da adıyla aynı olan, ama hiçbir `createdBy`'da geçmeyen personel
+   `planCodeCleanse` tarafından engellenmez; denetçinin kapsamı `createdBy` çakışmasıydı. Aynı parola zayıflığı bu kişilerde
+   de vardır. İstenirse personel döngüsüne tek koşulla eklenebilir.
+3. **Oluşturmada (`poCreateOk`) akış kaydı hâlâ isteğe bağlı.** Bulgu kapsamındaki fonksiyonlar dışında; istemci her zaman
+   "Talep Oluşturuldu" yazar.
+4. **Başlatma bütçe payı 6–8'e düştü.** Başlatma yoluna yeni koşul eklenmeden önce ölçüm şart.
+5. **Değişmeyenler.** §8 / §11.6 / §12.5 açık riskleri değişmedi.

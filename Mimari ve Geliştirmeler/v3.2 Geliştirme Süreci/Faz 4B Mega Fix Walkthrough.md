@@ -4,7 +4,7 @@
 > günceller: kendi bölümünü doldurur, **Durum** tablosunu ve **Zincir devir notu**nu yeniler.
 
 Dal: `feat/phase-4b-identity-model`. J11 kodu ve testleri J10'un (`d35c919`) üstünde yerel commit
-**`06afc6f53da260bdc829e04b8b709c68fb2d706e`**, J11.5 düzeltmeleri **`6958aa352813025e6476b4ede6d5f976c021d831`**, J11.6 düzeltmeleri **`86963dea999a9585ca13e5c68e8b0b9e0ea00678`** olarak duruyor. Push, merge, deploy ve gerçek ortamda göç **yapılmadı**; hepsi
+**`06afc6f53da260bdc829e04b8b709c68fb2d706e`**, J11.5 düzeltmeleri **`6958aa352813025e6476b4ede6d5f976c021d831`**, J11.6 düzeltmeleri **`86963dea999a9585ca13e5c68e8b0b9e0ea00678`**, J11.7 düzeltmeleri **`e64394995fc60f8611b8fc497d4f2068b25eb7c0`** olarak duruyor. Push, merge, deploy ve gerçek ortamda göç **yapılmadı**; hepsi
 proje sahibinin ayrı onayını bekliyor (madde 10). Teslim ve denetim raporu:
 [Faz 4B Tur J11 Walkthrough](Faz%204B%20Tur%20J11%20Walkthrough.md).
 
@@ -22,6 +22,7 @@ Bağımsız denetim kararı (J10): **57/100 — NO-GO**.
 | Faz 1 · madde 10 | Yetki ve son karar: yalnız bu dal; başarısızlıkta güvenli kalma tablosu; J11 yerel commit `06afc6f`; bağımsız denetime teslim | Opus | ✅ Teslim edildi — push / merge / deploy / göç sahibin onayında |
 | Tur J11.5 | Bağımsız denetim (76/100) zero-trust bulguları: biçimden bağımsız eski kod engeli · onayda `currentState` ardıl bağı · sahibin olay türü + uid bağı (`ownerEventOk`) · yerel commit `6958aa3` | Opus | ✅ Tamam — rules 197/197, unit 114/114, E2E 55/55. Ayrıntı: [Tur J11 Walkthrough §11](Faz%204B%20Tur%20J11%20Walkthrough.md) |
 | Tur J11.6 | Bağımsız denetim (84/100, NO-GO) final P1'ler: kod / kimlik çakışması kodlar silinmeden engel (`planCodeCleanse`) · sahibin `workflow.currentState`'i istemcinin gerçek WorkflowEngine değerlerine bağlı (`poCreateOk` / `poDraftOk` / `poWithdrawOk`) · yerel commit `86963de` | Opus | ✅ Tamam — saldırı testleri J11.5'te başarısız, J11.6'da geçer; rules 203/203, unit 120/120, ownership emu 17/17, E2E 55/55. Ayrıntı: [Tur J11 Walkthrough §12](Faz%204B%20Tur%20J11%20Walkthrough.md) |
+| Tur J11.7 | Son cerrahi kapanış: kod = kendi id'si / adı kodlar silinmeden engel (`planCodeCleanse`; `createdBy` dönüşümü yetmez, sahip kararı) · başlatma / iptal / geri çekme zorunlu denetim kaydı (`poDraftOk` / `poWithdrawOk`) · yerel commit `e643949` | Opus | ✅ Tamam — saldırı testleri J11.6'da başarısız, J11.7'de geçer; rules 207/207, unit 122/122, E2E 55/55; başlatma bütçe payı 6–8. Ayrıntı: [Tur J11 Walkthrough §13](Faz%204B%20Tur%20J11%20Walkthrough.md) |
 | Faz 2 | Kalan denetim bulguları | Sonnet | ⏳ Bekliyor — bkz. Zincir devir notu |
 | Faz 3 | Gerçek ortamda göç ve kilidin açılması (runbook) | Sahip + ajan | ⏳ Bekliyor (onay gerekir) |
 
