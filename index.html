@@ -33,6 +33,9 @@
     <script src="src/utils/schema.js"></script>
     <script src="src/utils/stock-import.js"></script>
     <script src="src/services/atomic-writer.js"></script>
+    <script src="src/utils/staff-code-registry.js"></script>
+    <script src="src/services/staff-provisioning.js"></script>
+    <script src="src/utils/ownership.js"></script>
     <script src="src/services/assignment-service.js"></script>
     <script src="src/ui/device-ids.js"></script>
     <link rel="stylesheet" href="todo-module.css">
@@ -622,7 +625,8 @@
                         <tr>
                             <th>Seç</th>
                             <th>Ad Soyad</th>
-                            <th>Oturum Kodu</th>
+                            <th>Birim</th>
+                            <th>Kurumsal Kimlik / Hesap</th>
                             <th>İşlemler</th>
                         </tr>
                     </thead>
@@ -1196,7 +1200,15 @@
                 <h2 id="personelModalTitle">Personel Düzenle</h2>
                 <form id="personelForm" autocomplete="off">
                     <label>Ad Soyad: <input type="text" id="personelName" required></label>
-                    <label>Oturum Kodu: <input type="text" id="personelCode" readonly></label>
+                    <!-- Faz 4B · J10 PRI: kurumsal kimlik addan üretilir (ad.soyad; çakışmada numara), hesap açılana kadar düzenlenebilir;
+                         kod yalnız yeni kayıtta bir kez gösterilir -->
+                    <label>Kurumsal Kimlik (PRI): <input type="text" id="personelPri" placeholder="ad.soyad" autocomplete="off"
+                        autocapitalize="none" spellcheck="false"></label>
+                    <p id="personelPriHint" style="font-size:12px; color:#64748b; margin:4px 0 10px;">Personel bu kimlikle girer.</p>
+                    <label>Birim: <select id="personelUnit"><option value="">— Birim seçin —</option></select></label>
+                    <label id="personelCodeRow">Giriş Kodu: <input type="text" id="personelCode" autocomplete="off"></label>
+                    <p id="personelCodeHint" style="font-size:12px; color:#64748b; margin:4px 0 10px;">Kod giriş hesabının parolasıdır;
+                        sistemde saklanmaz. Kaydettikten sonra personele iletin.</p>
                     <button type="submit" class="save-btn">Kaydet</button>
                 </form>
             </div>
@@ -1209,13 +1221,19 @@
                 <div class="login-inner-body">
                     <div class="login-icon-box">📦</div>
                     <h2 id="loginModalTitle">Envanter Yönetimi</h2>
-                    <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Erişim sağlamak için personel kodunuzu
-                        ya da yönetici parolasını giriniz.</p>
+                    <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Kurumsal kimliğiniz (ad.soyad) ve giriş kodunuzla girin.
+                        Yönetici: yalnız parolayı girip "Yönetici Paneli"ne basın.</p>
 
 <form id="loginForm" onsubmit="event.preventDefault(); handleLogin(event);" autocomplete="off">
+                            <!-- Faz 4B · J10 PRI: iki kutu; giriş veritabanını okumadan <pri>@staff.medipol.local hesabına gider -->
                             <div class="modern-input-group">
-                                <input type="text" id="access-val-node" required placeholder="Kod / parola"
-                                    autocomplete="off">
+                                <input type="text" id="login-pri" placeholder="ad.soyad" aria-label="Kurumsal kimlik (PRI)"
+                                    autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"
+                                    style="width:100%; box-sizing:border-box; height:55px; font-size:18px; text-align:center; border:2px solid var(--color-border-light); border-radius:var(--radius-lg); background:var(--color-surface-alt);">
+                            </div>
+                            <div class="modern-input-group">
+                                <input type="password" id="access-val-node" placeholder="Giriş kodu / yönetici parolası"
+                                    aria-label="Giriş kodu ya da yönetici parolası" autocomplete="off">
                                 <script>
                                     // [R-IMM]
                                     (function () {
@@ -1229,9 +1247,7 @@
                                 </script>
                             </div>
 
-                            <div id="loginStatus">
-                                <div class="sync-loader">☁️ Veriler Senkronize Ediliyor...</div>
-                            </div>
+                            <div id="loginStatus"></div>
 
                             <button type="submit" id="login-submit-btn" class="btn-login-new">
                                 Sisteme Giriş Yap

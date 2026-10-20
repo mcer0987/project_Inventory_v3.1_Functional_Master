@@ -535,6 +535,7 @@ window.selectPersonForWorkflow = function (index, name) {
 //        kayıtlı olmalı (ad kayıtlı biçimine çevrilir); şablon modunda da ekrandaki adımlar (sırayla şablon meta verisiyle) kullanılır.
 function _resolveWorkflowSteps(steps) {
     if (!Array.isArray(steps) || steps.length === 0) return { error: 'En az bir onay adımı ekleyin.' };
+    if (steps.length > 10) return { error: 'Bir akışta en fazla 10 onay adımı olabilir.' };   // J10: kurallarla aynı sınır
     const norm = v => String(v || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
     const known = new Map([...(window.data.personel || []), ...(window.data.staff || [])]
         .map(p => String(p?.name || p?.adSoyad || '').trim()).filter(Boolean).map(n => [norm(n), n]));
@@ -585,6 +586,7 @@ window.confirmStartWorkflow = async function () {
             currentState: window.WorkflowEngine.states.INITIATION,
             steps: checked.steps.map(s => ({
                 user: s.user,
+                userUid: window.Ownership.uidForPersonName(s.user),   // J9: onaylayıcının Auth uid'si (yoksa null)
                 tip: s.tip,
                 status: "pending",
                 note: "",
@@ -594,7 +596,8 @@ window.confirmStartWorkflow = async function () {
                 ...prevHist,
                 {
                     action: 'create',
-                    actor: window.currentUser?.name || 'system',
+                    actor: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'system',
+                    uid: window.userAuth?.uid || '',   // J11.5: kurallar sahibin kaydında request.auth.uid ile eşler
                     timestamp: new Date().toISOString(),
                     to: window.WorkflowEngine.states.INITIATION
                 }
@@ -635,7 +638,8 @@ window.confirmStartWorkflow = async function () {
     if (!req.akis) req.akis = [];
     req.akis.push({
         islem: "İş akışı başlatıldı",
-        yapan: window.currentUser?.name,
+        yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name,
+        uid: window.userAuth?.uid || '',   // J11.5
         tarih: new Date().toLocaleString('tr-TR')
     });
 
@@ -892,7 +896,8 @@ window.fixWorkflowCurrentStep = async function (item, saveToDB = false) {
     }
 
     const changed = before !== JSON.stringify([item.workflow.currentStep, item.workflow.currentState, item.workflow.finished, item.durum]);
-    if (changed && saveToDB && typeof window.upsertItem === 'function') {
+    const canRepair = typeof window.isDbAdmin === 'function' && window.isDbAdmin();   // J10: personel onarım yazamaz (kurallar)
+    if (changed && saveToDB && canRepair && typeof window.upsertItem === 'function') {
         // Görüntüleme sırasında onarım yazılamazsa (çevrimdışı, yetki) pencere yine açılır; sonuç yalnız loglanır.
         if (!(await window.writeOk(window.upsertItem('purchaseOrders', item)))) console.warn('⚠️ Akış onarımı kaydedilemedi:', item.id);
     }
@@ -979,12 +984,20 @@ function _canActOnCurrentStep(item) {
     const step = (wf.steps || [])[wf.currentStep || 0];
     if (!step) return false;
     if (typeof window.isDbAdmin === 'function' && window.isDbAdmin()) return true;
-    const me = window.currentUser || (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null);
-    return !!(me && me.name && _normName(step.user) === _normName(me.name));
+    // Faz 4B · J10: kurallar onaylayıcıyı adıyla değil Auth uid'siyle tanır (steps[currentStep].userUid). Onaylayıcı hesabı
+    //               tanımsız adımı yalnız yönetici onaylar. Talep sahibinin kendi adımı burada değil guardSelfApproval'da durur
+    //               (J4: engel + 'blocked' denetim kaydı); kurallar da sahibin onayını reddeder.
+    const u = window.userAuth;
+    return !!(u && !u.isAnonymous && step.userUid && String(step.userUid) === String(u.uid));
 }
 
-function _denyStepAction() {
-    if (typeof showAppAlert === 'function') showAppAlert('Bu adım için işlem yetkiniz yok (sıra sizde değil veya akış tamamlandı).', 'error');
+function _denyStepAction(item) {
+    const wf = item && item.workflow;
+    const step = wf && (wf.steps || [])[wf.currentStep || 0];
+    const msg = step && !step.userUid && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin())
+        ? 'Bu adımın onaylayıcısının giriş hesabı tanımlı değil; adımı yönetici onaylamalı (ya da şablon / akış yeniden başlatılmalı).'
+        : 'Bu adım için işlem yetkiniz yok (sıra sizde değil veya akış tamamlandı).';
+    if (typeof showAppAlert === 'function') showAppAlert(msg, 'error');
 }
 
 // ✅ ENHANCED: State machine ile uyumlu onay sistemi
@@ -996,7 +1009,7 @@ window.approveStep = async function (id) {
     try {
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
         if (!item || !item.workflow) return;
-        if (!_canActOnCurrentStep(item)) { _denyStepAction(); return; }
+        if (!_canActOnCurrentStep(item)) { _denyStepAction(item); return; }
 
         // [WHY]: Faz 4 · J4 (EBYS-04, M12) — kendi satın alma talebinin adımını onaylama kontrolü yalnız index'teki
         //        sarmalayıcıdaydı (admin.html'de ve doğrudan çağrıda yoktu). Personel → engel + 'blocked'; admin → parola.
@@ -1007,7 +1020,7 @@ window.approveStep = async function (id) {
         if (!guard.allowed) return;
         _beginMutation(lockKey, item);
 
-        const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+        const actor = (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || "Bilinmeyen Kullanıcı";   // J11 · P1 #5: kurallar staffName ile karşılaştırır
 
         // 1. MEVCUT ADIMI SABİTLE (Hata buradaydı: geçişten önce indeksi almalıyız)
         const currentStepIndex = item.workflow.currentStep || 0;
@@ -1099,6 +1112,7 @@ window.approveStep = async function (id) {
         item.akis.push({
             islem: `✅ Onaylandı: ${step?.tip || 'Onay Adımı'}`,
             yapan: actor,
+            uid: window.userAuth?.uid || '',   // J11 · P1 #5
             tarih: approvalTime,
             note: `Süreç: ${window.getStateLabel ? window.getStateLabel(nextState) : nextState}`
         });
@@ -1144,7 +1158,12 @@ window.rejectStep = async function (id) {
     try {
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
         if (!item || !item.workflow) return;
-        if (!_canActOnCurrentStep(item)) { _denyStepAction(); return; }
+        if (!_canActOnCurrentStep(item)) { _denyStepAction(item); return; }
+        // J10: personel kendi talebinin adımını reddedemez (kurallar da reddeder); sahibin yolu talebi geri çekmektir.
+        if (!window.isDbAdmin() && item.createdByUid && window.userAuth && String(item.createdByUid) === String(window.userAuth.uid)) {
+            if (typeof showAppAlert === 'function') showAppAlert('Kendi talebinizin adımında işlem yapamazsınız; talebi geri çekebilirsiniz.', 'error');
+            return;
+        }
 
         let note;
         while (true) {
@@ -1154,7 +1173,7 @@ window.rejectStep = async function (id) {
             alert("Red nedeni boş bırakılamaz!");
         }
 
-        const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+        const actor = (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || "Bilinmeyen Kullanıcı";   // J11 · P1 #5: kurallar staffName ile karşılaştırır
         _beginMutation(lockKey, item);
 
         // Mevcut adımı sabitle
@@ -1185,9 +1204,11 @@ window.rejectStep = async function (id) {
         // Eski akış sistemini de güncelle
         if (!item.akis) item.akis = [];
         const rejectionTime = new Date().toLocaleString('tr-TR');
+        const myUid = window.userAuth?.uid || '';   // J11 · P1 #5: kurallar üç red kaydında da request.auth.uid ile eşler
         item.akis.push({
             islem: `❌ REDDEDİLDİ: ${step?.tip || 'Onay'}`,
             yapan: actor,
+            uid: myUid,
             tarih: rejectionTime,
             not: note.trim()
         });
@@ -1199,6 +1220,7 @@ window.rejectStep = async function (id) {
                 item.akis.push({
                     islem: `🔄 State Geçişi: ${window.getStateLabel ? window.getStateLabel(lastHistory.to) : lastHistory.to}`,
                     yapan: lastHistory.actor || actor,
+                    uid: myUid,
                     tarih: new Date(lastHistory.timestamp).toLocaleString('tr-TR'),
                     not: `Reddedildi: ${note.trim()}`
                 });
@@ -1210,6 +1232,7 @@ window.rejectStep = async function (id) {
         item.akis.push({
             islem: `❌ Reddedildi: ${step?.tip || 'Onay Adımı'}`,
             yapan: actor,
+            uid: myUid,
             tarih: rejectionTime,
             not: note.trim(),
             stateNote: `State: ${window.getStateLabel ? window.getStateLabel(window.WorkflowEngine.states.CANCELLED) : 'CANCELLED'}`
@@ -1330,7 +1353,9 @@ window.renderMyApprovals = function () {
             return false;
         }
         const steps = item.workflow?.steps || [];
+        const myUid = window.userAuth && !window.userAuth.isAnonymous ? String(window.userAuth.uid) : '';
         const isMatch = steps.some(s => {
+            if (s.userUid) return !!myUid && String(s.userUid) === myUid;   // J10: hesabı tanımlı adım uid ile
             const stepUser = (s.user || "").trim().toLocaleLowerCase('tr-TR');
             return stepUser === me;
         });
@@ -1741,6 +1766,7 @@ window.createWorkflowFromTemplate = function (tpl) {
             processedSteps.push({
                 id: 'step_' + stepIndex++,
                 user: s.user,
+                userUid: window.Ownership ? window.Ownership.uidForPersonName(s.user) : null,   // J9: akış başlarken güncel personelden
                 tip: s.tip,
                 order: s.order,
                 status: "pending",
@@ -1772,7 +1798,8 @@ window.createWorkflowFromTemplate = function (tpl) {
                 id: 'hist_' + Date.now(),
                 from: null,
                 to: window.WorkflowEngine.states.INITIATION,
-                actor: window.currentUser?.name || 'system',
+                actor: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'system',
+                uid: window.userAuth?.uid || '',   // J11.5
                 timestamp: new Date().toISOString(),
                 action: 'create',
                 note: 'Workflow başlatıldı',
@@ -1836,6 +1863,7 @@ window.transitionWorkflowState = async function (workflowId, targetState, actor,
         from: workflow.currentState,
         to: targetState,
         actor: actor,
+        uid: window.userAuth?.uid || '',   // J11 · P1 #5: kurallar onay/red kaydında request.auth.uid ile eşler
         timestamp: new Date().toISOString(),
         action: 'transition',
         note: note,
@@ -2349,6 +2377,7 @@ window.saveTemplateData = async function () {
         alert("En az 1 adım eklemelisiniz");
         return;
     }
+    if (WorkflowState.tempTplSteps.length > 10) { alert("Bir şablonda en fazla 10 onay adımı olabilir."); return; }   // J10: kural sınırı
 
     // [BUGFIX] Bug 2: Admin guard — workflowTemplates is a root collection with admin-only write rules.
     // Faz 4 · J1: yetki localStorage bayrağıyla değil Firebase admin oturumuyla (bayrak elle yazılabiliyordu).
@@ -2367,10 +2396,16 @@ window.saveTemplateData = async function () {
         // ID yoksa yeni oluştur, varsa mevcutu kullan (Düzenleme modu için)
         const id = WorkflowState.currentEditingTemplateId || "tpl_" + Date.now();
 
+        // Faz 4B · J9: adım onaylayıcısının Auth uid'si (adı TEK bir personeli işaret ediyorsa); belirsiz / hesapsız / sistem → null
+        const steps = WorkflowState.tempTplSteps.map(s => ({ ...s, userUid: window.Ownership.uidForPersonName(s.user) }));
+        const unresolved = steps.filter(s => !s.userUid).length;
+        if (unresolved && typeof showAppAlert === 'function') {
+            showAppAlert(`Not: ${unresolved} adımın onaylayıcısı için giriş hesabı bulunamadı (hesap yok ya da ad birden fazla personelde). Şablon kaydedilir; bu adımlar hesapla eşleşmez.`, 'warning');
+        }
         const templateData = {
             id: id,
             name: name,
-            steps: WorkflowState.tempTplSteps,
+            steps,
             auth: WorkflowState.tempTplAuth || [],
             createdAt: Date.now()
         };

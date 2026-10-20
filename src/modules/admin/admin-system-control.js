@@ -888,6 +888,503 @@
         }
     };
 
+    // ─── PRI / Hesap Göç Aracı (Faz 4B · J7 → J10 PRI revizyonu) ───
+    // [WHY]: Giriş kurumsal kimlikle (PRI) yapılıyor; var olan personelin PRI'si yok, J7'de açılan hesaplar p<id>@ adresinde.
+    // [HOW]: J9 aracının kuralları: önizleme planStaffAccounts (YAZMAZ) → kişi kişi atanacak PRI ve hesap işlemi (hesap aç /
+    //        e-postayı uid korunarak taşı / eşlemeyi yenile / kod yok → "Hesap Aç" / tutarsız → dokunma) → onay →
+    //        applyStaffAccounts (personel listesi sunucudan taze okunur; önizlemeden sonra değiştiyse hiç yazmadan durur).
+    //        Sonuç gizlenmez: durum başına sayı, durma nedeni, kalan. Giriş kodları ve parolalar hiçbir mesaja, loga ya da
+    //        konsola yazılmaz. DOM API (innerHTML yok). Test kancaları: #staffAccountWizard[data-state], data-role nitelikleri.
+    const _PAW_ACTION = {
+        ok: 'Bağlı — kimlik eşlemesi yenilenir',
+        create: 'Giriş hesabı açılacak',
+        move: 'J7 hesabı PRI adresine taşınacak (uid korunur)',
+        'no-code': 'Hesap yok, kod yok — tablodan "Hesap Aç"',
+        blocked: 'Dokunulmayacak',
+    };
+    const _PAW_STATUS = {
+        created: 'açılan', relinked: 'yeniden bağlanan', moved: 'taşınan', 'move-resumed': 'taşıması tamamlanan (bağ onarıldı)',
+        ok: 'eşlemesi yenilenen', 'pri-written': 'yalnız PRI yazılan',
+        conflict: 'çakışan', invalid: 'geçersiz', error: 'hata', 'link-failed': 'bağlanamayan', disabled: 'devre dışı hesap', skipped: 'atlanan',
+    };
+    let _staffWizardOpen = false;
+    window.vipMigrateStaffAuth = function (btn) {
+        if (_staffWizardOpen) return null;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error'); return null; }
+        if (!window.StaffProvisioning || typeof window.planStaffAccounts !== 'function') { _dupAlert('Hesap modülü yüklenemedi; sayfayı yenileyin.', 'error'); return null; }
+        let plan;
+        try { plan = window.planStaffAccounts(); }
+        catch (e) { _dupAlert('Önizleme hazırlanamadı: ' + ((e && e.message) || 'bilinmeyen hata'), 'error'); return null; }
+        const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text !== undefined) n.textContent = text; return n; };
+        const cell = 'padding:6px 8px; border-bottom:1px solid var(--color-border);';
+        const overlay = el('div', 'position:fixed; inset:0; background:rgba(15,23,42,0.7); z-index:10650; display:flex; align-items:center; justify-content:center;');
+        overlay.id = 'staffAccountWizard';
+        overlay.dataset.state = 'preview';
+        const panel = el('div', 'background:var(--color-surface,#fff); color:var(--color-text); border-radius:16px; width:820px; max-width:95vw; max-height:88vh; overflow:auto; padding:22px; box-shadow:0 24px 64px rgba(0,0,0,0.45);');
+        overlay.appendChild(panel);
+        panel.append(el('h4', 'margin:0 0 6px; font-weight:800;', '🪪 PRI / Hesap Göç Aracı — Önizleme'),
+            el('div', 'font-size:13px; color:var(--color-text-muted); margin-bottom:14px;',
+                `Ortam: ${window.COLLECTION_ROOT}. Bu ekran hiçbir şey yazmadı. Her personele kurumsal kimlik (PRI) atanır; giriş hesabı ` +
+                `<pri>@staff.medipol.local adresinde olur. J7'de açılmış hesapların (p<id>@) e-postası uid korunarak taşınır, böylece ` +
+                'sahiplik kayıtları bağlı kalır. Hesaplar ikincil bir oturumda işlenir; yönetici oturumunuz etkilenmez.'));
+        const c = plan.counts;
+        const summary = el('table', 'width:100%; border-collapse:collapse; font-size:13px; margin-bottom:12px;');
+        summary.dataset.role = 'summary';
+        [['Kurumsal kimlik (PRI) yazılacak', c.priWrites, 'pri'], ['Giriş hesabı açılacak', c.create, 'create'], ['J7 hesabı PRI adresine taşınacak', c.move, 'move'],
+            ['Bağlı (kimlik eşlemesi yenilenecek)', c.ok, 'ok'], ['Hesap yok, kod yok → tablodan "Hesap Aç"', c['no-code'], 'no-code'], ['Dokunulmayacak (tutarsız bağ)', c.blocked, 'blocked']]
+            .forEach(([k, v, key]) => { const r = el('tr'); r.dataset.key = key; r.append(el('td', cell, k), el('td', cell + ' font-weight:800; text-align:right;', String(v))); summary.appendChild(r); });
+        panel.appendChild(summary);
+        const rows = el('table', 'width:100%; border-collapse:collapse; font-size:12px; margin-bottom:12px;');
+        rows.dataset.role = 'rows';
+        const head = el('tr'); ['Personel', 'Kurumsal kimlik', 'İşlem', 'Not'].forEach(h => head.appendChild(el('th', cell + ' text-align:left;', h)));
+        rows.appendChild(head);
+        plan.rows.slice(0, 300).forEach(r => {
+            const tr = el('tr'); tr.dataset.id = r.id; tr.dataset.action = r.action;
+            tr.append(el('td', cell, r.name), el('td', cell + ' font-family:monospace;', r.pri + (r.priChange ? ' (yeni)' : '')),
+                el('td', cell, _PAW_ACTION[r.action] || r.action), el('td', cell + ' color:var(--color-text-muted);', r.reason || ''));
+            rows.appendChild(tr);
+        });
+        panel.appendChild(rows);
+        if (plan.rows.length > 300) panel.appendChild(el('div', 'font-size:12px; margin-bottom:12px;', `… ve ${plan.rows.length - 300} personel daha (tamamı uygulanır).`));
+
+        const footer = el('div', 'display:flex; gap:10px; justify-content:flex-end; align-items:center; flex-wrap:wrap;');
+        const work = c.create + c.move + c.ok + plan.rows.filter(r => r.action === 'no-code' && r.priChange).length;
+        const status = el('div', 'flex:1; font-size:12px; color:var(--color-text-muted);', work ? `${work} personel işlenecek. Firebase hesap işlemlerini IP başına sınırlar; sınır dolarsa iş durur, yeniden çalıştırılabilir.` : 'Yapılacak bir şey yok.');
+        status.dataset.role = 'status';
+        const cancel = el('button', 'padding:9px 16px; background:none; border:1px solid var(--color-border); border-radius:8px; cursor:pointer; color:var(--color-text);', 'Kapat');
+        cancel.type = 'button'; cancel.id = 'pawClose';
+        const apply = el('button', 'padding:9px 18px; background:#0284c7; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;', 'Uygula');
+        apply.type = 'button'; apply.id = 'pawApply';
+        apply.disabled = work === 0;
+        apply.style.opacity = apply.disabled ? '0.5' : '1';
+        footer.append(status, cancel, apply);
+        panel.appendChild(footer);
+        const close = () => { overlay.remove(); _staffWizardOpen = false; if (btn) btn.disabled = false; };
+        cancel.addEventListener('click', close);
+
+        async function run() {
+            if (apply.disabled) return null;
+            const ok = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('PRI / Hesap Göç Aracı', `${work} personel işlenecek (PRI atama, hesap açma / taşıma). Devam edilsin mi?`)
+                : confirm('Uygulansın mı?');
+            if (ok !== true) return null;
+            overlay.dataset.state = 'running';
+            apply.disabled = true; cancel.disabled = true;
+            let res;
+            try { res = await window.applyStaffAccounts(plan, { onProgress: (d, t) => { apply.textContent = `İşleniyor… ${d}/${t}`; } }); }
+            catch (e) { res = { results: [], counts: {}, stopped: { code: (e && e.code) || 'error', message: (e && e.message) || 'bilinmeyen hata' }, remaining: work }; }
+            const failed = res.results.filter(r => ['conflict', 'invalid', 'error', 'link-failed', 'disabled', 'skipped'].includes(r.status));
+            const result = el('div', 'margin-top:12px; padding:10px 12px; border-radius:10px; font-size:13px; border:1px solid ' + (res.stopped || failed.length ? '#dc2626' : '#16a34a') + ';');
+            result.dataset.role = 'result';
+            result.dataset.status = res.aborted ? 'aborted' : res.stopped ? 'stopped' : 'done';
+            result.appendChild(el('div', 'font-weight:800;', res.aborted ? '✗ Hiçbir şey yazılmadı' : res.stopped ? '✗ Yarıda durdu' : (failed.length ? '⚠ Tamamlandı, sorunlu kayıtlar var' : '✓ Tamamlandı')));
+            const parts = Object.entries(res.counts).map(([k, v]) => `${_PAW_STATUS[k] || k}: ${v}`);
+            if (res.remaining) parts.push(`denenmeyen: ${res.remaining}`);
+            result.appendChild(el('div', '', parts.join(' · ') || '—'));
+            if (res.stopped) result.appendChild(el('div', 'color:#dc2626;', `Neden: ${res.stopped.message}`));
+            failed.slice(0, 20).forEach(r => {
+                const row = plan.rows.find(x => x.id === r.id);
+                result.appendChild(el('div', 'font-size:12px;', `• ${row ? row.name : r.id} (${row ? row.pri : '-'}): ${_PAW_STATUS[r.status] || r.status} — ${r.reason || ''}${r.kind ? ` [${r.kind}]` : ''}`));
+            });
+            panel.insertBefore(result, footer);
+            const summaryText = parts.join(' · ');
+            _dupAlert(`🪪 PRI / hesap göçü: ${summaryText || 'işlem yok'}${res.stopped ? ` · Durdu: ${res.stopped.message}` : ''}`, res.stopped || failed.length ? 'warning' : 'success');
+            _appendLog(res.stopped || failed.length ? 'warn' : 'success', [`🪪 PRI / HESAP GÖÇÜ (J10): ${summaryText} · kök ${window.COLLECTION_ROOT}${res.stopped ? ' · durdu: ' + res.stopped.code : ''}`]);
+            if (failed.length) console.warn('[PRI / Hesap Göçü] sorunlu:', failed.map(r => ({ id: r.id, durum: r.status, neden: r.reason })));
+            apply.textContent = 'Tamamlandı';
+            cancel.disabled = false;
+            overlay.dataset.state = 'done';
+            if (typeof window.renderPersonelTable === 'function') window.renderPersonelTable();
+            return res;
+        }
+        apply.addEventListener('click', () => { run(); });
+        _staffWizardOpen = true;
+        if (btn) btn.disabled = true;
+        document.body.appendChild(overlay);
+        return { overlay, plan, run, close };
+    };
+
+    // [Faz 4B · J10]: "Kod Benzersizleştirme" (J7.5) ve "Giriş Modu" (J8) araçları kaldırıldı: giriş kurumsal kimlik (PRI) + kodla
+    //   Firebase Auth'a yapılıyor (kodların tekil olması gerekmez), kurallar personel kaydına kod yazılmasını reddeder, mod sabit 'accounts'.
+
+    // ─── Sahiplik Göç Aracı (Faz 4B · J9) ───
+    // [WHY]: J9 öncesi kayıtlarda sahiplik uid'leri yok; J10 kuralları sahibi ancak bunlarla tanır. Yanlış eşleme kalıcıdır
+    //        (sahiplik alanı yazıldıktan sonra değişmez), bu yüzden belirsiz her şey raporlanır, hiçbir şey tahmin edilmez.
+    // [HOW]: Önizleme planOwnershipMigration (YAZMAZ) → koleksiyon özeti + sorun listesi (belirsiz ad, hesapsız personel,
+    //        çakışan kaynak, tutarsız hesap bağı, dolu-farklı uid) → onay → applyOwnershipMigration (transaction'lı, parçalı).
+    //        Sonuç gizlenmez: yazılan / atlanan (nedeniyle) / düşen / denenmeyen ayrı gösterilir. Giriş kodu hiçbir yerde
+    //        gösterilmez. DOM API (innerHTML yok). Test kancaları: #ownershipWizard[data-state], data-role nitelikleri.
+    const _OWN_STATUS = {
+        ambiguous: 'Ad / kod birden fazla personelde — eşlenmedi',
+        'not-found': 'Personel bulunamadı',
+        'no-account': 'Personelin giriş hesabı yok (önce PRI / Hesap Göç Aracı)',
+        'account-inconsistent': 'Personelin hesap bağı tutarsız ya da hesabı PRI adresinde değil (önce PRI / Hesap Göç Aracı)',
+        conflict: 'Kayıttaki kaynaklar farklı kişileri gösteriyor',
+        unmatched: 'Kayıtta kişi bilgisi yok',
+        system: 'Sistem / rol / havuz — uid yazılmaz',
+        mismatch: 'Dolu uid bugünkü hesaptan farklı — değiştirilmedi',
+    };
+    const _OWN_COL = { requests: 'Envanter talepleri', purchaseOrders: 'Satın alma talepleri', tasks: 'Görevler', workflowTemplates: 'İş akışı şablonları' };
+    const _OWN_SKIP = { 'changed-since-preview': 'önizlemeden sonra değişti', deleted: 'silinmiş', already: 'bu arada doldurulmuş' };
+    let _ownershipOpen = false;
+
+    window.vipOwnershipMigration = function (btn) {
+        if (_ownershipOpen) return null;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error'); return null; }
+        let plan;
+        try { plan = window.planOwnershipMigration(); }
+        catch (e) { _dupAlert('Önizleme hazırlanamadı: ' + ((e && e.message) || 'bilinmeyen hata'), 'error'); return null; }
+
+        const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text !== undefined) n.textContent = text; return n; };
+        const overlay = el('div', 'position:fixed; inset:0; background:rgba(15,23,42,0.7); z-index:10650; display:flex; align-items:center; justify-content:center;');
+        overlay.id = 'ownershipWizard';
+        overlay.dataset.state = 'preview';
+        const panel = el('div', 'background:var(--color-surface,#fff); color:var(--color-text); border-radius:16px; width:860px; max-width:95vw; max-height:88vh; overflow:auto; padding:22px; box-shadow:0 24px 64px rgba(0,0,0,0.45);');
+        overlay.appendChild(panel);
+        panel.append(el('h4', 'margin:0 0 6px; font-weight:800;', '🪪 Sahiplik Göç Aracı — Önizleme'),
+            el('div', 'font-size:13px; color:var(--color-text-muted); margin-bottom:14px;',
+                `Ortam: ${window.COLLECTION_ROOT}. Bu ekran hiçbir şey yazmadı. "Uygula" yalnız BOŞ sahiplik alanlarına, kaydın sahibi TEK bir personele ` +
+                'kesin olarak eşleniyorsa ve o personelin giriş hesabı varsa uid ekler. Yazılan sahiplik alanı sonradan değiştirilemez; ' +
+                'belirsiz kayıtlar aşağıda listelenir ve dokunulmaz.'));
+
+        // Koleksiyon özeti
+        const table = el('table', 'width:100%; border-collapse:collapse; font-size:13px; margin-bottom:14px;');
+        table.dataset.role = 'summary';
+        const tr = (cells, head) => { const r = el('tr'); cells.forEach(c => { const td = el(head ? 'th' : 'td', 'text-align:left; padding:6px 8px; border-bottom:1px solid var(--color-border);' + (head ? 'font-size:11px; text-transform:uppercase; color:var(--color-text-muted);' : ''), String(c)); r.appendChild(td); }); return r; };
+        table.appendChild(tr(['Koleksiyon', 'Kayıt', 'Güncellenecek kayıt', 'Eklenecek uid', 'Zaten dolu alan', 'Sorun'], true));
+        Object.entries(plan.summary).forEach(([col, s]) => {
+            const r = tr([_OWN_COL[col] || col, s.total, s.toUpdate, s.assigns, s.alreadyFields, s.issues]);
+            r.dataset.col = col;
+            table.appendChild(r);
+        });
+        panel.appendChild(table);
+
+        if (plan.duplicateUidGroups.length) {
+            panel.appendChild(el('div', 'font-size:12px; color:#dc2626; margin-bottom:10px;',
+                `⚠ ${plan.duplicateUidGroups.length} giriş hesabı birden fazla personele bağlı (${plan.duplicateUidGroups.map(g => g.join(' / ')).join('; ')}). Bu personellere uid yazılmaz.`));
+        }
+
+        // Sorunlar (gruplu sayı + ilk 60 satır)
+        const byStatus = {};
+        plan.issues.forEach(i => { byStatus[i.status] = (byStatus[i.status] || 0) + 1; });
+        const issueBox = el('div', 'border:1px solid var(--color-border); border-radius:10px; padding:10px 12px; margin-bottom:14px;');
+        issueBox.dataset.role = 'issues';
+        issueBox.appendChild(el('div', 'font-weight:800; font-size:13px; margin-bottom:6px;', plan.issues.length ? `Eşlenmeyecek alanlar: ${plan.issues.length}` : 'Eşlenmeyecek alan yok.'));
+        Object.entries(byStatus).forEach(([st, n]) => {
+            const row = el('div', 'font-size:12px;', `• ${_OWN_STATUS[st] || st}: ${n}`);
+            row.dataset.status = st;
+            issueBox.appendChild(row);
+        });
+        if (plan.issues.length) {
+            const list = el('div', 'max-height:220px; overflow:auto; margin-top:8px; font-size:12px; border-top:1px dashed var(--color-border); padding-top:6px;');
+            plan.issues.slice(0, 60).forEach(i => {
+                const cand = i.candidates && i.candidates.length ? ` — adaylar: ${i.candidates.join(', ')}` : '';
+                list.appendChild(el('div', 'padding:2px 0;', `${_OWN_COL[i.col] || i.col} · ${i.label} · ${i.field}: ${_OWN_STATUS[i.status] || i.status}${i.detail ? ' (' + i.detail + ')' : ''}${cand}`));
+            });
+            if (plan.issues.length > 60) list.appendChild(el('div', 'padding:2px 0; color:var(--color-text-muted);', `… ve ${plan.issues.length - 60} satır daha (tamamı konsolda).`));
+            issueBox.appendChild(list);
+            console.table(plan.issues.map(i => ({ koleksiyon: i.col, kayit: i.label, alan: i.field, durum: i.status, ayrinti: i.detail || '' })));
+        }
+        panel.appendChild(issueBox);
+
+        const footer = el('div', 'display:flex; gap:10px; justify-content:flex-end; align-items:center; flex-wrap:wrap;');
+        const status = el('div', 'flex:1; font-size:12px; color:var(--color-text-muted);',
+            plan.items.length ? `${plan.totals.records} kayda ${plan.totals.assigns} uid eklenecek.` : 'Eklenecek uid yok — tüm eşlenebilir kayıtlar zaten güncel.');
+        status.dataset.role = 'status';
+        const cancel = el('button', 'padding:9px 16px; background:none; border:1px solid var(--color-border); border-radius:8px; cursor:pointer; color:var(--color-text);', 'Kapat');
+        cancel.type = 'button'; cancel.id = 'owwClose';
+        const apply = el('button', 'padding:9px 18px; background:#db2777; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;', 'Uygula');
+        apply.type = 'button'; apply.id = 'owwApply';
+        apply.disabled = plan.items.length === 0;
+        apply.style.opacity = apply.disabled ? '0.5' : '1';
+        footer.append(status, cancel, apply);
+        panel.appendChild(footer);
+
+        const close = () => { overlay.remove(); _ownershipOpen = false; if (btn) btn.disabled = false; };
+        cancel.addEventListener('click', close);
+
+        async function run() {
+            if (!plan.items.length) return null;
+            const question = `${plan.totals.records} kayda ${plan.totals.assigns} sahiplik uid'si eklenecek (yalnız boş alanlara). ` +
+                `${plan.issues.length} alan belirsiz olduğu için eşlenmeyecek. Yazılan sahiplik alanı sonradan değiştirilemez. Devam edilsin mi?`;
+            const ok = typeof showCustomConfirm === 'function' ? await showCustomConfirm('Sahiplik Göçü — Onay', question) : confirm(question);
+            if (ok !== true) return null;
+            overlay.dataset.state = 'running';
+            apply.disabled = true; cancel.disabled = true;
+            let res;
+            try {
+                res = await window.applyOwnershipMigration(plan, { onProgress: (d, t) => { apply.textContent = `Uygulanıyor… ${d}/${t}`; } });
+            } catch (e) {
+                res = { status: 'stopped', written: [], skipped: [], failed: [], notAttempted: plan.items.length, error: { code: (e && e.code) || 'error', message: (e && e.message) || 'bilinmeyen hata' } };
+            }
+            const skipText = Object.entries(res.skipped.reduce((m, s) => { m[s.reason] = (m[s.reason] || 0) + 1; return m; }, {}))
+                .map(([r, n]) => `${n} ${_OWN_SKIP[r] || r}`).join(', ');
+            const result = el('div', 'margin-top:12px; padding:10px 12px; border-radius:10px; font-size:13px; border:1px solid ' + (res.status === 'done' ? '#16a34a' : '#dc2626') + ';');
+            result.dataset.role = 'result';
+            result.dataset.status = res.status;
+            result.append(
+                el('div', 'font-weight:800;', res.status === 'done' ? '✓ Göç tamamlandı' : (res.status === 'aborted' ? '✗ Göç başlatılmadı' : '✗ Göç yarıda durdu')),
+                el('div', '', `Yazılan kayıt: ${res.written.length} · Atlanan: ${res.skipped.length}${skipText ? ' (' + skipText + ')' : ''} · Düşen: ${res.failed.length} · Denenmeyen: ${res.notAttempted}`));
+            if (res.error) result.appendChild(el('div', 'color:#dc2626;', `Neden: ${res.error.message} [${res.error.code}]. Yazılanlar kalıcıdır; aracı yeniden açıp çalıştırmak kalanları tamamlar.`));
+            panel.insertBefore(result, footer);
+            const level = res.status === 'done' && !res.failed.length ? 'success' : 'warning';
+            _dupAlert(`🪪 Sahiplik göçü: ${res.written.length} kayıt yazıldı, ${res.skipped.length} atlandı, ${res.failed.length} düştü, ${res.notAttempted} denenmedi.`, level);
+            _appendLog(level === 'success' ? 'success' : 'warn', [`🪪 SAHİPLİK GÖÇÜ (J9): ${res.status} · yazılan ${res.written.length} · atlanan ${res.skipped.length} · düşen ${res.failed.length} · denenmeyen ${res.notAttempted} · kök ${window.COLLECTION_ROOT}`]);
+            apply.textContent = 'Uygulandı';
+            cancel.disabled = false;
+            overlay.dataset.state = 'done';
+            return res;
+        }
+        apply.addEventListener('click', () => { run(); });
+
+        _ownershipOpen = true;
+        if (btn) btn.disabled = true;
+        document.body.appendChild(overlay);
+        return { overlay, plan, run, close };
+    };
+
+    // ─── Kod Temizliği (Faz 4B · J10) ───
+    // [WHY]: Giriş yalnız Firebase Auth ile; düz metin giriş kodları (personel.code ve eski kayıtlara kopyalanmış hâlleri) veritabanında
+    //        durmamalı. Silme geri alınamaz ve kodu bilmeyen personel kilitlenir; bu yüzden önkoşullar sağlanmadan çalışmaz.
+    // [HOW]: planCodeCleanse (yazmaz) → önizleme: silinecekler, engeller (hesabı olmayan personel, sahiplik göçünde yazılmamış kayıt),
+    //        uyarılar → güçlü onay → applyCodeCleanse (400'lük batch; düşen batch ve sonrası raporlanır). DOM API (innerHTML yok).
+    let _cleanseOpen = false;
+    window.vipCodeCleanse = function (btn) {
+        if (_cleanseOpen) return null;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error'); return null; }
+        let plan;
+        try { plan = window.planCodeCleanse(); }
+        catch (e) { _dupAlert('Önizleme hazırlanamadı: ' + ((e && e.message) || 'bilinmeyen hata'), 'error'); return null; }
+        const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text !== undefined) n.textContent = text; return n; };
+        const overlay = el('div', 'position:fixed; inset:0; background:rgba(15,23,42,0.7); z-index:10650; display:flex; align-items:center; justify-content:center;');
+        overlay.id = 'codeCleanseWizard';
+        overlay.dataset.state = plan.ready ? 'preview' : 'blocked';
+        const panel = el('div', 'background:var(--color-surface,#fff); color:var(--color-text); border-radius:16px; width:720px; max-width:95vw; max-height:88vh; overflow:auto; padding:22px; box-shadow:0 24px 64px rgba(0,0,0,0.45);');
+        overlay.appendChild(panel);
+        panel.append(el('h4', 'margin:0 0 6px; font-weight:800;', '🧹 Kod Temizliği — Önizleme'),
+            el('div', 'font-size:13px; color:var(--color-text-muted); margin-bottom:14px;',
+                `Ortam: ${window.COLLECTION_ROOT}. Bu ekran hiçbir şey yazmadı. Giriş yalnız Firebase Auth ile yapılıyor; aşağıdaki düz metin kodlar silinecek. ` +
+                'Silme GERİ ALINAMAZ: kodunu unutan personelin parolası istemciden sıfırlanamaz (yönetici betiği gerekir).'));
+        const rows = [['Personel kaydındaki giriş kodu', plan.personel.length], ['Taleplerdeki eski kod kopyası (personelKodu)', plan.requests.length],
+            ['Satın almalarda kod taşıyan "oluşturan" alanı (personel id\'sine çevrilir)', plan.purchaseOrders.length]];
+        const table = el('table', 'width:100%; border-collapse:collapse; font-size:13px; margin-bottom:12px;');
+        table.dataset.role = 'summary';
+        rows.forEach(([k, v]) => { const r = el('tr'); r.append(el('td', 'padding:6px 8px; border-bottom:1px solid var(--color-border);', k), el('td', 'padding:6px 8px; border-bottom:1px solid var(--color-border); font-weight:800; text-align:right;', String(v))); table.appendChild(r); });
+        panel.appendChild(table);
+        const box = el('div', 'border:1px solid ' + (plan.ready ? 'var(--color-border)' : '#dc2626') + '; border-radius:10px; padding:10px 12px; margin-bottom:14px; font-size:12px;');
+        box.dataset.role = 'blockers';
+        if (plan.ready) box.appendChild(el('div', 'color:#16a34a; font-weight:700;', '✓ Önkoşullar sağlandı: tüm personelin geçerli giriş hesabı var, sahiplik göçünde yazılmamış kayıt yok ve çözülemeyen eski kod referansı yok.'));
+        if (plan.blockers.noAccount.length) box.appendChild(el('div', 'color:#dc2626;', `✗ Giriş hesabı olmayan / tutarsız personel (${plan.blockers.noAccount.length}): ${plan.blockers.noAccount.slice(0, 20).join(', ')}${plan.blockers.noAccount.length > 20 ? '…' : ''}. Önce "PRI / Hesap Göç Aracı" ya da personel tablosunda "Hesap Aç".`));
+        if (plan.blockers.ownershipPending) box.appendChild(el('div', 'color:#dc2626;', `✗ Sahiplik göçünde yazılmamış ${plan.blockers.ownershipPending} kayıt var. Önce "Sahiplik Göç Aracı".`));
+        // J11 · P1: sahiplik alanının KENDİSİ çözülemeyen kayıtlar (onay adımı gibi uyarılardan ayrı) artık ENGEL.
+        if (plan.blockers.ownershipUnresolved.length) {
+            box.appendChild(el('div', 'color:#dc2626; font-weight:700; margin-top:4px;', `✗ Sahipliği çözülemeyen ${plan.blockers.ownershipUnresolved.length} kayıt var (belirsiz / bulunamayan / farklı uid). Kodlar silinmeden önce bu kayıtlar elle düzeltilmeli ya da "Sahiplik Göç Aracı" ile yeniden denenmeli:`));
+            plan.blockers.ownershipUnresolved.slice(0, 10).forEach(t => box.appendChild(el('div', 'color:#dc2626; font-size:11px;', '• ' + t)));
+            if (plan.blockers.ownershipUnresolved.length > 10) box.appendChild(el('div', 'color:#dc2626; font-size:11px;', `… ve ${plan.blockers.ownershipUnresolved.length - 10} kayıt daha`));
+        }
+        // J11 · P1: eskiden burada otomatik 'unknown' yazılırdı (bilgi kaybı); artık yönetici müdahalesi gereken açık bir engel.
+        if (plan.blockers.purchaseOrderUnresolved.length) {
+            box.appendChild(el('div', 'color:#dc2626; font-weight:700; margin-top:4px;', `✗ ${plan.blockers.purchaseOrderUnresolved.length} satın alma kaydının eski "oluşturan" kodu tekil bir personele indirgenemiyor (otomatik 'unknown' YAZILMAZ). Kaydı elle düzeltin:`));
+            plan.blockers.purchaseOrderUnresolved.slice(0, 10).forEach(x => box.appendChild(el('div', 'color:#dc2626; font-size:11px;', `• ${x.label} — ${x.reason}`)));
+            if (plan.blockers.purchaseOrderUnresolved.length > 10) box.appendChild(el('div', 'color:#dc2626; font-size:11px;', `… ve ${plan.blockers.purchaseOrderUnresolved.length - 10} kayıt daha`));
+        }
+        if (plan.warnings.ownershipAdvisory.length) box.appendChild(el('div', 'color:#b45309; margin-top:4px;', `⚠ Onay adımı / atanan alanında eşlenemeyen ${plan.warnings.ownershipAdvisory.length} alan var (belirsiz ad, sistem/rol vb.) — engel değil, yalnız yönetici onaylar.`));
+        panel.appendChild(box);
+
+        const footer = el('div', 'display:flex; gap:10px; justify-content:flex-end; align-items:center; flex-wrap:wrap;');
+        const status = el('div', 'flex:1; font-size:12px; color:var(--color-text-muted);', plan.total ? `${plan.total} alan silinecek / değiştirilecek.` : 'Temizlenecek kod yok.');
+        status.dataset.role = 'status';
+        const cancel = el('button', 'padding:9px 16px; background:none; border:1px solid var(--color-border); border-radius:8px; cursor:pointer; color:var(--color-text);', 'Kapat');
+        cancel.type = 'button'; cancel.id = 'ccwClose';
+        const apply = el('button', 'padding:9px 18px; background:#dc2626; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;', 'Kodları Sil');
+        apply.type = 'button'; apply.id = 'ccwApply';
+        apply.disabled = !plan.ready || plan.total === 0;
+        apply.style.opacity = apply.disabled ? '0.5' : '1';
+        footer.append(status, cancel, apply);
+        panel.appendChild(footer);
+        const close = () => { overlay.remove(); _cleanseOpen = false; if (btn) btn.disabled = false; };
+        cancel.addEventListener('click', close);
+
+        async function run() {
+            if (apply.disabled) return null;
+            const ok = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('Kod Temizliği — Geri Alınamaz', `${plan.total} düz metin kod alanı silinecek. Kodunu unutan personelin parolası bu ekrandan sıfırlanamaz. Devam edilsin mi?`, { confirmText: 'Kodları Sil', danger: true })
+                : confirm('Kodlar silinsin mi?');
+            if (ok !== true) return null;
+            overlay.dataset.state = 'running';
+            apply.disabled = true; cancel.disabled = true; apply.textContent = 'Siliniyor…';
+            let res;
+            // J11 · P1: AtomicWriter hepsi-ya-da-hiçbiri yazar (tek atomik batch ya da günlüklü işlem); kademeli ilerleme yok —
+            // sonuç ya tam yazılmıştır ya da (hata/değişen veri durumunda) HİÇBİR ŞEY yazılmamıştır.
+            try { res = await window.applyCodeCleanse(plan); }
+            catch (e) { res = { written: 0, failed: 0, notAttempted: plan.total, phase: e && e.details && e.details.phase, error: { code: (e && e.code) || 'error', message: (e && e.message) || 'bilinmeyen hata' } }; }
+            // J11 · P1 #4: başlık GERÇEK sonuca göre — kısmi tamamlanma ya da belirsiz sonuç "hiçbir şey yazılmadı" diye gösterilmez.
+            const NOTHING = ['changed-since-preview', 'not-ready', 'forbidden', 'bulk-locked', 'rolled-back', 'no-auth', 'pending-journal', 'prepare-failed'];
+            const title = !res.error ? '✓ Kod temizliği tamamlandı'
+                : res.phase === 'codes' ? '⚠ Kısmen tamamlandı — personel kodu silme yarıda kaldı'
+                : res.error.code === 'rollback-pending' ? '⚠ Yarıda kaldı — veritabanı kilitli, geri alma yönetici oturumunda otomatik tamamlanacak'
+                : NOTHING.includes(res.error.code) ? '✗ Hiçbir şey yazılmadı' : '⚠ Sonuç kesin değil — aşağıdaki sunucu durumuna bakın';
+            const result = el('div', 'margin-top:12px; padding:10px 12px; border-radius:10px; font-size:13px; border:1px solid ' + (res.error ? '#dc2626' : '#16a34a') + ';');
+            result.dataset.role = 'result';
+            result.dataset.status = res.error ? 'stopped' : 'done';
+            result.append(el('div', 'font-weight:800;', title),
+                el('div', '', `Yazılan: ${res.written} · Düşen: ${res.failed} · Denenmeyen: ${res.notAttempted}`));
+            if (res.error) result.appendChild(el('div', 'color:#dc2626;', `Neden: ${res.error.message} [${res.error.code}]. Aracı yeniden açıp çalıştırmak güvenlidir (önizleme sunucudaki gerçek durumu gösterir).`));
+            panel.insertBefore(result, footer);
+            _dupAlert(`🧹 Kod temizliği: ${res.written} alan güncellendi${res.error ? ', hiçbir şey yazılmadı' : ''}.`, res.error ? 'warning' : 'success');
+            _appendLog(res.error ? 'warn' : 'success', [`🧹 KOD TEMİZLİĞİ (J11): yazılan ${res.written}${res.error ? ' · durdu: ' + res.error.code : ''} · kök ${window.COLLECTION_ROOT}`]);
+            apply.textContent = 'Tamamlandı';
+            cancel.disabled = false;
+            overlay.dataset.state = 'done';
+            return res;
+        }
+        apply.addEventListener('click', () => { run(); });
+        _cleanseOpen = true;
+        if (btn) btn.disabled = true;
+        document.body.appendChild(overlay);
+        return { overlay, plan, run, close };
+    };
+
+    // ─── Personel Erişim Kilidi (Faz 4B · J11 · P0) ───
+    // [WHY]: Kurallar personel erişimini kök başına bir kilide bağlar; kilit yoksa / kapalıysa hiçbir personel hiçbir şey okuyamaz
+    //        (göç sırasında düz metin kodlar sızmasın). Kilidi açmanın tek istemci yolu bu araç.
+    // [HOW]: Açılışta verifyStaffAccessClosure (SUNUCUDAN taze okur, yazmaz) → sekiz denetim + ilk sorunlu kayıtlar. "Erişimi Aç"
+    //        yalnız hepsi 0 iken etkin; openStaffAccess denetimi yeniden çalıştırır, kural kanıtın şeklini doğrular. "Erişimi
+    //        Kapat" her zaman. DOM API (innerHTML yok). Test kancaları: #staffGateWizard[data-state|data-gate], data-role.
+    const _GATE_LABEL = { open: '🔓 AÇIK', closed: '🔒 KAPALI', missing: '🔒 KAPALI (kilit kaydı yok — varsayılan)', invalid: '🔒 KAPALI (geçersiz kilit kaydı)', denied: '? okunamadı', unknown: '? okunamadı' };
+    const _GATE_CHECK = {
+        personelCodes: ['Personel kaydında düz metin giriş kodu', 'Kod Temizliği'],
+        requestCodes: ['Taleplerde eski kod kopyası (personelKodu)', 'Kod Temizliği'],
+        purchaseOrderCodes: ['Satın almalarda kodlu ya da çözülemeyen "oluşturan" alanı', 'Kod Temizliği'],
+        accountsMissing: ['Giriş hesabı olmayan personel', 'PRI / Hesap Göç Aracı ya da tabloda "Hesap Aç"'],
+        accountsInconsistent: ['Hesabı tutarsız / PRI adresinde olmayan personel (J7 dahil)', 'PRI / Hesap Göç Aracı'],
+        accountMapMismatch: ['Kimlik eşlemesi (staffAccounts) eksik / tutarsız', 'PRI / Hesap Göç Aracı (eşlemeyi yeniler)'],
+        ownershipPending: ['Sahiplik göçünün yazacağı kayıt', 'Sahiplik Göç Aracı'],
+        ownershipUnresolved: ['Sahipliği çözülemeyen kayıt (belirsiz / bulunamayan / farklı uid)', 'Kaydı elle düzeltin ya da silin'],
+    };
+    window.renderStaffGateStatus = function (gate) {
+        const btn = document.getElementById('vipStaffGateBtn');
+        if (!btn || !gate) return;
+        btn.dataset.gate = gate.state;
+        const label = btn.querySelector('[data-role="gate-state"]');
+        if (label) label.textContent = gate.state === 'open' ? ' · AÇIK' : (gate.state === 'unknown' ? '' : ' · KAPALI');
+    };
+    let _gateOpen = false;
+    window.vipStaffAccessGate = async function (btn) {
+        if (_gateOpen) return null;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error'); return null; }
+        if (typeof window.verifyStaffAccessClosure !== 'function') { _dupAlert('Erişim kilidi modülü yüklenemedi; sayfayı yenileyin.', 'error'); return null; }
+        _gateOpen = true;
+        if (btn) btn.disabled = true;
+        let gate, v;
+        try { [gate, v] = await Promise.all([window.readStaffAccessGate(), window.verifyStaffAccessClosure()]); }
+        catch (e) { _gateOpen = false; if (btn) btn.disabled = false; _dupAlert('Kapanış denetimi yapılamadı: ' + ((e && e.message) || 'bilinmeyen hata'), 'error'); return null; }
+        const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text !== undefined) n.textContent = text; return n; };
+        const cell = 'padding:6px 8px; border-bottom:1px solid var(--color-border);';
+        const overlay = el('div', 'position:fixed; inset:0; background:rgba(15,23,42,0.7); z-index:10650; display:flex; align-items:center; justify-content:center;');
+        overlay.id = 'staffGateWizard';
+        overlay.dataset.state = v.ready ? 'ready' : 'blocked';
+        overlay.dataset.gate = gate.state;
+        const panel = el('div', 'background:var(--color-surface,#fff); color:var(--color-text); border-radius:16px; width:780px; max-width:95vw; max-height:88vh; overflow:auto; padding:22px; box-shadow:0 24px 64px rgba(0,0,0,0.45);');
+        overlay.appendChild(panel);
+        const stateLine = el('div', 'font-size:14px; font-weight:800; margin-bottom:6px;', `Personel erişimi: ${_GATE_LABEL[gate.state] || gate.state}`);
+        stateLine.dataset.role = 'gate-state';
+        panel.append(el('h4', 'margin:0 0 6px; font-weight:800;', '🛡️ Personel Erişim Kilidi'), stateLine,
+            el('div', 'font-size:13px; color:var(--color-text-muted); margin-bottom:14px;',
+                `Ortam: ${v.root}. Kilit kapalıyken hiçbir personel veri okuyamaz ve yazamaz; yönetici etkilenmez. Kilit yalnız göçün üç adımı ` +
+                '(PRI / Hesap Göçü, Sahiplik Göçü, Kod Temizliği) sunucudan doğrulandığında açılabilir. Bu denetim veritabanını yeniden okudu, hiçbir şey yazmadı. ' +
+                'Önemli: açıldıktan sonra personelin okuduğu veri geri alınamaz.'));
+        const table = el('table', 'width:100%; border-collapse:collapse; font-size:13px; margin-bottom:12px;');
+        table.dataset.role = 'checks';
+        const head = el('tr'); ['Denetim', 'Sayı', 'Çözüm'].forEach(h => head.appendChild(el('th', cell + ' text-align:left;', h)));
+        table.appendChild(head);
+        Object.keys(_GATE_CHECK).forEach(k => {
+            const n = v.checks[k];
+            const tr = el('tr'); tr.dataset.key = k;
+            tr.append(el('td', cell, _GATE_CHECK[k][0]), el('td', cell + ` font-weight:800; text-align:right; color:${n ? '#dc2626' : '#16a34a'};`, String(n)),
+                el('td', cell + ' color:var(--color-text-muted);', n ? _GATE_CHECK[k][1] : '✓'));
+            table.appendChild(tr);
+        });
+        panel.appendChild(table);
+        const issues = Object.keys(_GATE_CHECK).filter(k => v.details[k].length);
+        if (issues.length) {
+            const box = el('div', 'border:1px solid #dc2626; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:12px;');
+            box.dataset.role = 'details';
+            issues.forEach(k => {
+                box.appendChild(el('div', 'font-weight:700; margin-top:4px;', _GATE_CHECK[k][0]));
+                v.details[k].slice(0, 10).forEach(t => box.appendChild(el('div', '', '• ' + t)));
+                if (v.checks[k] > 10) box.appendChild(el('div', 'color:var(--color-text-muted);', `… ve ${v.checks[k] - 10} kayıt daha`));
+            });
+            panel.appendChild(box);
+        }
+        if (v.warningCount) panel.appendChild(el('div', 'font-size:12px; color:#b45309; margin-bottom:12px;', `⚠ ${v.warningCount} onay adımı / atanan alanı eşlenemedi (engel değil: o adımları yalnız yönetici onaylar).`));
+        const footer = el('div', 'display:flex; gap:10px; justify-content:flex-end; align-items:center; flex-wrap:wrap;');
+        const status = el('div', 'flex:1; font-size:12px; color:var(--color-text-muted);', v.ready ? '✓ Kapanış doğrulandı: sekiz denetimin hepsi 0.' : '✗ Kapanış doğrulanmadı: erişim açılamaz.');
+        status.dataset.role = 'status';
+        const close = el('button', 'padding:9px 16px; background:none; border:1px solid var(--color-border); border-radius:8px; cursor:pointer; color:var(--color-text);', 'Kapat');
+        close.type = 'button'; close.id = 'sgwClose';
+        const lock = el('button', 'padding:9px 16px; background:#b45309; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;', 'Erişimi Kapat');
+        lock.type = 'button'; lock.id = 'sgwLock';
+        const unlock = el('button', 'padding:9px 18px; background:#16a34a; color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;', 'Erişimi Aç');
+        unlock.type = 'button'; unlock.id = 'sgwUnlock';
+        unlock.disabled = !v.ready || gate.state === 'open';
+        unlock.style.opacity = unlock.disabled ? '0.5' : '1';
+        footer.append(status, close, lock, unlock);
+        panel.appendChild(footer);
+        const dispose = () => { overlay.remove(); _gateOpen = false; if (btn) btn.disabled = false; };
+        close.addEventListener('click', dispose);
+        const report = (ok, text) => {
+            const r = el('div', 'margin-top:12px; padding:10px 12px; border-radius:10px; font-size:13px; border:1px solid ' + (ok ? '#16a34a' : '#dc2626') + ';', text);
+            r.dataset.role = 'result'; r.dataset.status = ok ? 'done' : 'refused';
+            panel.insertBefore(r, footer);
+        };
+
+        async function open() {
+            if (unlock.disabled) return null;
+            const ok = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('Personel Erişimini Aç', 'Kapanış sunucuda yeniden doğrulanacak; geçerse tüm personel veriye erişebilecek. Devam edilsin mi?', { confirmText: 'Erişimi Aç' })
+                : confirm('Personel erişimi açılsın mı?');
+            if (ok !== true) return null;
+            overlay.dataset.state = 'running'; unlock.disabled = true; lock.disabled = true;
+            let res;
+            try { res = await window.openStaffAccess(); }
+            catch (e) { res = { ok: false, error: e }; }
+            if (res.ok) {
+                overlay.dataset.gate = 'open'; stateLine.textContent = `Personel erişimi: ${_GATE_LABEL.open}`;
+                report(true, '✓ Kapanış yeniden doğrulandı; personel erişimi açıldı.');
+                _appendLog('success', [`🔓 PERSONEL ERİŞİM KİLİDİ AÇILDI (J11) · kök ${window.COLLECTION_ROOT}`]);
+            } else {
+                const why = res.error ? ((res.error && res.error.message) || 'bilinmeyen hata')
+                    : 'yeniden denetimde kapanmamış kayıt bulundu: ' + Object.entries(res.verification.checks).filter(([, n]) => n).map(([k, n]) => `${_GATE_CHECK[k][0]} (${n})`).join(', ');
+                report(false, '✗ Erişim açılmadı — ' + why);
+            }
+            overlay.dataset.state = 'done'; lock.disabled = false;
+            return res;
+        }
+        async function shut() {
+            const ok = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('Personel Erişimini Kapat', 'Tüm personel oturumları sonlanacak ve kilit açılana kadar giriş yapılamayacak. Devam edilsin mi?', { confirmText: 'Erişimi Kapat', danger: true })
+                : confirm('Personel erişimi kapatılsın mı?');
+            if (ok !== true) return null;
+            overlay.dataset.state = 'running'; lock.disabled = true;
+            let res;
+            try { res = await window.closeStaffAccess(); }
+            catch (e) { res = { ok: false, error: e }; }
+            if (res.ok) {
+                overlay.dataset.gate = 'closed'; stateLine.textContent = `Personel erişimi: ${_GATE_LABEL.closed}`;
+                report(true, '✓ Personel erişimi kapatıldı.');
+                _appendLog('warn', [`🔒 PERSONEL ERİŞİM KİLİDİ KAPATILDI (J11) · kök ${window.COLLECTION_ROOT}`]);
+                unlock.disabled = !v.ready; unlock.style.opacity = unlock.disabled ? '0.5' : '1';
+            } else report(false, '✗ Kapatılamadı — ' + ((res.error && res.error.message) || 'bilinmeyen hata'));
+            overlay.dataset.state = 'done'; lock.disabled = false;
+            return res;
+        }
+        unlock.addEventListener('click', () => { open(); });
+        lock.addEventListener('click', () => { shut(); });
+        document.body.appendChild(overlay);
+        return { overlay, gate, verification: v, open, shut, close: dispose };
+    };
+
     // Global Kill Switch
     // [WHY]: Kill Switch (Sistemi Kapatma) komutu localStorage'da tutuluyordu, DevTools ile bypass edilebiliyordu.
     // [HOW]: Artık Firestore üzerindeki 'system_config/admin_settings' dökümanına asenkron yazıyor. Sadece Firebase Auth ile doğrulanmış adminler bu veriyi değiştirebilir.

@@ -58,7 +58,11 @@ const _normP = s => String(s || '').trim().toLocaleLowerCase('tr-TR');
 function _isPurchaseOwner(item) {
     const me = typeof window.getActiveUser === 'function' ? window.getActiveUser() : window.currentUser;
     if (!me || !item) return false;
-    if (me.code && item.createdBy && item.createdBy !== 'unknown' && String(item.createdBy) === String(me.code)) return true;
+    // Faz 4B · J9: sahiplik uid'si varsa önce o (Auth kimliği; ad/id yedekleri eski kayıtlar için)
+    if (item.createdByUid && window.userAuth && String(item.createdByUid) === String(window.userAuth.uid)) return true;
+    // Faz 4B · J8: oturum giriş kodunu taşımaz; yeni talepler createdBy = personel id, eski talepler (createdBy = kod) ad ile eşleşir
+    const by = item.createdBy && item.createdBy !== 'unknown' ? String(item.createdBy) : null;
+    if (by && [me.id, me.code].some(v => v != null && v !== '' && String(v) === by)) return true;
     const owner = _normP(item.createdByName || item.talepEden);
     return !!owner && owner === _normP(me.name);
 }
@@ -160,9 +164,11 @@ window.openNewPurchaseModal = function () {
 // [WHY]: Talep eden, yeni talepte ölü initEBYSModal'daki sabit "Muhammed CER" yedeğine düşebiliyor; kayıtta ise elle
 //        değiştirilebilen form alanından okunuyordu (EBYS-06).
 // [HOW]: Talep eden her zaman oturumdaki aktif kullanıcıdır (getActiveUser → currentUser); form alanı yalnız gösterimdir.
+// Faz 4B · J8: createdBy artık personel id'si — giriş kodu herkesin okuduğu satın alma belgesine yazılmaz (J9 uid ekler).
 function _purchaseRequester() {
     const u = (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null) || window.currentUser || {};
-    return { name: String(u.name || '').trim(), code: String(u.code || u.id || '').trim() };
+    // J11 · P1 #7: ad kuralların staffName'i ile aynı kaynaktan (name → adSoyad → ad, kırpılmış)
+    return { name: (window.Ownership && window.Ownership.selfName()) || String(u.name || '').trim(), id: String(u.id || '').trim() };
 }
 
 // -----------------------------
@@ -237,8 +243,10 @@ window.savePurchaseRequest = async function (e) {
             tur: document.getElementById('purType')?.value || "",
             oncelik: document.getElementById('purPriority')?.value || "Normal",
             aciklama: document.getElementById('purDesc')?.value || "",
-            createdBy: requester.code || "unknown",
+            createdBy: requester.id || "unknown",
             createdByName: requester.name,
+            // Faz 4B · J9: sahiplik uid'si yalnız Auth'tan (personelin kendi hesabı); ilk yazımdan sonra değişmez
+            ...(window.Ownership.selfUid() ? { createdByUid: window.Ownership.selfUid() } : {}),
             durum: "Onay Bekliyor",
             createdAt: Date.now(),
             files: uploadedFiles.map(f => ({
@@ -251,6 +259,7 @@ window.savePurchaseRequest = async function (e) {
                 {
                     islem: "Talep Oluşturuldu",
                     yapan: requester.name,
+                    uid: window.userAuth?.uid || '',   // J11.5: kurallar sahibin kaydında request.auth.uid ile eşler
                     tarih: new Date().toLocaleString('tr-TR')
                 }
             ],
@@ -390,13 +399,16 @@ window.renderPurchaseModule = function (options = {}) {
     // --------------------------------------------------
     if (!window.isAdminPanel) {
         const currentMe = (window.currentUser?.name || "").trim().toLocaleLowerCase('tr-TR');
-        const currentCode = String(window.currentUser?.code || window.currentUser?.id || "");
+        // Faz 4B · J8: oturum kodu taşımaz — kendi talebi: createdBy = personel id (yeni) ya da talep eden adı (kodla açılmış eski talepler)
+        const currentId = String(window.currentUser?.id || "");
 
         console.log(`🔍 EBYS Filtreleme Başladı. Aktif: ${currentMe}`);
 
         data = data.filter(item => {
             const itemCreatedBy = String(item.createdBy || "");
-            const ownRequest = itemCreatedBy === currentCode;
+            const ownerName = String(item.createdByName || item.talepEden || "").trim().toLocaleLowerCase('tr-TR');
+            const myUid = window.userAuth && !window.userAuth.isAnonymous ? String(window.userAuth.uid) : '';
+            const ownRequest = (!!myUid && String(item.createdByUid || '') === myUid) || (!!currentId && itemCreatedBy === currentId) || (!!currentMe && ownerName === currentMe);
 
             // Onay bekleyen kontrolü
             let waitingApproval = false;
@@ -406,7 +418,8 @@ window.renderPurchaseModule = function (options = {}) {
                 const currentStepIndex = Math.min(currentStep, Math.max(0, steps.length - 1));
                 const step = steps[currentStepIndex];
                 const stepUser = (step?.user || "").trim().toLocaleLowerCase('tr-TR');
-                if (stepUser === currentMe && step.status !== 'approved') {
+                const mine = step?.userUid ? (!!myUid && String(step.userUid) === myUid) : stepUser === currentMe;   // J10: uid öncelikli
+                if (mine && step.status !== 'approved') {
                     waitingApproval = true;
                 }
             }
@@ -414,7 +427,7 @@ window.renderPurchaseModule = function (options = {}) {
             // Kullanıcı kendi talebi veya onay bekleyen bir talep ise göster
             const shouldShow = ownRequest || waitingApproval;
             if (item.evrakNo?.includes('8146')) {
-                console.log(`🧐 [DEBUG] 8146 Talebi Kontrolü: ownRequest=${ownRequest}, waitingApproval=${waitingApproval}, itemCreatedBy=${itemCreatedBy}, currentCode=${currentCode}`);
+                console.log(`🧐 [DEBUG] 8146 Talebi Kontrolü: ownRequest=${ownRequest}, waitingApproval=${waitingApproval}`);
             }
             return shouldShow;
         });
@@ -1394,6 +1407,11 @@ window.updatePurchaseRequest = async function (e, id) {
     const item = _findPurchase(id);
     if (!item) { if (typeof showAppAlert === 'function') showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     if (!_canManagePurchase(item)) { _denyManage(); return; }
+    // Faz 4B · J10: akış başladıktan sonra talebin içeriği değiştirilemez (kurallar reddeder; onaylanan içerik sabit kalmalı)
+    if (item.workflow?.started === true && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+        if (typeof showAppAlert === 'function') showAppAlert('Onay akışı başlamış bir talep düzenlenemez. Önce talebi geri çekin.', 'warning');
+        return;
+    }
     const undo = _snapshotPurchase(item);
 
     // Yeni dosya yükleme
@@ -1425,7 +1443,8 @@ window.updatePurchaseRequest = async function (e, id) {
     if (!item.akis) item.akis = [];
     item.akis.push({
         islem: 'Talep güncellendi',
-        yapan: window.currentUser?.name || 'Kullanıcı',
+        yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
+        uid: window.userAuth?.uid || '',   // J11.5
         tarih: new Date().toLocaleString('tr-TR')
     });
 
@@ -1475,7 +1494,8 @@ window.deleteRequestFile = async function (requestId, fileIndex, fileRef) {
     if (!item.akis) item.akis = [];
     item.akis.push({
         islem: 'Ek dosya silindi',
-        yapan: window.currentUser?.name || 'Admin',
+        yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Admin',
+        uid: window.userAuth?.uid || '',   // J11.5
         tarih: new Date().toLocaleString('tr-TR')
     });
 
@@ -1548,7 +1568,8 @@ window.cancelPurchaseRequest = async function (id) {
                 ...prevHistory,
                 {
                     action: 'withdraw',
-                    actor: window.currentUser?.name || 'Kullanıcı',
+                    actor: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
+                    uid: window.userAuth?.uid || '',   // J11.5
                     timestamp: new Date().toISOString(),
                     from: item.workflow?.currentState || 'active',
                     to: window.WorkflowEngine?.states?.INITIATION || 'initiation',
@@ -1561,7 +1582,8 @@ window.cancelPurchaseRequest = async function (id) {
             ...prevAkis,
             {
                 islem: 'Talep Geri Çekildi (Taslak Moduna Alındı)',
-                yapan: window.currentUser?.name || 'Kullanıcı',
+                yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
+                uid: window.userAuth?.uid || '',   // J11.5
                 tarih: new Date().toLocaleString('tr-TR')
             }
         ];
@@ -1597,7 +1619,8 @@ window.cancelPurchaseRequest = async function (id) {
         if (!item.akis) item.akis = [];
         item.akis.push({
             islem: 'Talep İptal Edildi',
-            yapan: window.currentUser?.name || 'Kullanıcı',
+            yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
+            uid: window.userAuth?.uid || '',   // J11.5
             tarih: new Date().toLocaleString('tr-TR')
         });
 

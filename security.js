@@ -26,9 +26,10 @@ const SecurityConfig = {
     //        yapılan admin girişi, kalıcılık değişimi ve iki oturum işlemiyle yarışabiliyordu (anonim yanıt admin oturumunun üstüne
     //        yazılabilir). Canlıda ağ gecikmesi bu pencereyi saniyelere uzatıyordu.
     // [HOW]: Oturum durumu yerleşene kadar (Firebase'den bir kullanıcı — anonim ya da değil — gelene kadar) beklenir; en fazla ms.
+    // J10: anonim oturum yok — "yerleşti" = Firebase oturum durumunu bir kez bildirdi (kullanıcı ya da oturumsuz).
     async waitForAuthSettled(ms = 10000) {
-        if (window.userAuth || typeof window.whenAuthReady !== 'function') return !!window.userAuth;
-        return Promise.race([window.whenAuthReady().then(() => true), new Promise(r => setTimeout(() => r(false), ms))]);
+        if (typeof window.whenAuthKnown !== 'function') return !!window.userAuth;
+        return Promise.race([window.whenAuthKnown().then(() => true), new Promise(r => setTimeout(() => r(false), ms))]);
     },
 
     async _auth() {

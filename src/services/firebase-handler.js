@@ -8,10 +8,11 @@
  */
 
 // 1. MODÜLER FIREBASE IMPORTLARI (Versiyon 10+)
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
-    initializeAuth, onAuthStateChanged, signInAnonymously, connectAuthEmulator, setPersistence,
-    browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence
+    initializeAuth, onAuthStateChanged, connectAuthEmulator, setPersistence,
+    browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
+    createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateEmail
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
     initializeFirestore,
@@ -20,6 +21,8 @@ import {
     onSnapshot,
     doc,
     getDoc,
+    getDocFromServer,
+    getDocsFromServer,
     setDoc,
     writeBatch,
     runTransaction,
@@ -124,7 +127,8 @@ export const checkAdminAuth = function () {
         return;
     }
 
-    whenAuthReady().then(() => {
+    // J10: anonim oturum yok — oturumsuz yeni sekmede whenAuthReady hiç çözülmezdi; kilit kartı oturum durumu BELLİ olunca gösterilir.
+    whenAuthKnown().then(() => {
         const S = window.SecurityConfig;
         if (S.isSignInPending()) return;
         if (!window.isDbAdmin()) {
@@ -160,6 +164,8 @@ window.fireDb = fireDb;
 // [WHY]: system_config kökte ortam ayrımsızdı; localhost'tan kill switch / force logout / mesaj testi canlı kullanıcıları etkiliyordu (RULE-04, VIP-05).
 // [HOW]: Tüm sistem ayarları ${COLLECTION_ROOT}/system_config/items/{admin_settings|admin_messages} altında. Kural: oturumlu okur, admin yazar.
 export const systemConfigRef = window.systemConfigRef = (name) => doc(fireDb, COLLECTION_ROOT, 'system_config', 'items', name);
+// J11 · P0 personel erişim kilidi (kural: firestore.rules → staffAccessOpen). Ayrıntı: dosya sonundaki "Personel erişim kilidi".
+const staffGateRef = () => doc(fireDb, COLLECTION_ROOT, 'accessGate', 'items', 'staff');
 
 // ─── Denetim günlüğü (Faz 4 · J4 · 4.7, KJ-7, M14) ───────────────────────────────────────────────
 // [WHY]: Self-approval günlüğü sessionStorage'daydı: sekme kapanınca kayboluyor, başka cihazdan görülemiyor, kullanıcı
@@ -317,6 +323,14 @@ export const reportListenerError = window.reportListenerError = function (name, 
             return;
         }
         console.error(`⛔ [Güvenlik] ${name}: Firestore okuma yetkisi reddedildi.`, err);
+        // J10: personel hesabıyla açılmış ama personel kaydına bağlı olmayan (ya da bağı kaldırılmış) oturum hiçbir şey okuyamaz.
+        // J11 · P0: kilit kapalıyken de personel hiçbir şey okuyamaz. Personelin okuma yetkisi koleksiyon ayrımsız (hepsi ya da hiçbiri)
+        //      olduğundan tek bir ret oturumun bittiği demektir: neden (kilit / bağ yok) kilit dokümanından öğrenilir, yerel veri
+        //      silinir, oturum kapatılır. Ağ hatası gibi belirsiz durumda bant gösterilir.
+        if (window.AppModules && window.AppModules.Session && window.AppModules.Session.isStaffAccountSession()) {
+            _resolveStaffDenial(name);
+            return;
+        }
         _deniedListeners.add(name);
         _renderSyncHealth();
         return;
@@ -348,6 +362,19 @@ export const whenAuthReady = window.whenAuthReady = function () {
     if (window.userAuth) return Promise.resolve(window.userAuth);
     return new Promise(resolve => _authReadyResolvers.push(resolve));
 };
+// J10: anonim oturum kalktı → sayfa oturumsuz da açılabilir. Firebase oturum durumunu İLK kez bildirdiğinde (kullanıcı ya da null)
+// çözülür; "oturum yerleşti mi" sorusu (yönetici girişi, admin.html kapısı) artık buna bakar.
+let _authKnown = false;
+let _authKnownResolvers = [];
+export const whenAuthKnown = window.whenAuthKnown = function () {
+    if (_authKnown) return Promise.resolve(window.userAuth);
+    return new Promise(resolve => _authKnownResolvers.push(resolve));
+};
+function _markAuthKnown() {
+    _authKnown = true;
+    const rs = _authKnownResolvers; _authKnownResolvers = [];
+    rs.forEach(r => { try { r(window.userAuth); } catch (e) { } });
+}
 
 /**
  * @function startRealtimeSync
@@ -366,34 +393,12 @@ export const stopRealtimeSync = window.stopRealtimeSync = function () {
     _syncStopping = false;
 };
 
-// Faz 3.5 · giriş kodu otomatik odağının izolasyonu (denetim bulgusu): odak yalnız kullanıcı sayfayla henüz etkileşmediyse
-// verilir. Etkileşim = giriş kutusu dışında bir yere tıklama/dokunma ya da tuş (kutu disabled iken odak alamadığı için ona
-// tıklamak sayılmaz). Kutuya sayfa başına en fazla bir kez odaklanılır; personel listesinin sonraki her snapshot'ı odağı
-// tekrar çalmaz.
-let _userInteracted = false;
-let _loginAutoFocused = false;
-const _loginFieldIds = ['loginCode', 'access-val-node'];
-function _markUserInteraction(e) {
-    if (e && e.target && _loginFieldIds.includes(e.target.id)) return;
-    _userInteracted = true;
-    ['pointerdown', 'keydown'].forEach(t => document.removeEventListener(t, _markUserInteraction, true));
-}
-['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, _markUserInteraction, true));
-
 window.startRealtimeSync = function () {
     stopRealtimeSync();
     _syncRunning = true;
     _syncUid = window.userAuth ? window.userAuth.uid : null;
 
-    const statusDiv = document.getElementById('loginStatus');
-    // [WHY]: Support 'access-val-node' ID which is used in index.html for security obfuscation.
-    // [HOW]: Query both ID possibilities to retrieve the actual login input element.
-    const loginInput = document.getElementById('loginCode') || document.getElementById('access-val-node');
-
-    if (loginInput) {
-        loginInput.disabled = true;
-        loginInput.placeholder = "Veriler senkronize ediliyor...";
-    }
+    // J10: senkron yalnız oturum açıldıktan sonra çalışır; giriş ekranı (rehber, kutu, odak) auth-engine'de yönetilir.
 
     // A. ENVANTER VERİLERİNİ DİNLE (COLLECTION_ROOT alt koleksiyonları)
     // [ENV_GUARD] Sabit "inventory_v2" yerine COLLECTION_ROOT kullanılıyor.
@@ -454,32 +459,6 @@ window.startRealtimeSync = function () {
             // Personel koleksiyonu yüklendiğinde sistemi hazır hale getir
             if (colName === 'personel' && items.length >= 0) {
                 window.isFirebaseLoaded = true;
-
-                // Faz 4 kapanış hotfix'i: "Sistem Hazır" yalnız senkronun ilk yüklemesinde ve giriş mesajı yokken; gizleme
-                // zamanlayıcısı kayıtlı (auth-engine setLoginStatus iptal eder). Eskiden her personel güncellemesi kutuyu yeniden
-                // yazıp 4 sn sonra kalıcı olarak gizliyordu — sonraki giriş mesajları görünmüyordu.
-                if (statusDiv && isInitialLoad && statusDiv.dataset.loginMsg !== '1') {
-                    statusDiv.style.display = '';
-                    statusDiv.innerHTML = '✅ Sistem Hazır.';
-                    statusDiv.style.color = "#27ae60";
-                    clearTimeout(window._loginStatusHideTimer);
-                    window._loginStatusHideTimer = setTimeout(() => { statusDiv.style.display = 'none'; }, 4000);
-                }
-
-                if (loginInput) {
-                    // [WHY]: Re-enable access code input and present a descriptive, premium placeholder.
-                    // [HOW]: Set disabled to false and update placeholder text.
-                    loginInput.disabled = false;
-                    loginInput.placeholder = "Erişim Kodu Giriniz";
-                    // Giriş modalı görünürken koda otomatik odaklan (input senkron bitene kadar disabled olduğu için odak ancak
-                    // burada verilebilir). Kullanıcı başka bir alana odaklandıysa ya da sayfayla etkileştiyse odak çalınmaz;
-                    // sayfa başına bir kez (Faz 3.5).
-                    const active = document.activeElement;
-                    if (!_loginAutoFocused && !_userInteracted && loginInput.offsetParent !== null && (!active || active === document.body)) {
-                        _loginAutoFocused = true;
-                        try { loginInput.focus({ preventScroll: true }); } catch (e) { loginInput.focus(); }
-                    }
-                }
             }
         }, (err) => reportListenerError(colName, err)));
     });
@@ -565,6 +544,19 @@ window.startRealtimeSync = function () {
             }
         }
     }, (err) => reportListenerError('admin_messages', err)));
+
+    // C2. J11 · P0 PERSONEL ERİŞİM KİLİDİ — yönetici panelde durumu görür; personel oturumu kilit kapanınca sonlandırılır
+    //     (kurallar yeni okumaları zaten reddeder; açık dinleyicinin sunucuda hemen kesileceği garanti değil → istemci de keser).
+    //     Önbellekten gelen "doküman yok" anlık görüntüsüne göre karar verilmez (sunucu yanıtı beklenir).
+    _syncUnsubscribers.push(onSnapshot(staffGateRef(), (snap) => {
+        _markListenerHealthy('accessGate');
+        if (snap.metadata && snap.metadata.fromCache && !snap.exists()) return;
+        _staffGate = _gateFromSnap(snap);
+        if (typeof window.renderStaffGateStatus === 'function') window.renderStaffGateStatus(_staffGate);
+        if (_staffGate.state !== 'open' && window.AppModules && window.AppModules.Session && window.AppModules.Session.isStaffAccountSession()) {
+            revokeStaffAccess('gate-closed');
+        }
+    }, (err) => reportListenerError('accessGate', err)));
 
     // D. MODÜLLERİN KAYDETTİĞİ EK DİNLEYİCİLER (ör. iş akışı şablonları)
     _extraListeners.forEach((subscribe, key) => {
@@ -759,6 +751,9 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
             }), opts);
             if (guard) return fail(guard.code, guard.message, guard.details);
         }
+        // Faz 4B · J9: sahiplik alanları (personelUid/createdByUid/creatorUid) değiştirilemez; tam yazmada eski değer taşınır.
+        const owner = _ownerGuardError(writes.map(w => ({ op: 'set', col: colName, id: w.key, data: w.data })));
+        if (owner) return fail(owner.code, owner.message, owner.details);
 
         const bulk = isBulkDeleteBlocked(deletes.length, mirror.length);
         if (bulk && opts.allowBulkDelete !== true) {
@@ -895,6 +890,28 @@ function _schemaGuardError(prepared, opts) {
     return null;
 }
 
+// ─── Faz 4B · J9 · sahiplik muhafızı ─────────────────────────────────────────────────────────────────────
+// [WHY]: Sahiplik uid'leri (J10 kurallarının "kimin kaydı" kararı) bir kez yazıldıktan sonra değişmemeli (GPT-6 kural 1); tam
+//        değiştirme yapan yollar (upsertItem, saveData) alanı bilmeyen eski bir yerel kopyayla sahipliği sessizce silebilirdi.
+// [HOW]: Kural Ownership.ownerGuard'da (saf, birim testli). Firestore'daki son hâl (mirror) ile karşılaştırılır: dolu alan farklı
+//        bir değerle → 'owner-immutable'; gönderilmemiş/boş → eski değer taşınır; var olan kayda ilk yazım yalnız yönetici;
+//        yeni kayıtta yalnız oturumun kendi uid'si. Sunucu tarafı karşılığı firestore.rules (personel yazmaları).
+//        Modül yüklenmemişse sahiplik koleksiyonlarına yazma kapalı (güvenli varsayılan).
+function _ownerGuardError(prepared) {
+    const touches = prepared.filter(p => p && p.op !== 'delete' && ['requests', 'purchaseOrders', 'tasks'].includes(p.col));
+    if (!touches.length) return null;
+    const O = window.Ownership;
+    if (!O || typeof O.ownerGuard !== 'function') return new SaveDataError('write-failed', 'Sahiplik modülü (ownership.js) yüklenmemiş; kayıt yapılmadı.');
+    const actorUid = window.userAuth ? window.userAuth.uid : null;
+    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+    for (const p of touches) {
+        const prev = (window._dbMirror[p.col] || []).find(_sameId(p.id)) || null;
+        const e = O.ownerGuard({ col: p.col, op: p.op, data: p.data, prev, actorUid, isAdmin });
+        if (e) return new SaveDataError(e.code, e.message, { collection: p.col, id: p.id, field: e.field });
+    }
+    return null;
+}
+
 function _applyLocal(colName, op) {
     _bumpDataRevision();
     for (const store of [window.data, window._dbMirror]) {
@@ -946,6 +963,8 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
     if (prepared.length > 490) return fail('invalid-argument', `Tek atomik işlemde en fazla 490 doküman yazılabilir (${prepared.length}).`);
     const guard = _schemaGuardError(prepared, opts);   // Faz 3.5/K2: b3/b1/b2 sözleşmesi — ihlalde batch'in hiçbir parçası yazılmaz
     if (guard) return fail(guard.code, guard.message, guard.details);
+    const owner = _ownerGuardError(prepared);           // Faz 4B · J9: sahiplik alanları değiştirilemez
+    if (owner) return fail(owner.code, owner.message, owner.details);
     if (_maintenanceBlocksWrite()) {
         _announceDenied('maintenance', MAINTENANCE_WRITE_MESSAGE);
         return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
@@ -1051,19 +1070,17 @@ onAuthStateChanged(auth, async (user) => {
             window.checkAuth();
         }
     } else {
+        // [WHY]: Faz 4B · J10 (Aşama B) — anonim oturum kaldırıldı: kurallar ziyaretçiye hiçbir şey açmaz (J10 PRI: giriş veritabanını okumaz) ve
+        //        anonim sağlayıcı Console'da kapatılır. Eskiden burada her oturumsuz sayfa anonim oturum açıyordu.
+        // [HOW]: Oturum yok → senkron durur, giriş ekranı gösterilir (checkAuth). Giriş = personel hesabı ya da yönetici.
         window.userAuth = null;
-        console.warn("⚠️ [Auth] Oturum Yok Veya Kapandı. Anonim oturum başlatılıyor...");
-        // [WHY]: Normal personeller giriş yapmadan personel listesini çekemiyordu. 'Veriler Senkronize Ediliyor' kilidini açmak zorundayız.
-        // [HOW]: Kullanıcının aktif bir token'ı yoksa, sadece okuma yetkisine sahip bir Anonim Oturum (Anonymous Auth) başlatıyoruz.
-        try {
-            // AUTH-05: personel (anonim) oturumu sekmeye değil tarayıcıya bağlı kalsın — admin çıkışı/kilidi sonrası da.
-            await setPersistence(auth, browserLocalPersistence);
-            await signInAnonymously(auth);
-            console.log("✅ [Auth] Anonim Oturum (Okuma Yetkili) başarıyla açıldı.");
-        } catch (error) {
-            console.error("❌ [Auth] Anonim oturum açılamadı:", error.message);
-        }
+        console.warn("⚠️ [Auth] Oturum yok — giriş bekleniyor (anonim oturum açılmaz).");
+        if (_syncRunning) stopRealtimeSync();
+        isSyncStarted = false;
+        window.isFirebaseLoaded = false;
+        if (typeof window.checkAuth === 'function') window.checkAuth();
     }
+    _markAuthKnown();
 });
 
 // window.addEventListener("load", () => {
@@ -1237,6 +1254,8 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
     if (stockByKey.size + prepared.length === 0) return fail('invalid-argument', 'En az bir işlem gerekli.');
     const guard = _schemaGuardError(prepared, opts);   // Faz 3.5/K2: b3/b1/b2 sözleşmesi — ihlalde transaction hiç başlamaz (stok da değişmez)
     if (guard) return fail(guard.code, guard.message, guard.details);
+    const owner = _ownerGuardError(prepared);           // Faz 4B · J9: sahiplik alanları değiştirilemez
+    if (owner) return fail(owner.code, owner.message, owner.details);
     if (_bulkLockBlocks([...[...stockByKey.values()].map(s => s.col), ...prepared.map(p => p.col)])) {
         _announceDenied('bulk-locked', BULK_LOCK_MESSAGE);
         return fail('bulk-locked', BULK_LOCK_MESSAGE);
@@ -1322,7 +1341,9 @@ function _bulkSchemaGuard(entries, opts) {
     return _schemaGuardError(prepared, opts);
 }
 
-async function _runBulk({ name, collections, entries, opts }) {
+// extraGuard: J11 · P1 — kod temizliği gibi araçların kendi (şema dışı) ön koşul denetimi (ör. kapanmamış sahiplik / hesap
+// kaydı). _bulkSchemaGuard ile AYNI sözleşmeyle çalışır ve ondan SONRA çağrılır; ikisi de hiçbir şey yazılmadan önce koşar.
+async function _runBulk({ name, collections, entries, opts, extraGuard }) {
     const strict = opts.strict !== false;
     const fail = (code, message, details) => {
         const err = new SaveDataError(code, message, details);
@@ -1341,7 +1362,7 @@ async function _runBulk({ name, collections, entries, opts }) {
     try {
         const res = await window.AtomicWriter.run({
             store: _atomicStore(), kind: name, collections, uid: window.userAuth.uid, entries,
-            guard: list => _bulkSchemaGuard(list, opts),
+            guard: list => _bulkSchemaGuard(list, opts) || (extraGuard ? extraGuard(list) : null),
         });
         console.log(`☁️ ${name}: ${res.written} yazıldı · ${res.deleted} silindi · ${res.chunks} parça${res.journaled ? ' (günlüklü)' : ' (tek atomik batch)'}`);
         return res;
@@ -1444,3 +1465,407 @@ function _scheduleBulkRecovery(delay = 3000, force = false) {
 window.addEventListener('onAuthReady', () => {
     if (window.data && window.data.config && window.data.config.restoreLock) _scheduleBulkRecovery();
 });
+
+// ─── Personel Auth hesabı açma (Faz 4B · J7 · 4.6 / K4) ─────────────────────────────────────────────
+// [WHY]: Aşama B'de her personelin kendi Firebase Auth hesabı olacak. Ana Auth örneğiyle hesap açmak, Firebase'in yeni
+//        hesapla oturum açması demek — admin oturumu düşerdi.
+// [HOW]: Hesaplar staff-provisioning.js'in ikincil app örneğinde ('provisioner', bellek içi kalıcılık) açılır. Bağlama ana
+//        oturumdaki admin yazmasıdır, sırası bilinçli:
+//          1) ${root}/staffAccounts/items/{uid} → { personelId, pri } — kuralların isStaff eşlemesi (PRI e-postasından personel
+//             kaydının id'si türetilemez; uid → personel). Yalnız yönetici yazar ve okur.
+//          2) personel.uid / authEmail / pri / authProvisionedAt.
+//        J11 · P1: ikisi TEK transaction'da (StaffProvisioning.createFirestoreLinker): ya ikisi ya hiçbiri; kayıt başka bir
+//        hesaba / eşleme başka bir personele bağlıysa hiçbir şey yazılmaz. Yalnız Firebase admin.
+let _staffProvisioner = null;
+const _getStaffProvisioner = () => _staffProvisioner || (_staffProvisioner = window.StaffProvisioning.createAuthProvisioner({
+    fns: { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateEmail },
+    options: firebaseConfig,
+    emulatorUrl: EMULATOR_MODE ? `http://${EMULATOR_HOST}:9099` : null,
+}));
+const _staffAccountRef = uid => doc(fireDb, COLLECTION_ROOT, 'staffAccounts', 'items', String(uid));
+let _staffLinker = null;
+async function _linkStaffAccount(person, fields) {
+    _staffLinker = _staffLinker || window.StaffProvisioning.createFirestoreLinker({
+        runTransaction, db: fireDb, personelRef: id => _docRef('personel', id), accountRef: _staffAccountRef,
+    });
+    const written = await _staffLinker(person, fields);
+    // Yazılanları yerel kopyaya hemen işle (snapshot beklenmeden; sonraki önizleme / tablo tutarlı olsun)
+    if (Object.keys(written).length) _applyLocal('personel', { op: 'update', id: String(person.id), data: written });
+}
+function _requireProvisioningAdmin() {
+    if (!window.StaffProvisioning) throw new SaveDataError('write-failed', 'Hesap açma modülü (staff-provisioning.js) yüklenmemiş.');
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Personel hesabı yalnız yönetici oturumuyla açılabilir.');
+    // Bağlama transaction'ı veri katmanının dışında: yarım kalmış bir personel geri yüklemesinin üstüne yazılmasın.
+    if (_bulkLockBlocks(['personel'])) throw new SaveDataError('bulk-locked', BULK_LOCK_MESSAGE);
+}
+// [WHY]: J10 istemcisi J10 kuralları yayınlanmamış bir projeye bağlıyken hesap AÇILIYOR ama eşleme yazılamıyordu (eski kurallarda
+//        staffAccounts yok → permission-denied): Firebase Auth'ta bağsız, gerçek hesaplar kalıyordu (saha bulgusu).
+// [HOW]: Hesap açmadan / taşımadan ÖNCE yönetici eşleme koleksiyonunu okuyabiliyor mu bakılır (J10 kuralı: yalnız admin okur).
+//        Okuyamıyorsa hiçbir Auth işlemi yapılmaz. Başarı oturum boyunca hatırlanır.
+let _staffRulesReady = false;
+async function _requireStaffRules() {
+    if (_staffRulesReady) return;
+    try {
+        await getDoc(_staffAccountRef('kural-denetimi'));
+        _staffRulesReady = true;
+    } catch (e) {
+        const denied = e && e.code === 'permission-denied';
+        throw new SaveDataError(denied ? 'rules-not-deployed' : 'write-failed', denied
+            ? `Bu ortamın (${COLLECTION_ROOT}) Firestore kuralları J10 (PRI) sürümü değil; hesap AÇILMADI. Önce kurallar yayınlanmalı (emülatörde: adres ?emu=1 ile mi?).`
+            : `Kurallar denetlenemedi (${(e && (e.code || e.message)) || 'bilinmeyen hata'}); hesap açılmadı.`);
+    }
+}
+
+/** Tek personele <pri>@ hesabı açar/bağlar. Dönüş: StaffProvisioning.provisionOne sonucu; kota/kapalı sign-up → status 'stopped'. */
+export const provisionStaffAccount = window.provisionStaffAccount = async function (person, { code } = {}) {
+    _requireProvisioningAdmin();
+    await _requireStaffRules();
+    try {
+        // J10: kod personel kaydında tutulmaz; yönetici yeni kodu burada verir (verilmezse eski kayıttaki kod — kod temizliğinden önce)
+        return await window.StaffProvisioning.provisionOne(person, _getStaffProvisioner(), _linkStaffAccount, { code });
+    } catch (e) {
+        if (e && e.name === 'ProvisioningStop') return { status: 'stopped', code: e.code, reason: e.message };
+        throw e;
+    }
+};
+
+// ─── PRI / Hesap Göç Aracı (J10 PRI revizyonu) ──────────────────────────────────────────────────────────
+// [WHY]: Var olan personelin PRI'si yok; J7'de açılmış hesaplar p<id>@ adresinde. Hepsi <pri>@ adresine geçmeli (uid korunarak).
+// [HOW]: Önizleme yerel veriden, YAZMADAN (StaffProvisioning.planAccounts). Uygulama personel listesini sunucudan TAZE okur;
+//        önizlemeden sonra değiştiyse hiç yazmadan durur (J9 kuralı). Satırlar sırayla; kota / kapalı özellikte durur, kalan
+//        sayı bildirilir; yeniden çalıştırmak güvenlidir (bağlı ve PRI'si doğru personel yalnız eşlemesi yenilenerek geçilir).
+export const planStaffAccounts = window.planStaffAccounts = function () {
+    _requireProvisioningAdmin();
+    return window.StaffProvisioning.planAccounts(window.data.personel || []);
+};
+export const applyStaffAccounts = window.applyStaffAccounts = async function (plan, { onProgress } = {}) {
+    _requireProvisioningAdmin();
+    await _requireStaffRules();
+    const SP = window.StaffProvisioning;
+    const snap = await getDocs(collection(fireDb, COLLECTION_ROOT, 'personel', 'items'));
+    const fresh = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (SP.accountsFingerprint(fresh) !== plan.fingerprint) {
+        return { aborted: true, results: [], counts: {}, stopped: { code: 'personel-changed', message: 'Personel listesi önizlemeden sonra değişti; aracı yeniden açın.' }, remaining: plan.rows.length };
+    }
+    const byId = new Map(fresh.map(p => [String(p.id), p]));
+    const writePri = (person, pri) => updateItem('personel', person.id, { pri });
+    return SP.applyAccounts(plan, byId, _getStaffProvisioner(), _linkStaffAccount, { writePri, onProgress });
+};
+
+
+// ─── Personel hesabıyla giriş (Faz 4B · J8 · 4.6 / K4) ─────────────────────────────────────────────
+// [WHY]: J7 hesapları açtı; giriş hâlâ anonim oturumla yapılıyordu. Hesapla giriş, kurallara "kim" bilgisini taşır (J10) ve
+//        sayfa yenilemede oturumun korunmasını (K5) Firebase'in kendi kalıcılığına bırakır.
+// [HOW]: ANA Auth örneğinde (J7'deki ikincil örnek değil) yerel kalıcılıkla giriş: anonim oturum yerini personel hesabına
+//        bırakır, Firestore dinleyicileri yeni kimlikle sürer (anonim → admin geçişindeki gibi). onAuthStateChanged'in
+//        window.userAuth'u güncellemesi beklenir; çağıran uid bağını (personel.uid) ayrıca doğrular.
+//        J10 PRI: giriş ekranı adresi kullanıcının yazdığı kurumsal kimlikten kurar (<pri>@staff.medipol.local); öncesinde
+//        veritabanı okunmaz.
+export const signInStaffAccount = window.signInStaffAccount = async function (email, password) {
+    await setPersistence(auth, browserLocalPersistence);
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    const uid = cred.user.uid;
+    const t = Date.now();
+    while (!(window.userAuth && window.userAuth.uid === uid) && Date.now() - t < 10000) await new Promise(r => setTimeout(r, 50));
+    return cred.user;
+};
+
+
+// ─── Sahiplik Göç Aracı (Faz 4B · J9) ─────────────────────────────────────────────────────────────────
+// [WHY]: J9 öncesi kayıtların (talep, satın alma, görev, şablon/akış adımları) sahiplik uid'leri yok; J10 kuralları bunlar
+//        olmadan sahibini tanıyamaz.
+// [HOW]: Plan ve uygulama mantığı Ownership'te (saf, birim testli); burada yalnız Firestore bağdaştırıcısı ve yetki kapısı.
+//        Önizleme yerel veriden, YAZMADAN; uygulama sunucudan taze okuyarak transaction'larla (bkz. Ownership.applyMigration).
+const _ownershipStore = () => ({
+    async readAll(col) {
+        const snap = await getDocs(collection(fireDb, COLLECTION_ROOT, col, 'items'));
+        return snap.docs.map(d => ({ id: d.id, data: d.data() }));
+    },
+    transaction: fn => runTransaction(fireDb, t => fn({
+        async get(col, id) { const sn = await t.get(_docRef(col, id)); return sn.exists() ? { id: sn.id, ...sn.data() } : null; },
+        update(col, id, patch) { t.update(_docRef(col, id), patch); },
+    })),
+});
+function _requireOwnershipAdmin() {
+    if (!window.Ownership) throw new SaveDataError('write-failed', 'Sahiplik modülü (ownership.js) yüklenmemiş.');
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Sahiplik göçü yalnız yönetici oturumuyla yapılabilir.');
+}
+
+/** Önizleme: hiçbir yere yazmaz (yerel veriden plan). */
+export const planOwnershipMigration = window.planOwnershipMigration = function () {
+    _requireOwnershipAdmin();
+    const d = window.data || {};
+    return window.Ownership.planMigration({
+        data: { requests: d.requests || [], purchaseOrders: d.purchaseOrders || [], tasks: d.tasks || [], workflowTemplates: d.workflowTemplates || [] },
+        personel: d.personel || [],
+        accountEmail: window.StaffProvisioning ? window.StaffProvisioning.accountEmailOf : null,
+    });
+};
+
+/** Uygulama: plan önizlemedeki haliyle; her kayıt transaction içinde yeniden doğrulanır. */
+export const applyOwnershipMigration = window.applyOwnershipMigration = async function (plan, { onProgress } = {}) {
+    _requireOwnershipAdmin();
+    if (_bulkLockBlocks(['requests', 'purchaseOrders', 'tasks'])) throw new SaveDataError('bulk-locked', BULK_LOCK_MESSAGE);
+    const res = await window.Ownership.applyMigration({
+        plan, store: _ownershipStore(), onProgress,
+        accountEmail: window.StaffProvisioning ? window.StaffProvisioning.accountEmailOf : null,
+    });
+    // Yazılanları yerel kopyaya hemen işle (snapshot beklenmeden; sonraki önizleme tutarlı olsun)
+    res.written.forEach(w => {
+        if (COLLECTIONS.includes(w.col)) { _applyLocal(w.col, { op: 'update', id: w.id, data: w.patch }); return; }
+        const list = (window.data && window.data[w.col]) || [];
+        const i = list.findIndex(_sameId(w.id));
+        if (i !== -1) list[i] = { ...list[i], ...w.patch };
+    });
+    console.log(`🪪 Sahiplik göçü: ${res.status} · yazılan ${res.written.length} · atlanan ${res.skipped.length} · düşen ${res.failed.length} · denenmeyen ${res.notAttempted}`);
+    return res;
+};
+
+// ─── Kod temizliği (Faz 4B · J10 → J11 · P1) ───────────────────────────────────────────────────────────
+// [WHY]: Giriş yalnız Firebase Auth ile yapılıyor; düz metin kodlar (personel.code, requests.personelKodu, eski
+//        purchaseOrders.createdBy) veritabanında durmamalı. Kurallar kodun yeniden yazılmasını zaten reddeder.
+//        J11 denetimi: eski sürüm personel.code'u purchaseOrders dönüşümünden ÖNCE siliyordu; ilk batch'ten sonra ikinci
+//        batch düşerse yeniden çalıştırma — personel.code artık yok olduğu için — çözülebilir createdBy değerlerini KALICI
+//        OLARAK 'unknown' yapıyordu. Ayrıca sahiplik sorunları (ownershipIssues) sıfır olmasa da plan hazır sayılabiliyordu.
+// [HOW]: Plan Ownership.planCodeCleanse (saf, yazmaz). Önkoşullar artık TÜMÜYLE engelleyici: hesabı olmayan personel, Sahiplik
+//        Göç Aracı'nın yazmadığı kayıt, sahiplik alanının KENDİSİ çözülemeyen kayıt (ownershipIssues içindeki engelleyici
+//        satırlar — onay adımı gibi uyarılar hariç) ve TEKİL bir personele indirgenemeyen (silinmiş / ortak) createdBy. Son
+//        durum artık otomatik 'unknown' yapılmaz; yönetici müdahalesi gereken bir engel olarak raporlanır.
+//        Uygulama — İKİ AŞAMA (yeni bir toplu yazma motoru İCAT EDİLMEDİ; Faz 5 P0 AtomicWriter yeniden kullanılır):
+//          0) sunucudan TAZE personel/requests/purchaseOrders okunur, plan YENİDEN hesaplanır (önizlemeye güvenilmez); önizlemeden
+//             sonra değiştiyse (fingerprint) ya da "ready" değilse hiçbir şey yazılmadan durur;
+//          1) GERİ ALINABİLİR dönüşümler AtomicWriter ile hepsi-ya-da-hiçbiri: purchaseOrders.createdBy (personel.code'a İHTİYAÇ
+//             DUYAR — bu yüzden ÖNCE) → requests.personelKodu. Ara parça düşerse yazılanlar da geri alınır;
+//          2) personel.code silme EN SON ve AYRI: kurallar silinmiş kodun yeniden yazımını reddettiği için GERİ ALINAMAZ (AtomicWriter
+//             günlüğüne konsaydı geri alma hiç tamamlanamaz, kilit takılı kalırdı — J11 emülatör testi). Yalnız 1. aşama commit
+//             edildikten sonra, ileri yönlü ve idempotent (Ownership.deleteCodesForward); yarıda kalırsa yeniden çalıştırma tamamlar.
+//        Kısmi sonuç başarı gibi gösterilmez: hata yolunda gerçek kalıcı durum sunucudan yeniden okunup raporlanır. Yalnız Firebase admin.
+export const planCodeCleanse = window.planCodeCleanse = function () {
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Kod temizliği yalnız yönetici oturumuyla yapılabilir.');
+    const own = planOwnershipMigration();
+    const d = window.data || {};
+    return window.Ownership.planCodeCleanse({
+        personel: d.personel || [], requests: d.requests || [], purchaseOrders: d.purchaseOrders || [],
+        accountEmail: window.StaffProvisioning ? window.StaffProvisioning.accountEmailOf : null,
+        ownershipPendingItems: own.items.length, ownershipIssues: own.issues,
+    });
+};
+// Sunucudan taze okuyarak kod temizliği planını YENİDEN hesaplar (önizlemeye güvenilmez; applyCodeCleanse ve VIP önizleme
+// tazeleme için ortak). readCollection: AtomicWriter store'unun okuma yolu (getDocsFromServer ile aynı veri).
+async function _freshCodeCleansePlan(readCollection) {
+    const O = window.Ownership, SP = window.StaffProvisioning;
+    const [pRows, rRows, poRows, tRows, wRows] = await Promise.all(
+        ['personel', 'requests', 'purchaseOrders', 'tasks', 'workflowTemplates'].map(readCollection));
+    const toList = rows => rows.map(r => ({ id: r.id, ...r.data }));
+    const personel = toList(pRows), requests = toList(rRows), purchaseOrders = toList(poRows);
+    const own = O.planMigration({ data: { requests, purchaseOrders, tasks: toList(tRows), workflowTemplates: toList(wRows) }, personel, accountEmail: SP.accountEmailOf });
+    const plan = O.planCodeCleanse({ personel, requests, purchaseOrders, accountEmail: SP.accountEmailOf, ownershipPendingItems: own.items.length, ownershipIssues: own.issues });
+    return { plan, rows: { personel: pRows, requests: rRows, purchaseOrders: poRows } };
+}
+const _readServerRows = c => getDocsFromServer(collection(fireDb, COLLECTION_ROOT, c, 'items')).then(sn => sn.docs.map(d => ({ id: d.id, data: d.data() })));
+// Hata yolunda: sunucudaki GERÇEK durum (yanıtı kaybolmuş ama uygulanmış bir commit olabilir) — kullanıcıya bu gösterilir.
+async function _codeCleanseServerState() {
+    try {
+        const { plan: p } = await _freshCodeCleansePlan(_readServerRows);
+        return { pendingPurchaseOrders: p.purchaseOrders.length, pendingRequests: p.requests.length, remainingCodes: p.personel.length };
+    } catch (_) { return null; }
+}
+const _stateText = st => (st ? `Sunucudaki gerçek durum: ${st.pendingPurchaseOrders} satın alma ve ${st.pendingRequests} talep dönüşümü bekliyor, ${st.remainingCodes} personel kodu duruyor.` : 'Sunucu durumu okunamadı; aracı yeniden açın (önizleme gerçek durumu gösterir).');
+export const applyCodeCleanse = window.applyCodeCleanse = async function (plan) {
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Kod temizliği yalnız yönetici oturumuyla yapılabilir.');
+    if (!plan) throw new SaveDataError('invalid-argument', 'Kod temizliği önizlemesi gerekli.');
+    if (_bulkLockBlocks(['personel', 'requests', 'purchaseOrders'])) throw new SaveDataError('bulk-locked', BULK_LOCK_MESSAGE);
+    const O = window.Ownership;
+    let freshPlan = null, steps = null;
+    // ── AŞAMA 1: geri alınabilir dönüşümler (hepsi ya da hiçbiri) ──
+    let res;
+    try {
+        res = await _runBulk({
+            name: 'codeCleanse', collections: ['requests', 'purchaseOrders'], opts: {},
+            entries: async store => {
+                const { plan: fp, rows } = await _freshCodeCleansePlan(c => store.readCollection(c));
+                freshPlan = fp;
+                if (fp.fingerprint !== plan.fingerprint) {
+                    throw new SaveDataError('changed-since-preview', 'Personel / talep / satın alma verisi önizlemeden sonra değişti; aracı yeniden açın.', { freshPlan: fp });
+                }
+                if (!fp.ready) {
+                    throw new SaveDataError('not-ready', 'Kapanmamış kayıtlar var (hesapsız personel, bekleyen sahiplik göçü ya da elle çözülmesi gereken eski kod referansı); kod temizliği yapılmadı.', { freshPlan: fp });
+                }
+                steps = O.codeCleanseSteps(fp, rows);
+                return steps.reversible;
+            },
+        });
+    } catch (e) {
+        // Önkoşul / yetki / kilit retlerinde hiçbir şey yazılmadı. Diğerlerinde (bağlantı, geri alma bekliyor) sunucu yeniden okunur.
+        if (e && ['changed-since-preview', 'not-ready', 'forbidden', 'bulk-locked', 'no-auth', 'pending-journal'].includes(e.code)) throw e;
+        const st = await _codeCleanseServerState();
+        throw new SaveDataError((e && e.code) || 'write-failed', `${(e && e.message) || 'bilinmeyen hata'} ${_stateText(st)}`, { serverState: st, phase: 'reversible' });
+    }
+    freshPlan.purchaseOrders.forEach(x => _applyLocal('purchaseOrders', { op: 'update', id: x.id, data: { createdBy: x.replaceWith } }));
+    freshPlan.requests.forEach(x => { for (const store of [window.data, window._dbMirror]) { const it = (store.requests || []).find(_sameId(x.id)); if (it) delete it.personelKodu; } });
+
+    // ── AŞAMA 2: personel.code — geri alınamaz, EN SON, ileri yönlü ve idempotent ──
+    const del = await O.deleteCodesForward({
+        ids: steps.codeIds,
+        commit: async ids => {
+            const batch = writeBatch(fireDb);
+            ids.forEach(id => batch.update(_docRef('personel', id), { code: deleteField() }));
+            await batch.commit();
+            ids.forEach(id => { for (const store of [window.data, window._dbMirror]) { const it = (store.personel || []).find(_sameId(id)); if (it) delete it.code; } });
+        },
+    });
+    if (del.error) {
+        const st = await _codeCleanseServerState();
+        console.warn(`🧹 Kod temizliği yarıda: dönüşümler ${res.written} · silinen kod ${del.deleted} · ${_stateText(st)}`);
+        return {
+            written: res.written + del.deleted, failed: del.remaining, notAttempted: 0, phase: 'codes', serverState: st, freshPlan,
+            error: { code: del.error.code, message: `Talep / satın alma dönüşümleri tamamlandı (${res.written} kayıt); personel kodu silme yarıda kaldı (${del.error.message}). ${_stateText(st)} Aracı yeniden çalıştırmak kalan kodları siler.` },
+        };
+    }
+    console.log(`🧹 Kod temizliği tamamlandı: ${res.written} dönüşüm (hepsi ya da hiçbiri · ${res.chunks} parça${res.journaled ? ', günlüklü' : ''}) + ${del.deleted} kod · kök ${COLLECTION_ROOT}`);
+    return { written: res.written + del.deleted, failed: 0, notAttempted: 0, error: null, freshPlan };
+};
+
+// ─── Personel erişim kilidi (Faz 4B · J11 · P0) ─────────────────────────────────────────────────────────
+// [WHY]: Kod temizliği bitene kadar personel kayıtlarında düz metin giriş kodu var (kod + sabit dolgu = Auth parolası); Aşama B'de
+//        bağlı her personel tüm personel listesini okuyabildiği için bu, hesap ele geçirme penceresiydi. Kurallar koleksiyon
+//        tarayamaz → yöneticinin yazdığı açık bir kilit gerekir.
+// [HOW]: Kural tarafı (TEK KAYNAK): firestore.rules staffAccessOpen — ${root}/accessGate/items/staff.staffAccessEnabled === true
+//        değilse (doküman yok / alan yok / tip yanlış / false) personel hiçbir şey okuyamaz ve yazamaz; yönetici etkilenmez.
+//        İstemci tarafı:
+//          readStaffAccessGate()      kilit durumu (sunucudan): open | closed | missing | invalid | denied | unknown
+//          verifyStaffAccessClosure() kapanış denetimi — 5 koleksiyon + eşlemeler SUNUCUDAN taze okunur (Ownership.planStaffAccessClosure)
+//          openStaffAccess()          denetimi YENİDEN çalıştırır; sekiz sayı da 0 ise kanıtla açar (kural kanıtın şeklini doğrular)
+//          closeStaffAccess()         her zaman kapatır
+//          revokeStaffAccess(reason)  personel oturumunu keser: dinleyiciler durur, bellekteki veri silinir, oturum kapanır
+//        Önceden indirilmiş veri geri alınamaz: kilit, kapalıyken yeni okumayı engeller; açıkken okunmuş veriyi silemez. Bu yüzden
+//        kilit, kodlar silinmeden ÖNCE açılmamalı (runbook: "Faz 4B Mega Fix Walkthrough").
+let _staffGate = { state: 'unknown' };
+const STAFF_REVOKE_MESSAGES = {
+    'gate-closed': 'Personel erişimi şu an kapalı (sistem geçişi sürüyor). Lütfen daha sonra yeniden deneyin; sorun sürerse yöneticiye başvurun.',
+    unlinked: 'Giriş hesabınız bir personel kaydına bağlı değil. Lütfen yöneticiye başvurun.',
+};
+export const getStaffRevokeMessage = window.getStaffRevokeMessage = reason => STAFF_REVOKE_MESSAGES[reason] || STAFF_REVOKE_MESSAGES['gate-closed'];
+
+function _gateFromSnap(snap) {
+    if (!snap.exists()) return { state: 'missing' };
+    const d = snap.data() || {};
+    const state = d.staffAccessEnabled === true ? 'open' : d.staffAccessEnabled === false ? 'closed' : 'invalid';
+    const at = d.changedAt && typeof d.changedAt.toMillis === 'function' ? d.changedAt.toMillis() : null;
+    return { state, changedAt: at, changedBy: d.changedBy || null, reason: d.reason || '', closure: d.closure || null };
+}
+export const getStaffAccessGateState = window.getStaffAccessGateState = () => ({ ..._staffGate });
+
+/** Kilit durumu, sunucudan. Ret (kimlik geçersiz) → 'denied'; ağ vb. → 'unknown'. 'open' dışındaki her durum KAPALI demektir. */
+export const readStaffAccessGate = window.readStaffAccessGate = async function () {
+    try {
+        _staffGate = _gateFromSnap(await getDocFromServer(staffGateRef()));
+    } catch (e) {
+        return { state: e && e.code === 'permission-denied' ? 'denied' : 'unknown', code: (e && e.code) || 'error' };
+    }
+    return { ..._staffGate };
+};
+
+function _purgeLocalData() {
+    // Personelin indirdiği kayıtlar bellekte kalmasın (yeniden yükleme DOM'u da temizler; bkz. revokeStaffAccess).
+    const d = window.data || {};
+    Object.keys(d).forEach(k => { if (Array.isArray(d[k])) d[k] = []; });
+    d.config = {};
+    window._dbMirror = {};
+    window.isFirebaseLoaded = false;
+    _bumpDataRevision();
+}
+
+let _staffRevoking = null;
+let _staffRevocation = null;   // { uid, reason, at } — giriş akışı ret nedenini buradan okur
+export const getStaffRevocation = window.getStaffRevocation = () => (_staffRevocation ? { ..._staffRevocation } : null);
+/**
+ * Personel oturumunu keser. silent: uyarı gösterme (giriş ekranı kendi mesajını gösterir). Oturum kurulmuş (veri ekranda)
+ * idiyse sayfa yeniden yüklenir — ekrana çizilmiş kayıtlar da gider; mesaj yenilemeden sonra gösterilir.
+ */
+export const revokeStaffAccess = window.revokeStaffAccess = function (reason = 'gate-closed', { silent = false } = {}) {
+    if (_staffRevoking) return _staffRevoking;
+    const u = window.userAuth;
+    const wasIn = !!(typeof window.getActiveUser === 'function' && window.getActiveUser()) || document.body.classList.contains('logged-in');
+    _staffRevocation = { uid: u ? u.uid : null, reason, at: Date.now() };
+    console.warn(`🔒 [Erişim Kilidi] Personel oturumu sonlandırılıyor (${reason}).`);
+    _staffRevoking = (async () => {
+        stopRealtimeSync();
+        _purgeLocalData();
+        if (window.SecurityConfig) await window.SecurityConfig.endAdminSession('stale');
+        if (wasIn) {
+            try { sessionStorage.setItem('staffAccessRevoked', reason); } catch (_) { /* yoksay */ }
+            window.location.reload();
+        } else if (!silent && typeof window.showAppAlert === 'function') {
+            window.showAppAlert(getStaffRevokeMessage(reason), 'error');
+        }
+    })().finally(() => { _staffRevoking = null; });
+    return _staffRevoking;
+};
+// Yeniden yüklemeden sonra ret nedeni bir kez gösterilir.
+(() => {
+    let r = null;
+    try { r = sessionStorage.getItem('staffAccessRevoked'); if (r) sessionStorage.removeItem('staffAccessRevoked'); } catch (_) { /* yoksay */ }
+    if (!r) return;
+    const show = () => setTimeout(() => { if (typeof window.showAppAlert === 'function') window.showAppAlert(getStaffRevokeMessage(r), 'error'); }, 300);
+    if (document.readyState === 'complete') show(); else window.addEventListener('load', show, { once: true });
+})();
+
+let _resolvingDenial = null;
+function _resolveStaffDenial(name) {
+    if (_resolvingDenial || _staffRevoking) return;
+    _resolvingDenial = (async () => {
+        const g = await readStaffAccessGate();
+        if (['closed', 'missing', 'invalid'].includes(g.state)) return revokeStaffAccess('gate-closed');
+        if (g.state === 'denied') return revokeStaffAccess('unlinked');   // kimlik kuralda geçersiz (bağ yok / kaldırılmış)
+        _deniedListeners.add(name);   // kilit açık ya da belirsiz (ağ): bant
+        _renderSyncHealth();
+    })().finally(() => { _resolvingDenial = null; });
+}
+
+function _requireGateAdmin() {
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', 'Personel erişim kilidi yalnız yönetici oturumuyla yönetilebilir.');
+    if (!window.Ownership || !window.StaffProvisioning) throw new SaveDataError('write-failed', 'Sahiplik / hesap modülü yüklenmemiş.');
+}
+const _gateReason = (r, fallback) => String(r || fallback).replace(/</g, '‹').slice(0, 300);
+
+/** Kapanış denetimi (yazmaz). Personel, talepler, satın almalar, görevler, şablonlar ve hesap eşlemeleri SUNUCUDAN okunur. */
+export const verifyStaffAccessClosure = window.verifyStaffAccessClosure = async function () {
+    _requireGateAdmin();
+    const read = async col => (await getDocsFromServer(collection(fireDb, COLLECTION_ROOT, col, 'items'))).docs.map(d => ({ id: d.id, ...d.data() }));
+    const [personel, requests, purchaseOrders, tasks, workflowTemplates, accounts] = await Promise.all(
+        ['personel', 'requests', 'purchaseOrders', 'tasks', 'workflowTemplates', 'staffAccounts'].map(read));
+    const res = window.Ownership.planStaffAccessClosure({
+        data: { requests, purchaseOrders, tasks, workflowTemplates }, personel,
+        staffAccounts: accounts.map(a => ({ ...a, id: a.id })),   // eşleme kimliği = doküman id'si (uid)
+        accountEmail: window.StaffProvisioning.accountEmailOf,
+    });
+    return { ...res, root: COLLECTION_ROOT, verifiedAt: Date.now() };
+};
+
+/** Kilidi açar: denetim burada YENİDEN çalışır (önizlemeye güvenilmez); sekiz sayı da 0 değilse yazmaz. */
+export const openStaffAccess = window.openStaffAccess = async function ({ reason } = {}) {
+    _requireGateAdmin();
+    if ((window.data && window.data.config && window.data.config.restoreLock) || _bulkActive) {
+        throw new SaveDataError('bulk-locked', 'Yarım kalmış bir toplu yazma / geri yükleme kilidi var; personel erişimi açılmadı.');
+    }
+    const verification = await verifyStaffAccessClosure();
+    if (!verification.ready) return { ok: false, verification };
+    await setDoc(staffGateRef(), {
+        staffAccessEnabled: true, changedAt: serverTimestamp(), changedBy: window.userAuth.uid,
+        reason: _gateReason(reason, 'J11 kapanış denetimi geçti'), closure: { ...verification.checks }, version: 1,
+    });
+    console.log(`🔓 [Erişim Kilidi] Personel erişimi AÇILDI · kök ${COLLECTION_ROOT}`);
+    return { ok: true, verification, gate: await readStaffAccessGate() };
+};
+
+/** Kilidi kapatır (kanıt gerekmez). Açık personel oturumları kilit dinleyicisiyle sonlanır. */
+export const closeStaffAccess = window.closeStaffAccess = async function ({ reason } = {}) {
+    _requireGateAdmin();
+    await setDoc(staffGateRef(), {
+        staffAccessEnabled: false, changedAt: serverTimestamp(), changedBy: window.userAuth.uid,
+        reason: _gateReason(reason, 'Yönetici kapattı'), version: 1,
+    });
+    console.warn(`🔒 [Erişim Kilidi] Personel erişimi KAPATILDI · kök ${COLLECTION_ROOT}`);
+    return { ok: true, gate: await readStaffAccessGate() };
+};

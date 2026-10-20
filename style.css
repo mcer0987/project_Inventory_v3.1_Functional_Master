@@ -4534,14 +4534,17 @@ tr.selectable-row:active>td {
 /* [ENV_GUARD] Global Horizontal Overflow Prevention */
 /* WHY: Mobil cihazlarda 100vw sınırını aşan elemanlar tüm sayfanın yatayda sonsuz kaymasına (right scroll bug) neden olur. */
 /* HOW: Kök html, body ve ana ekran sarmalayıcılarına overflow-x: hidden vererek bu davranışı engelliyoruz. */
-html, body, .inventory-screen, .launchpad-container {
+html,
+body,
+.inventory-screen,
+.launchpad-container {
     overflow-x: hidden !important;
 }
 
 /* [ENV_GUARD] Mobile Tactile Feedback */
 /* WHY: Mobil dokunmatik cihazlarda "Native App" hissi yaratmak için butonlara basıldığında hafifçe küçülme (scale) animasyonu veriyoruz. */
 /* HOW: transform: scale(0.95) değerini :active durumu ile tüm FAB ve Bottom Sheet butonlarına uyguluyoruz. */
-.fab-btn:active, 
+.fab-btn:active,
 .bs-action-btn:active,
 .fab-close-btn:active,
 .bs-close-btn:active {
@@ -4549,6 +4552,7 @@ html, body, .inventory-screen, .launchpad-container {
 }
 
 @media (max-width: 768px) {
+
     /* [ENV_GUARD] Navbar (.tabs) yatay kaydırma ve görünmez scrollbar */
     /* WHY: Menü butonları sığmadığında dikeyde uzayıp ekranı kaplamamalı, yatayda kaydırılabilmeli. */
     /* HOW: overflow-x: auto ve white-space: nowrap ile kaydırma açılır. scrollbar::-webkit-scrollbar { display:none } ile scrollbar gizlenir. */
@@ -4558,20 +4562,23 @@ html, body, .inventory-screen, .launchpad-container {
         white-space: nowrap !important;
         -webkit-overflow-scrolling: touch !important;
     }
-    
+
     .tabs::-webkit-scrollbar {
         display: none !important;
     }
-    
-    .tab-button, .tabs button, .tabs .tab-btn {
+
+    .tab-button,
+    .tabs button,
+    .tabs .tab-btn {
         flex-shrink: 0 !important;
         white-space: nowrap !important;
     }
-    
+
     /* [ENV_GUARD] Pasif satır görünümü */
     /* WHY: Mobilde hover durumu olmadığı için pasif satırlar doğrudan soluklaşmalı. */
     /* HOW: opacity: 0.6 vererek görsel ayrım sağlıyoruz. */
-    tr.passive-row, .passive-row {
+    tr.passive-row,
+    .passive-row {
         opacity: 0.6 !important;
     }
 }
@@ -4585,4 +4592,4 @@ html, body, .inventory-screen, .launchpad-container {
     background-color: transparent !important;
     transform: none !important;
     box-shadow: none !important;
-}
+}

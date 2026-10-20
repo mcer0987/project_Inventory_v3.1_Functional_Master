@@ -36,6 +36,9 @@
     <script src="src/utils/schema.js"></script>
     <script src="src/utils/stock-import.js"></script>
     <script src="src/services/atomic-writer.js"></script>
+    <script src="src/utils/staff-code-registry.js"></script>
+    <script src="src/services/staff-provisioning.js"></script>
+    <script src="src/utils/ownership.js"></script>
     <script src="src/services/assignment-service.js"></script>
     <script src="src/ui/device-ids.js"></script>
     <link rel="stylesheet" href="todo-module.css">
@@ -1437,6 +1440,26 @@
                             title="B3 kayıtlarını önizleme + yedekle yeni şemaya taşır (Faz 3.6)"
                             style="background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid #f59e0b; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                             <i class="fas fa-dna me-2"></i>Şema Göçü (B3)
+                        </button>
+                        <button class="btn w-100 fw-bold" onclick="window.vipMigrateStaffAuth(this)"
+                            title="Personele kurumsal kimlik (PRI) atar; <pri>@ giriş hesabını açar ya da J7 hesabını uid korunarak taşır; önizleme + onay (Faz 4B · J10)"
+                            style="background: rgba(56,189,248,0.1); color: #38bdf8; border: 1px solid #38bdf8; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-user-shield me-2"></i>PRI / Hesap Göç Aracı
+                        </button>
+                        <button class="btn w-100 fw-bold" onclick="window.vipOwnershipMigration(this)"
+                            title="Talep, satın alma, görev ve şablonlara sahiplik uid'lerini önizlemeyle ekler (Faz 4B · J9)"
+                            style="background: rgba(244,114,182,0.1); color: #f472b6; border: 1px solid #f472b6; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-fingerprint me-2"></i>Sahiplik Göç Aracı
+                        </button>
+                        <button class="btn w-100 fw-bold" onclick="window.vipCodeCleanse(this)"
+                            title="Düz metin giriş kodlarını veritabanından siler; önkoşullar sağlanmadan çalışmaz (Faz 4B · J10)"
+                            style="background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid #ef4444; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-eraser me-2"></i>Kod Temizliği
+                        </button>
+                        <button class="btn w-100 fw-bold" id="vipStaffGateBtn" onclick="window.vipStaffAccessGate(this)"
+                            title="Personel erişim kilidi: göç kapanışı sunucudan doğrulanmadan personel veri okuyamaz (Faz 4B · J11)"
+                            style="background: rgba(34,197,94,0.1); color: #22c55e; border: 1px solid #22c55e; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-shield-halved me-2"></i>Personel Erişim Kilidi<span data-role="gate-state"></span>
                         </button>
                     </div>
                 </div>

@@ -167,8 +167,15 @@ body {
 }
 
 @keyframes tabFadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ── 6. TABLOLAR ─────────────────────────────────────────── */
@@ -1974,7 +1981,8 @@ input:checked+.slider::before {
    HOW: position:fixed ile her zaman erişilebilir; z-index 1300 ile her şeyin
         üzerinde durur. Font Awesome fa-bars ikonu kullanılır. */
 .sidebar-toggle-btn {
-  display: none; /* Masaüstünde gizli — medya sorgusu ile açılır */
+  display: none;
+  /* Masaüstünde gizli — medya sorgusu ile açılır */
   align-items: center;
   justify-content: center;
   width: 42px;
@@ -2054,7 +2062,8 @@ input:checked+.slider::before {
   .main-content {
     margin-left: 0 !important;
     padding: 16px;
-    padding-top: 70px; /* hamburger butonu için alan */
+    padding-top: 70px;
+    /* hamburger butonu için alan */
   }
 
   /* Grafik kartları yatay taşmaları önler
@@ -2191,6 +2200,7 @@ input:checked+.slider::before {
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
   }
+
   .sidebar-backdrop.active {
     display: block;
   }
@@ -2201,6 +2211,7 @@ input:checked+.slider::before {
     overflow-x: auto;
     overflow-y: hidden;
   }
+
   .chart-container canvas,
   .chart-wrapper canvas {
     min-width: 280px;
@@ -2210,6 +2221,7 @@ input:checked+.slider::before {
   .kpi-container {
     flex-direction: column;
   }
+
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
@@ -2221,6 +2233,7 @@ input:checked+.slider::before {
   .sidebar-backdrop {
     display: none !important;
   }
+
   .status-mobile-controls {
     display: none !important;
   }

@@ -402,14 +402,20 @@
     function isSelfApproval({ actor, record, kind } = {}) {
         if (!actor || !record) return false;
         const me = normName(actor.name);
+        // Faz 4B · J10: sahiplik uid'si (J9) eşleşirse kendi kaydıdır. Yalnız OLUMLU kanıt: yöneticinin kimliği personel kaydından
+        //               gelir (uid'si personel hesabınınki, yönetici oturumununki değil) — uid'nin tutmaması "başkası" demek değildir.
+        const sameUid = v => !isBlank(v) && !isBlank(actor.uid) && String(v) === String(actor.uid);
         if (kind === 'request') {
+            if (sameUid(record.personelUid)) return true;
             if (!isBlank(record.personelId) && !isBlank(actor.id)) return String(record.personelId) === String(actor.id);
             if (!isBlank(record.personelKodu) && !isBlank(actor.code)) return String(record.personelKodu) === String(actor.code);
             return me !== '' && normName(record.personel) === me;
         }
         if (kind === 'purchase') {
+            if (sameUid(record.createdByUid)) return true;
             const by = isBlank(record.createdBy) || record.createdBy === 'unknown' ? null : String(record.createdBy);
             if (by && !isBlank(actor.code) && by === String(actor.code)) return true;
+            if (by && !isBlank(actor.id) && by === String(actor.id)) return true;   // J8+: createdBy = personel id
             if (me === '') return false;
             return [record.createdByName, record.talepEden, by].some(n => !isBlank(n) && normName(n) === me);
         }
