@@ -167,7 +167,8 @@ window.openNewPurchaseModal = function () {
 // Faz 4B · J8: createdBy artık personel id'si — giriş kodu herkesin okuduğu satın alma belgesine yazılmaz (J9 uid ekler).
 function _purchaseRequester() {
     const u = (typeof window.getActiveUser === 'function' ? window.getActiveUser() : null) || window.currentUser || {};
-    return { name: String(u.name || '').trim(), id: String(u.id || '').trim() };
+    // J11 · P1 #7: ad kuralların staffName'i ile aynı kaynaktan (name → adSoyad → ad, kırpılmış)
+    return { name: (window.Ownership && window.Ownership.selfName()) || String(u.name || '').trim(), id: String(u.id || '').trim() };
 }
 
 // -----------------------------
@@ -1441,7 +1442,7 @@ window.updatePurchaseRequest = async function (e, id) {
     if (!item.akis) item.akis = [];
     item.akis.push({
         islem: 'Talep güncellendi',
-        yapan: window.currentUser?.name || 'Kullanıcı',
+        yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
         tarih: new Date().toLocaleString('tr-TR')
     });
 
@@ -1491,7 +1492,7 @@ window.deleteRequestFile = async function (requestId, fileIndex, fileRef) {
     if (!item.akis) item.akis = [];
     item.akis.push({
         islem: 'Ek dosya silindi',
-        yapan: window.currentUser?.name || 'Admin',
+        yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Admin',
         tarih: new Date().toLocaleString('tr-TR')
     });
 
@@ -1564,7 +1565,7 @@ window.cancelPurchaseRequest = async function (id) {
                 ...prevHistory,
                 {
                     action: 'withdraw',
-                    actor: window.currentUser?.name || 'Kullanıcı',
+                    actor: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
                     timestamp: new Date().toISOString(),
                     from: item.workflow?.currentState || 'active',
                     to: window.WorkflowEngine?.states?.INITIATION || 'initiation',
@@ -1577,7 +1578,7 @@ window.cancelPurchaseRequest = async function (id) {
             ...prevAkis,
             {
                 islem: 'Talep Geri Çekildi (Taslak Moduna Alındı)',
-                yapan: window.currentUser?.name || 'Kullanıcı',
+                yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
                 tarih: new Date().toLocaleString('tr-TR')
             }
         ];
@@ -1613,7 +1614,7 @@ window.cancelPurchaseRequest = async function (id) {
         if (!item.akis) item.akis = [];
         item.akis.push({
             islem: 'Talep İptal Edildi',
-            yapan: window.currentUser?.name || 'Kullanıcı',
+            yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'Kullanıcı',
             tarih: new Date().toLocaleString('tr-TR')
         });
 

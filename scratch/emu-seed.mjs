@@ -138,6 +138,9 @@ async function push() {
             else if (Object.keys(fields).length) await updateDoc(ref, fields);
             if (uid && pri) await setDoc(doc(db, SOURCE_ROOT, 'staffAccounts', 'items', uid), { personelId: String(p.id), pri, linkedAt: Date.now() });
         }
+        // J11 · P0 personel erişim kilidi: normal tohum "göç kapanmış" ortamı temsil eder → AÇIK (akış testleri personel girişi yapar).
+        // --legacy: J10 öncesi veri → kilit dokümanı YOK (varsayılan kapalı); VIP → "Personel Erişim Kilidi" ile göçten sonra açılır.
+        if (!LEGACY) await setDoc(doc(db, SOURCE_ROOT, 'accessGate', 'items', 'staff'), { staffAccessEnabled: true, changedAt: new Date(), changedBy: 'emu-seed', reason: 'emülatör tohumu', version: 1 });
     });
     await env2.cleanup();
     const opened = links.filter(l => l.uid);

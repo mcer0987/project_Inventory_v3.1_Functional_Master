@@ -596,7 +596,7 @@ window.confirmStartWorkflow = async function () {
                 ...prevHist,
                 {
                     action: 'create',
-                    actor: window.currentUser?.name || 'system',
+                    actor: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'system',
                     timestamp: new Date().toISOString(),
                     to: window.WorkflowEngine.states.INITIATION
                 }
@@ -637,7 +637,7 @@ window.confirmStartWorkflow = async function () {
     if (!req.akis) req.akis = [];
     req.akis.push({
         islem: "İş akışı başlatıldı",
-        yapan: window.currentUser?.name,
+        yapan: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name,
         tarih: new Date().toLocaleString('tr-TR')
     });
 
@@ -1018,7 +1018,7 @@ window.approveStep = async function (id) {
         if (!guard.allowed) return;
         _beginMutation(lockKey, item);
 
-        const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+        const actor = (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || "Bilinmeyen Kullanıcı";   // J11 · P1 #5: kurallar staffName ile karşılaştırır
 
         // 1. MEVCUT ADIMI SABİTLE (Hata buradaydı: geçişten önce indeksi almalıyız)
         const currentStepIndex = item.workflow.currentStep || 0;
@@ -1110,6 +1110,7 @@ window.approveStep = async function (id) {
         item.akis.push({
             islem: `✅ Onaylandı: ${step?.tip || 'Onay Adımı'}`,
             yapan: actor,
+            uid: window.userAuth?.uid || '',   // J11 · P1 #5
             tarih: approvalTime,
             note: `Süreç: ${window.getStateLabel ? window.getStateLabel(nextState) : nextState}`
         });
@@ -1170,7 +1171,7 @@ window.rejectStep = async function (id) {
             alert("Red nedeni boş bırakılamaz!");
         }
 
-        const actor = window.currentUser?.name || "Bilinmeyen Kullanıcı";
+        const actor = (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || "Bilinmeyen Kullanıcı";   // J11 · P1 #5: kurallar staffName ile karşılaştırır
         _beginMutation(lockKey, item);
 
         // Mevcut adımı sabitle
@@ -1201,9 +1202,11 @@ window.rejectStep = async function (id) {
         // Eski akış sistemini de güncelle
         if (!item.akis) item.akis = [];
         const rejectionTime = new Date().toLocaleString('tr-TR');
+        const myUid = window.userAuth?.uid || '';   // J11 · P1 #5: kurallar üç red kaydında da request.auth.uid ile eşler
         item.akis.push({
             islem: `❌ REDDEDİLDİ: ${step?.tip || 'Onay'}`,
             yapan: actor,
+            uid: myUid,
             tarih: rejectionTime,
             not: note.trim()
         });
@@ -1215,6 +1218,7 @@ window.rejectStep = async function (id) {
                 item.akis.push({
                     islem: `🔄 State Geçişi: ${window.getStateLabel ? window.getStateLabel(lastHistory.to) : lastHistory.to}`,
                     yapan: lastHistory.actor || actor,
+                    uid: myUid,
                     tarih: new Date(lastHistory.timestamp).toLocaleString('tr-TR'),
                     not: `Reddedildi: ${note.trim()}`
                 });
@@ -1226,6 +1230,7 @@ window.rejectStep = async function (id) {
         item.akis.push({
             islem: `❌ Reddedildi: ${step?.tip || 'Onay Adımı'}`,
             yapan: actor,
+            uid: myUid,
             tarih: rejectionTime,
             not: note.trim(),
             stateNote: `State: ${window.getStateLabel ? window.getStateLabel(window.WorkflowEngine.states.CANCELLED) : 'CANCELLED'}`
@@ -1791,7 +1796,7 @@ window.createWorkflowFromTemplate = function (tpl) {
                 id: 'hist_' + Date.now(),
                 from: null,
                 to: window.WorkflowEngine.states.INITIATION,
-                actor: window.currentUser?.name || 'system',
+                actor: (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || 'system',
                 timestamp: new Date().toISOString(),
                 action: 'create',
                 note: 'Workflow başlatıldı',
@@ -1855,6 +1860,7 @@ window.transitionWorkflowState = async function (workflowId, targetState, actor,
         from: workflow.currentState,
         to: targetState,
         actor: actor,
+        uid: window.userAuth?.uid || '',   // J11 · P1 #5: kurallar onay/red kaydında request.auth.uid ile eşler
         timestamp: new Date().toISOString(),
         action: 'transition',
         note: note,

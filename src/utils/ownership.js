@@ -238,6 +238,22 @@
         return `${pick(d.name, '-')}`;
     }
 
+    // planMigration().issues içindeki her satırı ikiye ayırır (J11 · P1, J11 · P0 ile aynı sınıflandırma — TEK yer):
+    //   engelleyici (blocking)  sahiplik alanının (personelUid/createdByUid/creatorUid) kendisi çözülemedi ya da dolu uid
+    //                           bugünkü hesaptan farklı ('mismatch') — kod temizliği ve P0 kilidi bunlarla açılmaz/ilerlemez.
+    //   uyarı (warning)         onay adımı / atanan alanı (steps[].userUid, assigneeUid) çözülemedi ya da sistem/rol/havuz
+    //                           değeri ('system') — bu alanlar yalnız yönetici tarafından elle çözülür, engel SAYILMAZ
+    //                           (aksi hâlde "Admin" / "havuz" gibi hiç çözülemeyecek değerler aracı kalıcı olarak kilitlerdi).
+    function classifyOwnershipIssues(issues) {
+        const ownerFields = Object.values(OWNER_FIELDS);
+        const blocking = [], warnings = [];
+        (issues || []).forEach(i => {
+            if (i.status === 'mismatch' || (ownerFields.includes(i.field) && i.status !== 'system')) blocking.push(i);
+            else if (i.status !== 'system') warnings.push(i);
+        });
+        return { blocking, warnings };
+    }
+
     // ─── Uygulama (transaction, parçalı) ──────────────────────────────────────────────────────────────
     /**
      * @param {object} o
@@ -365,18 +381,44 @@
         return buildPersonIndex((window.data && window.data.personel) || [], { accountEmail: SP ? SP.accountEmailOf : null });
     }
     const uidForPersonName = name => uidForName(currentIndex(), name);
+    // J11 · P1 #5/#7: oturum sahibinin GÖRÜNEN adı — firestore.rules staffName ile AYNI kaynak ve öncelik (personel kaydında
+    // name → adSoyad → ad, kırpılmış). Talep sahibi / oluşturan / onaylayan alanları bununla yazılır; kurallar aynı değeri bekler.
+    function selfName() {
+        const me = typeof window.getActiveUser === 'function' ? window.getActiveUser() : null;
+        if (!me) return '';
+        // Kuralla birebir: boş olmayan İLK metin alanı seçilir, sonra kırpılır (yalnız boşluktan oluşan ad → '').
+        const pick = [me.name, me.adSoyad].find(v => typeof v === 'string' && v !== '');
+        const nm = pick !== undefined ? pick : me.ad;
+        return typeof nm === 'string' ? nm.trim() : '';
+    }
 
-    // ─── Kod temizliği planı (Faz 4B · J10) ──────────────────────────────────────────────────────────────
+    // ─── Kod temizliği planı (Faz 4B · J10 → J11 · P1) ───────────────────────────────────────────────────
     // [WHY]: Giriş artık yalnız Firebase Auth ile; düz metin giriş kodları (personel.code ve eski kayıtlara kopyalanmış hâlleri:
     //        requests.personelKodu, purchaseOrders.createdBy) veritabanında kalmamalı.
-    // [HOW]: Engeller (kod silinirse personel kilitlenir ya da sahiplik eşlemesi kaybolur): hesabı olmayan/tutarsız personel,
-    //        Sahiplik Göç Aracı'nın yazmadığı kayıt. Sahiplik sorunları (belirsiz ad vb.) engel değil, uyarı: kod silindikten
-    //        sonra o kayıtlar yalnız ad/id ile eşlenebilir. createdBy bir personelin koduysa personel id'siyle (tekilse),
-    //        kimsenin kodu değil ama kod biçimindeyse (silinmiş personel) 'unknown' ile değiştirilir; addır → dokunulmaz.
-    function planCodeCleanse({ personel, requests, purchaseOrders, accountEmail, ownershipPendingItems = 0, ownershipIssues = 0 }) {
+    // [HOW]: Engeller (kod silinirse personel kilitlenir, sahiplik eşlemesi kaybolur ya da eski kimlik referansı KALICI OLARAK
+    //        çözülemez hâle gelir — kodlar silindikten sonra hangi değerin kod olduğu bir daha bilinemez):
+    //          - hesabı olmayan / tutarsız personel
+    //          - Sahiplik Göç Aracı'nın yazmadığı kayıt (ownershipPendingItems)
+    //          - sahiplik alanının KENDİSİ çözülemeyen / dolu uid'si bugünkü hesaptan farklı kayıt (ownershipIssues içinden
+    //            classifyOwnershipIssues ile ayrılan ENGELLEYİCİ satırlar — onay adımı / atanan gibi UYARI'lar engel değil)
+    //          - createdBy KOD BİÇİMİNDE ama TEKİL bir personele indirgenemiyor (hiç kimsenin kodu değil ya da birden fazla
+    //            kişide ortak): ESKİDEN burada otomatik 'unknown' yazılırdı — bu, bilgiyi geri dönüşsüz siliyordu ve personel.code
+    //            daha önce silinmişse (yarım kalmış bir önceki koşudan) HER ZAMAN 'unknown'a düşüyordu (J11 denetim bulgusu).
+    //            Artık böyle kayıtlar plan.blockers.purchaseOrderUnresolved'a düşer; yönetici KAYDI ELLE düzeltmeden plan
+    //            hazır sayılmaz, hiçbir alan otomatik 'unknown' yapılmaz.
+    //        createdBy bir personelin koduysa ve o kod TEKİL bir kişiye aitse personel id'siyle değiştirilir (plan.purchaseOrders).
+    //        SIRA (uygulayan tarafın uyması gereken, ayrıntı applyCodeCleanse'de): purchaseOrders → requests → EN SON personel.
+    //        Satırlar kodun KENDİSİNİ içermez (yalnız id/etiket); rapor güvenli.
+    function planCodeCleanse({ personel, requests, purchaseOrders, accountEmail, ownershipPendingItems = 0, ownershipIssues = [] }) {
         const index = buildPersonIndex(personel, { accountEmail });
         const label = p => (p && (p.name || p.adSoyad)) || '-';
-        const plan = { personel: [], requests: [], purchaseOrders: [], blockers: { noAccount: [], ownershipPending: ownershipPendingItems }, warnings: { ownershipIssues } };
+        const { blocking, warnings } = classifyOwnershipIssues(ownershipIssues);
+        const issueLabel = i => `${i.col} · ${i.label} · ${i.field}: ${i.detail || i.status}`;
+        const plan = {
+            personel: [], requests: [], purchaseOrders: [],
+            blockers: { noAccount: [], ownershipPending: ownershipPendingItems, ownershipUnresolved: blocking.map(issueLabel), purchaseOrderUnresolved: [] },
+            warnings: { ownershipAdvisory: warnings.map(issueLabel) },
+        };
         (personel || []).forEach(p => {
             if (!p || blank(p.id)) return;
             if (accountOf(index, p).status !== 'ok') plan.blockers.noAccount.push(label(p));
@@ -389,19 +431,128 @@
             if (index.byId.has(by) || isSystemActor(by) || (index.byName.get(norm(by)) || []).length) return;
             const hits = index.byCode.get(by) || [];
             const looksLikeCode = /^[A-Za-z0-9]{4,12}$/.test(by);
-            if (!hits.length && !looksLikeCode) return;
-            plan.purchaseOrders.push({ id: String(po.id), label: `${po.evrakNo || po.urun || '-'} · ${po.createdByName || po.talepEden || '-'}`, replaceWith: hits.length === 1 ? String(hits[0].id) : 'unknown' });
+            if (!hits.length && !looksLikeCode) return;   // addır ya da tanınmayan bir metin → kod temizliğinin konusu değil, dokunulmaz
+            const lbl = `${po.evrakNo || po.urun || '-'} · ${po.createdByName || po.talepEden || '-'}`;
+            if (hits.length === 1) { plan.purchaseOrders.push({ id: String(po.id), label: lbl, replaceWith: String(hits[0].id) }); return; }
+            // J11 · P1: hiç kimsenin kodu değil (silinmiş personel) ya da birden fazla kişide ortak — otomatik YAZILMAZ.
+            plan.blockers.purchaseOrderUnresolved.push({ id: String(po.id), label: lbl, reason: hits.length ? 'bu kod birden fazla personelde ortak' : 'bu kodu taşıyan personel bulunamadı (silinmiş olabilir)' });
         });
-        plan.ready = plan.blockers.noAccount.length === 0 && plan.blockers.ownershipPending === 0;
+        plan.ready = plan.blockers.noAccount.length === 0 && plan.blockers.ownershipPending === 0
+            && plan.blockers.ownershipUnresolved.length === 0 && plan.blockers.purchaseOrderUnresolved.length === 0;
         plan.total = plan.personel.length + plan.requests.length + plan.purchaseOrders.length;
+        // "Değişti mi" denetimi (changed-since-preview, applyCodeCleanse): PLANIN KENDİ (zaten kod içermeyen) çıktısından
+        // kurulur — id'ler, etiketler (ad; gizli değil) ve çözüm hedefleri (personel id'si). Kodun KENDİSİ hiçbir zaman
+        // fingerprint'e girmez; "plan çıktısı kod değerini içermez" kuralı fingerprint alanı için de geçerlidir.
+        plan.fingerprint = [
+            `p:${plan.personel.map(x => x.id).sort().join(',')}`,
+            `r:${plan.requests.map(x => x.id).sort().join(',')}`,
+            `po:${plan.purchaseOrders.map(x => `${x.id}=${x.replaceWith}`).sort().join(',')}`,
+            `na:${[...plan.blockers.noAccount].sort().join(',')}`,
+            `op:${plan.blockers.ownershipPending}`,
+            `ou:${plan.blockers.ownershipUnresolved.length}`,
+            `pu:${plan.blockers.purchaseOrderUnresolved.map(x => x.id).sort().join(',')}`,
+        ].join('|');
         return plan;
     }
 
+    /**
+     * J11 · P1 #4: kod temizliğinin iki aşaması. plan: planCodeCleanse sonucu; rows: { requests, purchaseOrders } → [{ id, data }]
+     * (sunucudan TAZE okunmuş). Saf: firebase-handler.applyCodeCleanse ve emülatör testi aynı kodu kullanır.
+     *   reversible  AtomicWriter girdileri ({col, id, prev, next}; next = önceki belgenin tamamı, yalnız hedef alan değişmiş):
+     *               purchaseOrders (eski kimlik dönüşümü — personel.code'a İHTİYAÇ DUYAR) → requests (bağımsız kod kopyası).
+     *               Geri alınabilir: hata olursa AtomicWriter önceki hâli yazar (kurallar bu alanların geri yazımına izin verir).
+     *   codeIds     personel.code silinecek personel id'leri — EN SON ve AYRI adım. Kurallar silinmiş kodun YENİDEN yazılmasını
+     *               reddettiği için bu adım GERİ ALINAMAZ; AtomicWriter'ın günlüklü geri alması burada hiç tamamlanamaz (kilit ve
+     *               günlük takılı kalırdı — emülatör testinde bulundu). Bu yüzden yalnız reversible aşama commit edildikten sonra,
+     *               ileri yönlü ve idempotent çalışır (deleteCodesForward); yarıda kalırsa yeniden çalıştırma kalanları siler.
+     */
+    function codeCleanseSteps(plan, rows) {
+        const byId = list => new Map((list || []).map(r => [String(r.id), r.data]));
+        const rMap = byId(rows.requests), poMap = byId(rows.purchaseOrders);
+        const reversible = [];
+        plan.purchaseOrders.forEach(x => { const prev = poMap.get(x.id); if (prev) reversible.push({ col: 'purchaseOrders', id: x.id, prev, next: { ...prev, createdBy: x.replaceWith } }); });
+        plan.requests.forEach(x => { const prev = rMap.get(x.id); if (prev) { const next = { ...prev }; delete next.personelKodu; reversible.push({ col: 'requests', id: x.id, prev, next }); } });
+        return { reversible, codeIds: plan.personel.map(x => x.id) };
+    }
+
+    /**
+     * J11 · P1 #4: personel.code silme — ileri yönlü, parçalı, idempotent. commit(ids) bir parçayı tek batch'te siler (enjekte
+     * edilir). Hata olursa DURUR ve gerçek ilerlemeyi döner; yazılanlar kalıcıdır (kodun yeniden yazımı kurallarca yasak),
+     * kalanlar yeniden çalıştırmada silinir. Başarı yalnız tüm parçalar commit edildiğinde bildirilir.
+     * @returns {Promise<{deleted:number, remaining:number, error:null|{code,message}}>}
+     */
+    async function deleteCodesForward({ ids, commit, chunkSize = 400 }) {
+        const res = { deleted: 0, remaining: ids.length, error: null };
+        for (let i = 0; i < ids.length; i += chunkSize) {
+            const part = ids.slice(i, i + chunkSize);
+            try { await commit(part); } catch (e) {
+                res.error = { code: (e && e.code) || 'write-failed', message: (e && e.message) || 'bilinmeyen hata' };
+                return res;
+            }
+            res.deleted += part.length;
+            res.remaining = ids.length - res.deleted;
+        }
+        return res;
+    }
+
+    // ─── Personel erişim kilidi: kapanış denetimi (Faz 4B · J11 · P0) ──────────────────────────────────────
+    // [WHY]: Kurallar personel erişimini accessGate/items/staff kilidine bağlar (varsayılan kapalı). Kilit ancak göçün ÜÇ adımı da
+    //        (PRI / Hesap Göçü, Sahiplik Göçü, Kod Temizliği) bittiğinde açılmalı; kurallar koleksiyon tarayamadığı için kanıtı
+    //        istemci üretir, kural yalnız kanıtın şeklini (sekiz sayı, hepsi 0) doğrular.
+    // [HOW]: SAF — çağıran tüm koleksiyonları SUNUCUDAN taze okuyup verir. Sayılar (rapor için ilk 50 etiket):
+    //          personelCodes        personel.code dolu                         (Kod Temizliği)
+    //          requestCodes         requests.personelKodu dolu                 (Kod Temizliği)
+    //          purchaseOrderCodes   kod biçimli eski purchaseOrders.createdBy  (Kod Temizliği; planCodeCleanse ile aynı tespit)
+    //          accountsMissing      personelin giriş hesabı yok                (PRI / Hesap Göçü ya da "Hesap Aç")
+    //          accountsInconsistent paylaşılan uid / hesap PRI adresinde değil (J7 adresi dahil)
+    //          accountMapMismatch   bağlı personelin staffAccounts eşlemesi yok / başka personeli / başka PRI'yi gösteriyor
+    //          ownershipPending     Sahiplik Göç Aracı'nın hâlâ yazacağı kayıt
+    //          ownershipUnresolved  sahiplik alanı (personelUid / createdByUid / creatorUid) çözülemeyen kayıt (sistem / rol
+    //                               değerleri hariç) + dolu uid'si bugünkü hesaptan farklı her alan
+    //        Onay adımı / atanan uid'si çözülemeyen kayıtlar engel değil uyarıdır (warnings): o adımları yalnız yönetici onaylar.
+    const CLOSURE_CHECKS = Object.freeze(['personelCodes', 'requestCodes', 'purchaseOrderCodes', 'accountsMissing', 'accountsInconsistent',
+        'accountMapMismatch', 'ownershipPending', 'ownershipUnresolved']);
+    function planStaffAccessClosure({ data = {}, personel = [], staffAccounts = [], accountEmail } = {}) {
+        const index = buildPersonIndex(personel, { accountEmail });
+        const checks = {}, details = {};
+        CLOSURE_CHECKS.forEach(k => { checks[k] = 0; details[k] = []; });
+        const add = (k, text) => { checks[k]++; if (details[k].length < 50) details[k].push(text); };
+        const maps = new Map((staffAccounts || []).filter(m => m && !blank(m.id)).map(m => [String(m.id), m]));
+        (personel || []).forEach(p => {
+            if (!p || typeof p !== 'object' || blank(p.id)) return;
+            if (!blank(p.code)) add('personelCodes', label(p));
+            const acct = accountOf(index, p);
+            if (acct.status === 'no-account') add('accountsMissing', label(p));
+            else if (acct.status !== 'ok') add('accountsInconsistent', `${label(p)} — ${acct.detail}`);
+            if (!blank(p.uid)) {
+                const m = maps.get(String(p.uid));
+                if (!m) add('accountMapMismatch', `${label(p)} — kimlik eşlemesi yok`);
+                else if (String(m.personelId) !== String(p.id)) add('accountMapMismatch', `${label(p)} — eşleme başka bir personeli gösteriyor`);
+                else if (String(m.pri || '') !== String(p.pri || '')) add('accountMapMismatch', `${label(p)} — eşlemedeki PRI personel kaydındakinden farklı`);
+            }
+        });
+        // J11 · P1: planCodeCleanse artık kendi ownership girdisi beklemiyor (bu çağrıda verilmiyor) — yalnız personel.code /
+        // requests.personelKodu / purchaseOrders.createdBy taramasını kullanıyoruz. Çözülemeyen createdBy (purchaseOrderUnresolved)
+        // da kodlu sayılır: temizlik bitmeden kilit açılmamalı.
+        const cleanse = planCodeCleanse({ personel, requests: data.requests || [], purchaseOrders: data.purchaseOrders || [], accountEmail });
+        cleanse.requests.forEach(r => add('requestCodes', r.label));
+        [...cleanse.purchaseOrders, ...cleanse.blockers.purchaseOrderUnresolved].forEach(r => add('purchaseOrderCodes', r.label));
+        const own = planMigration({ data, personel, accountEmail });
+        own.items.forEach(it => add('ownershipPending', `${it.col} · ${it.label}`));
+        const { blocking, warnings } = classifyOwnershipIssues(own.issues);
+        blocking.forEach(i => add('ownershipUnresolved', `${i.col} · ${i.label} · ${i.field}: ${i.detail || i.status}`));
+        const warningLabels = warnings.map(i => `${i.col} · ${i.label} · ${i.field}: ${i.detail || i.status}`);
+        const scanned = { personel: (personel || []).length, staffAccounts: (staffAccounts || []).length };
+        MIGRATION_COLLECTIONS.forEach(c => { scanned[c] = (data[c] || []).length; });
+        return { checks, details, warnings: warningLabels.slice(0, 50), warningCount: warningLabels.length, scanned,
+            ready: CLOSURE_CHECKS.every(k => checks[k] === 0) };
+    }
+
     const Ownership = {
-        OWNER_FIELDS, MIGRATION_COLLECTIONS, CHUNK_SIZE, SYSTEM_ACTORS,
+        OWNER_FIELDS, MIGRATION_COLLECTIONS, CHUNK_SIZE, SYSTEM_ACTORS, CLOSURE_CHECKS,
         buildPersonIndex, accountOf, resolveOwner, uidForName, planDoc, planMigration, applyMigration, ownerGuard,
-        personelFingerprint, isSystemActor, planCodeCleanse,
-        selfUid, actorUid, uidForPersonName,
+        personelFingerprint, isSystemActor, classifyOwnershipIssues, planCodeCleanse, codeCleanseSteps, deleteCodesForward, planStaffAccessClosure,
+        selfUid, actorUid, uidForPersonName, selfName,
     };
     window.AppModules = window.AppModules || {};
     window.AppModules.Ownership = Ownership;

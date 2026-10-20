@@ -317,11 +317,17 @@ test('selfUid / actorUid: uid yalnız Auth\'tan — anonim ve hesabı aktif kull
 });
 
 // ─── J10 · kod temizliği planı ──────────────────────────────────────────────────────────────────────────
-test('planCodeCleanse: hesabı olmayan personel ve bekleyen sahiplik göçü ENGEL; eski kod kopyaları bulunur, adlar dokunulmaz', () => {
+test('planCodeCleanse: hesabı olmayan personel, bekleyen sahiplik göçü ve ÇÖZÜLEMEYEN createdBy ENGEL; adlar / id dokunulmaz', () => {
     const { O, SP } = load();
     const pers = people(SP);
+    // J11 · P1: ownershipIssues artık SAYI değil, planMigration().issues ile aynı şekilde DİZİ (classifyOwnershipIssues bunu
+    // ayırır). Sahiplik alanının KENDİSİ (personelUid) çözülemeyen satır ENGEL; onay adımı (steps[].userUid) çözülemeyen UYARI.
+    const issues = [
+        { col: 'requests', id: 'r9', label: 'Belirsiz Talep', field: 'personelUid', status: 'ambiguous', detail: '2 kişide ortak ad' },
+        { col: 'purchaseOrders', id: 'po9', label: 'Şablon', field: 'steps[0].userUid', status: 'ambiguous', detail: 'belirsiz onaylayıcı' },
+    ];
     const plan = plain(O.planCodeCleanse({
-        personel: pers, accountEmail: SP.accountEmailOf, ownershipPendingItems: 2, ownershipIssues: 1,
+        personel: pers, accountEmail: SP.accountEmailOf, ownershipPendingItems: 2, ownershipIssues: issues,
         requests: [{ id: 'r1', personelKodu: '00000', personel: 'Seher Kaya' }, { id: 'r2', personel: 'Ayşe Yılmaz' }],
         purchaseOrders: [{ id: 'po1', createdBy: '00000' }, { id: 'po2', createdBy: 'p_ayse' }, { id: 'po3', createdBy: 'Seher Kaya' },
             { id: 'po4', createdBy: 'zz999' }, { id: 'po5', createdBy: 'unknown' }, { id: 'po6', createdBy: 'aliv1' }],
@@ -329,11 +335,105 @@ test('planCodeCleanse: hesabı olmayan personel ve bekleyen sahiplik göçü ENG
     assert.equal(plan.ready, false);
     assert.deepEqual(plan.blockers.noAccount.sort(), ['Bozuk Bağ', 'Can Demir']);
     assert.equal(plan.blockers.ownershipPending, 2);
+    assert.equal(plan.blockers.ownershipUnresolved.length, 1, 'yalnız personelUid satırı engel; onay adımı değil');
+    assert.match(plan.blockers.ownershipUnresolved[0], /Belirsiz Talep.*personelUid/);
+    assert.equal(plan.warnings.ownershipAdvisory.length, 1);
+    assert.match(plan.warnings.ownershipAdvisory[0], /steps\[0\]\.userUid/);
     assert.equal(plan.personel.length, pers.length, 'tüm kodlu personel');
     assert.deepEqual(plan.requests.map(r => r.id), ['r1']);
-    assert.deepEqual(plan.purchaseOrders.map(p => [p.id, p.replaceWith]), [['po1', 'p_seher'], ['po4', 'unknown'], ['po6', 'p_ali1']],
-        'kod → personel id; kimsenin kodu olmayan kod biçimi → unknown; id / ad / unknown dokunulmaz');
+    // J11 · P1: kod → TEKİL personele indirgenen (po1, po6) otomatik yazılır; id / ad / "unknown" sistem değeri dokunulmaz.
+    assert.deepEqual(plan.purchaseOrders.map(p => [p.id, p.replaceWith]), [['po1', 'p_seher'], ['po6', 'p_ali1']]);
+    // J11 · P1 KABUL: hiç kimsenin kodu değilse (po4) ARTIK OTOMATİK 'unknown' YAZILMAZ — açık bir engel olarak raporlanır.
+    assert.deepEqual(plan.blockers.purchaseOrderUnresolved.map(x => x.id), ['po4']);
+    assert.match(plan.blockers.purchaseOrderUnresolved[0].reason, /bulunamadı/);
     assert.ok(!JSON.stringify(plan).match(/00000|aliv1|zz999|ayse1/), 'plan çıktısı kod değerini içermez');
     const ok = plain(O.planCodeCleanse({ personel: pers.filter(p => p.uid && p.id !== 'p_bad'), accountEmail: SP.accountEmailOf, requests: [], purchaseOrders: [] }));
     assert.equal(ok.ready, true);
+});
+
+test('planCodeCleanse: aynı kod birden fazla personelde ortaksa (göç öncesi eski veri) createdBy engeldir, "ortak" olarak raporlanır', () => {
+    const { O, SP } = load();
+    const pers = [
+        { id: 'p1', name: 'Bir', code: 'ortak1', uid: 'u1', pri: 'p1', authEmail: SP.staffEmail('p1') },
+        { id: 'p2', name: 'İki', code: 'ortak1', uid: 'u2', pri: 'p2', authEmail: SP.staffEmail('p2') },
+    ];
+    const plan = plain(O.planCodeCleanse({ personel: pers, accountEmail: SP.accountEmailOf, requests: [], purchaseOrders: [{ id: 'po1', createdBy: 'ortak1' }] }));
+    assert.equal(plan.ready, false);
+    assert.deepEqual(plan.blockers.purchaseOrderUnresolved.map(x => x.id), ['po1']);
+    assert.match(plan.blockers.purchaseOrderUnresolved[0].reason, /ortak/);
+    assert.equal(plan.purchaseOrders.length, 0, 'ortak kod otomatik yazılmaz');
+});
+
+test('planCodeCleanse.fingerprint: kodun KENDİSİNİ içermez (plan çıktısı kuralı fingerprint için de geçerli); ilgili değişiklik iz bırakır, kodun değeri bırakmaz', () => {
+    const { O, SP } = load();
+    const base = { personel: [{ id: 'p1', name: 'Ali', code: 'abc12', uid: 'u1', pri: 'p1', authEmail: SP.staffEmail('p1') },
+        { id: 'p2', name: 'Veli', code: 'xyz99', uid: 'u2', pri: 'p2', authEmail: SP.staffEmail('p2') }],
+        requests: [{ id: 'r1', personelKodu: 'abc12' }], purchaseOrders: [{ id: 'po1', createdBy: 'abc12' }], accountEmail: SP.accountEmailOf };
+    const plan = O.planCodeCleanse(base);
+    const f = plan.fingerprint;
+    assert.ok(!/abc12|xyz99/.test(f), 'fingerprint kodun kendisini içermez');
+    // Kodun DEĞERİ değişse de (başka hiçbir kaydın çözümünü etkilemeyen bir personelde) plan.personel/requests/purchaseOrders
+    // aynı kalıyorsa fingerprint AYNI kalır (kod bilgisi fingerprint'e hiç girmediği için "farklı kod" ↔ "aynı kod" ayırt
+    // edilemez — kasıtlı: sızıntı yok). p2'nin kodu hiçbir request/purchaseOrders alanında referanslanmıyor.
+    assert.equal(O.planCodeCleanse({ ...base, personel: [base.personel[0], { ...base.personel[1], code: 'baskaKod2' }] }).fingerprint, f);
+    // Kodun VARLIĞI (personel listede olup olmaması), çözüm hedefi ya da engel listesi değişince iz DEĞİŞİR.
+    assert.notEqual(O.planCodeCleanse({ ...base, personel: [{ ...base.personel[0], code: undefined }, base.personel[1]] }).fingerprint, f, 'kod silinince plan.personel küçülür → iz değişir');
+    assert.notEqual(O.planCodeCleanse({ ...base, requests: [{ id: 'r1' }] }).fingerprint, f, 'personelKodu kaldırılınca plan.requests küçülür → iz değişir');
+    assert.notEqual(O.planCodeCleanse({ ...base, purchaseOrders: [{ id: 'po1', createdBy: 'xyz99' }] }).fingerprint, f, 'createdBy başka personele çözülünce (replaceWith değişir) iz değişir');
+    assert.notEqual(O.planCodeCleanse({ ...base, personel: [...base.personel, { id: 'p3', name: 'Yeni' }] }).fingerprint, f, 'hesapsız yeni personel (noAccount) iz değiştirir');
+});
+
+// ─── J11 · P0: personel erişim kilidi kapanış denetimi ───────────────────────────────────────────────
+test('planStaffAccessClosure: sekiz denetim kural şemasıyla aynı; temiz veri ready; her kusur kendi sayacına düşer', () => {
+    const { O, SP } = load();
+    const rules = fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8');
+    const ruleKeys = rules.match(/function closureOk[\s\S]*?hasOnly\(\[([^\]]*)\]/)[1].match(/'([a-zA-Z]+)'/g).map(s => s.slice(1, -1));
+    assert.deepEqual([...O.CLOSURE_CHECKS].sort(), ruleKeys.sort(), 'istemci ve kural aynı sekiz anahtarı kullanır');
+
+    const acc = (id, name, uid) => ({ id, name, uid, pri: id, authEmail: SP.staffEmail(id) });
+    const personel = [acc('p_a', 'Ayşe Yılmaz', 'u-a'), acc('p_b', 'Bora Kaya', 'u-b')];
+    const staffAccounts = [{ id: 'u-a', personelId: 'p_a', pri: 'p_a' }, { id: 'u-b', personelId: 'p_b', pri: 'p_b' },
+        { id: 'u-stale', personelId: 'p_a', pri: 'p_a' }];   // bayat eşleme: kural personel kaydındaki uid'yi de ister → engel değil
+    const data = {
+        requests: [{ id: 'r1', personel: 'Ayşe Yılmaz', personelUid: 'u-a' }],
+        purchaseOrders: [{ id: 'po1', createdBy: 'p_b', createdByUid: 'u-b', workflow: { steps: [{ user: 'Bilinmeyen Kişi' }] } }],
+        tasks: [{ id: 't1', title: 'Görev', creatorId: 'Admin' }],   // sistem / rol sahibi → engel değil
+        workflowTemplates: [],
+    };
+    const clean = plain(O.planStaffAccessClosure({ data, personel, staffAccounts, accountEmail: SP.accountEmailOf }));
+    assert.equal(clean.ready, true, JSON.stringify(clean.checks));
+    assert.equal(clean.warningCount, 1, 'çözülemeyen onay adımı uyarıdır, engel değil');
+
+    const bad = plain(O.planStaffAccessClosure({
+        personel: [...personel.map(p => (p.id === 'p_b' ? { ...p, code: 'kod12' } : p)),
+            { id: 'p_c', name: 'Can Demir' },                                                          // hesap yok
+            { id: 'p_j7', name: 'Eski Hesap', uid: 'u-j7', pri: 'eski.hesap', authEmail: 'pp_j7@staff.medipol.local' }],   // J7 adresinde
+        staffAccounts: [{ id: 'u-a', personelId: 'p_b', pri: 'p_a' }, { id: 'u-b', personelId: 'p_b', pri: 'yanlis' }],
+        data: {
+            requests: [{ id: 'r1', personel: 'Ayşe Yılmaz', personelUid: 'u-baska' },      // dolu uid bugünkü hesaptan farklı
+                { id: 'r2', personel: 'Ayşe Yılmaz', personelKodu: 'eski1' },               // sahiplik bekliyor + kod kopyası
+                { id: 'r3', personel: 'Hiç Kimse' }],                                       // sahibi bulunamıyor
+            purchaseOrders: [{ id: 'po2', createdBy: 'zz999', createdByUid: 'u-b' }], tasks: [], workflowTemplates: [],
+        },
+        accountEmail: SP.accountEmailOf,
+    }));
+    assert.equal(bad.ready, false);
+    assert.deepEqual(bad.checks, { personelCodes: 1, requestCodes: 1, purchaseOrderCodes: 1, accountsMissing: 1, accountsInconsistent: 1,
+        accountMapMismatch: 3, ownershipPending: 1, ownershipUnresolved: 2 });
+    assert.ok(!/kod12|eski1|zz999/.test(JSON.stringify(bad)), 'rapor kod değeri içermez');
+});
+
+// ─── J11 · P1 #5/#7: selfName — kuralların staffName'i ile aynı kaynak ve öncelik ─────────────────────────────────────────
+test('selfName: name → adSoyad → ad önceliği, kırpılmış; boş/metin olmayan alan atlanır (firestore.rules staffName ile birebir)', () => {
+    const { O, window } = load();
+    const as = u => { window.getActiveUser = () => u; return O.selfName(); };
+    assert.equal(as({ name: '  Ayşe Yılmaz ' }), 'Ayşe Yılmaz');
+    assert.equal(as({ name: '', adSoyad: 'Eski Şema' }), 'Eski Şema');
+    assert.equal(as({ adSoyad: '  Eski  ', ad: 'X' }), 'Eski');
+    assert.equal(as({ name: null, adSoyad: 7, ad: 'Ad Alanı' }), 'Ad Alanı', 'metin olmayan alan atlanır (kural: is string)');
+    assert.equal(as({ name: '   ', adSoyad: 'B' }), '', 'yalnız boşluk olan name seçilir ve kırpılır (kural: != \'\' sonra trim)');
+    assert.equal(as(null), '');
+    const rules = fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8');
+    assert.match(rules, /let n1 = pd\.get\('name', ''\);[\s\S]*let n2 = pd\.get\('adSoyad', ''\);[\s\S]*pd\.get\('ad', ''\)\);[\s\S]*nm\.trim\(\)/,
+        'kuraldaki staffName aynı öncelik ve kırpma ile yazılmış');
 });

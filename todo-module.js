@@ -718,7 +718,7 @@ window.todoModule = {
             title: title,
             description: desc,
             assigneeId: assignee,
-            creatorId: window.currentUser ? window.currentUser.name : "Admin",
+            creatorId: (window.Ownership && window.Ownership.selfName()) || (window.currentUser ? window.currentUser.name : "Admin"),   // J11 · P1 #7: kurallar staffName bekler
             // Faz 4B · J9: oluşturan = işlemi yapan Auth hesabı (personel ya da yönetici; anonimde yok) — değişmez.
             // Atanan = adı TEK bir personeli işaret ediyorsa onun hesabı (havuz / belirsiz / hesapsız → null).
             creatorUid: window.Ownership.actorUid(),

@@ -473,6 +473,7 @@ const _LOGIN_MSG = {
     disabled: "<span style='color:var(--danger-color); font-weight:bold;'>⛔ Giriş hesabınız devre dışı. Lütfen yöneticiye başvurun.</span>",
     rateLimited: "<span style='color:var(--danger-color); font-weight:bold;'>⏳ Çok fazla deneme yapıldı. Birkaç dakika sonra tekrar deneyin.</span>",
     network: "<span style='color:var(--danger-color)'>⚠️ Sunucuya bağlanılamadı. Bağlantınızı kontrol edip tekrar deneyin.</span>",
+    gateClosed: "<span style='color:var(--warning-color); font-weight:bold;'>🔒 Personel erişimi şu an kapalı (sistem geçişi sürüyor). Lütfen daha sonra yeniden deneyin.</span>",
 };
 // Firebase Auth hata kodu → kullanıcı mesajı. Yanlış kod ile var olmayan kimlik aynı mesajı alır (hesap varlığı sızdırılmaz).
 function _staffLoginError(code) {
@@ -507,6 +508,19 @@ async function completeStaffLogin(pri, code, { priInput, codeInput, loginModal }
         return;
     }
 
+    // J11 · P0: girişten SONRA (zero-lookup korunur) personel erişim kilidi okunur. Kapalıysa (doküman yok / false / geçersiz) ya da
+    // kural kimliği tanımıyorsa oturum sessizce kesilir ve neden giriş ekranında söylenir; veri ekrana hiç gelmez.
+    if (typeof window.readStaffAccessGate === 'function') {
+        const gate = await window.readStaffAccessGate();
+        if (gate.state !== 'open' && gate.state !== 'unknown') {
+            const reason = gate.state === 'denied' ? 'unlinked' : 'gate-closed';
+            if (typeof window.revokeStaffAccess === 'function') await window.revokeStaffAccess(reason, { silent: true });
+            else if (window.userAuth && window.SecurityConfig) await window.SecurityConfig.logout();
+            _rejectStaffLogin(reason === 'gate-closed' ? _LOGIN_MSG.gateClosed : _LOGIN_MSG.contact, codeInput);
+            return;
+        }
+    }
+
     // Kimlik: personel listesi gelince checkAuth K5 yolu setActiveUser(personel) yapar (uid eşleşmesiyle).
     const bound = () => {
         const u = window.getActiveUser();
@@ -517,7 +531,9 @@ async function completeStaffLogin(pri, code, { priInput, codeInput, loginModal }
     if (!bound()) {
         console.warn('🔒 [auth-engine] Hesap bir personel kaydına bağlanamadı; oturum kapatılıyor.');
         if (window.userAuth && window.SecurityConfig) await window.SecurityConfig.logout();
-        _rejectStaffLogin(_LOGIN_MSG.contact, codeInput);
+        // Bekleme sırasında kilit kapanmış olabilir (dinleyici reddi → revokeStaffAccess): nedeni doğru söyle
+        const rv = typeof window.getStaffRevocation === 'function' ? window.getStaffRevocation() : null;
+        _rejectStaffLogin(rv && rv.reason === 'gate-closed' && Date.now() - rv.at < 60000 ? _LOGIN_MSG.gateClosed : _LOGIN_MSG.contact, codeInput);
         return;
     }
     const user = window.getActiveUser();

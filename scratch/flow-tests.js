@@ -31,6 +31,46 @@ const staffEmailOf = staff => `${staff.pri}@staff.medipol.local`;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 const csp = CSP.createCollector();
+
+// J11 · P1 #6: test temizliği personel oturumundan YAPILAMAZ (KJ-5 demo silme istisnası kurallardan kaldırıldı). Emülatörde Node
+// tarafı, emülatöre özgü kural-atlatan yönetim erişimiyle (Authorization: Bearer owner — yalnız emülatör kabul eder, gerçek
+// projede anlamı yok) inventory_demo'daki işaretli belgeleri siler. Gerçek demoda yönetici kimlik bilgisi betiklere girmediği
+// için temizlik yapılmaz ve bunu açıkça söyler (gerçek veri test kolaylığı için değiştirilmez).
+const FS_EMU = 'http://127.0.0.1:8080';
+const EMU_PROJECT = 'medipol-inventory-v3';
+const CLEAN_COLS = ['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords'];
+async function cleanupMarked(names = CLEAN_COLS) {
+    if (!EMU) { console.log('  (gerçek demo: işaretli kayıt temizliği yalnız yönetici oturumuyla yapılabilir — atlandı)'); return 0; }
+    let n = 0;
+    for (const col of names) {
+        let token = '';
+        do {
+            const url = `${FS_EMU}/v1/projects/${EMU_PROJECT}/databases/(default)/documents/inventory_demo/${col}/items?pageSize=300${token ? '&pageToken=' + encodeURIComponent(token) : ''}`;
+            const r = await fetch(url, { headers: { Authorization: 'Bearer owner' } });
+            if (!r.ok) throw new Error(`temizlik listesi ${col}: HTTP ${r.status}`);
+            const j = await r.json();
+            for (const d of j.documents || []) {
+                if (!JSON.stringify(d.fields || {}).includes(MARKER)) continue;
+                const del = await fetch(`${FS_EMU}/v1/${d.name}`, { method: 'DELETE', headers: { Authorization: 'Bearer owner' } });
+                if (!del.ok) throw new Error(`temizlik silme ${d.name}: HTTP ${del.status}`);
+                n++;
+            }
+            token = j.nextPageToken || '';
+        } while (token);
+    }
+    return n;
+}
+// J11 · P1 #5: sunucudaki GERÇEK belge (yalnız emülatör, yönetim erişimi — istemcinin yerel önbelleği değil)
+const fsValue = v => v == null ? undefined : 'stringValue' in v ? v.stringValue : 'integerValue' in v ? Number(v.integerValue)
+    : 'doubleValue' in v ? v.doubleValue : 'booleanValue' in v ? v.booleanValue : 'nullValue' in v ? null : 'timestampValue' in v ? v.timestampValue
+    : 'arrayValue' in v ? (v.arrayValue.values || []).map(fsValue)
+    : 'mapValue' in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, fsValue(x)])) : v;
+async function emuDoc(col, id) {
+    const r = await fetch(`${FS_EMU}/v1/projects/${EMU_PROJECT}/databases/(default)/documents/inventory_demo/${col}/items/${encodeURIComponent(id)}`, { headers: { Authorization: 'Bearer owner' } });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`emuDoc ${col}/${id}: HTTP ${r.status}`);
+    return fsValue({ mapValue: { fields: (await r.json()).fields } });
+}
 const SEC_HEADERS = CSP.testHeaders({ emu: EMU });
 function startServer() {
     const server = http.createServer((req, res) => {
@@ -102,11 +142,7 @@ async function installHelpers(page) {
             sleep: ms => new Promise(r => setTimeout(r, ms)),
             async readAll(name) { const s = await fs.getDocs(col(name)); return s.docs.map(d => ({ _docId: d.id, ...d.data() })); },
             async readMarked(name) { return (await this.readAll(name)).filter(d => JSON.stringify(d).includes(MARKER)); },
-            async cleanup(names) {
-                let n = 0;
-                for (const name of names) for (const d of await this.readMarked(name)) { await fs.deleteDoc(fs.doc(window.fireDb, window.COLLECTION_ROOT, name, 'items', d._docId)); n++; }
-                return n;
-            },
+            // J11 · P1 #6: personel oturumundan test temizliği yok (kurallar reddeder) — Node tarafı cleanupMarked kullanılır.
             async waitFor(fn, ms = 8000) { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await this.sleep(250); } return false; },
             set(id, v) { const el = document.getElementById(id); if (!el) throw new Error('missing #' + id); el.value = v; el.dispatchEvent(new Event('change')); },
             emulator: !!(window.AppEnv && window.AppEnv.EMULATOR),
@@ -118,6 +154,14 @@ async function installHelpers(page) {
             },
             // J10: yönetici işleminden sonra anonim oturuma değil test personelinin hesabına dönülür (anonim oturum yok).
             staff: FT_STAFF, staff2: FT_STAFF2,
+            // J11 · P1 #7: kurallar görünen kimliği (personel / talepEden / createdByName / actor) oturumun GERÇEK personel kaydına
+            // bağlar — senaryolar sahte ad (setActiveUser fikstürü) ile yazamaz. Etkin kullanıcı oturumun kendi kaydına çekilir.
+            realIdentity() {
+                const me = (window.data.personel || []).find(p => p && window.userAuth && String(p.uid || '') === String(window.userAuth.uid));
+                if (!me) throw new Error('oturumun personel kaydı bulunamadı');
+                window.setActiveUser(me);
+                return window.getActiveUser();
+            },
             _inAdmin: false,
             // Belirli bir personel hesabıyla giriş (gerçek giriş ekranı yolu). Önceki oturum kapatılır.
             async loginAs(staff) {
@@ -321,7 +365,7 @@ const SCENARIOS = {
     async saveRequest(page) {
         return page.evaluate(async () => {
             const ft = window.__ft, out = {};
-            window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+            ft.realIdentity();
             window.openRequestModal(false);
             ft.set('reqProdName', 'Test Laptop'); ft.set('reqQty', '2'); ft.set('reqType', 'Kalıcı Zimmet');
             ft.set('reqPriority', 'Yüksek'); ft.set('reqNote', 'not ' + ft.MARKER);
@@ -356,7 +400,7 @@ const SCENARIOS = {
     async staffRequestActions(page) {
         return page.evaluate(async () => {
             const ft = window.__ft, out = {};
-            window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+            ft.realIdentity();
             window.showCustomConfirm = async () => true;
             window.openRequestModal(false);
             ft.set('reqProdName', 'Mouse ' + ft.MARKER); ft.set('reqQty', '1'); ft.set('reqType', 'Kalıcı Zimmet'); ft.set('reqNote', ft.MARKER);
@@ -699,7 +743,7 @@ const SCENARIOS = {
             const fire = col => window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: col, isPatch: false, changes: [] } }));
             const opts = () => [...document.getElementById('purType').options].map(o => o.value);
             const form = document.getElementById('purchaseForm');
-            window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+            ft.realIdentity();
 
             window.data.productTypes = []; window.data.units = [{ id: 'u1', name: 'FT Birim' }];
             window.openNewPurchaseModal();
@@ -1453,7 +1497,7 @@ const SCENARIOS = {
     async h2Leftovers(page, browser) {
         const out = await page.evaluate(async () => {
             const ft = window.__ft, o = {};
-            window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+            ft.realIdentity();
             const realUpload = window.uploadFiles, realConfirm = window.showCustomConfirm, realAlert = window.showAppAlert;
             window.showAppAlert = () => {};
             const fail = () => { const e = new Error('1 dosya yüklenemedi: a.pdf (storage/unauthorized)'); e.name = 'UploadError'; e.uploaded = []; e.failed = ['a.pdf']; throw e; };
@@ -3178,18 +3222,19 @@ const SCENARIOS = {
             const take = () => alerts.splice(0).join(' | ');
             const has = async (col, id) => (await ft.readAll(col)).some(d => String(d.id) === String(id));
             try {
-                window.setActiveUser({ name: 'Flow Test ' + ft.MARKER, code: '00001' });
+                ft.realIdentity();
                 out.staffAccount = window.AppModules.Session.isStaffAccountSession();   // J10: anonim değil, personel hesabı
                 const uid = window.userAuth.uid;
 
                 // M1 · personel silme kapıları (kayıt yerinde kalır, anlaşılır mesaj). J10: kayıtlar sahiplik alanıyla açılır.
-                const po = { id: window.makeId(), urun: 'J1 ' + ft.MARKER, aciklama: ft.MARKER, createdBy: 'ft_staff', createdByName: 'Flow Test ' + ft.MARKER, createdByUid: uid, durum: 'Onay Bekliyor', workflow: { started: false, steps: [] } };
+                const me = window.getActiveUser(), myName = window.Ownership.selfName();
+                const po = { id: window.makeId(), urun: 'J1 ' + ft.MARKER, aciklama: ft.MARKER, createdBy: String(me.id), createdByName: myName, talepEden: myName, createdByUid: uid, durum: 'Onay Bekliyor', workflow: { started: false, steps: [] } };
                 await window.appendItem('purchaseOrders', po);
                 await ft.waitFor(async () => (window.data.purchaseOrders || []).some(p => String(p.id) === String(po.id)));
                 await window.deletePurchaseRequest(po.id);
                 out.staffDeletePurchase = { kept: await has('purchaseOrders', po.id), alert: take() };
 
-                const rq = { id: window.makeId(), ürün: 'J1 ' + ft.MARKER, adet: 1, durum: 'Beklemede', personel: 'Flow Test ' + ft.MARKER, personelUid: uid };
+                const rq = { id: window.makeId(), ürün: 'J1 ' + ft.MARKER, adet: 1, durum: 'Beklemede', personel: myName, personelId: me.id, personelUid: uid };
                 await window.appendItem('requests', rq);
                 await ft.waitFor(async () => (window.data.requests || []).some(r => String(r.id) === String(rq.id)));
                 await window.deleteRequest(rq.id);
@@ -3202,14 +3247,13 @@ const SCENARIOS = {
                 // Kapıyı atlayan doğrudan yazma: kural reddi → 'forbidden' + tek anlaşılır mesaj
                 const direct = async p => { try { await p; return 'ok'; } catch (e) { return e.code; } };
                 out.directAssignmentWrite = { code: await direct(window.appendItem('assignments', { id: window.makeId(), sn: ft.MARKER })), alert: take() };
-                // İşaretli demo kayıtları KJ-5 gereği silinebilir; reddi işaretsiz bir kayıtla sına (admin oluşturur ve temizler).
+                // J11 · P1 #6: KJ-5 istisnası kaldırıldı — işaretli demo kaydını da personel silemez. İşaretsiz kayıt ayrıca sınanır.
                 const unmarked = { id: window.makeId(), ürün: 'J1 işaretsiz kayıt', adet: 1, durum: 'Beklemede', personel: 'J1' };
                 await ft.asAdmin(() => window.appendItem('requests', unmarked));
                 await ft.waitFor(async () => (window.data.requests || []).some(r => String(r.id) === String(unmarked.id)));
                 take();
                 out.directStaffDeleteUnmarked = { code: await direct(window.removeItem('requests', unmarked.id)), kept: await has('requests', unmarked.id), alert: take() };
-                out.directStaffDeleteMarkedDemo = { code: await direct(window.removeItem('requests', rq.id)), note: 'KJ-5: işaretli demo kaydı silinebilir' };
-                await window.appendItem('requests', rq);
+                out.directStaffDeleteMarkedDemo = { code: await direct(window.removeItem('requests', rq.id)), kept: await has('requests', rq.id), alert: take() };
 
                 // M3 · etiket ön kontrolü (form) ve kural (doğrudan)
                 window.openRequestModal(false);
@@ -4527,8 +4571,9 @@ const SCENARIOS = {
             window.openRequestModal(false);
             const modalOpens = getComputedStyle(document.getElementById('requestModal')).display !== 'none';
             window.closeRequestModal();
-            const write = await window.appendItem('requests', { id: window.makeId(), ürün: 'J6 ' + MARKER, adet: 1, durum: 'Beklemede', personel: (window.getActiveUser() || {}).name,
-                personelUid: window.userAuth && window.userAuth.uid }).then(() => 'ok', e => e.code || e.message);
+            // J11 · P1 #7: yoklama oturumun gerçek kimlik alanlarıyla yazar (kurallar sahte ad / eksik personelId kabul etmez)
+            const write = await window.appendItem('requests', { id: window.makeId(), ürün: 'J6 ' + MARKER, adet: 1, durum: 'Beklemede', personel: window.Ownership.selfName(),
+                personelId: (window.getActiveUser() || {}).id, personelUid: window.userAuth && window.userAuth.uid }).then(() => 'ok', e => e.code || e.message);
             return { modalOpens, write };
         }, MARKER);
         const loginScreen = p => p.evaluate(() => ({ loginModal: getComputedStyle(document.getElementById('loginModal')).display !== 'none', activeUser: !!window.getActiveUser(), signedIn: !!window.userAuth }));
@@ -4784,6 +4829,101 @@ const SCENARIOS = {
         if (!out.ok) throw new Error('j10CodeCleanse beklenen sözleşmede değil: ' + JSON.stringify(out));
         return out;
     },
+
+    // J11 · P1 #5 kapanışı — GERÇEK istemci (approveStep / rejectStep) ile GERÇEK kurallar uyumlu mu? Kurallar artık eklenen
+    // history / akış kayıtlarının türünü, uid'sini ve red gerekçesini denetliyor; rules testlerindeki fikstürler istemciyi taklit
+    // eder, bu senaryo istemcinin kendisini koşar. Talep sahibi (ana sayfa, flow.personel) 2 adımlı akışı başlatır; onaylayıcı
+    // (ayrı bağlam, flow.onaylayici): 1) aynı sayıda ama sahte içerikli onay yazamaz (sunucu değişmez, başarı gösterilmez),
+    // 2) adım 1'i gerçek approveStep ile onaylar, 3) adım 2'yi gerçek rejectStep ile reddeder. Her adım SUNUCUDAN okunur.
+    async j11ApprovalAudit(page, browser) {
+        if (!EMU) return { skipped: 'yalnız --emu (ikinci personel hesabı ve sunucu okuması emülatörde)' };
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const settle = async (p, fn, ms = 20000, arg) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await p.evaluate(fn, arg)) return true; } catch (e) { } await sleep(250); } return false; };
+        const errs = [], out = {};
+        const base = page.url().split('/index.html')[0];
+        let id = null;
+        const ctx = await browser.createBrowserContext();
+        try {
+            const s = await ctx.newPage();
+            s.on('pageerror', e => errs.push(e.message));
+            s.on('dialog', d => d.dismiss());
+            await s.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
+            await indexIdle(s);
+            out.approverLogin = (await staffLoginVia(s, FT_STAFF2)).ok;
+            await settle(s, () => window.isFirebaseLoaded === true && (window.data.personel || []).length > 0);
+            const approver = await s.evaluate(() => ({ uid: window.userAuth.uid, name: window.Ownership.selfName() }));
+
+            // Talep sahibi: oluştur (Taslak) → başlat (iki adım, ikisi de onaylayıcıda) — gerçek kimlik alanlarıyla
+            id = await page.evaluate(async (approver, MARKER) => {
+                const me = window.Ownership.selfName(), pid = String((window.getActiveUser() || {}).id), uid = window.userAuth.uid;
+                const id = 'j11po_' + Date.now();
+                const po = { id, urun: 'J11 onay denetimi ' + MARKER, adet: 1, durum: 'Taslak', createdBy: pid, createdByName: me, createdByUid: uid, talepEden: me,
+                    akis: [{ islem: 'Talep Oluşturuldu', yapan: me, tarih: new Date().toLocaleString('tr-TR') }],
+                    workflow: { id: 'wf_' + id, started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [] } };
+                await window.appendItem('purchaseOrders', po);
+                const step = tip => ({ user: approver.name, userUid: approver.uid, tip, status: 'pending', note: '', date: '' });
+                await window.upsertItem('purchaseOrders', { ...po, durum: 'Onay Bekliyor',
+                    akis: [...po.akis, { islem: 'Süreç başlatıldı', yapan: me, tarih: new Date().toLocaleString('tr-TR') }],
+                    workflow: { ...po.workflow, started: true, steps: [step('Paraf'), step('Onay')],
+                        history: [{ id: 'trans_' + Date.now(), from: 'initiation', to: 'initiation', actor: me, uid, timestamp: new Date().toISOString(), action: 'start', note: '' }] } });
+                return id;
+            }, approver, MARKER);
+            out.started = (await emuDoc('purchaseOrders', id))?.workflow?.started === true;
+            const visible = await settle(s, id => (window.data.purchaseOrders || []).some(x => String(x.id) === id && x.workflow && x.workflow.started), 20000, id);
+
+            // 1) Aynı SAYIDA (+1 history, +1 akış) ama SAHTE İÇERİKLİ onay: akış kaydı "red" olayı, history uid'siz → kurallar reddeder
+            //    (veri katmanı permission-denied'ı bakım kapalıyken 'forbidden' koduyla yükseltir — firebase-handler _deniedFailure)
+            out.forged = await s.evaluate(async id => {
+                const cur = window.data.purchaseOrders.find(x => String(x.id) === id);
+                const f = JSON.parse(JSON.stringify(cur));
+                const me = window.Ownership.selfName();
+                f.workflow.steps[0] = { ...f.workflow.steps[0], status: 'approved', actor: me, date: '01.01.2020 00:00' };
+                f.workflow.currentStep = 1; f.workflow.currentState = 'manager_approval';
+                f.workflow.history.push({ id: 'trans_1', from: 'initiation', to: 'manager_approval', actor: me, timestamp: '2020-01-01T00:00:00.000Z', action: 'transition', note: '' });
+                f.akis.push({ islem: '❌ REDDEDİLDİ: Paraf', yapan: me, uid: window.userAuth.uid, tarih: '01.01.2020 00:00' });
+                return window.upsertItem('purchaseOrders', f).then(() => 'yazıldı', e => e.code || e.message);
+            }, id);
+            const afterForged = await emuDoc('purchaseOrders', id);
+            out.forgedServerUnchanged = afterForged.workflow.steps[0].status === 'pending' && afterForged.workflow.history.length === 1 && afterForged.akis.length === 2;
+            await settle(s, id => { const x = window.data.purchaseOrders.find(y => String(y.id) === id); return x && x.workflow.steps[0].status === 'pending'; }, 15000, id);
+
+            // 2) Gerçek approveStep (adım 1)
+            out.approve = await s.evaluate(async id => {
+                const alerts = [], real = window.showAppAlert;
+                window.showAppAlert = (m, t) => alerts.push(`${t}: ${m}`);
+                try { await window.approveStep(id); } finally { window.showAppAlert = real; }
+                return alerts.join(' | ');
+            }, id);
+            const a = await emuDoc('purchaseOrders', id);
+            const hA = a.workflow.history.at(-1), kA = a.akis.at(-1);
+            out.approveServer = { step0: a.workflow.steps[0].status, actor: a.workflow.steps[0].actor, currentStep: a.workflow.currentStep, durum: a.durum,
+                history: a.workflow.history.length, histUid: hA.uid === approver.uid, histAction: hA.action, akis: a.akis.length, akisUid: kA.uid === approver.uid, akisIslem: kA.islem };
+
+            // 3) Gerçek rejectStep (adım 2) — gerekçe istemi taklit edilir
+            await settle(s, id => { const x = window.data.purchaseOrders.find(y => String(y.id) === id); return x && x.workflow.currentStep === 1; }, 15000, id);
+            out.reject = await s.evaluate(async id => {
+                const alerts = [], real = window.showAppAlert, realPrompt = window.prompt;
+                window.showAppAlert = (m, t) => alerts.push(`${t}: ${m}`); window.prompt = () => '  bütçe yok  ';
+                try { await window.rejectStep(id); } finally { window.showAppAlert = real; window.prompt = realPrompt; }
+                return alerts.join(' | ');
+            }, id);
+            const r = await emuDoc('purchaseOrders', id);
+            const hR = r.workflow.history.at(-1), k3 = r.akis.slice(-3);
+            out.rejectServer = { step1: r.workflow.steps[1].status, note: r.workflow.steps[1].note, durum: r.durum, finished: r.workflow.finished, state: r.workflow.currentState,
+                history: r.workflow.history.length, histTo: hR.to, histNote: hR.note, histUid: hR.uid === approver.uid,
+                akis: r.akis.length, akisUids: k3.every(x => x.uid === approver.uid), akisIslem: k3.map(x => x.islem), akisNot: k3.map(x => x.not) };
+        } finally { await ctx.close(); }
+        out.pageErrors = errs;
+        const A = out.approveServer || {}, R = out.rejectServer || {};
+        out.ok = out.approverLogin === true && out.started && !!id && out.forged === 'forbidden' && out.forgedServerUnchanged
+            && /success/.test(out.approve) && A.step0 === 'approved' && A.currentStep === 1 && A.durum === 'Onay Bekliyor'
+            && A.history === 2 && A.histUid && A.histAction === 'transition' && A.akis === 3 && A.akisUid && /^✅ Onaylandı: /.test(A.akisIslem)
+            && /warning: Talep reddedildi/.test(out.reject) && R.step1 === 'rejected' && R.note === 'bütçe yok' && R.durum === 'Reddedildi' && R.finished === true
+            && R.state === 'cancelled' && R.history === 3 && R.histTo === 'cancelled' && R.histNote === 'Reddedildi: bütçe yok' && R.histUid
+            && R.akis === 6 && R.akisUids && errs.length === 0;
+        if (!out.ok) throw new Error('j11ApprovalAudit beklenen sözleşmede değil: ' + JSON.stringify(out));
+        return out;
+    },
 };
 
 (async () => {
@@ -4806,7 +4946,7 @@ const SCENARIOS = {
         await page.goto(`http://127.0.0.1:${PORT}/index.html${EMU ? '?emu=1' : ''}`, { waitUntil: 'domcontentloaded' });
         await staffLoginPage(page, FT_STAFF);
         await installHelpers(page);
-        const pre = await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
+        const pre = await cleanupMarked();
         console.log(`pre-cleanup removed: ${pre}`);
         let fails = 0;
         for (const [i, name] of wanted.entries()) {
@@ -4814,7 +4954,7 @@ const SCENARIOS = {
             console.log(`\n[${i + 1}/${wanted.length}] ${name} başladı · ${clock()} · geçen ${elapsed()} · hata ${fails}`);
             try {
                 if (await ensureMainSession(page)) console.log('  (ana sayfa test personeli oturumu yeniden kuruldu)');
-                await page.evaluate(() => window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
+                await cleanupMarked();
                 await new Promise(r => setTimeout(r, 1500));
                 const asAdmin = EMU && ADMIN_SCENARIOS.has(name);
                 if (asAdmin) await page.evaluate(async () => { await window.__ft.adminLogin(); window.__ft._inAdmin = true; });
@@ -4828,7 +4968,7 @@ const SCENARIOS = {
         console.log(`\n■ bitti · ${wanted.length} senaryo · ${fails} hata · süre ${elapsed()}`);
     } finally {
         try {
-            const post = await page.evaluate(() => window.__ft && window.__ft.cleanup(['requests', 'tasks', 'purchaseOrders', 'assignments', 'serviceRecords']));
+            const post = await cleanupMarked();
             console.log(`\npost-cleanup removed: ${post}`);
         } catch (e) { console.log('cleanup error: ' + e.message); }
         console.log('pageerrors:', pageErrors);

@@ -188,7 +188,7 @@ test('provisionOne: PRI adresinde parolası farklı hesap (kendine hesap açan /
     assert.match(S.describe(r).text, /PRI/);
 });
 
-test('provisionOne: kota / kapalı sign-up ProvisioningStop; diğer hatalar error', async () => {
+test('provisionOne: kota / kapalı sign-up / ağ ProvisioningStop; diğer hatalar error (türüyle)', async () => {
     const S = load();
     const auth = fakeAuth();
     const p = { id: 'a', pri: 'a.b', code: 'k1aaa' };
@@ -196,8 +196,11 @@ test('provisionOne: kota / kapalı sign-up ProvisioningStop; diğer hatalar erro
     await assert.rejects(S.provisionOne(p, auth, async () => {}), e => e.name === 'ProvisioningStop' && e.code === 'rate-limited');
     auth.fault = () => 'admin-restricted-operation';
     await assert.rejects(S.provisionOne(p, auth, async () => {}), e => e.code === 'signup-disabled');
+    // J11 · P1: ağ kopması kişiye özgü değil → toplu iş durur (hesap sunucuda açılmış olabilir; yeniden çalıştırma "zaten var" yolundan bağlar)
     auth.fault = () => 'network-request-failed';
-    assert.deepEqual(plain(await S.provisionOne(p, auth, async () => {})), { status: 'error', email: 'a.b' + D, reason: 'network-request-failed' });
+    await assert.rejects(S.provisionOne(p, auth, async () => {}), e => e.name === 'ProvisioningStop' && e.code === 'network');
+    auth.fault = () => 'weak-password';
+    assert.deepEqual(plain(await S.provisionOne(p, auth, async () => {})), { status: 'error', kind: 'unknown', email: 'a.b' + D, reason: 'weak-password' });
 });
 
 // ─── J7 hesabının taşınması ──────────────────────────────────────────────────────────────────────────
@@ -308,10 +311,10 @@ test('accountsFingerprint: ad / PRI / hesap bağı / kodun varlığı değişinc
 
 test('describe: her sonuç için mesaj; giriş kodu/parola hiçbir mesajda yok', () => {
     const S = load();
-    for (const st of ['created', 'relinked', 'already-linked', 'invalid', 'conflict', 'stopped', 'link-failed', 'error']) {
+    for (const st of ['created', 'relinked', 'already-linked', 'moved', 'move-resumed', 'invalid', 'conflict', 'disabled', 'stopped', 'link-failed', 'error']) {
         const d = plain(S.describe({ status: st, reason: 'neden' }));
         assert.equal(typeof d.text, 'string');
-        assert.equal(d.ok, ['created', 'relinked', 'already-linked'].includes(st));
+        assert.equal(d.ok, ['created', 'relinked', 'already-linked', 'moved', 'move-resumed'].includes(st));
         assert.ok(!/Mdp!/.test(d.text));
     }
 });
@@ -338,4 +341,164 @@ test('createAuthProvisioner: ikincil app "provisioner" bellek içi kalıcılıkl
         ['initializeApp', 'provisioner'], ['initializeAuth', 'provisioner', 'MEMORY'], ['emulator', 'http://127.0.0.1:9099'],
         ['signOut', 'provisioner'], ['signOut', 'provisioner'], ['updateEmail', 'S-old@y', 'new@y'], ['signOut', 'provisioner'],
     ]);
+});
+
+// ─── J11 · P1: hata kurtarma / idempotency ──────────────────────────────────────────────────────────
+test('errorKind: kota / ağ / yetki / yanlış kod / çakışma / devre dışı / kapalı özellik birbirinden ayrılır', () => {
+    const S = load();
+    const k = c => S.errorKind({ code: c });
+    assert.deepEqual(
+        ['auth/too-many-requests', 'resource-exhausted', 'auth/network-request-failed', 'unavailable', 'permission-denied', 'auth/invalid-credential',
+            'auth/user-not-found', 'auth/email-already-in-use', 'auth/user-disabled', 'auth/operation-not-allowed', 'auth/requires-recent-login', 'uid-mismatch', 'x'].map(k),
+        ['rate-limited', 'rate-limited', 'network', 'network', 'permission-denied', 'wrong-password', 'wrong-password', 'email-in-use', 'user-disabled',
+            'operation-not-allowed', 'requires-recent-login', 'uid-mismatch', 'unknown']);
+});
+
+test('KABUL (P1): Auth taşıması başarılı + Firestore bağı düştü → ikinci çalıştırma AYNI uid\'yi aynı personele bağlar (move-resumed)', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const uid = await auth.createAccount('pa1' + D, 'k1aaaMdp!');
+    const db = fakeDb([{ id: 'a1', name: 'Ali Veli', code: 'k1aaa', uid, authEmail: 'pa1' + D }]);
+    db.fail = () => true;   // Firestore bağı reddedildi (permission-denied)
+    const r1 = plain(await S.moveLegacyAccount({ ...db.personel[0], pri: 'ali.veli' }, auth, db.link));
+    assert.deepEqual([r1.status, r1.kind, r1.uid], ['link-failed', 'permission-denied', uid]);
+    assert.ok(auth.accounts.has('ali.veli' + D) && !auth.accounts.has('pa1' + D), 'Auth tarafı taşındı');
+    assert.equal(db.personel[0].authEmail, 'pa1' + D, 'Firestore tarafı eski hâlde');
+    // Personel kaydı hâlâ eski adresi gösterdiği için plan yine "move" der (eski sürüm burada "parola eşleşmiyor" ile duruyordu)
+    assert.equal(S.planAccounts(db.personel).rows[0].action, 'move');
+    db.fail = null;
+    auth.calls.length = 0;
+    const r2 = plain(await S.moveLegacyAccount({ ...db.personel[0], pri: 'ali.veli' }, auth, db.link, { now: () => 9 }));
+    assert.deepEqual(r2, { status: 'move-resumed', uid, email: 'ali.veli' + D });
+    assert.deepEqual(auth.calls.map(c => c[0]), ['move', 'find'], 'yalnız giriş denendi; yeni hesap açılmadı, e-posta yeniden değiştirilmedi');
+    assert.equal(auth.accounts.size, 1);
+    assert.deepEqual(plain(db.personel[0]), { id: 'a1', name: 'Ali Veli', code: 'k1aaa', uid, authEmail: 'ali.veli' + D, pri: 'ali.veli', authProvisionedAt: 9 });
+    assert.equal(S.planAccounts(db.personel).rows[0].action, 'ok', 'üçüncü koşu yalnız eşlemeyi yeniler');
+});
+
+test('P1: kurtarmada PRI adresindeki hesabın uid\'si personeldekiyle aynı değilse HİÇBİR bağ yazılmaz (conflict)', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const other = await auth.createAccount('ali.veli' + D, 'k1aaaMdp!');   // aynı kodla açılmış başka bir hesap
+    const db = fakeDb([{ id: 'a1', code: 'k1aaa', uid: 'uid-gercek', authEmail: 'pa1' + D }]);
+    const r = plain(await S.moveLegacyAccount({ ...db.personel[0], pri: 'ali.veli' }, auth, db.link));
+    assert.deepEqual([r.status, r.kind], ['conflict', 'uid-mismatch']);
+    assert.notEqual(other, 'uid-gercek');
+    assert.equal(db.links.length, 0, 'bağ yazılmadı');
+    assert.equal(db.personel[0].uid, 'uid-gercek', 'uid değişmedi');
+});
+
+test('P1: ne eski ne PRI adresi kodu kabul ediyor → conflict (wrong-password); devre dışı hesap → disabled; hiçbirinde bağ yok', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const uid = await auth.createAccount('pa1' + D, 'k1aaaMdp!');
+    const db = fakeDb([{ id: 'a1', code: 'yanlis', uid, authEmail: 'pa1' + D }]);
+    const r = plain(await S.moveLegacyAccount({ ...db.personel[0], pri: 'ali.veli' }, auth, db.link));
+    assert.deepEqual([r.status, r.kind], ['conflict', 'wrong-password']);
+    assert.match(r.reason, /firebase-admin/);
+    auth.fault = op => (op === 'move' ? 'user-disabled' : null);
+    const d = plain(await S.moveLegacyAccount({ ...db.personel[0], code: 'k1aaa', pri: 'ali.veli' }, auth, db.link));
+    assert.deepEqual([d.status, d.kind], ['disabled', 'user-disabled']);
+    assert.equal(S.describe(d).ok, false);
+    assert.equal(db.links.length, 0);
+});
+
+test('P1: taşıma sırasında ağ koptu (sunucuda tamamlanmış) → durur; bağlantı gelince yeniden çalıştırma tamamlar', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const uid = await auth.createAccount('pa1' + D, 'k1aaaMdp!');
+    const db = fakeDb([{ id: 'a1', code: 'k1aaa', uid, authEmail: 'pa1' + D }]);
+    const realMove = auth.moveAccount;
+    auth.moveAccount = async (...a) => { await realMove(...a); throw Object.assign(new Error('net'), { code: 'auth/network-request-failed' }); };
+    await assert.rejects(S.moveLegacyAccount({ ...db.personel[0], pri: 'ali.veli' }, auth, db.link), e => e.name === 'ProvisioningStop' && e.code === 'network');
+    auth.moveAccount = realMove;
+    const r = plain(await S.moveLegacyAccount({ ...db.personel[0], pri: 'ali.veli' }, auth, db.link));
+    assert.deepEqual([r.status, r.uid], ['move-resumed', uid]);
+});
+
+test('P1: applyAccounts — bağ yazması yetkiden reddedilince satır raporlanır ve iş DURUR; yeniden çalıştırma kalanı ve yarımı tamamlar', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const legacyUid = await auth.createAccount('pp3' + D, 'gizli3Mdp!');
+    const db = fakeDb([
+        { id: 'p3', name: 'Mehmet Ali Kaya', uid: legacyUid, authEmail: 'pp3' + D, code: 'gizli3' },
+        { id: 'p2', name: 'Ayşe Yılmaz', code: 'gizli2' },
+    ]);
+    db.fail = () => true;
+    const plan = S.planAccounts(db.personel);
+    const r = plain(await S.applyAccounts(plan, db.byId(), auth, db.link, { writePri: db.writePri }));
+    assert.equal(r.stopped.code, 'permission-denied');
+    assert.deepEqual(r.results.map(x => [x.id, x.status, x.kind]), [['p3', 'link-failed', 'permission-denied']]);
+    assert.equal(r.remaining, 1, 'ikinci personel denenmedi (aynı sebeple düşecekti)');
+    db.fail = null;
+    const r2 = plain(await S.applyAccounts(S.planAccounts(db.personel), db.byId(), auth, db.link, { writePri: db.writePri }));
+    assert.deepEqual(r2.counts, { 'move-resumed': 1, created: 1 });
+    assert.equal(db.personel[0].uid, legacyUid);
+    assert.equal(auth.accounts.size, 2);
+});
+
+test('P1: applyAccounts — ağ hatası satırda raporlanır ve iş durur ("ok" eşleme yenilemesi dahil)', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const db = fakeDb([{ id: 'p1', name: 'Ali Veli', pri: 'ali.veli', uid: 'u1', authEmail: 'ali.veli' + D }, { id: 'p2', name: 'Can Can', pri: 'can.can', uid: 'u2', authEmail: 'can.can' + D }]);
+    db.link = async () => { throw Object.assign(new Error('koptu'), { code: 'unavailable' }); };
+    const r = plain(await S.applyAccounts(S.planAccounts(db.personel), db.byId(), auth, db.link, {}));
+    assert.equal(r.stopped.code, 'network');
+    assert.deepEqual(r.results.map(x => [x.status, x.kind]), [['link-failed', 'network']]);
+    assert.equal(r.remaining, 1);
+});
+
+test('P1: bağ çakışması (eşleme başka personeli / kayıt başka uid\'yi gösteriyor) link-failed değil conflict', async () => {
+    const S = load();
+    const auth = fakeAuth();
+    const db = fakeDb([{ id: 'a1', pri: 'ali.veli', code: 'k1aaa' }]);
+    db.link = async () => { throw Object.assign(new Error('bu giriş hesabı başka bir personele eşlenmiş (bağ değiştirilmedi)'), { code: 'uid-mismatch' }); };
+    const r = plain(await S.provisionOne(db.personel[0], auth, db.link));
+    assert.deepEqual([r.status, r.kind], ['conflict', 'uid-mismatch']);
+    assert.match(S.describe(r).text, /başka bir personele/);
+});
+
+// createFirestoreLinker: Firestore transaction taklidi (okumalar anlık görüntü; yazmalar commit'te, hata → hiçbiri)
+function fakeTx(docs, { failCommit = false } = {}) {
+    const snap = p => ({ exists: () => docs.has(p), data: () => ({ ...docs.get(p) }) });
+    const runTransaction = async (_db, fn) => {
+        const writes = [];
+        const t = { get: async p => snap(p), set: (p, d) => writes.push(['set', p, d]), update: (p, d) => writes.push(['update', p, d]) };
+        const out = await fn(t);
+        if (failCommit) throw Object.assign(new Error('commit düştü'), { code: 'unavailable' });
+        for (const [op, p, d] of writes) docs.set(p, op === 'set' ? { ...d } : { ...(docs.get(p) || {}), ...d });
+        return out;
+    };
+    return { runTransaction };
+}
+const linkerFor = (S, docs, opts) => S.createFirestoreLinker({
+    runTransaction: fakeTx(docs, opts).runTransaction, db: {}, personelRef: id => 'personel/' + id, accountRef: uid => 'staffAccounts/' + uid, now: () => 5,
+});
+
+test('createFirestoreLinker: eşleme + personel bağı TEK transaction; commit düşerse ikisi de yazılmaz; yeniden çalıştırma idempotent', async () => {
+    const S = load();
+    const docs = new Map([['personel/a1', { id: 'a1', name: 'Ali', pri: 'ali.veli' }]]);
+    const fields = at => ({ uid: 'u1', authEmail: 'ali.veli' + D, pri: 'ali.veli', authProvisionedAt: at });
+    await assert.rejects(linkerFor(S, docs, { failCommit: true })({ id: 'a1', pri: 'ali.veli' }, fields(1)), e => S.errorKind(e) === 'network');
+    assert.ok(!docs.has('staffAccounts/u1') && !docs.get('personel/a1').uid, 'yarım bağ yok');
+    assert.deepEqual(plain(await linkerFor(S, docs)({ id: 'a1', pri: 'ali.veli' }, fields(1))), { uid: 'u1', authEmail: 'ali.veli' + D, authProvisionedAt: 1 });
+    assert.deepEqual(docs.get('staffAccounts/u1'), { personelId: 'a1', pri: 'ali.veli', linkedAt: 5 });
+    assert.deepEqual(plain(await linkerFor(S, docs)({ id: 'a1', pri: 'ali.veli' }, fields(2))), {});
+    assert.equal(docs.get('personel/a1').authProvisionedAt, 1, 'değişmeyen bağ yeniden yazılmadı');
+});
+
+test('createFirestoreLinker: kayıt başka uid\'ye bağlıysa / eşleme başka personeli gösteriyorsa / kayıt yoksa hiçbir şey yazılmaz', async () => {
+    const S = load();
+    const docs = new Map([
+        ['personel/a1', { id: 'a1', pri: 'ali.veli', uid: 'u-eski' }],
+        ['personel/b1', { id: 'b1', pri: 'bora.kaya' }],
+        ['staffAccounts/u9', { personelId: 'zzz', pri: 'baska' }],
+    ]);
+    const before = JSON.stringify([...docs]);
+    const link = linkerFor(S, docs);
+    await assert.rejects(link({ id: 'a1' }, { uid: 'u1', pri: 'ali.veli' }), e => S.errorKind(e) === 'uid-mismatch');
+    await assert.rejects(link({ id: 'b1' }, { uid: 'u9', pri: 'bora.kaya' }), e => S.errorKind(e) === 'uid-mismatch');
+    await assert.rejects(link({ id: 'yok' }, { uid: 'u2', pri: 'x.y' }), e => S.errorKind(e) === 'not-found');
+    await assert.rejects(link({ id: 'b1' }, { uid: '', pri: 'x.y' }), e => e.code === 'invalid-argument');
+    assert.equal(JSON.stringify([...docs]), before);
 });

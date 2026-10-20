@@ -9,6 +9,9 @@ rules_version = '2';
 // talep sahibinin seçtiği onaylayıcı adı ile uid'nin aynı kişi olduğu kuralla doğrulanamaz (liste; bkz. J10 notu).
 // DİKKAT: Kurallar proje geneli (canlı + demo). Yayın yalnız J10 istemcisiyle AYNI deploy'da ve personel hesapları açıldıktan
 // sonra (VIP "PRI / Hesap Göç Aracı" — staffAccounts eşlemesini de o yazar); anonim sağlayıcı Console'da kapatılır.
+// J11 · P0: personel erişimi kök başına bir KİLİDE bağlı (accessGate/items/staff). Doküman yok / alan yok / tip yanlış / false
+// → hiçbir personel hiçbir şey okuyamaz ve yazamaz (fail-closed); yönetici etkilenmez. Kilit yalnız kapanış kanıtıyla açılır.
+// Yayın sırası: "Faz 4B Mega Fix Walkthrough" → P0 runbook.
 // =============================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -33,17 +36,33 @@ service cloud.firestore {
     function staffAccount(root) { return /databases/$(database)/documents/$(root)/staffAccounts/items/$(request.auth.uid); }
     function staffPersonOk(root, pid) {
       let p = /databases/$(database)/documents/$(root)/personel/items/$(pid);
-      return exists(p) && get(p).data.get('uid', '') == request.auth.uid && get(p).data.get('pri', '') == staffPri();
+      return pid is string && pid != '' && get(p).data.get('uid', '') == request.auth.uid && get(p).data.get('pri', '') == staffPri();
     }
-    function isStaff(root) {
+    // Kimlik (kilitten bağımsız): yalnız kilit dokümanının kendisini okumak için kullanılır (istemci "neden reddedildim" sorusunu
+    // yanıtlayabilsin). Veri erişimi için HER ZAMAN isStaff.
+    // J11: eşleme yolu ve personelId bir kez hesaplanır (kilit +1 okuma getirdi; en ağır onay isteği 1000 ifade sınırında kalsın).
+    function staffIdentity(root) {
+      let acct = staffAccount(root);
       return signedIn()
         && request.auth.token.firebase.sign_in_provider == 'password'
         && request.auth.token.get('email', '').lower().matches('[a-z0-9]+([._-][a-z0-9]+)*@staff[.]medipol[.]local')
-        && exists(staffAccount(root))
-        && get(staffAccount(root)).data.get('personelId', '') is string
-        && get(staffAccount(root)).data.get('personelId', '') != ''
-        && staffPersonOk(root, get(staffAccount(root)).data.personelId);
+        && staffPersonOk(root, get(acct).data.get('personelId', ''));
     }
+
+    // ─── J11 · P0 personel erişim kilidi (TEK KAYNAK) ─────────────────────────────────────────────────────
+    // [WHY]: Kod temizliği bitene kadar personel kayıtlarında düz metin giriş kodu var; kod + sabit dolgu Firebase Auth parolası
+    //        olduğundan bir personelin listeyi okuması hesap ele geçirme demek. Kurallar koleksiyonu tarayıp "temizlik bitti mi"
+    //        diyemez → yöneticinin yazdığı açık bir durum alanı gerekir.
+    // [HOW]: ${root}/accessGate/items/staff.staffAccessEnabled == true (bool) DEĞİLSE personel yok sayılır. isStaff bu kapıdan
+    //        geçer; personelin tüm okuma / listeleme / yazma / silme yolları (iş akışı, denetim günlüğü, demo temizlik istisnası)
+    //        isStaff ya da member üzerinden olduğu için hepsi tek noktadan kapanır. Bakım modu (maintenanceOn) ve istemcideki
+    //        geri yükleme kilidi ayrı kalır: kilit kapalıyken onlara hiç sıra gelmez; açıkken eskisi gibi çalışırlar.
+    //        Maliyet: personel isteği başına +1 doküman okuması (kilit kapalıyken diğer okumalara gerek kalmaz).
+    function staffGate(root) { return /databases/$(database)/documents/$(root)/accessGate/items/staff; }
+    function staffAccessOpen(root) {
+      return get(staffGate(root)).data.get('staffAccessEnabled', false) == true;
+    }
+    function isStaff(root) { return staffAccessOpen(root) && staffIdentity(root); }
     function member(root) { return isAdmin() || isStaff(root); }
 
     // T1: canlı kök lifeserver_master (28.09.2026'dan beri) + localhost/demo kökü. inventory_v2 aşağıda ayrı (KJ-2).
@@ -68,18 +87,20 @@ service cloud.firestore {
     // XSS savunma derinliği: "<harf", "</", "<!", "<?" reddedilir; "<5mm", "a < b" serbest (istemci: html.js hasTagLike).
     function noTag(v) { return !(v is string) || !v.matches('(?s).*<[a-zA-Z/!?].*'); }
 
+    // J11: koleksiyon dalı ?: ile seçilir (yalnız seçilen dal değerlendirilir; 1000 ifade bütçesi — bkz. walkthrough ölçümleri).
     function textOk(c, d) {
       return noTag(d.get('id', ''))
-        && (c != 'requests' || (
+        && (c == 'requests' ? (
              noTag(d.get('ürün', '')) && noTag(d.get('urun', '')) && noTag(d.get('not', ''))
-             && noTag(d.get('personel', '')) && noTag(d.get('talepTuru', '')) && noTag(d.get('oncelik', ''))))
-        && (c != 'tasks' || (
+             && noTag(d.get('personel', '')) && noTag(d.get('talepTuru', '')) && noTag(d.get('oncelik', '')))
+          : c == 'tasks' ? (
              noTag(d.get('title', '')) && noTag(d.get('description', '')) && noTag(d.get('priority', ''))
-             && noTag(d.get('assigneeId', '')) && noTag(d.get('creatorId', ''))))
-        && (c != 'purchaseOrders' || (
+             && noTag(d.get('assigneeId', '')) && noTag(d.get('creatorId', '')))
+          : c == 'purchaseOrders' ? (
              noTag(d.get('urun', '')) && noTag(d.get('aciklama', '')) && noTag(d.get('talepEden', ''))
              && noTag(d.get('birim', '')) && noTag(d.get('tur', '')) && noTag(d.get('evrakNo', ''))
-             && noTag(d.get('oncelik', '')) && noTag(d.get('createdByName', ''))));
+             && noTag(d.get('oncelik', '')) && noTag(d.get('createdByName', '')))
+          : true);
     }
 
     // ─── Sahiplik (J9 alanları; J10'da ZORUNLU) ──────────────────────────────────────────────────────────
@@ -90,22 +111,56 @@ service cloud.firestore {
     // Liste yalnız sona ekleme ile büyüyebilir (geçmiş / akış kayıtları). Not: kurallar dilinde BOŞ dilim ([0:0]) hata verir —
     // boş durum ayrıca karşılanır.
     function appendOnly(a, b) { return b.size() >= a.size() && (a.size() == 0 || b[0:a.size()] == a); }
-
-    // Yeni / taslak akış adımı: karar verilmemiş ve onaylayıcısı talep sahibinin kendisi değil. Kurallar liste üzerinde
-    // döngü kuramadığı için adım sayısı en fazla 10 ve her indeks açıkça denetlenir (istemci de 10 ile sınırlar).
-    function stepFresh(s, i, owner) {
-      return i >= s.size() || (!(s[i].get('status', 'pending') in ['approved', 'rejected']) && s[i].get('userUid', '') != owner);
+    // J11 · P1 #7: liste ya AYNEN kalır ya da sona TEK kayıt eklenir (önek korunur) ve eklenen kaydın aktör alanı (f) "me".
+    // Sahibin taslak / başlatma / geri çekme / iptal işlemleri istemcide en fazla bir history ve bir akış kaydı ekler.
+    function appendOneBy(a, b, f, me) {
+      let k = a.size();
+      return b.size() == k ? b == a : (b.size() == k + 1 && b[k].get(f, '') == me && (k == 0 || b[0:k] == a));
     }
+
+    // ─── J11 · P1 #5/#7: oturum sahibinin GERÇEK personel kimliği ─────────────────────────────────────────
+    // [WHY]: Kurallar sahiplik UID'sini doğruluyordu ama görünen kimlik alanlarını (talepEden, createdByName, personel,
+    //        creatorId, onay adımındaki actor/user, akis.yapan, history.actor) istemcinin yazdığı gibi kabul ediyordu.
+    // [HOW]: isStaff'ın ZATEN okuduğu iki belgeden (staffAccounts/{uid} → personelId, personel/{pid}) türetilir; Firestore aynı
+    //        yolları istek içinde önbellekler — yeni belge okuması ve O(N) sorgu yok. Ad, istemcideki
+    //        Ownership.selfName ile AYNI öncelikle (name → adSoyad → ad) ve kırpılarak hesaplanır.
+    function staffPid(root) { return get(staffAccount(root)).data.get('personelId', ''); }
+    function staffName(root) {
+      let pid = staffPid(root);
+      let pd = get(/databases/$(database)/documents/$(root)/personel/items/$(pid)).data;
+      let n1 = pd.get('name', '');
+      let n2 = pd.get('adSoyad', '');
+      let nm = (n1 is string && n1 != '') ? n1 : ((n2 is string && n2 != '') ? n2 : pd.get('ad', ''));
+      return nm is string ? nm.trim() : '';
+    }
+
+    // Yeni / taslak akış adımı: henüz karara bağlanmamış (status 'pending' ya da yok) ve onaylayıcısı talep sahibinin kendisi
+    // değil. Kurallar liste üzerinde döngü kuramadığı için adım sayısı en fazla 10 ve her indeks açıkça denetlenir (istemci de 10
+    // ile sınırlar). J11: satır içi ve 'pending' eşitliği — 10 adımlı başlatma isteği 1000 ifade bütçesine kimlik denetimleriyle
+    // birlikte ancak böyle sığıyor (eski "approved/rejected değil" biçimi 'cancelled' gibi değerleri de kabul ediyordu; istemci
+    // akışı her zaman 'pending' adımlarla başlatır, taslakta adım listesi boştur).
     function freshSteps(s, owner) {
-      return s.size() <= 10
-        && stepFresh(s, 0, owner) && stepFresh(s, 1, owner) && stepFresh(s, 2, owner) && stepFresh(s, 3, owner)
-        && stepFresh(s, 4, owner) && stepFresh(s, 5, owner) && stepFresh(s, 6, owner) && stepFresh(s, 7, owner)
-        && stepFresh(s, 8, owner) && stepFresh(s, 9, owner);
+      let n = s.size();
+      return n <= 10
+        && (n <= 0 || (s[0].get('status', 'pending') == 'pending' && s[0].get('userUid', '') != owner))
+        && (n <= 1 || (s[1].get('status', 'pending') == 'pending' && s[1].get('userUid', '') != owner))
+        && (n <= 2 || (s[2].get('status', 'pending') == 'pending' && s[2].get('userUid', '') != owner))
+        && (n <= 3 || (s[3].get('status', 'pending') == 'pending' && s[3].get('userUid', '') != owner))
+        && (n <= 4 || (s[4].get('status', 'pending') == 'pending' && s[4].get('userUid', '') != owner))
+        && (n <= 5 || (s[5].get('status', 'pending') == 'pending' && s[5].get('userUid', '') != owner))
+        && (n <= 6 || (s[6].get('status', 'pending') == 'pending' && s[6].get('userUid', '') != owner))
+        && (n <= 7 || (s[7].get('status', 'pending') == 'pending' && s[7].get('userUid', '') != owner))
+        && (n <= 8 || (s[8].get('status', 'pending') == 'pending' && s[8].get('userUid', '') != owner))
+        && (n <= 9 || (s[9].get('status', 'pending') == 'pending' && s[9].get('userUid', '') != owner));
     }
 
     // ─── Envanter talebi (requests) ───────────────────────────────────────────────────────────────────────
-    function requestCreateOk(d) {
-      return d.get('personelUid', '') == request.auth.uid && d.get('durum', '') in ['Beklemede', 'draft'];
+    // J11 · P1 #7: talep sahibinin adı (personel) ve personel id'si oturumun GERÇEK kaydıyla aynı olmalı. Güncellemede bu alanlar
+    // requestUpdateOk'un hasOnly listesinde olmadığı için zaten değiştirilemez.
+    function requestCreateOk(root, d) {
+      return d.get('personelUid', '') == request.auth.uid && d.get('durum', '') in ['Beklemede', 'draft']
+        && d.get('personel', '') == staffName(root)
+        && string(d.get('personelId', '')) == staffPid(root);
     }
     // Sahibi: bekleyen/taslak talebi düzenler, geri çeker (draft), yeniden gönderir (Beklemede); onaylanmışı teslim alır (completed).
     // Onaylama / reddetme / zimmet alanları yalnız yönetici.
@@ -119,52 +174,101 @@ service cloud.firestore {
     }
 
     // ─── Satın alma (purchaseOrders) ──────────────────────────────────────────────────────────────────────
-    function poCreateOk(d) {
+    // J11 · P1 #7: talebi açanın görünen kimliği (createdBy = personel id, createdByName, talepEden) oturumun GERÇEK kaydıyla aynı;
+    // yeni talep geçmişsiz başlar (history yok) ve en fazla tek "Talep Oluşturuldu" akış kaydı taşır — o da sahibin adıyla
+    // (savePurchaseRequest ile aynı). Önceden "onaylandı" yazan sahte geçmişle talep açılamaz.
+    function poCreateOk(root, d) {
       let wf = d.get('workflow', {});
+      let me = staffName(root);
       return d.get('createdByUid', '') == request.auth.uid
         && d.get('durum', '') in ['Onay Bekliyor', 'Taslak']
         && wf.get('started', false) != true && wf.get('finished', false) != true
-        && freshSteps(wf.get('steps', []), request.auth.uid);
+        && freshSteps(wf.get('steps', []), request.auth.uid)
+        && d.get('createdByName', '') == me && d.get('talepEden', '') == me
+        && string(d.get('createdBy', '')) == staffPid(root)
+        && wf.get('history', []).size() == 0
+        && appendOneBy([], d.get('akis', []), 'yapan', me);
     }
     // Sahibi, akış BAŞLAMAMIŞKEN: düzenler, akışı başlatır (adımlar kararsız, kendisi onaylayıcı değil), iptal eder.
+    // J11 · P1 #7: talep sahibinin görünen kimliği (createdBy / createdByName / talepEden) taslakta da DEĞİŞTİRİLEMEZ. Sahibin her
+    // işlemi (düzenleme, ek silme, başlatma, iptal) istemcide en fazla bir history ve bir akış kaydı ekler; eklenen kayıt sahibin
+    // KENDİ adını taşımak zorunda (başkası adına "onayladı" kaydı düşülemez). Sahibin adı olarak kayıttaki createdByName
+    // kullanılır: J11 sonrası açılan her talepte poCreateOk onu staffName'e bağlar ve burada değiştirilemez (aynı değer, ek
+    // belge okumasız — 10 adımlı başlatma bütçesi staffName'in ek maliyetini kaldırmıyor).
     function poDraftOk(old, d) {
       let wf = old.get('workflow', {});
       let nwf = d.get('workflow', {});
+      let me = old.get('createdByName', '');
       return wf.get('started', false) != true
+        && d.get('createdBy', null) == old.get('createdBy', null) && d.get('createdByName', null) == old.get('createdByName', null)
+        && d.get('talepEden', null) == old.get('talepEden', null)
         && old.get('durum', '') in ['Onay Bekliyor', 'Taslak', '']
         && d.get('durum', '') in ['Onay Bekliyor', 'Taslak', 'İptal Edildi']
         && freshSteps(nwf.get('steps', []), request.auth.uid)
         && nwf.get('currentStep', 0) == 0
         && (nwf.get('finished', false) != true || d.get('durum', '') == 'İptal Edildi')
         && (nwf.get('started', false) != true || d.get('durum', '') == 'Onay Bekliyor')
-        && appendOnly(wf.get('history', []), nwf.get('history', []))
-        && appendOnly(old.get('akis', []), d.get('akis', []));
+        && appendOneBy(wf.get('history', []), nwf.get('history', []), 'actor', me)
+        && appendOneBy(old.get('akis', []), d.get('akis', []), 'yapan', me);
     }
     // Sahibi, akış SÜRERKEN: yalnız geri çeker (taslağa döner; içerik değişmez, geçmiş korunur).
     function poWithdrawOk(old, d) {
       let wf = old.get('workflow', {});
       let nwf = d.get('workflow', {});
+      let me = old.get('createdByName', '');
       return wf.get('started', false) == true && wf.get('finished', false) != true
         && d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis'])
         && d.get('durum', '') == 'Taslak'
         && nwf.get('started', true) == false && nwf.get('finished', true) == false
         && nwf.get('steps', [1]).size() == 0 && nwf.get('currentStep', -1) == 0
-        && appendOnly(wf.get('history', []), nwf.get('history', []))
-        && appendOnly(old.get('akis', []), d.get('akis', []));
+        && appendOneBy(wf.get('history', []), nwf.get('history', []), 'actor', me)
+        && appendOneBy(old.get('akis', []), d.get('akis', []), 'yapan', me);
     }
-    // ONAY ADIMI (GPT-6): yalnız SIRASI GELMİŞ adımın onaylayıcısı (steps[currentStep].userUid == auth.uid; talep sahibi olamaz),
-    // yalnız o adımın karar alanlarını (status/date/actor/note) değiştirir. Diğer adımlar birebir aynı kalır (dilim eşitliği),
-    // onaylayıcı kimliği (user/userUid) değişemez, geçmiş ve akış kayıtları yalnız sona eklenir, sıra / bitiş / durum kararla tutarlı.
-    function poApprovalOk(old, d) {
+    // ONAY ADIMI (GPT-6 + J11 · P1 #5): yalnız SIRASI GELMİŞ adımın onaylayıcısı (steps[currentStep].userUid == auth.uid; talep
+    // sahibi olamaz), yalnız o adımın karar alanlarını (status/date/actor/note) değiştirir. Diğer adımlar birebir aynı kalır
+    // (dilim eşitliği), onaylayıcı kimliği (user/userUid) değişemez, sıra / bitiş / durum kararla tutarlı.
+    // J11 · P1 #5 — sahte olay / sahte aktör:
+    //   - Eklenen kayıt SAYISI edm-workflow.js'in gerçek davranışıyla birebir: onay = +1 history +1 akis (transitionWorkflowState
+    //     + approveStep'in tek akis.push'u); red = +1 history +3 akis (aynı transition + rejectStep'in üç akis.push'u: red,
+    //     state geçişi, modal kaydı). edm-workflow.js'te bu sayı değişirse kural da güncellenmeli (rules testleri yakalar).
+    //   - Adımın actor'u, yeni history kaydının actor'u ve yeni akış kayıtlarının yapan'ı onaylayanın GERÇEK adı (staffName).
+    // J11 · P1 #7 — sahte onaylayıcı: sıradaki adımın görünen onaylayıcısı (steps[cs].user) da onaylayanın gerçek adı olmalı.
+    //   Talep sahibi "Müdür X" adıyla başka birinin uid'sini adıma yazmış olsa bile o uid'nin sahibi bu adımı ONAYLAYAMAZ (yalnız
+    //   yönetici). Karşılaştırma tam ya da küçük harf eşitliğidir; istemci (_resolveWorkflowSteps) adı personel kaydındaki
+    //   biçime zaten normalize eder.
+    // "Bayat onay" tekrar oynatımı engellidir: cs HER ZAMAN sunucudaki GÜNCEL currentStep'tir; akış ilerlediyse eski payload ya
+    //   onaylayıcı uid'sinde ya da dilim eşitliği / sıra-durum kontrolünde düşer. İkinci kez onay da aynı nedenle düşer.
+    // Bilinçli sınırlama: date / tarih / timestamp istemci saatidir (request.time zorunlu kılınmadı — mevcut kayıtlar ISO / tr-TR
+    //   metin olarak okunuyor; değiştirmek çalışan akışı kırar). Adım adlarının uid ile eşleşmesi akış BAŞLARKEN değil (10 adımda
+    //   20 ek belge okuması gerekir — istek başına 10 get() sınırı), KARAR ANINDA zorunlu tutulur.
+    // J11 · P1 #5 kapanışı (bağımsız denetim) — aynı SAYIDA ama farklı İÇERİKLİ olay:
+    //   - Güncellenen adımın ESKİ durumu 'pending' olmalı: verilmiş bir kararın üzerine (onaylı → red, onaylı → tekrar onay;
+    //     currentStep'in geride kaldığı bozuk eski kayıtlar) yazılamaz. Böyle bir kayıt yöneticiye kalır.
+    //   - Eklenen history kaydı bir 'transition' olayıdır ve uid'si oturumun uid'si (request.auth.uid; ek get() yok). Eklenen her
+    //     akış kaydı da aynı uid'yi taşır. Aynı adlı iki personel olsa bile kaydı kimin yazdığı uid ile ayırt edilir.
+    //   - Olay türü kararla tutarlı: onayda akış kaydı "✅ Onaylandı: …"; redde sırasıyla "❌ REDDEDİLDİ: …", "🔄 State Geçişi: …",
+    //     "❌ Reddedildi: …" (edm-workflow.js rejectStep), history kaydı 'cancelled' durumuna geçer ve red gerekçesi (adımın
+    //     note'u, boş olamaz) akış kayıtlarına ve history notuna aynen taşınır. Onayda adımın note'u değişmez.
+    //   - Bilinçli sınırlama: tarih alanları (timestamp / tarih / date) istemci saatidir; sunucu saatine bağlanamaz (dizi içinde
+    //     serverTimestamp yok, veri katmanı JSON kopyası alır). Onayda history'nin from/to değerleri bağlanmadı: istemcinin durum
+    //     döngüsü 6+ adımlı akışta 'completed'a geçip fixWorkflowCurrentStep ile 'initiation'a döner (meşru akış kırılırdı).
+    function poApprovalOk(root, old, d) {
       let wf = old.get('workflow', {});
       let nwf = d.get('workflow', {});
       let cs = wf.get('currentStep', -1);
       let n = wf.get('steps', []).size();
       let st = nwf.get('steps', [])[cs].get('status', '');
+      let hSize = wf.get('history', []).size();
+      let aSize = old.get('akis', []).size();
+      let me = staffName(root);
+      let stepUser = string(wf.steps[cs].get('user', '')).trim();
+      let uid = request.auth.uid;
       return wf.get('started', false) == true && wf.get('finished', false) != true && wf.get('currentState', '') != 'suspended'
         && cs is int && cs >= 0 && cs < n
-        && wf.steps[cs].get('userUid', '') == request.auth.uid
-        && old.get('createdByUid', '') != request.auth.uid
+        && wf.steps[cs].get('userUid', '') == uid
+        && wf.steps[cs].get('status', 'pending') == 'pending'
+        && old.get('createdByUid', '') != uid
+        && me != '' && (stepUser == me || stepUser.lower() == me.lower())
         && d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis'])
         && nwf.diff(wf).affectedKeys().hasOnly(['steps', 'currentStep', 'finished', 'currentState', 'history', 'started'])
         && nwf.get('started', false) == true
@@ -172,22 +276,48 @@ service cloud.firestore {
         && (cs == 0 || nwf.steps[0:cs] == wf.steps[0:cs])
         && (cs + 1 == n || nwf.steps[cs + 1:n] == wf.steps[cs + 1:n])
         && nwf.steps[cs].diff(wf.steps[cs]).affectedKeys().hasOnly(['status', 'date', 'actor', 'note'])
+        && nwf.steps[cs].get('actor', '') == me
         && appendOnly(wf.get('history', []), nwf.get('history', []))
+        && nwf.get('history', []).size() == hSize + 1
+        && nwf.history[hSize].get('actor', '') == me
+        && nwf.history[hSize].get('uid', '') == uid
+        && nwf.history[hSize].get('action', '') == 'transition'
         && appendOnly(old.get('akis', []), d.get('akis', []))
-        && ((st == 'approved' && nwf.get('currentStep', -1) == cs + 1 && nwf.get('finished', false) == (cs + 1 == n)
-              && d.get('durum', '') == (cs + 1 == n ? 'Onaylandı' : 'Onay Bekliyor'))
-          || (st == 'rejected' && nwf.get('currentStep', -1) == cs && nwf.get('finished', false) == true
-              && d.get('durum', '') == 'Reddedildi'));
+        && (st == 'approved'
+          ? (nwf.get('currentStep', -1) == cs + 1 && nwf.get('finished', false) == (cs + 1 == n)
+              && d.get('durum', '') == (cs + 1 == n ? 'Onaylandı' : 'Onay Bekliyor')
+              && nwf.steps[cs].get('note', '') == wf.steps[cs].get('note', '')
+              && nwf.history[hSize].get('to', '') != 'cancelled'
+              && d.get('akis', []).size() == aSize + 1
+              && d.akis[aSize].get('yapan', '') == me && d.akis[aSize].get('uid', '') == uid
+              && d.akis[aSize].get('islem', '').matches('✅ Onaylandı: .*'))
+          : (st == 'rejected' && nwf.get('currentStep', -1) == cs && nwf.get('finished', false) == true
+              && d.get('durum', '') == 'Reddedildi' && nwf.get('currentState', '') == 'cancelled'
+              && poRejectAkisOk(d.akis, aSize, nwf.history[hSize], nwf.steps[cs].get('note', ''), me, uid)));
     }
-    function poUpdateOk(old, d) {
-      return (old.get('createdByUid', '') == request.auth.uid && (poDraftOk(old, d) || poWithdrawOk(old, d)))
-        || poApprovalOk(old, d);
+    // Red: tam +3 akış kaydı, üçü de onaylayanın adı + uid'siyle, rejectStep'in sırası ve türleriyle; gerekçe boş olamaz ve her
+    // kayıtta aynı. history kaydı 'cancelled'a geçiş ve notu "Reddedildi: <gerekçe>".
+    function poRejectAkisOk(a, k, h, why, me, uid) {
+      return why is string && why.trim() != '' && a.size() == k + 3
+        && h.get('to', '') == 'cancelled' && h.get('note', '') == 'Reddedildi: ' + why
+        && a[k].get('yapan', '') == me && a[k].get('uid', '') == uid
+        && a[k].get('islem', '').matches('❌ REDDEDİLDİ: .*') && a[k].get('not', '') == why
+        && a[k + 1].get('yapan', '') == me && a[k + 1].get('uid', '') == uid
+        && a[k + 1].get('islem', '').matches('🔄 State Geçişi: .*') && a[k + 1].get('not', '') == 'Reddedildi: ' + why
+        && a[k + 2].get('yapan', '') == me && a[k + 2].get('uid', '') == uid
+        && a[k + 2].get('islem', '').matches('❌ Reddedildi: .*') && a[k + 2].get('not', '') == why;
+    }
+    // Sahibi: akış başlamamışsa taslak işlemleri, başlamışsa yalnız geri çekme (sahibi değilse onay adımı: poApprovalOk; dağıtım
+    // update kuralında ?: ile — yalnız seçilen dal değerlendirilir).
+    function poOwnerUpdateOk(old, d) {
+      return old.get('workflow', {}).get('started', false) == true ? poWithdrawOk(old, d) : poDraftOk(old, d);
     }
 
     // ─── Görev (tasks) ────────────────────────────────────────────────────────────────────────────────────
     // Oluşturan: her alanı (sahiplik hariç). Atanan: yalnız durum / mesaj / alt madde. Havuz görevleri yönetici atar.
+    // J11 · P1 #7: oluşturanın görünen adı (creatorId) oluşturmada oturum sahibinin gerçek adı, sonra DEĞİŞTİRİLEMEZ.
     function taskUpdateOk(old, d) {
-      return old.get('creatorUid', '') == request.auth.uid
+      return (old.get('creatorUid', '') == request.auth.uid && !d.diff(old).affectedKeys().hasAny(['creatorId']))
         || (old.get('assigneeUid', '') == request.auth.uid
             && d.diff(old).affectedKeys().hasOnly(['status', 'interactions', 'checklist', 'updatedAt']));
     }
@@ -199,14 +329,10 @@ service cloud.firestore {
         || (resource != null && resource.data.keys().hasAny(['code']) && d.code == resource.data.code);
     }
 
-    // KJ-5: yalnız inventory_demo'da, akış testlerinin __flowtest__ işaretli dokümanlarının temizliği.
-    function marked(d, f) { return d.get(f, '') is string && d.get(f, '').matches('.*__flowtest__.*'); }
-    function isTestDoc(d) {
-      return marked(d, 'ürün') || marked(d, 'urun') || marked(d, 'not') || marked(d, 'sn') || marked(d, 'personel')
-          || marked(d, 'talepEden') || marked(d, 'aciklama') || marked(d, 'evrakNo') || marked(d, 'createdByName')
-          || marked(d, 'title') || marked(d, 'description') || marked(d, 'alanKisi') || marked(d, 'baslik')
-          || marked(d, 'name');
-    }
+    // J11 · P1 #6: KJ-5 demo test silme istisnası (__flowtest__ işaretli belgeyi HER personelin silebilmesi) KALDIRILDI. İşaret
+    // personelin yazabildiği metin alanlarında aranıyordu; bu yüzden yetkisiz silmeye ve bakım modunun aşılmasına izin veriyordu
+    // (zimmet ve servis kayıtları dahil). Test temizliği artık yalnız yönetici oturumuyla ya da emülatörde kuralları atlayan yönetim
+    // erişimiyle yapılır (scratch/flow-tests.js).
 
     match /{root}/{col}/items/{docId} {
       // Ek D "Ziyaretçi ✗": oturumsuz / anonim / personele bağlı olmayan hesap hiçbir şey okuyamaz.
@@ -220,21 +346,24 @@ service cloud.firestore {
       // Personel: yalnız iş akışı koleksiyonları, bakım kapalıyken, etiketsiz metinle; sahiplik zorunlu ve değişmez.
       allow create: if validRoot(root) && !isAdmin() && isStaff(root)
         && staffWritable(col) && !maintenanceOn(root) && textOk(col, request.resource.data)
-        && ((col == 'requests' && requestCreateOk(request.resource.data))
-            || (col == 'purchaseOrders' && poCreateOk(request.resource.data))
-            || (col == 'tasks' && request.resource.data.get('creatorUid', '') == request.auth.uid));
+        && (col == 'requests' ? requestCreateOk(root, request.resource.data)
+            : col == 'purchaseOrders' ? poCreateOk(root, request.resource.data)
+            : (request.resource.data.get('creatorUid', '') == request.auth.uid
+                && request.resource.data.get('creatorId', '') == staffName(root)));
+      // J11 · P1 #5: textOk onay dalında değerlendirilmez — onaylayıcı textOk'un baktığı hiçbir alanı değiştiremez
+      // (poApprovalOk: affectedKeys yalnız workflow / durum / akis); kazanılan ifade bütçesi kayıt içerik denetimlerine gider.
       allow update: if validRoot(root) && !isAdmin() && isStaff(root)
-        && staffWritable(col) && !maintenanceOn(root) && textOk(col, request.resource.data)
+        && staffWritable(col) && !maintenanceOn(root)
         && ownerUnchanged(col, request.resource.data, resource.data)
-        && ((col == 'requests' && requestUpdateOk(resource.data, request.resource.data))
-            || (col == 'purchaseOrders' && poUpdateOk(resource.data, request.resource.data))
-            || (col == 'tasks' && taskUpdateOk(resource.data, request.resource.data)));
+        && (col == 'requests' ? textOk(col, request.resource.data) && requestUpdateOk(resource.data, request.resource.data)
+            : col == 'purchaseOrders' ? (resource.data.get('createdByUid', '') == request.auth.uid
+                ? textOk(col, request.resource.data) && poOwnerUpdateOk(resource.data, request.resource.data)
+                : poApprovalOk(root, resource.data, request.resource.data))
+            : textOk(col, request.resource.data) && taskUpdateOk(resource.data, request.resource.data));
 
       // Silme: personel yalnız KENDİ oluşturduğu görevi; talepler, satın almalar, zimmet ve servis kayıtları admin'e ait.
       allow delete: if validRoot(root) && !isAdmin() && isStaff(root) && col == 'tasks' && !maintenanceOn(root)
         && resource.data.get('creatorUid', '') == request.auth.uid;
-      allow delete: if root == 'inventory_demo' && isStaff(root)
-        && col in ['requests', 'purchaseOrders', 'assignments', 'serviceRecords', 'tasks'] && resource != null && isTestDoc(resource.data);
     }
 
     // J10 · personel hesap eşlemesi (uid → personelId, pri): isStaff'ın dayanağı. Yalnız yönetici okur / yazar; personel kendi
@@ -242,6 +371,39 @@ service cloud.firestore {
     // Oturumsuz giriş rehberi (staffDirectory) KALDIRILDI: eşleşen kural yok → herkese kapalı.
     match /{root}/staffAccounts/items/{uid} {
       allow read, write: if validRoot(root) && isAdmin();
+    }
+
+    // J11 · P0 erişim kilidi. Okuma: yönetici ve (kilit kapalıyken de) kimliği doğrulanmış personel — yalnız durum + sayılar, kişisel
+    // veri yok. Yazma yalnız yönetici: KAPATMA her zaman serbest; AÇMA yalnız kapanış kanıtıyla (closureOk). Silme = kapatma.
+    // Bilinçli sınırlama: kurallar kanıttaki sayıların gerçekten sunucudan sayıldığını doğrulayamaz (yönetici güvenilir taraf; istemci
+    // yolu VIP "Personel Erişim Kilidi" aracıdır ve sayıları sunucudan taze okur). Kanıt şeması, sıfır olmayan sayı, eksik / fazla
+    // alan, istemci saati ve başkası adına imza reddedilir.
+    function gateBaseOk(d) {
+      return d.keys().hasOnly(['staffAccessEnabled', 'changedAt', 'changedBy', 'reason', 'closure', 'version'])
+        && d.get('staffAccessEnabled', null) is bool
+        && d.get('version', 0) == 1
+        && d.get('changedAt', null) == request.time
+        && d.get('changedBy', '') == request.auth.uid
+        && d.get('reason', '') is string && d.get('reason', '').size() <= 300 && noTag(d.get('reason', ''));
+    }
+    // Kapanış kanıtı: J11'in sekiz denetimi, hepsi 0 (eksik / fazla anahtar yok). İstemcideki karşılığı Ownership.CLOSURE_CHECKS.
+    function closureOk(c) {
+      return c is map
+        && c.keys().hasAll(['personelCodes', 'requestCodes', 'purchaseOrderCodes', 'accountsMissing', 'accountsInconsistent',
+                            'accountMapMismatch', 'ownershipPending', 'ownershipUnresolved'])
+        && c.keys().hasOnly(['personelCodes', 'requestCodes', 'purchaseOrderCodes', 'accountsMissing', 'accountsInconsistent',
+                             'accountMapMismatch', 'ownershipPending', 'ownershipUnresolved'])
+        && c.personelCodes == 0 && c.requestCodes == 0 && c.purchaseOrderCodes == 0
+        && c.accountsMissing == 0 && c.accountsInconsistent == 0 && c.accountMapMismatch == 0
+        && c.ownershipPending == 0 && c.ownershipUnresolved == 0;
+    }
+    function gateWriteOk(d) {
+      return gateBaseOk(d) && (d.staffAccessEnabled == false || closureOk(d.get('closure', null)));
+    }
+    match /{root}/accessGate/items/{gateId} {
+      allow read: if validRoot(root) && gateId == 'staff' && (isAdmin() || staffIdentity(root));
+      allow create, update: if validRoot(root) && gateId == 'staff' && isAdmin() && gateWriteOk(request.resource.data);
+      allow delete: if validRoot(root) && gateId == 'staff' && isAdmin();
     }
 
     // Denetim günlüğü (4.7 · KJ-7): yalnız ekleme, katı şema, sunucu saati, kendi uid'i; admin dahil kimse düzeltemez/silemez.

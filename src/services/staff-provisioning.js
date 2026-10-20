@@ -15,10 +15,13 @@
  *                    yalnız Firebase'in ≥ 6 karakter kuralını sağlar. Güvenlik kodun kendisinden gelir.
  *        - Hesap açma yalnız İKİNCİL bir app örneğinde ('provisioner', bellek içi kalıcılık): admin oturumu (ana örnek) hiç
  *          etkilenmez; ikincil örnek her işlemden sonra signOut eder, tarayıcı depolamasına hiçbir şey yazmaz.
- *        - Bağlama : önce kuralların kimlik eşlemesi (staffAccounts/{uid} → personelId, pri), sonra personel.uid / authEmail / pri.
+ *        - Bağlama : kuralların kimlik eşlemesi (staffAccounts/{uid} → personelId, pri) ve personel.uid / authEmail / pri TEK
+ *                    transaction'da (J11 · createFirestoreLinker); başka hesaba / personele bağlı kayıt değiştirilmez.
  *                    Bağlama düşerse yeniden çalıştırma hesabı "zaten var" bulur, aynı parolayla uid'i alıp bağlar (idempotent).
  *        - J7 hesabı (p<id>@…, PRI öncesi): uid KORUNARAK e-postası PRI adresine taşınır (yeni hesap açılsaydı uid değişir, J9
- *                    sahiplik alanları sahipsiz kalırdı). Eski kod gerekir → Kod Temizliğinden ÖNCE.
+ *                    sahiplik alanları sahipsiz kalırdı). Eski kod gerekir → Kod Temizliğinden ÖNCE. Taşıma olup bağ düştüyse
+ *                    yeniden çalıştırma PRI adresiyle girer, uid aynıysa bağı tamamlar (J11 · 'move-resumed').
+ *        - Hatalar : errorKind ile türlere ayrılır (kota / ağ / yetki / yanlış kod / çakışma / devre dışı); ağ ve yetki toplu işi durdurur.
  *        - Kota    : Firebase istemci tarafı hesap açmayı IP başına sınırlar; 'too-many-requests'te toplu iş DURUR ve kalan
  *                    sayıyı bildirir (yarım kalan iş sonra kaldığı yerden devam eder — açılmış olanlar bağlıdır).
  *        Saf çekirdek window'a ve Firebase'e dokunmaz → tests/unit/staff-provisioning.test.mjs; gerçek Auth:
@@ -117,10 +120,45 @@
 
     const isStaffEmail = email => typeof email === 'string' && email.toLowerCase().endsWith('@' + STAFF_EMAIL_DOMAIN);
 
-    const errCode = e => String((e && e.code) || '').replace(/^auth\//, '');
-    const RATE_LIMIT = ['too-many-requests', 'quota-exceeded'];
+    const errCode = e => String((e && e.code) || '').replace(/^(auth|firestore)\//, '');
+    const RATE_LIMIT = ['too-many-requests', 'quota-exceeded', 'resource-exhausted'];
     const SIGNUP_CLOSED = ['admin-restricted-operation', 'operation-not-allowed'];
     const WRONG_PASSWORD = ['wrong-password', 'invalid-credential', 'invalid-login-credentials', 'user-not-found'];
+    const NETWORK = ['network-request-failed', 'unavailable', 'deadline-exceeded', 'timeout'];
+    const PERMISSION = ['permission-denied', 'unauthenticated'];
+
+    // [WHY]: Faz 4B · J11 (P1) — kota, ağ kopması, yetki reddi, yanlış kod, e-posta çakışması ve devre dışı hesap aynı "error" /
+    //        "conflict" kutusuna düşüyordu: yönetici ne yapacağını bilemiyor, toplu iş ağ koptuğunda her satırı ayrı ayrı düşürüyordu.
+    // [HOW]: Her hata tek bir türe indirgenir; sonuçlar `kind` taşır. Toplu işi durduranlar (kota, ağ, yetki, kapalı özellik)
+    //        ProvisioningStop / durma nedeni olur; kişiye özgü olanlar (yanlış kod, çakışma, devre dışı) satır sonucu kalır.
+    /** Hata → tür: rate-limited | operation-not-allowed | requires-recent-login | network | permission-denied | wrong-password |
+     *  email-in-use | user-disabled | uid-mismatch | not-found | unknown */
+    function errorKind(e) {
+        const c = errCode(e);
+        if (RATE_LIMIT.includes(c)) return 'rate-limited';
+        if (SIGNUP_CLOSED.includes(c)) return 'operation-not-allowed';
+        if (c === 'requires-recent-login') return 'requires-recent-login';
+        if (NETWORK.includes(c)) return 'network';
+        if (PERMISSION.includes(c)) return 'permission-denied';
+        if (WRONG_PASSWORD.includes(c)) return 'wrong-password';
+        if (c === 'email-already-in-use') return 'email-in-use';
+        if (c === 'user-disabled') return 'user-disabled';
+        if (c === 'uid-mismatch') return 'uid-mismatch';
+        if (c === 'not-found') return 'not-found';
+        return 'unknown';
+    }
+    const reasonOf = e => errCode(e) || (e && e.message) || 'bilinmeyen hata';
+    const STOP_RATE = () => new ProvisioningStop('rate-limited', 'Firebase deneme / hesap açma kotası doldu; bir süre sonra kaldığı yerden devam edin.');
+    const STOP_NETWORK = () => new ProvisioningStop('network', 'Sunucuya bağlantı koptu; bağlantı gelince aracı yeniden çalıştırın (yarım kalan hesaplar kaldığı yerden tamamlanır).');
+    const STOP_PERMISSION = () => new ProvisioningStop('permission-denied', 'Firestore yazması reddedildi (yönetici oturumu düşmüş ya da kurallar uygun değil); yeniden giriş yapıp aracı tekrar çalıştırın. Açılmış / taşınmış hesaplar yeniden çalıştırmada bağlanır.');
+    const DISABLED_REASON = 'giriş hesabı Firebase\'de devre dışı (Console → Authentication) — etkinleştirilmeden bağlanmaz';
+
+    /** Bağlama hatası → satır sonucu. Bağ çakışması (başka hesap / başka personel) 'conflict'tir: hiçbir şey yazılmadı. */
+    function linkFailure(e, uid, email) {
+        const kind = errorKind(e);
+        if (kind === 'uid-mismatch') return { status: 'conflict', kind, uid, email, reason: (e && e.message) || 'bağ başka bir hesabı / personeli gösteriyor' };
+        return { status: 'link-failed', kind, uid, email, reason: reasonOf(e) };
+    }
 
     // ─── Hesap açma (tek personel) ──────────────────────────────────────────────────────────────────────
     /**
@@ -129,9 +167,9 @@
      * @param {{createAccount:Function, findAccount:Function}} provisioner  (email, password) → uid
      * @param {Function} link                 (person, { uid, authEmail, pri, authProvisionedAt }) → Promise
      * @param {{now?:Function, code?:string}} [opts]  code: yöneticinin verdiği yeni kod (verilmezse eski kayıttaki kod)
-     * @returns {Promise<{status:'created'|'relinked'|'already-linked'|'invalid'|'conflict'|'error'|'link-failed',
-     *                    uid?:string, email?:string, reason?:string}>}
-     * Toplu işi durdurması gereken hatalarda ProvisioningStop fırlatır ('rate-limited' | 'signup-disabled').
+     * @returns {Promise<{status:'created'|'relinked'|'already-linked'|'invalid'|'conflict'|'disabled'|'error'|'link-failed',
+     *                    uid?:string, email?:string, reason?:string, kind?:string}>}
+     * Toplu işi durdurması gereken hatalarda ProvisioningStop fırlatır ('rate-limited' | 'signup-disabled' | 'network').
      */
     async function provisionOne(person, provisioner, link, { now = Date.now, code } = {}) {
         if (person && person.uid) return { status: 'already-linked', uid: person.uid };
@@ -145,35 +183,45 @@
             uid = await provisioner.createAccount(email, password);
             status = 'created';
         } catch (e) {
-            const c = errCode(e);
-            if (RATE_LIMIT.includes(c)) throw new ProvisioningStop('rate-limited', 'Firebase hesap açma kotası doldu; bir süre sonra kaldığı yerden devam edin.');
-            if (SIGNUP_CLOSED.includes(c)) throw new ProvisioningStop('signup-disabled', 'Firebase Console\'da e-posta/parola ile hesap oluşturma kapalı (Authentication → Settings → User actions).');
-            if (c !== 'email-already-in-use') return { status: 'error', email, reason: c || (e && e.message) || 'bilinmeyen hata' };
+            const k = errorKind(e);
+            if (k === 'rate-limited') throw STOP_RATE();
+            if (k === 'operation-not-allowed') throw new ProvisioningStop('signup-disabled', 'Firebase Console\'da e-posta/parola ile hesap oluşturma kapalı (Authentication → Settings → User actions).');
+            if (k === 'network') throw STOP_NETWORK();   // hesap sunucuda açılmış olabilir: yeniden çalıştırma "zaten var" yolundan bağlar
+            if (k !== 'email-in-use') return { status: 'error', kind: k, email, reason: reasonOf(e) };
             // Hesap zaten var (önceki koşuda açılmış, bağlama düşmüş olabilir): aynı parolayla girip uid'i al
             try {
                 uid = await provisioner.findAccount(email, password);
                 status = 'relinked';
             } catch (e2) {
-                const c2 = errCode(e2);
-                if (RATE_LIMIT.includes(c2)) throw new ProvisioningStop('rate-limited', 'Firebase giriş deneme kotası doldu; bir süre sonra devam edin.');
-                if (WRONG_PASSWORD.includes(c2)) {
-                    return { status: 'conflict', email, reason: 'bu kurumsal kimlikle (PRI) Firebase\'de parolası farklı bir hesap var — PRI\'yi değiştirin ya da hesap yerel firebase-admin betiğiyle sıfırlanmalı' };
+                const k2 = errorKind(e2);
+                if (k2 === 'rate-limited') throw STOP_RATE();
+                if (k2 === 'network') throw STOP_NETWORK();
+                if (k2 === 'user-disabled') return { status: 'disabled', kind: k2, email, reason: DISABLED_REASON };
+                if (k2 === 'wrong-password') {
+                    return { status: 'conflict', kind: k2, email, reason: 'bu kurumsal kimlikle (PRI) Firebase\'de parolası farklı bir hesap var — PRI\'yi değiştirin ya da hesap yerel firebase-admin betiğiyle sıfırlanmalı' };
                 }
-                return { status: 'error', email, reason: c2 || (e2 && e2.message) || 'bilinmeyen hata' };
+                return { status: 'error', kind: k2, email, reason: reasonOf(e2) };
             }
         }
         try {
             await link(person, { uid, authEmail: email, pri, authProvisionedAt: now() });
         } catch (e) {
-            return { status: 'link-failed', uid, email, reason: (e && (e.code || e.message)) || 'bağlama yazılamadı' };
+            return linkFailure(e, uid, email);
         }
         return { status, uid, email };
     }
 
     /**
      * J7 hesabının (p<id>@) e-postasını uid'yi koruyarak PRI adresine taşır ve bağlar. Eski kod gerekir.
-     * @returns {Promise<{status:'moved'|'conflict'|'error'|'link-failed'|'invalid', uid?, email?, reason?}>}
-     * Kota / e-posta değişikliğinin projede kapalı olması → ProvisioningStop ('rate-limited' | 'email-change-blocked').
+     * [WHY]: Faz 4B · J11 (P1) — Auth taşıması başarılı olup Firestore bağı düşünce (ağ, yetki) personel kaydı hâlâ eski adresi
+     *        gösteriyordu; yeniden çalıştırma eski adrese girmeye çalışıp "parola eşleşmiyor" çakışmasıyla duruyordu — hesap
+     *        taşınmış ama hiçbir zaman bağlanamıyordu.
+     * [HOW]: Önce eski adresle giriş + taşıma (değişmedi). Eski adres kodu kabul etmezse hesap önceki koşuda taşınmış olabilir:
+     *        hedef PRI adresiyle AYNI kodla yalnız giriş denenir (hiçbir şey değiştirmez). Bulunan hesabın uid'si personel
+     *        kaydındakiyle BİREBİR aynıysa eksik bağ tamamlanır ('move-resumed'); değilse hiçbir Firestore bağı yazılmaz
+     *        ('conflict'). Hiçbir durumda yeni hesap açılmaz, başka hesaba bağlanmaz, uid değiştirilmez.
+     * @returns {Promise<{status:'moved'|'move-resumed'|'conflict'|'disabled'|'error'|'link-failed'|'invalid', uid?, email?, reason?, kind?}>}
+     * Kota / ağ / e-posta değişikliğinin projede kapalı olması → ProvisioningStop ('rate-limited' | 'network' | 'email-change-blocked').
      */
     async function moveLegacyAccount(person, provisioner, link, { now = Date.now, code } = {}) {
         const pri = normalizePri(person && person.pri);
@@ -181,27 +229,42 @@
         const from = String((person && person.authEmail) || '').trim().toLowerCase() || legacyStaffEmail(person && person.id);
         const password = staffPassword(code !== undefined ? code : (person && person.code));
         if (!to || !from || !password || !person.uid) return { status: 'invalid', reason: !to ? 'kurumsal kimlik (PRI) yok ya da geçersiz' : 'eski hesap ya da giriş kodu yok' };
-        let uid;
+        const expectUid = String(person.uid);
+        let uid, status = 'moved';
         try {
-            uid = await provisioner.moveAccount(from, password, to, { expectUid: String(person.uid) });
+            uid = await provisioner.moveAccount(from, password, to, { expectUid });
         } catch (e) {
-            const c = errCode(e);
-            if (c === 'uid-mismatch') return { status: 'conflict', email: from, reason: 'eski e-postadaki hesap bu personele bağlı hesap değil (taşınmadı)' };
-            if (RATE_LIMIT.includes(c)) throw new ProvisioningStop('rate-limited', 'Firebase deneme kotası doldu; bir süre sonra kaldığı yerden devam edin.');
-            if (c === 'operation-not-allowed' || c === 'requires-recent-login') {
+            const k = errorKind(e);
+            if (k === 'uid-mismatch') return { status: 'conflict', kind: k, email: from, reason: 'eski e-postadaki hesap bu personele bağlı hesap değil (taşınmadı)' };
+            if (k === 'rate-limited') throw STOP_RATE();
+            if (k === 'network') throw STOP_NETWORK();   // taşıma sunucuda olmuş olabilir: yeniden çalıştırma aşağıdaki kurtarma yolundan tamamlar
+            if (k === 'operation-not-allowed' || k === 'requires-recent-login') {
                 throw new ProvisioningStop('email-change-blocked', 'Firebase bu projede doğrulamasız e-posta değişikliğine izin vermiyor (Authentication → Settings → "Email enumeration protection"). Kapatın ya da hesaplar yerel firebase-admin betiğiyle taşınmalı.');
             }
-            if (c === 'email-already-in-use') return { status: 'conflict', email: to, reason: 'PRI adresinde başka bir hesap var — bu personel için farklı bir PRI seçin' };
-            if (WRONG_PASSWORD.includes(c)) return { status: 'conflict', email: from, reason: 'eski hesabın parolası kayıttaki kodla eşleşmiyor' };
-            return { status: 'error', email: to, reason: c || (e && e.message) || 'bilinmeyen hata' };
+            if (k === 'email-in-use') return { status: 'conflict', kind: k, email: to, reason: 'PRI adresinde başka bir hesap var — bu personel için farklı bir PRI seçin' };
+            if (k === 'user-disabled') return { status: 'disabled', kind: k, email: from, reason: DISABLED_REASON };
+            if (k !== 'wrong-password') return { status: 'error', kind: k, email: to, reason: reasonOf(e) };
+            // Eski adres girişi reddetti → önceki koşuda taşınmış olabilir (Auth tamam, Firestore bağı düşmüş). Yalnız GİRİŞ (değişiklik yok).
+            try {
+                uid = await provisioner.findAccount(to, password);
+                status = 'move-resumed';
+            } catch (e2) {
+                const k2 = errorKind(e2);
+                if (k2 === 'rate-limited') throw STOP_RATE();
+                if (k2 === 'network') throw STOP_NETWORK();
+                if (k2 === 'user-disabled') return { status: 'disabled', kind: k2, email: to, reason: DISABLED_REASON };
+                if (k2 === 'wrong-password') return { status: 'conflict', kind: k2, email: from, reason: 'ne eski (J7) adres ne PRI adresi kayıttaki kodu kabul etti — kod değişmiş olabilir; uid\'yi koruyan sıfırlama yerel firebase-admin betiği ister' };
+                return { status: 'error', kind: k2, email: to, reason: reasonOf(e2) };
+            }
+            if (String(uid) !== expectUid) return { status: 'conflict', kind: 'uid-mismatch', email: to, reason: 'PRI adresindeki hesap bu personele bağlı hesap değil (bağ değiştirilmedi)' };
         }
-        if (String(uid) !== String(person.uid)) return { status: 'conflict', email: from, reason: 'eski e-postadaki hesap bu personele bağlı hesap değil' };
+        if (String(uid) !== expectUid) return { status: 'conflict', kind: 'uid-mismatch', email: from, reason: 'eski e-postadaki hesap bu personele bağlı hesap değil' };
         try {
             await link(person, { uid, authEmail: to, pri, authProvisionedAt: now() });
         } catch (e) {
-            return { status: 'link-failed', uid, email: to, reason: (e && (e.code || e.message)) || 'bağlama yazılamadı' };
+            return linkFailure(e, uid, to);
         }
-        return { status: 'moved', uid, email: to };
+        return { status, uid, email: to };
     }
 
     // ─── PRI / hesap göç planı (VIP aracı) ─────────────────────────────────────────────────────────────
@@ -266,19 +329,25 @@
             const row = todo[i];
             const fresh = personelById.get(row.id);
             const person = fresh && { ...fresh, id: row.id, pri: row.pri };
+            let r;
             try {
-                let r;
                 if (!fresh) r = { status: 'skipped', reason: 'personel kaydı bulunamadı' };
                 else if (row.action === 'create') r = await provisionOne(person, provisioner, link, { now });
                 else if (row.action === 'move') r = await moveLegacyAccount(person, provisioner, link, { now });
-                else if (row.action === 'ok') { await link(person, { uid: person.uid, authEmail: staffEmail(row.pri), pri: row.pri }); r = { status: 'ok' }; }
+                else if (row.action === 'ok') {
+                    try { await link(person, { uid: person.uid, authEmail: staffEmail(row.pri), pri: row.pri }); r = { status: 'ok' }; }
+                    catch (e) { r = linkFailure(e, person.uid, staffEmail(row.pri)); }
+                }
                 else { if (row.priChange) await writePri(person, row.pri); r = { status: row.priChange ? 'pri-written' : 'unchanged' }; }
-                results.push({ id: row.id, action: row.action, ...r });
             } catch (e) {
                 if (e && e.name === 'ProvisioningStop') { stopped = { code: e.code, message: e.message }; break; }
-                results.push({ id: row.id, action: row.action, status: 'error', reason: (e && (e.code || e.message)) || 'bilinmeyen hata' });
+                r = { status: 'error', kind: errorKind(e), reason: reasonOf(e) };
             }
+            results.push({ id: row.id, action: row.action, ...r });
             if (onProgress) onProgress(i + 1, todo.length);
+            // J11 · P1: ağ / yetki hatası kişiye özgü değildir — sonraki satırlar da düşer. Bu satır raporlanır, iş durur.
+            if (r.kind === 'network') { stopped = { code: 'network', message: STOP_NETWORK().message }; break; }
+            if (r.kind === 'permission-denied') { stopped = { code: 'permission-denied', message: STOP_PERMISSION().message }; break; }
         }
         const counts = {};
         results.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
@@ -321,6 +390,42 @@
         };
     }
 
+    // ─── Firestore bağı (tek transaction) ──────────────────────────────────────────────────────────────
+    const linkError = (code, message) => Object.assign(new Error(message), { code });
+    /**
+     * [WHY]: Faz 4B · J11 (P1) — bağlama iki ayrı yazmaydı (önce staffAccounts eşlemesi, sonra personel kaydı): ikincisi düşerse
+     *        yarım bağ kalıyordu; ayrıca eşlemenin başka bir personeli gösterip göstermediği hiç denetlenmeden üzerine yazılıyordu.
+     * [HOW]: Eşleme ve personel bağı TEK transaction'da: ya ikisi ya hiçbiri. Ön koşullar transaction içinde sunucudan taze
+     *        okunur — personel kaydı var; kayıtta BAŞKA bir uid yok; eşleme BAŞKA bir personeli göstermiyor. Tutmazsa
+     *        'uid-mismatch' / 'not-found' fırlatılır ve hiçbir şey yazılmaz. Değişmeyen alan yazılmaz (yeniden çalıştırma ucuz,
+     *        idempotent). Tarayıcıda firebase-handler, testte emülatör aynı kodu kullanır.
+     * @param {{runTransaction:Function, db:object, personelRef:(id)=>ref, accountRef:(uid)=>ref, now?:Function}} o
+     * @returns {(person, fields) => Promise<object>}  personel kaydına yazılan alanlar ({} → kayıt zaten bağlıydı)
+     */
+    function createFirestoreLinker({ runTransaction, db, personelRef, accountRef, now = Date.now }) {
+        return async function link(person, fields) {
+            const uid = blank(fields && fields.uid) ? '' : String(fields.uid);
+            const pid = person && !blank(person.id) ? String(person.id) : '';
+            if (!uid || !pid) throw linkError('invalid-argument', 'bağlanacak uid / personel yok');
+            const pri = fields.pri || person.pri;
+            return runTransaction(db, async t => {
+                const pSnap = await t.get(personelRef(pid));
+                const mSnap = await t.get(accountRef(uid));
+                if (!pSnap.exists()) throw linkError('not-found', 'personel kaydı bulunamadı (silinmiş olabilir)');
+                const live = pSnap.data();
+                if (!blank(live.uid) && String(live.uid) !== uid) throw linkError('uid-mismatch', 'personel kaydı başka bir giriş hesabına bağlı (bağ değiştirilmedi)');
+                const m = mSnap.exists() ? mSnap.data() : null;
+                if (m && String(m.personelId) !== pid) throw linkError('uid-mismatch', 'bu giriş hesabı başka bir personele eşlenmiş (bağ değiştirilmedi)');
+                const changed = {};
+                for (const [k, v] of Object.entries(fields)) if (k !== 'authProvisionedAt' && v !== undefined && live[k] !== v) changed[k] = v;
+                if (Object.keys(changed).length && fields.authProvisionedAt !== undefined) changed.authProvisionedAt = fields.authProvisionedAt;
+                if (!m || m.pri !== pri) t.set(accountRef(uid), { personelId: pid, pri, linkedAt: now() });
+                if (Object.keys(changed).length) t.update(personelRef(pid), changed);
+                return changed;
+            });
+        };
+    }
+
     // ─── Arayüz yardımcıları (personel ekleme/düzenleme akışları) ────────────────────────────────────
     /** provisionOne / provisionStaffAccount sonucu → kullanıcı mesajı. Kod/parola hiçbir mesaja girmez. */
     function describe(r) {
@@ -330,7 +435,10 @@
             case 'relinked': return { ok: true, text: 'Var olan giriş hesabı bağlandı.' };
             case 'already-linked': return { ok: true, text: 'Giriş hesabı zaten bağlı.' };
             case 'invalid': return { ok: false, text: `Giriş hesabı açılmadı: ${r.reason}.` };
+            case 'moved': return { ok: true, text: 'Eski giriş hesabı kurumsal kimlik adresine taşındı.' };
+            case 'move-resumed': return { ok: true, text: 'Daha önce taşınmış giriş hesabı personel kaydına bağlandı.' };
             case 'conflict': return { ok: false, text: `Giriş hesabı açılmadı: ${r.reason || 'bu kurumsal kimlikle başka bir hesap var'}.` };
+            case 'disabled': return { ok: false, text: `Giriş hesabı bağlanmadı: ${r.reason}.` };
             case 'stopped': return { ok: false, text: `Giriş hesabı açılmadı: ${r.reason}${retry}` };
             // Hesap bu kodla AÇILDI: kod kaybolursa yeniden bağlanamaz → çağıran kodu yine bir kez gösterir; "Hesap Aç" + aynı kod bağlar
             case 'link-failed': return { ok: false, linkFailed: true, text: `Giriş hesabı açıldı ama personel kaydına bağlanamadı (${(r && r.reason) || 'yazma reddedildi'}). Bu kodu saklayın: personel tablosunda "Hesap Aç"a basıp AYNI kodu girerek yeniden bağlayın.` };
@@ -354,7 +462,7 @@
         foldTr, normalizePri, isValidPri, priBase, generateStaffPri, takenPris, validatePri,
         staffEmail, accountEmailOf, legacyStaffEmail, staffPassword, isStaffEmail,
         provisionOne, moveLegacyAccount, planAccounts, applyAccounts, accountsFingerprint, createAuthProvisioner,
-        describe, provisionWithNotice,
+        createFirestoreLinker, errorKind, describe, provisionWithNotice,
     };
     window.AppModules = window.AppModules || {};
     window.AppModules.StaffProvisioning = StaffProvisioning;

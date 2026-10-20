@@ -69,6 +69,8 @@ beforeEach(async () => {
                 ['uid-stale', 's4', 'deniz.ak'], ['uid-ghost', 'silinmis', 'hayalet.kisi']]) {
                 await setDoc(item(db, root, 'staffAccounts', uid), { personelId, pri });
             }
+            // J11 · P0: göç kapanışı doğrulanmış ortam (kilit AÇIK). Kilidin kendisi ayrı blokta: varsayılan kapalı, yarım göç vb.
+            await setDoc(item(db, root, 'accessGate', 'staff'), { staffAccessEnabled: true });
         }
         await setDoc(item(db, LIVE, 'personel', 's5'), { id: 's5', name: 'Yalnız Canlı', pri: 'yalniz.canli', uid: 'uid-s5' });
         await setDoc(item(db, LIVE, 'staffAccounts', 'uid-s5'), { personelId: 's5', pri: 'yalniz.canli' });
@@ -149,7 +151,13 @@ describe('KVKK: oturumsuz okuma yok · personel hesap eşlemesi (staffAccounts)'
         await assertFails(updateDoc(item(ctx.s1(), LIVE, 'personel', 's1'), { pri: 'baska.isim' }));
         await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'personel', 's4'), { pri: 'deniz.ak2' }));
     });
-    test('tanımsız kökte eşleme admin için de kapalı', () => assertFails(getDoc(item(ctx.admin(), 'rogue_root', 'staffAccounts', 'uid-s1'))));
+    test('KÖTÜ NİYET: eşlemedeki personelId metin değilse (sayı / harita / boş) yetki vermez', async () => {
+        for (const personelId of [1, { id: 's1' }, '', null]) {
+            await seed(db => setDoc(item(db, LIVE, 'staffAccounts', 'uid-s1'), { personelId, pri: 'ayse.yilmaz' }));
+            await assertFails(getDoc(item(ctx.s1(), LIVE, 'b1', 'p1')));
+        }
+    });
+    test('tanımsız kökte eşleme admin için de kapalı',() => assertFails(getDoc(item(ctx.admin(), 'rogue_root', 'staffAccounts', 'uid-s1'))));
 });
 
 describe('Admin kimliği', () => {
@@ -170,7 +178,8 @@ describe('Yönetici koleksiyonları', () => {
 });
 
 describe('Envanter talebi (requests) — sahiplik', () => {
-    const mine = { ürün: 'Klavye', adet: 1, durum: 'Beklemede', personelUid: 'uid-s1' };
+    // J11 · P1 #7: görünen talep sahibi (personel / personelId) oturumun GERÇEK personel kaydı (s1 = Ayşe Yılmaz)
+    const mine = { ürün: 'Klavye', adet: 1, durum: 'Beklemede', personelUid: 'uid-s1', personel: 'Ayşe Yılmaz', personelId: 's1' };
     test('personel kendi uid\'siyle oluşturur', () => assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'requests', 'n1'), { id: 'n1', ...mine })));
     test('uid\'siz oluşturamaz', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'n1'), { id: 'n1', ...mine, personelUid: null })));
     test('başkası adına oluşturamaz', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'n1'), { id: 'n1', ...mine, personelUid: 'uid-s2' })));
@@ -205,24 +214,44 @@ describe('Envanter talebi (requests) — sahiplik', () => {
 });
 
 // ─── Satın alma ve ONAY ADIMI (GPT-6 kötü niyetli senaryolar) ──────────────────────────────────────────────
-const step = (uid, extra = {}) => ({ user: uid === 'uid-s2' ? 'Bora' : uid === 'uid-s3' ? 'Cem' : 'Ayşe', userUid: uid, tip: 'Paraf', status: 'pending', note: '', date: '', ...extra });
-const hist = [{ action: 'create', actor: 'Ayşe', timestamp: 't0' }];
-const akis = [{ islem: 'Talep Oluşturuldu', yapan: 'Ayşe', tarih: 't0' }];
+// J11 · P1 #5/#7: adım adları, aktörler ve akış kayıtları personel kayıtlarındaki GERÇEK adlar (kurallar staffName ile eşler)
+const NAME = { 'uid-s1': 'Ayşe Yılmaz', 'uid-s2': 'Bora Kaya', 'uid-s3': 'Cem Demir' };
+const step = (uid, extra = {}) => ({ user: NAME[uid] || 'Ayşe Yılmaz', userUid: uid, tip: 'Paraf', status: 'pending', note: '', date: '', ...extra });
+const hist = [{ action: 'create', actor: 'Ayşe Yılmaz', timestamp: 't0' }];
+const akis = [{ islem: 'Talep Oluşturuldu', yapan: 'Ayşe Yılmaz', tarih: 't0' }];
+const OWNER = { createdByUid: 'uid-s1', createdBy: 's1', createdByName: 'Ayşe Yılmaz', talepEden: 'Ayşe Yılmaz' };
 const running = (over = {}) => ({
-    urun: 'Toner', adet: 1, durum: 'Onay Bekliyor', createdByUid: 'uid-s1', createdByName: 'Ayşe', akis,
+    urun: 'Toner', adet: 1, durum: 'Onay Bekliyor', ...OWNER, akis,
     workflow: { id: 'wf1', started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2'), step('uid-s3')], history: hist },
     ...over,
 });
-// Onaylayıcının istemcide yaptığı geçerli onay (approveStep ile aynı alanlar)
+// Onaylayıcının istemcide yaptığı geçerli onay (approveStep + transitionWorkflowState ile aynı alanlar; J11 · P1 #5: uid)
 function approved(po, i, wfOver = {}, top = {}) {
-    const steps = po.workflow.steps.map((s, k) => (k === i ? { ...s, status: 'approved', date: '16.10.2026 10:00', actor: s.user } : s));
+    const s = po.workflow.steps[i];
+    const steps = po.workflow.steps.map((x, k) => (k === i ? { ...x, status: 'approved', date: '16.10.2026 10:00', actor: x.user } : x));
     const last = i + 1 >= steps.length;
-    return { ...po, durum: last ? 'Onaylandı' : 'Onay Bekliyor', akis: [...po.akis, { islem: '✅ Onaylandı', yapan: 'x', tarih: 't1' }],
-        workflow: { ...po.workflow, steps, currentStep: i + 1, finished: last, currentState: last ? 'completed' : 'manager_approval', history: [...po.workflow.history, { action: 'transition', actor: 'x', timestamp: 't1' }], ...wfOver }, ...top };
+    const to = last ? 'completed' : 'manager_approval';
+    return { ...po, durum: last ? 'Onaylandı' : 'Onay Bekliyor',
+        akis: [...po.akis, { islem: '✅ Onaylandı: ' + s.tip, yapan: s.user, uid: s.userUid || '', tarih: 't1', note: 'Süreç: x' }],
+        workflow: { ...po.workflow, steps, currentStep: i + 1, finished: last, currentState: to,
+            history: [...po.workflow.history, { id: 'trans_1', from: po.workflow.currentState, to, actor: s.user, uid: s.userUid || '', timestamp: 't1', action: 'transition', note: s.tip + ' onaylandı' }], ...wfOver }, ...top };
+}
+// Onaylayıcının istemcide yaptığı geçerli red (rejectStep: +1 history, sırasıyla üç akış kaydı, gerekçe hepsinde aynı)
+function rejected(po, i, why = 'bütçe yok') {
+    const s = po.workflow.steps[i];
+    const who = { yapan: s.user, uid: s.userUid || '' };
+    const steps = po.workflow.steps.map((x, k) => (k === i ? { ...x, status: 'rejected', note: why, date: 'd', actor: x.user } : x));
+    return { ...po, durum: 'Reddedildi',
+        akis: [...po.akis,
+            { islem: '❌ REDDEDİLDİ: ' + s.tip, ...who, tarih: 't1', not: why },
+            { islem: '🔄 State Geçişi: İptal Edildi', ...who, tarih: 't1', not: 'Reddedildi: ' + why },
+            { islem: '❌ Reddedildi: ' + s.tip, ...who, tarih: 't1', not: why, stateNote: 'State: İptal Edildi' }],
+        workflow: { ...po.workflow, steps, finished: true, currentState: 'cancelled',
+            history: [...po.workflow.history, { id: 'trans_1', from: po.workflow.currentState, to: 'cancelled', actor: s.user, uid: s.userUid || '', timestamp: 't1', action: 'transition', note: 'Reddedildi: ' + why }] } };
 }
 
 describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
-    const draft = { urun: 'Kağıt', aciklama: 'A4', durum: 'Onay Bekliyor', createdByUid: 'uid-s1', akis, workflow: { started: false, currentStep: 0, steps: [], history: [] } };
+    const draft = { urun: 'Kağıt', aciklama: 'A4', durum: 'Onay Bekliyor', ...OWNER, akis, workflow: { started: false, currentStep: 0, steps: [], history: [] } };
     test('personel kendi uid\'siyle, başlamamış akışla oluşturur', () => assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { id: 'po2', ...draft })));
     test('başkası adına / uid\'siz oluşturamaz', async () => {
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { id: 'po2', ...draft, createdByUid: 'uid-s2' }));
@@ -235,9 +264,9 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
     });
     test('sahibi taslağı düzenler ve akışı başlatır (adımlar kararsız)', async () => {
         await put('purchaseOrders', 'po2', draft);
-        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { urun: 'Kağıt A3', akis: [...akis, { islem: 'güncellendi' }] }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { urun: 'Kağıt A3', akis: [...akis, { islem: 'güncellendi', yapan: 'Ayşe Yılmaz' }] }));
         await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), {
-            durum: 'Onay Bekliyor', workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2'), step('uid-s3')], history: [{ action: 'create' }] } }));
+            durum: 'Onay Bekliyor', workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2'), step('uid-s3')], history: [{ action: 'create', actor: 'Ayşe Yılmaz' }] } }));
     });
     test('sahibi akışı kendisini onaylayıcı yaparak / önceden onaylı adımla / 11 adımla başlatamaz', async () => {
         await put('purchaseOrders', 'po2', draft);
@@ -249,14 +278,23 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
     test('en ağır durum: sahibi 10 adımlı akışı başlatır (1000 ifade sınırı içinde), 10. adımın onayı da geçer', async () => {
         await put('purchaseOrders', 'po2', draft);
         const ten = Array.from({ length: 10 }, (_, i) => step(i % 2 ? 'uid-s3' : 'uid-s2'));
-        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { durum: 'Onay Bekliyor', akis: [...akis, { islem: 'başlatıldı' }],
-            workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: ten, history: [{ action: 'create' }] } }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { durum: 'Onay Bekliyor', akis: [...akis, { islem: 'başlatıldı', yapan: 'Ayşe Yılmaz' }],
+            workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: ten, history: [{ action: 'create', actor: 'Ayşe Yılmaz' }] } }));
         let po = running({ workflow: { ...running().workflow, steps: ten, history: Array.from({ length: 12 }, (_, i) => ({ action: 'transition', i })) },
             akis: Array.from({ length: 15 }, (_, i) => ({ islem: 'kayıt ' + i })) });
         for (let i = 0; i < 9; i++) po = approved(po, i);
         await put('purchaseOrders', 'po9', po);
         await assertFails(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'po9'), { id: 'po9', ...approved(po, 9) }));   // 10. adım s3'ün
         await assertSucceeds(setDoc(item(ctx.s3(), LIVE, 'purchaseOrders', 'po9'), { id: 'po9', ...approved(po, 9) }));
+    });
+    test('en ağır red: 10 adımlı akışın 10. adımının reddi (üç akış kaydı denetimiyle, 1000 ifade sınırı içinde)', async () => {
+        const ten = Array.from({ length: 10 }, (_, i) => step(i % 2 ? 'uid-s3' : 'uid-s2'));
+        let po = running({ workflow: { ...running().workflow, steps: ten, history: Array.from({ length: 12 }, (_, i) => ({ action: 'transition', i })) },
+            akis: Array.from({ length: 15 }, (_, i) => ({ islem: 'kayıt ' + i })) });
+        for (let i = 0; i < 9; i++) po = approved(po, i);
+        await put('purchaseOrders', 'pr9', po);
+        await assertFails(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'pr9'), { id: 'pr9', ...rejected(po, 9) }));   // 10. adım s3'ün
+        await assertSucceeds(setDoc(item(ctx.s3(), LIVE, 'purchaseOrders', 'pr9'), { id: 'pr9', ...rejected(po, 9) }));
     });
     test('sahibi akış sürerken içeriği değiştiremez, kendisi onaylayamaz', async () => {
         await put('purchaseOrders', 'po3', running());
@@ -266,8 +304,8 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
     test('sahibi akış sürerken geri çeker (taslağa döner, geçmiş korunur)', async () => {
         await put('purchaseOrders', 'po3', running());
         await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po3'), {
-            durum: 'Taslak', akis: [...akis, { islem: 'geri çekildi' }],
-            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', status: 'draft', steps: [], history: [...hist, { action: 'withdraw' }] } }));
+            durum: 'Taslak', akis: [...akis, { islem: 'geri çekildi', yapan: 'Ayşe Yılmaz' }],
+            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', status: 'draft', steps: [], history: [...hist, { action: 'withdraw', actor: 'Ayşe Yılmaz' }] } }));
     });
     test('geri çekerken geçmişi silemez', async () => {
         await put('purchaseOrders', 'po3', running());
@@ -290,12 +328,8 @@ describe('ONAY ADIMI güvenliği (GPT-6) — yalnız sırası gelmiş adım', ()
     beforeEach(() => put('purchaseOrders', 'po4', running()));
 
     test('sırası gelen onaylayıcı adımını onaylar', () => assertSucceeds(write(ctx.s2(), approved(running(), 0))));
-    test('sırası gelen onaylayıcı reddeder (gerekçeli)', () => {
-        const po = running();
-        const steps = po.workflow.steps.map((s, k) => (k === 0 ? { ...s, status: 'rejected', note: 'bütçe yok', date: 'd', actor: 'Bora' } : s));
-        return assertSucceeds(write(ctx.s2(), { ...po, durum: 'Reddedildi', akis: [...akis, { islem: '❌' }, { islem: '❌ 2' }],
-            workflow: { ...po.workflow, steps, finished: true, currentState: 'cancelled', history: [...hist, { action: 'transition' }] } }));
-    });
+    // J11 · P1: red tam olarak +3 akis kaydı üretir (edm-workflow.js rejectStep: red + state geçişi + modal gösterim).
+    test('sırası gelen onaylayıcı reddeder (gerekçeli)', () => assertSucceeds(write(ctx.s2(), rejected(running(), 0))));
     test('son adım onayı akışı bitirir (Onaylandı)', async () => {
         const after0 = approved(running(), 0);
         await put('purchaseOrders', 'po4', after0);
@@ -362,11 +396,157 @@ describe('ONAY ADIMI güvenliği (GPT-6) — yalnız sırası gelmiş adım', ()
         await assertFails(write(ctx.s2(), approved(noUid, 0)));
         await assertSucceeds(write(ctx.admin(), approved(noUid, 0)));
     });
+
+    // ─── J11 · P1: eklenen history/akis kaydı sayısı edm-workflow.js'in gerçek davranışıyla BİREBİR sınırlı ────────────────
+    // Eskiden appendOnly tek başına herhangi bir SAYIDA yeni kayıt kabul ediyordu (sahte EK history/akis kaydı enjekte
+    // edilebiliyordu). Şimdi: onay tam +1 history +1 akis, red tam +1 history +3 akis — ne fazla ne eksik.
+    test('KÖTÜ NİYET: onaylarken SAHTE EK history kaydı enjekte edilemez (meşru akış tam +1 kayıt üretir)', async () => {
+        const a = approved(running(), 0);
+        await assertFails(write(ctx.s2(), { ...a, workflow: { ...a.workflow, history: [...a.workflow.history, { action: 'transition', actor: 'SAHTE İkinci', timestamp: 't2' }] } }));
+        await assertFails(write(ctx.s2(), { ...running(), ...a, workflow: { ...a.workflow, history: running().workflow.history } }));   // eksik (0 yeni kayıt) de reddedilir
+    });
+    test('KÖTÜ NİYET: onaylarken SAHTE EK akis kaydı enjekte edilemez (meşru akış tam +1 kayıt üretir)', async () => {
+        const a = approved(running(), 0);
+        await assertFails(write(ctx.s2(), { ...a, akis: [...a.akis, { islem: 'SAHTE ikinci kayıt', yapan: 'Kimse' }] }));
+        await assertFails(write(ctx.s2(), { ...a, akis: running().akis }));   // eksik (0 yeni kayıt) de reddedilir
+    });
+    test('KÖTÜ NİYET: reddederken akış kaydı sayısı meşru rejectStep\'in ürettiğinden (tam +3) az ya da çok olamaz', async () => {
+        const base = rejected(running(), 0, 'red');
+        const [r1, r2, r3] = base.akis.slice(akis.length);
+        await assertFails(write(ctx.s2(), { ...base, akis: [...akis, r1] }));                                         // yalnız +1 (gerçek rejectStep +3 üretir)
+        await assertFails(write(ctx.s2(), { ...base, akis: [...akis, r1, r2, r3, { ...r3, islem: '❌ Reddedildi: SAHTE 4.' }] })); // +4 (fazladan sahte kayıt)
+        await assertSucceeds(write(ctx.s2(), base));                                                                  // tam +3: kabul
+    });
+    // "Bayat onay" tekrar oynatımı: cs her zaman SUNUCUDAKİ güncel currentStep'ten okunur; bir onaylayıcının daha önce
+    // hazırladığı (ama göndermediği) bir payload, akış ilerledikten SONRA gönderilirse reddedilir.
+    test('Bayat onay tekrar oynatımı (replay) reddedilir: akış ilerledikten sonra eski adıma hazırlanmış istek geçersiz', async () => {
+        const stalePayload = approved(running(), 0);   // s2, adım 0'ı onaylamak için HAZIRLANMIŞ (henüz gönderilmemiş) istek
+        // Bu arada gerçek s2 adım 0'ı GERÇEKTEN onayladı (akış ilerledi, sıradaki adım artık s3'ün)
+        await assertSucceeds(write(ctx.s2(), stalePayload));
+        // Aynı (artık BAYAT) payload tekrar gönderilirse: cs artık 1 (s3'ün), s2 o adımın onaylayıcısı değil → reddedilir.
+        await assertFails(write(ctx.s2(), stalePayload));
+        // Payload'ın KENDİSİ de artık geçerli bir "adım 1 onayı" değil (adım 0'ı tekrar "approved" yazmaya çalışıyor, adım
+        // 1'e dokunmuyor) — cs=1 iken adım 1'in onaylayıcısı olan s3 de bu BAYAT payload'ı göndererek adım 0'ı etkileyemez.
+        await assertFails(write(ctx.s3(), stalePayload));
+    });
+});
+
+// ─── J11 · P1 #5 kapanışı (bağımsız denetim): kayıt SAYISI meşru, İÇERİK / aktör / uid / tarih / tür sahte ──────────────────
+// Her negatif durumda yalnız TEK bir alan meşru payload'dan (approved / rejected) sapar; geri kalan her şey (kayıt sayısı dahil)
+// gerçek istemcinin ürettiğiyle aynıdır. Sonda aynı payload'ın sapmasız hali kabul edilir (testin yanlış nedenle geçmediğinin
+// kanıtı).
+describe('J11 · P1 #5 kapanışı — aynı sayıda farklı içerikli history / akış olayı', () => {
+    const write = (db, data) => setDoc(item(db, LIVE, 'purchaseOrders', 'pa'), { id: 'pa', ...data });
+    beforeEach(() => put('purchaseOrders', 'pa', running()));
+    const lastH = po => po.workflow.history.at(-1);
+    const withH = (po, patch) => ({ ...po, workflow: { ...po.workflow, history: [...po.workflow.history.slice(0, -1), { ...lastH(po), ...patch }] } });
+    const withA = (po, idx, patch) => ({ ...po, akis: po.akis.map((x, k) => (k === idx ? { ...x, ...patch } : x)) });
+    const N = akis.length;   // eski akış kaydı sayısı (yeni kayıtlar N, N+1, N+2)
+
+    test('ESKİ adım durumu pending olmalı: currentStep geride kalmış (onaylı / reddedilmiş adımda duran) kayıtta karar yazılamaz; admin düzeltir', async () => {
+        for (const prev of ['approved', 'rejected']) {
+            const bad = running({ workflow: { ...running().workflow, steps: [step('uid-s2', { status: prev, actor: 'Bora Kaya' }), step('uid-s3')] } });
+            await put('purchaseOrders', 'pa', bad);
+            await assertFails(write(ctx.s2(), approved(bad, 0)));       // onaylı → tekrar onay / reddedilmiş → onay
+            await assertFails(write(ctx.s2(), rejected(bad, 0)));       // onaylı → red
+            await assertSucceeds(write(ctx.admin(), approved(bad, 0))); // yönetici yolu açık
+        }
+        await put('purchaseOrders', 'pa', running());
+        await assertSucceeds(write(ctx.s2(), approved(running(), 0)));   // pending adım: kabul
+    });
+
+    test('ONAY · history: aynı sayıda ama farklı tür / uid / aktör ile yeni kayıt reddedilir', async () => {
+        const ok = approved(running(), 0);
+        await assertFails(write(ctx.s2(), withH(ok, { action: 'approved' })));       // tür: 'transition' değil
+        await assertFails(write(ctx.s2(), withH(ok, { action: 'rollback' })));
+        await assertFails(write(ctx.s2(), withH(ok, { uid: 'uid-s3' })));            // başkasının uid'si
+        await assertFails(write(ctx.s2(), withH(ok, { uid: '' })));                  // uid'siz
+        await assertFails(write(ctx.s2(), withH(ok, { actor: 'Cem Demir' })));       // başkasının adı
+        await assertFails(write(ctx.s2(), withH(ok, { to: 'cancelled' })));          // onayda 'iptal'e geçiş
+        await assertSucceeds(write(ctx.s2(), ok));
+    });
+
+    test('ONAY · history: ESKİ kayıtların içeriği / aktörü / tarihi değiştirilip kayıt sayısı korunsa da reddedilir', async () => {
+        const ok = approved(running(), 0);
+        const prev = ok.workflow.history.slice(0, -1);
+        const h = patch => ({ ...ok, workflow: { ...ok.workflow, history: [{ ...prev[0], ...patch }, lastH(ok)] } });
+        await assertFails(write(ctx.s2(), h({ timestamp: '01.01.2020' })));                  // geçmiş tarih
+        await assertFails(write(ctx.s2(), h({ actor: 'Bora Kaya' })));                       // geçmiş aktör
+        await assertFails(write(ctx.s2(), h({ action: 'transition', to: 'completed' })));    // geçmiş içerik
+        // eski kaydı silip yerine sahte kayıt + meşru yeni kayıt (toplam sayı aynı)
+        await assertFails(write(ctx.s2(), { ...ok, workflow: { ...ok.workflow, history: [lastH(ok), lastH(ok)] } }));
+        await assertSucceeds(write(ctx.s2(), ok));
+    });
+
+    test('ONAY · akış: aynı sayıda ama farklı tür / uid / aktör ile yeni kayıt; eski kaydın tarihi / içeriği değiştirilemez', async () => {
+        const ok = approved(running(), 0);
+        await assertFails(write(ctx.s2(), withA(ok, N, { islem: '❌ REDDEDİLDİ: Paraf' })));   // onayda red olayı
+        await assertFails(write(ctx.s2(), withA(ok, N, { islem: 'Talep Oluşturuldu' })));
+        await assertFails(write(ctx.s2(), withA(ok, N, { uid: 'uid-s3' })));
+        await assertFails(write(ctx.s2(), withA(ok, N, { uid: '' })));
+        await assertFails(write(ctx.s2(), withA(ok, N, { yapan: 'Cem Demir' })));
+        await assertFails(write(ctx.s2(), withA(ok, 0, { tarih: '01.01.2020' })));              // eski kaydın tarihi
+        await assertFails(write(ctx.s2(), withA(ok, 0, { yapan: 'Bora Kaya' })));               // eski kaydın aktörü
+        await assertFails(write(ctx.s2(), withA(ok, 0, { islem: '✅ Onaylandı: Paraf' })));     // eski kaydın içeriği
+        await assertSucceeds(write(ctx.s2(), ok));
+    });
+
+    test('ONAY: adımın notu (red gerekçesi alanı) onayda değiştirilemez', async () => {
+        const ok = approved(running(), 0);
+        const steps = ok.workflow.steps.map((x, k) => (k === 0 ? { ...x, note: 'SAHTE gerekçe' } : x));
+        await assertFails(write(ctx.s2(), { ...ok, workflow: { ...ok.workflow, steps } }));
+    });
+
+    test('RED · akış: üç kaydın sırası / türü / gerekçesi / uid\'si rejectStep\'le birebir olmalı', async () => {
+        const ok = rejected(running(), 0, 'bütçe yok');
+        const [r1, r2, r3] = ok.akis.slice(N);
+        await assertFails(write(ctx.s2(), { ...ok, akis: [...akis, r3, r2, r1] }));                 // sıra değişik
+        await assertFails(write(ctx.s2(), { ...ok, akis: [...akis, r1, r1, r3] }));                 // tür: state geçişi yok
+        await assertFails(write(ctx.s2(), withA(ok, N, { islem: '✅ Onaylandı: Paraf' })));       // redde onay olayı
+        await assertFails(write(ctx.s2(), withA(ok, N, { not: 'başka gerekçe' })));              // gerekçe adımdakiyle aynı değil
+        await assertFails(write(ctx.s2(), withA(ok, N + 1, { not: 'Reddedildi: başka' })));
+        await assertFails(write(ctx.s2(), withA(ok, N + 2, { not: 'başka gerekçe' })));
+        for (const i of [N, N + 1, N + 2]) {
+            await assertFails(write(ctx.s2(), withA(ok, i, { uid: 'uid-s3' })));                 // herhangi birinde başka uid
+            await assertFails(write(ctx.s2(), withA(ok, i, { uid: '' })));
+        }
+        await assertFails(write(ctx.s2(), withA(ok, 0, { tarih: '01.01.2020' })));                // eski kaydın tarihi
+        await assertSucceeds(write(ctx.s2(), ok));
+    });
+
+    test('RED · history ve durum: iptale geçiş, gerekçeli not, uid; gerekçe boş olamaz', async () => {
+        const ok = rejected(running(), 0, 'bütçe yok');
+        await assertFails(write(ctx.s2(), withH(ok, { to: 'completed' })));
+        await assertFails(write(ctx.s2(), withH(ok, { note: 'Reddedildi: başka' })));
+        await assertFails(write(ctx.s2(), withH(ok, { uid: 'uid-s3' })));
+        await assertFails(write(ctx.s2(), withH(ok, { action: 'rollback' })));
+        await assertFails(write(ctx.s2(), { ...ok, workflow: { ...ok.workflow, currentState: 'completed' } }));
+        await assertFails(write(ctx.s2(), rejected(running(), 0, '   ')));                        // boş gerekçe
+        await assertSucceeds(write(ctx.s2(), ok));
+    });
+
+    test('AYNI İSİMLİ başka personel meşru içerikli kaydı kendi uid\'siyle de yazamaz (uid adımda ve kayıtta)', async () => {
+        await seed(async db => {
+            await setDoc(item(db, LIVE, 'personel', 'tw'), { id: 'tw', name: 'Bora Kaya', pri: 'bora.kaya2', uid: 'uid-tw' });
+            await setDoc(item(db, LIVE, 'staffAccounts', 'uid-tw'), { personelId: 'tw', pri: 'bora.kaya2' });
+        });
+        const ok = approved(running(), 0);
+        const tw = staffCtx('uid-tw', 'bora.kaya2')();
+        await assertFails(write(tw, withA(withH(ok, { uid: 'uid-tw' }), N, { uid: 'uid-tw' })));
+        await assertFails(write(tw, ok));
+    });
+
+    // BİLİNÇLİ SINIRLAMA (açık risk olarak raporlandı): YENİ kaydın tarih alanı istemci saatidir; kurallar onu sunucu saatine
+    // bağlayamaz. Bu test sınırlamayı belgeler — "kapatıldı" iddiası YOKTUR. Geçmiş kayıtların tarihi yukarıda korunuyor.
+    test('SINIRLAMA (açık risk): yeni kaydın tarihi / timestamp\'i istemci saatidir — geçmiş tarihli yeni kayıt kabul edilir', async () => {
+        const ok = approved(running(), 0);
+        await assertSucceeds(write(ctx.s2(), withA(withH(ok, { timestamp: '2020-01-01T00:00:00.000Z' }), N, { tarih: '01.01.2020 00:00' })));
+    });
 });
 
 describe('Görev (tasks) — oluşturan / atanan', () => {
     test('personel kendi creatorUid\'siyle oluşturur; başkası adına / uid\'siz oluşturamaz', async () => {
-        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'tasks', 't2'), { id: 't2', title: 'Yeni', creatorUid: 'uid-s1' }));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'tasks', 't2'), { id: 't2', title: 'Yeni', creatorUid: 'uid-s1', creatorId: 'Ayşe Yılmaz' }));
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'tasks', 't3'), { id: 't3', title: 'Yeni', creatorUid: 'uid-s2' }));
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'tasks', 't4'), { id: 't4', title: 'Yeni' }));
     });
@@ -395,18 +575,163 @@ describe('Görev (tasks) — oluşturan / atanan', () => {
     test('görev metninde etiket reddedilir', () => assertFails(updateDoc(item(ctx.s1(), LIVE, 'tasks', 't1'), { title: XSS })));
 });
 
-describe('Silme (KJ-5 test temizliği dahil)', () => {
+describe('Silme (J11 · P1 #6: KJ-5 demo test istisnası kaldırıldı)', () => {
     test('personel talep silemez; admin siler', async () => {
         await assertFails(deleteDoc(item(ctx.s1(), LIVE, 'requests', 'r1')));
         await assertSucceeds(deleteDoc(item(ctx.admin(), LIVE, 'requests', 'r1')));
     });
-    test('KJ-5: demo kökünde __flowtest__ işaretli talep personelce silinir', () => assertSucceeds(deleteDoc(item(ctx.s1(), DEMO, 'requests', 'rtest'))));
-    test('KJ-5: demo kökünde işaretsiz talep silinemez', () => assertFails(deleteDoc(item(ctx.s1(), DEMO, 'requests', 'rreal'))));
-    test('KJ-5: istisna canlı kökte geçerli değil', () => assertFails(deleteDoc(item(ctx.s1(), LIVE, 'requests', 'rlivetest'))));
-    test('KJ-5: anonim işaretli kaydı da silemez', () => assertFails(deleteDoc(item(ctx.anon(), DEMO, 'requests', 'rtest'))));
-    test('KJ-5: işaret sayısal alanda olsa da hata vermez, silinmez', async () => {
-        await put('requests', 'rnum', { ürün: 42, adet: 1 }, DEMO);
-        await assertFails(deleteDoc(item(ctx.s1(), DEMO, 'requests', 'rnum')));
+    // Eskiden: demo kökünde __flowtest__ işaretli her belgeyi HER bağlı personel silebiliyordu (zimmet / servis kayıtları dahil,
+    // bakım modu kontrolü yok; işaret personelin yazabildiği metin alanlarında aranıyordu).
+    test('J11 · P1 #6: demo kökünde __flowtest__ işaretli belgeyi personel SİLEMEZ (5 koleksiyonun hiçbirinde)', async () => {
+        await seed(async db => {
+            await setDoc(item(db, DEMO, 'purchaseOrders', 'potest'), { id: 'potest', urun: 'X __flowtest__', createdByUid: 'uid-s1' });
+            await setDoc(item(db, DEMO, 'assignments', 'astest'), { id: 'astest', alanKisi: 'X __flowtest__' });
+            await setDoc(item(db, DEMO, 'serviceRecords', 'srtest'), { id: 'srtest', not: 'X __flowtest__' });
+            await setDoc(item(db, DEMO, 'tasks', 'ttest'), { id: 'ttest', title: 'X __flowtest__', creatorUid: 'uid-s2' });
+        });
+        for (const [col, id] of [['requests', 'rtest'], ['purchaseOrders', 'potest'], ['assignments', 'astest'], ['serviceRecords', 'srtest'], ['tasks', 'ttest']]) {
+            await assertFails(deleteDoc(item(ctx.s1(), DEMO, col, id)));
+        }
+    });
+    test('J11 · P1 #6: personel kendi talebine işaret yazıp silemez (sahte işaretle silme yolu yok)', async () => {
+        await put('requests', 'rmine', { ürün: 'Gerçek', durum: 'Beklemede', personelUid: 'uid-s1', personel: 'Ayşe Yılmaz', personelId: 's1' }, DEMO);
+        await assertSucceeds(updateDoc(item(ctx.s1(), DEMO, 'requests', 'rmine'), { not: 'artık __flowtest__' }));   // meşru düzenleme
+        await assertFails(deleteDoc(item(ctx.s1(), DEMO, 'requests', 'rmine')));
+        assert(!!(await rd('requests', 'rmine', DEMO)));
+    });
+    test('J11 · P1 #6: bakım modunda personel işaretli kaydı da silemez; admin bakımda da temizler', async () => {
+        await setMaintenance(true, DEMO);
+        await assertFails(deleteDoc(item(ctx.s1(), DEMO, 'requests', 'rtest')));
+        await assertSucceeds(deleteDoc(item(ctx.admin(), DEMO, 'requests', 'rtest')));
+    });
+    test('J11 · P1 #6: yetkili test temizliği (admin) demo kökünde işaretli kaydı siler; anonim / oturumsuz silemez', async () => {
+        await assertFails(deleteDoc(item(ctx.anon(), DEMO, 'requests', 'rtest')));
+        await assertFails(deleteDoc(item(ctx.none(), DEMO, 'requests', 'rtest')));
+        await assertSucceeds(deleteDoc(item(ctx.admin(), DEMO, 'requests', 'rtest')));
+    });
+    test('personel kendi oluşturduğu görevi siler (meşru yol değişmedi); başkasınınkini silemez', async () => {
+        await assertSucceeds(deleteDoc(item(ctx.s1(), LIVE, 'tasks', 't1')));
+        await put('tasks', 't9', { title: 'Başkasının', creatorUid: 'uid-s2' });
+        await assertFails(deleteDoc(item(ctx.s1(), LIVE, 'tasks', 't9')));
+    });
+});
+
+// ─── J11 · P1 #7: talep sahibi ve workflow katılımcı kimliği ─────────────────────────────────────────────────────────────
+describe('J11 · P1 #7 — görünen kimlik oturum sahibinin gerçek personel kaydına bağlı', () => {
+    const req = { ürün: 'Klavye', adet: 1, durum: 'Beklemede', personelUid: 'uid-s1', personel: 'Ayşe Yılmaz', personelId: 's1' };
+    const draftPo = { urun: 'Kağıt', durum: 'Taslak', ...OWNER, akis, workflow: { started: false, currentStep: 0, steps: [], history: [] } };
+    test('talep: kendi uid\'siyle BAŞKASININ adı / personel id\'si taşınamaz', async () => {
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'q1'), { id: 'q1', ...req, personel: 'Bora Kaya' }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'q1'), { id: 'q1', ...req, personelId: 's2' }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'q1'), { id: 'q1', ...req, personel: '' }));
+        const { personelId, ...noId } = req;
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'q1'), { id: 'q1', ...noId }));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'requests', 'q1'), { id: 'q1', ...req }));
+    });
+    test('talep: sayısal personel id\'si (eski kayıt biçimi) metin eşlemesiyle eşleşir', async () => {
+        await seed(async db => {
+            await setDoc(item(db, LIVE, 'personel', '1790573516931123'), { id: 1790573516931123, name: 'Sayı Kişi', pri: 'sayi.kisi', uid: 'uid-num' });
+            await setDoc(item(db, LIVE, 'staffAccounts', 'uid-num'), { personelId: '1790573516931123', pri: 'sayi.kisi' });
+        });
+        const num = staffCtx('uid-num', 'sayi.kisi');
+        await assertSucceeds(setDoc(item(num(), LIVE, 'requests', 'q2'), { id: 'q2', ürün: 'X', durum: 'Beklemede', personelUid: 'uid-num', personel: 'Sayı Kişi', personelId: 1790573516931123 }));
+    });
+    test('talep: ad personel kaydında adSoyad alanındaysa (eski şema) o ad esas alınır; kırpılmış karşılaştırma', async () => {
+        await seed(async db => {
+            await setDoc(item(db, LIVE, 'personel', 'sx'), { id: 'sx', adSoyad: '  Eski Şema  ', pri: 'eski.sema', uid: 'uid-sx' });
+            await setDoc(item(db, LIVE, 'staffAccounts', 'uid-sx'), { personelId: 'sx', pri: 'eski.sema' });
+        });
+        const sx = staffCtx('uid-sx', 'eski.sema');
+        await assertSucceeds(setDoc(item(sx(), LIVE, 'requests', 'q3'), { id: 'q3', ürün: 'X', durum: 'Beklemede', personelUid: 'uid-sx', personel: 'Eski Şema', personelId: 'sx' }));
+        await assertFails(setDoc(item(sx(), LIVE, 'requests', 'q4'), { id: 'q4', ürün: 'X', durum: 'Beklemede', personelUid: 'uid-sx', personel: 'Ayşe Yılmaz', personelId: 'sx' }));
+    });
+    test('talep: güncellemede görünen sahip alanları değiştirilemez', async () => {
+        await put('requests', 'q5', req);
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'requests', 'q5'), { personel: 'Bora Kaya' }));
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'requests', 'q5'), { personelId: 's2' }));
+    });
+    test('satın alma: talepEden / createdByName / createdBy başka personel olamaz; sahte geçmişle açılamaz', async () => {
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, talepEden: 'Bora Kaya' }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, createdByName: 'Bora Kaya' }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, createdBy: 's2' }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, akis: [{ islem: 'Talep Oluşturuldu', yapan: 'Bora Kaya' }] }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, akis: [...akis, { islem: '✅ Müdür onayladı', yapan: 'Ayşe Yılmaz' }] }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo, workflow: { ...draftPo.workflow, history: [{ action: 'approved', actor: 'Müdür' }] } }));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p1'), { id: 'p1', ...draftPo }));
+    });
+    test('satın alma taslağı: sahibi görünen kimliği değiştiremez; başkası adına / birden çok kayıt ekleyemez', async () => {
+        await put('purchaseOrders', 'p2', draftPo);
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { talepEden: 'Bora Kaya' }));
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { createdByName: 'Bora Kaya' }));
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { createdBy: 's2' }));
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { akis: [...akis, { islem: 'güncellendi', yapan: 'Bora Kaya' }] }));
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { akis: [...akis, { islem: 'a', yapan: 'Ayşe Yılmaz' }, { islem: 'b', yapan: 'Ayşe Yılmaz' }] }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p2'), { urun: 'Kağıt A3', akis: [...akis, { islem: 'güncellendi', yapan: 'Ayşe Yılmaz' }] }));
+    });
+    test('satın alma: iptal (taslak) ve geri çekme meşru kalır; geri çekmede başkası adına kayıt reddedilir', async () => {
+        await put('purchaseOrders', 'p3', draftPo);
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p3'), { durum: 'İptal Edildi', akis: [...akis, { islem: 'Talep İptal Edildi', yapan: 'Ayşe Yılmaz' }],
+            workflow: { started: false, finished: true, currentStep: 0, currentState: 'cancelled', steps: [], history: [] } }));
+        await put('purchaseOrders', 'p4', running());
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p4'), { durum: 'Taslak', akis: [...akis, { islem: 'geri çekildi', yapan: 'Cem Demir' }],
+            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [...hist, { action: 'withdraw', actor: 'Ayşe Yılmaz' }] } }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'p4'), { durum: 'Taslak', akis: [...akis, { islem: 'geri çekildi', yapan: 'Ayşe Yılmaz' }],
+            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [...hist, { action: 'withdraw', actor: 'Ayşe Yılmaz' }] } }));
+    });
+    test('SAHTE ONAYLAYICI: adımda "Bora Kaya" yazıp başkasının (s3) uid\'si konursa o kişi adımı ONAYLAYAMAZ; admin onaylar', async () => {
+        const fake = running({ workflow: { ...running().workflow, steps: [{ ...step('uid-s3'), user: 'Bora Kaya' }, step('uid-s2')] } });
+        await put('purchaseOrders', 'p5', fake);
+        const a = approved(fake, 0);
+        await assertFails(setDoc(item(ctx.s3(), LIVE, 'purchaseOrders', 'p5'), { id: 'p5', ...a }));
+        // s3 adımın görünen adını kendi adıyla "düzeltip" onaylayamaz (user değiştirilemez)
+        const b = approved(running({ workflow: { ...fake.workflow, steps: [step('uid-s3'), step('uid-s2')] } }), 0);
+        await assertFails(setDoc(item(ctx.s3(), LIVE, 'purchaseOrders', 'p5'), { id: 'p5', ...b }));
+        await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'p5'), { id: 'p5', ...a }));
+    });
+    test('SAHTE AKTÖR (P1 #5): sırası gelen gerçek onaylayıcı adım / history / akış kaydına BAŞKASININ adını yazamaz', async () => {
+        await put('purchaseOrders', 'p6', running());
+        const base = approved(running(), 0);
+        const steps0 = base.workflow.steps.map((s, k) => (k === 0 ? { ...s, actor: 'Yönetici' } : s));
+        await assertFails(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'p6'), { id: 'p6', ...base, workflow: { ...base.workflow, steps: steps0 } }));
+        // Yalnız aktör farklı (uid / tür / sayı meşru) — aktör denetimi tek başına reddeder
+        const h = [...running().workflow.history, { ...base.workflow.history.at(-1), actor: 'Yönetici' }];
+        await assertFails(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'p6'), { id: 'p6', ...base, workflow: { ...base.workflow, history: h } }));
+        await assertFails(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'p6'), { id: 'p6', ...base, akis: [...akis, { ...base.akis.at(-1), yapan: 'Yönetici' }] }));
+        await assertSucceeds(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'p6'), { id: 'p6', ...base }));
+        // İKİNCİ KEZ onay: aynı onaylayıcı aynı payload'ı tekrar gönderemez (cs ilerledi, sıra s3'te)
+        await assertFails(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'p6'), { id: 'p6', ...base }));
+    });
+    test('SAHTE AKTÖR (red): üç red kaydından herhangi biri başkası adına olursa reddedilir', async () => {
+        await put('purchaseOrders', 'p7', running());
+        const base = rejected(running(), 0, 'red');
+        const [r1, r2, r3] = base.akis.slice(akis.length);
+        await assertFails(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'p7'), { id: 'p7', ...base, akis: [...akis, r1, { ...r2, yapan: 'Cem Demir' }, r3] }));
+        await assertSucceeds(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'p7'), { id: 'p7', ...base }));
+    });
+    test('AYNI İSİMLİ iki personel: ad eşleşse de yalnız adımdaki uid\'nin sahibi onaylar', async () => {
+        await seed(async db => {
+            await setDoc(item(db, LIVE, 'personel', 'tw'), { id: 'tw', name: 'Bora Kaya', pri: 'bora.kaya2', uid: 'uid-tw' });
+            await setDoc(item(db, LIVE, 'staffAccounts', 'uid-tw'), { personelId: 'tw', pri: 'bora.kaya2' });
+        });
+        await put('purchaseOrders', 'p8', running());
+        await assertFails(setDoc(item(staffCtx('uid-tw', 'bora.kaya2')(), LIVE, 'purchaseOrders', 'p8'), { id: 'p8', ...approved(running(), 0) }));
+        await assertSucceeds(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'p8'), { id: 'p8', ...approved(running(), 0) }));
+    });
+    test('EKSİK UID: adımda userUid yoksa personel onaylayamaz (yalnız admin) — mevcut kural, kimlik denetimiyle birlikte', async () => {
+        const noUid = running({ workflow: { ...running().workflow, steps: [{ user: 'Bora Kaya', tip: 'Paraf', status: 'pending' }, step('uid-s3')] } });
+        await put('purchaseOrders', 'p9', noUid);
+        await assertFails(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'p9'), { id: 'p9', ...approved(noUid, 0) }));
+    });
+    test('görev: oluşturan adı (creatorId) başkası olamaz ve sonradan değiştirilemez', async () => {
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'tasks', 'g1'), { id: 'g1', title: 'X', creatorUid: 'uid-s1', creatorId: 'Bora Kaya' }));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'tasks', 'g1'), { id: 'g1', title: 'X', creatorUid: 'uid-s1', creatorId: 'Ayşe Yılmaz' }));
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'tasks', 'g1'), { creatorId: 'Bora Kaya' }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'tasks', 'g1'), { title: 'Y' }));
+    });
+    test('personel kaydı silinmiş / eşleme bozuk hesap kimlik gerektiren hiçbir yazma yapamaz', async () => {
+        await seed(db => deleteDoc(item(db, LIVE, 'personel', 's1')));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'q9'), { id: 'q9', ...req }));
+        await assertFails(setDoc(item(ctx.ghost(), LIVE, 'requests', 'q9'), { id: 'q9', ...req, personelUid: 'uid-ghost' }));
     });
 });
 
@@ -425,7 +750,7 @@ describe('Bakım modu (RULE-05)', () => {
     });
     test('bakım başka kökte açıkken canlı kökte personel yazar', async () => {
         await setMaintenance(true, DEMO);
-        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'requests', 'r4'), { id: 'r4', ürün: 'X', durum: 'Beklemede', personelUid: 'uid-s1' }));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'requests', 'r4'), { id: 'r4', ürün: 'X', durum: 'Beklemede', personelUid: 'uid-s1', personel: 'Ayşe Yılmaz', personelId: 's1' }));
     });
     test('system_config: personel okur, anonim okuyamaz, admin yazar', async () => {
         await assertSucceeds(getDoc(item(ctx.s1(), LIVE, 'system_config', 'admin_settings')));
@@ -435,8 +760,8 @@ describe('Bakım modu (RULE-05)', () => {
 });
 
 describe('Etiket reddi (RULE-02 savunma derinliği)', () => {
-    const own = { requests: { durum: 'Beklemede', personelUid: 'uid-s1' }, tasks: { creatorUid: 'uid-s1' },
-        purchaseOrders: { durum: 'Onay Bekliyor', createdByUid: 'uid-s1', workflow: { started: false, steps: [] } } };
+    const own = { requests: { durum: 'Beklemede', personelUid: 'uid-s1', personel: 'Ayşe Yılmaz', personelId: 's1' }, tasks: { creatorUid: 'uid-s1', creatorId: 'Ayşe Yılmaz' },
+        purchaseOrders: { durum: 'Onay Bekliyor', ...OWNER, workflow: { started: false, steps: [] } } };
     const cases = [
         ['requests', { ürün: XSS }], ['requests', { not: '</script>' }], ['requests', { personel: '<svg onload=1>' }],
         ['requests', { id: '"><img src=x>' }],
@@ -489,6 +814,176 @@ describe('Denetim günlüğü (4.7 · KJ-7)', () => {
     const reportQuery = db => getDocs(query(collection(db, LIVE, 'auditLogs', 'items'), orderBy('ts', 'desc'), limit(200)));
     test('admin rapor sorgusunu çalıştırır (J4)', () => assertSucceeds(reportQuery(ctx.admin())));
     test('personel rapor sorgusunu çalıştıramaz (J4)', () => assertFails(reportQuery(ctx.s1())));
+});
+
+// ─── J11 · P0: personel erişim kilidi (accessGate/items/staff) ────────────────────────────────────────────────────────────
+// Kanıtlanan: (1) VARSAYILAN KAPALI — kilit dokümanı yokken hiçbir personel hiçbir şey okuyamaz/yazamaz; (2) false, eksik alan ve
+// yanlış tip de kapalıdır (fail-closed); (3) kilit kapalıyken / göç yarıdayken yönetici göçün bütün adımlarını yapar; (4) kilit
+// yalnız sekiz denetimi sıfır olan, sunucu saatli, kendi imzalı kapanış kanıtıyla açılır; kapatmak her zaman serbesttir;
+// (5) personel kilide yazamaz; (6) kilit kök başınadır.
+const CLOSURE_KEYS = ['personelCodes', 'requestCodes', 'purchaseOrderCodes', 'accountsMissing', 'accountsInconsistent',
+    'accountMapMismatch', 'ownershipPending', 'ownershipUnresolved'];
+const zeroClosure = () => Object.fromEntries(CLOSURE_KEYS.map(k => [k, 0]));
+const gateRef = (db, root = LIVE) => item(db, root, 'accessGate', 'staff');
+const setGate = (data, root = LIVE) => seed(db => setDoc(gateRef(db, root), data));
+const dropGate = (root = LIVE) => seed(db => deleteDoc(gateRef(db, root)));
+const openPayload = (extra = {}) => ({ staffAccessEnabled: true, changedAt: serverTimestamp(), changedBy: 'admin-uid', reason: 'J11 kapanış', closure: zeroClosure(), version: 1, ...extra });
+const closePayload = (extra = {}) => ({ staffAccessEnabled: false, changedAt: serverTimestamp(), changedBy: 'admin-uid', reason: 'göç', version: 1, ...extra });
+
+// Personelin bütün erişim yolları: okuma, liste, iş akışı yazmaları, görev silme, denetim günlüğü, demo temizlik istisnası.
+async function staffLockedOut(db, root = LIVE) {
+    await assertFails(getDoc(item(db, root, 'b1', 'p1')));
+    await assertFails(getDoc(item(db, root, 'personel', 's2')));
+    await assertFails(getDocs(collection(db, root, 'personel', 'items')));
+    await assertFails(getDocs(collection(db, root, 'requests', 'items')));
+    await assertFails(getDoc(item(db, root, 'system_config', 'admin_settings')));
+    await assertFails(getDoc(item(db, root, 'workflowTemplates', 'w1')));
+    await assertFails(setDoc(item(db, root, 'requests', 'gx1'), { id: 'gx1', ürün: 'X', durum: 'Beklemede', personelUid: 'uid-s1' }));
+    await assertFails(setDoc(item(db, root, 'tasks', 'gx2'), { id: 'gx2', title: 'X', creatorUid: 'uid-s1' }));
+    await assertFails(setDoc(item(db, root, 'purchaseOrders', 'gx3'), { id: 'gx3', durum: 'Taslak', createdByUid: 'uid-s1', workflow: { started: false, steps: [] } }));
+    await assertFails(updateDoc(item(db, root, 'requests', 'r1'), { durum: 'draft' }));
+    await assertFails(deleteDoc(item(db, root, 'tasks', 't1')));
+    await assertFails(setDoc(item(db, root, 'auditLogs', 'gx4'), {
+        id: 'gx4', type: 'x', refCol: 'requests', refId: 'r1', item: 'x', qty: 1, actorName: 'Ayşe', actorPersonelId: 's1',
+        uid: 'uid-s1', authKind: 'password', result: 'blocked', reason: 'x', page: 'index', ts: serverTimestamp() }));
+}
+
+describe('J11 · P0 personel erişim kilidi — varsayılan kapalı (fail-closed)', () => {
+    beforeEach(async () => {
+        // tasks/t1 ve requests/r1 iki kökte de olsun (kilit yolları her iki kökte denenir)
+        await seed(async db => {
+            await setDoc(item(db, DEMO, 'b1', 'p1'), { id: 'p1', ürün: 'Laptop' });
+            await setDoc(item(db, DEMO, 'tasks', 't1'), { id: 't1', title: 'Görev', creatorUid: 'uid-s1', status: 'Pending' });
+            await setDoc(item(db, DEMO, 'requests', 'r1'), { id: 'r1', ürün: 'Mouse', durum: 'Beklemede', personelUid: 'uid-s1' });
+        });
+    });
+    test('KİLİT DOKÜMANI YOK (deploy sonrası ilk an): hiçbir personel hiçbir yolu kullanamaz — canlı ve demo', async () => {
+        await dropGate(LIVE); await dropGate(DEMO);
+        for (const root of [LIVE, DEMO]) for (const db of [ctx.s1(), ctx.s2(), ctx.s3()]) await staffLockedOut(db, root);
+        await assertFails(deleteDoc(item(ctx.s1(), DEMO, 'requests', 'rtest')));   // KJ-5 demo temizlik istisnası da kapalı
+    });
+    test('kilit false: personel kapalı', async () => {
+        await setGate({ staffAccessEnabled: false });
+        await staffLockedOut(ctx.s1());
+    });
+    for (const [label, data] of [['alan yok', {}], ['string "true"', { staffAccessEnabled: 'true' }], ['sayı 1', { staffAccessEnabled: 1 }],
+        ['null', { staffAccessEnabled: null }], ['harita', { staffAccessEnabled: { on: true } }], ['yanlış alan adı', { staffAccessEnable: true }]]) {
+        test(`kilit yanlış tipte / eksik (${label}): personel kapalı`, async () => {
+            await setGate(data);
+            await assertFails(getDoc(item(ctx.s1(), LIVE, 'personel', 's2')));
+            await assertFails(getDocs(collection(ctx.s1(), LIVE, 'personel', 'items')));
+            await assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'gy'), { id: 'gy', ürün: 'X', durum: 'Beklemede', personelUid: 'uid-s1' }));
+        });
+    }
+    test('GÖÇ YARIDA (kodlar personel kaydında duruyor): personel kodlu kaydı da listeyi de okuyamaz', async () => {
+        await dropGate();
+        await put('personel', 's2', { name: 'Bora Kaya', pri: 'bora.kaya', uid: 'uid-s2', code: 'Q7zP9' });
+        await put('requests', 'rk', { ürün: 'X', durum: 'Beklemede', personelKodu: 'Q7zP9', personelUid: 'uid-s1' });
+        await put('purchaseOrders', 'pok', { durum: 'Taslak', createdBy: 'Q7zP9', createdByUid: 'uid-s2' });
+        for (const db of [ctx.s1(), ctx.s2()]) {
+            await assertFails(getDoc(item(db, LIVE, 'personel', 's2')));
+            await assertFails(getDocs(collection(db, LIVE, 'personel', 'items')));
+            await assertFails(getDoc(item(db, LIVE, 'requests', 'rk')));
+            await assertFails(getDoc(item(db, LIVE, 'purchaseOrders', 'pok')));
+        }
+    });
+    test('kilit başka kökte açık: bu kökte kapalı (kök başına kilit)', async () => {
+        await dropGate(LIVE);
+        await assertSucceeds(getDoc(item(ctx.s1(), DEMO, 'b1', 'p1')));
+        await assertFails(getDoc(item(ctx.s1(), LIVE, 'b1', 'p1')));
+    });
+    test('bakım modu ile çelişmez: kilit kapalı + bakım kapalı → yazma yok; kilit açık + bakım açık → okuma var, yazma yok', async () => {
+        await setGate({ staffAccessEnabled: false });
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'm1'), { id: 'm1', ürün: 'X', durum: 'Beklemede', personelUid: 'uid-s1' }));
+        await setGate({ staffAccessEnabled: true });
+        await setMaintenance(true);
+        await assertSucceeds(getDoc(item(ctx.s1(), LIVE, 'b1', 'p1')));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'm2'), { id: 'm2', ürün: 'X', durum: 'Beklemede', personelUid: 'uid-s1' }));
+    });
+});
+
+describe('J11 · P0 — kilit kapalıyken yönetici göçü yapar', () => {
+    beforeEach(() => dropGate());
+    test('admin okur: personel listesi (kodlu), talepler, eşlemeler, kilit', async () => {
+        await put('personel', 's2', { name: 'Bora Kaya', pri: 'bora.kaya', uid: 'uid-s2', code: 'Q7zP9' });
+        await assertSucceeds(getDocs(collection(ctx.admin(), LIVE, 'personel', 'items')));
+        await assertSucceeds(getDocs(collection(ctx.admin(), LIVE, 'requests', 'items')));
+        await assertSucceeds(getDoc(item(ctx.admin(), LIVE, 'staffAccounts', 'uid-s1')));
+        await assertSucceeds(getDoc(gateRef(ctx.admin())));
+    });
+    test('PRI / Hesap göçü: eşleme + personel bağı yazılır', async () => {
+        await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'staffAccounts', 'uid-s4'), { personelId: 's4', pri: 'deniz.ak', linkedAt: 1 }));
+        await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'personel', 's4'), { uid: 'uid-s4', authEmail: 'deniz.ak@staff.medipol.local' }));
+    });
+    test('Sahiplik göçü: sahipsiz kayda uid yazılır', () =>
+        assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'requests', 'rlegacy'), { personelUid: 'uid-s1' })));
+    test('Kod temizliği: personel.code / requests.personelKodu silinir, purchaseOrders.createdBy değiştirilir', async () => {
+        await put('personel', 's2', { name: 'Bora Kaya', pri: 'bora.kaya', uid: 'uid-s2', code: 'Q7zP9' });
+        await put('requests', 'rk', { ürün: 'X', durum: 'Beklemede', personelKodu: 'Q7zP9' });
+        await put('purchaseOrders', 'pok', { durum: 'Taslak', createdBy: 'Q7zP9' });
+        await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'personel', 's2'), { code: deleteField() }));
+        await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'requests', 'rk'), { personelKodu: deleteField() }));
+        await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'pok'), { createdBy: 's2' }));
+    });
+    test('bakım modunu açar / kapatır (kilitten bağımsız)', () =>
+        assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'system_config', 'admin_settings'), { maintenance: true })));
+});
+
+describe('J11 · P0 — kilidi açma yalnız doğrulanmış kapanışla; kapatma her zaman', () => {
+    beforeEach(() => dropGate());
+    test('geçerli kanıt (8 denetim = 0, sunucu saati, kendi imzası) → açılır; personel artık okur', async () => {
+        await assertFails(getDoc(item(ctx.s1(), LIVE, 'b1', 'p1')));
+        await assertSucceeds(setDoc(gateRef(ctx.admin()), openPayload()));
+        await assertSucceeds(getDoc(item(ctx.s1(), LIVE, 'b1', 'p1')));
+    });
+    test('kanıtsız açılamaz (closure yok)', async () => {
+        const { closure, ...noClosure } = openPayload();
+        await assertFails(setDoc(gateRef(ctx.admin()), noClosure));
+    });
+    for (const k of CLOSURE_KEYS) {
+        test(`kapanmamış denetim (${k} = 1) ile açılamaz`, () =>
+            assertFails(setDoc(gateRef(ctx.admin()), openPayload({ closure: { ...zeroClosure(), [k]: 1 } }))));
+    }
+    test('eksik denetim anahtarı / fazladan anahtar / sayı yerine metin ile açılamaz', async () => {
+        const { ownershipUnresolved, ...missing } = zeroClosure();
+        await assertFails(setDoc(gateRef(ctx.admin()), openPayload({ closure: missing })));
+        await assertFails(setDoc(gateRef(ctx.admin()), openPayload({ closure: { ...zeroClosure(), extra: 0 } })));
+        await assertFails(setDoc(gateRef(ctx.admin()), openPayload({ closure: { ...zeroClosure(), personelCodes: '0' } })));
+        await assertFails(setDoc(gateRef(ctx.admin()), openPayload({ extra: true })));
+    });
+    test('istemci saati / başkası adına imza / sürüm yok / tip yanlış → reddedilir', async () => {
+        await assertFails(setDoc(gateRef(ctx.admin()), openPayload({ changedAt: new Date() })));
+        await assertFails(setDoc(gateRef(ctx.admin()), openPayload({ changedBy: 'baska-uid' })));
+        await assertFails(setDoc(gateRef(ctx.admin()), openPayload({ version: 2 })));
+        await assertFails(setDoc(gateRef(ctx.admin()), openPayload({ staffAccessEnabled: 'true' })));
+        await assertFails(setDoc(gateRef(ctx.admin()), openPayload({ reason: '<img src=x>' })));
+    });
+    test('kapatma kanıtsız serbest; silme = kapatma; ikisinde de personel hemen dışarıda', async () => {
+        await setGate({ staffAccessEnabled: true });
+        await assertSucceeds(getDoc(item(ctx.s1(), LIVE, 'b1', 'p1')));
+        await assertSucceeds(setDoc(gateRef(ctx.admin()), closePayload()));
+        await staffLockedOut(ctx.s1());
+        await setGate({ staffAccessEnabled: true });
+        await assertSucceeds(deleteDoc(gateRef(ctx.admin())));
+        await assertFails(getDoc(item(ctx.s1(), LIVE, 'b1', 'p1')));
+    });
+    test('KÖTÜ NİYET: personel kilidi açamaz / kapatamaz / silemez (kilit açıkken de)', async () => {
+        await assertFails(setDoc(gateRef(ctx.s1()), { ...openPayload(), changedBy: 'uid-s1' }));
+        await setGate({ staffAccessEnabled: true });
+        await assertFails(setDoc(gateRef(ctx.s1()), { ...closePayload(), changedBy: 'uid-s1' }));
+        await assertFails(updateDoc(gateRef(ctx.s1()), { staffAccessEnabled: true }));
+        await assertFails(deleteDoc(gateRef(ctx.s1())));
+    });
+    test('kimliği doğrulanmış personel kapalı kilidi OKUR (neden reddedildiğini bilsin); bağsız hesap / ziyaretçi okuyamaz', async () => {
+        await setGate({ staffAccessEnabled: false });
+        await assertSucceeds(getDoc(gateRef(ctx.s1())));
+        for (const db of [ctx.none(), ctx.anon(), ctx.signup(), ctx.squatter(), ctx.forged(), ctx.wrongPri(), ctx.legacyJ7()]) await assertFails(getDoc(gateRef(db)));
+    });
+    test('accessGate yalnız "staff" dokümanı; tanımsız kök kapalı', async () => {
+        await assertFails(setDoc(item(ctx.admin(), LIVE, 'accessGate', 'other'), openPayload()));
+        await assertFails(getDoc(item(ctx.admin(), LIVE, 'accessGate', 'other')));
+        await assertFails(setDoc(item(ctx.admin(), 'rogue_root', 'accessGate', 'staff'), openPayload()));
+    });
 });
 
 function assert(v) { if (!v) throw new Error('assert'); }
