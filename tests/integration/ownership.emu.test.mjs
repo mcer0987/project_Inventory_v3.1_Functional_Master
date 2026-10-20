@@ -359,6 +359,43 @@ for (const mode of ['before', 'after']) {
     });
 }
 
+// J11.6 · P1 (bağımsız denetim): bir personelin GEÇERLİ kodu sistem değeriyle ("admin") aynı. Eski sınıflandırma po_sys'i
+// "sistem" diye geçiyor, kod silinince değerin kişiyi gösterdiği bir daha bilinemiyor ve kapanış temiz görünüyordu.
+test('J11.6 · çakışma (kod = sistem değeri): kodlar silinmeden plan DURUR, kapanış engelli; yönetici çözünce kısmi göç + yeniden çalıştırma temiz kapanır', async () => {
+    await cleanseSeed({
+        personel: [acc('p_c', 'Cem Demir', 'admin', 'uid-c')],
+        purchaseOrders: [{ id: 'po_sys', urun: 'Kağıt', createdBy: 'admin', createdByName: 'Cem Demir', talepEden: 'Cem Demir', createdByUid: 'uid-c' }],
+        staffAccounts: [{ id: 'uid-a', personelId: 'p_a', pri: 'p_a' }, { id: 'uid-b', personelId: 'p_b', pri: 'p_b' }, { id: 'uid-c', personelId: 'p_c', pri: 'p_c' }],
+    });
+    const db = adminDb();
+    const p0 = (await freshCleansePlan(db)).plan;
+    assert.equal(p0.ready, false, 'çakışma varken kod temizliği başlamaz (applyCodeCleanse: not-ready)');
+    assert.deepEqual(plain(p0.blockers.purchaseOrderUnresolved.map(x => x.id)), ['po_sys']);
+    assert.match(p0.blockers.purchaseOrderUnresolved[0].reason, /birden fazla anlam/);
+    assert.deepEqual((await state(db)).codes, ['aaa11', 'admin', 'bbb22'], 'hiçbir kod silinmedi — çakışmanın izi duruyor');
+    const c0 = await closure(db);
+    assert.ok(c0.checks.purchaseOrderCodes >= 1 && !c0.ready, JSON.stringify(c0.checks));
+    await assert.rejects(setDoc(ref(db, 'accessGate', 'staff'), gatePayload(c0.checks)), denied, 'kilit bu kanıtla açılamaz');
+
+    // Yönetici kaydı inceleyip gerçek sahibe bağlar
+    await updateDoc(ref(db, 'purchaseOrders', 'po_sys'), { createdBy: 'p_c' });
+    const { plan, rows } = await freshCleansePlan(db);
+    assert.equal(plan.ready, true, JSON.stringify(plan.blockers));
+    // Kısmi göç: kod silme 2. parçada düşer (yarıda kalır)
+    const r1 = await runCleanse(db, plan, rows, { chunkSize: 1, faultB: n => (n === 1 ? 'before' : null) });
+    assert.equal(r1.a.status, 'committed');
+    assert.equal(r1.del.deleted, 1);
+    // Yeniden çalıştırma: taze plan sahte engel üretmez, kalan kodları siler; çakışan kayıt yerinde
+    const again = await freshCleansePlan(db);
+    assert.equal(again.plan.ready, true, JSON.stringify(again.plan.blockers));
+    assert.deepEqual(plain(again.plan.blockers.purchaseOrderUnresolved), []);
+    await runCleanse(db, again.plan, again.rows);
+    assert.deepEqual((await state(db)).codes, [null, null, null]);
+    assert.equal((await getDoc(ref(db, 'purchaseOrders', 'po_sys'))).data().createdBy, 'p_c');
+    const c1 = await closure(db);
+    assert.deepEqual([c1.checks.personelCodes, c1.checks.requestCodes, c1.checks.purchaseOrderCodes], [0, 0, 0], JSON.stringify(c1.checks));
+});
+
 test('J11 · P1 #4: ESKİ HATANIN bıraktığı yarım durum (kodlar silinmiş, createdBy dönüşmemiş) artık otomatik "unknown" yapılmaz — engel olarak raporlanır, hiçbir şey yazılmaz', async () => {
     await cleanseSeed();
     await env.withSecurityRulesDisabled(async c => {

@@ -648,6 +648,66 @@ describe('J11.5 · madde 3 — talep sahibi kendi talebine sahte tür / sahte ui
     });
 });
 
+// ─── J11.6 · P1 (bağımsız denetim): talep sahibi workflow.currentState'i sahte değere çekemez ───────────────────────────────
+// İstemcinin gerçek yazdıkları (WorkflowEngine durum makinesi esas): oluşturma currentState YAZMAZ (savePurchaseRequest; motor
+// başlangıcı initiation sayar), başlatma INITIATION (confirmStartWorkflow / createWorkflowFromTemplate), düzenleme / ek silme
+// DOKUNMAZ, iptal CANCELLED (motor: cancelled'a geçebilen bir durumdan), geri çekme INITIATION (taslak). Admin listesi başlamış
+// ve currentState 'completed' akışı "Tamamlandı" gösterir (admin-purchase-render.js) — onaysız talep tamamlanmış görünemez.
+describe('J11.6 · talep sahibi workflow.currentState\'i sahte değere çekemez (oluşturma / başlatma / düzenleme / iptal / geri çekme)', () => {
+    const draft = { urun: 'Kağıt', aciklama: 'A4', durum: 'Taslak', ...OWNER, akis, workflow: { started: false, currentStep: 0, steps: [] } };
+    const upd = (id, data) => updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', id), data);
+    const FAKE = ['completed', 'cancelled', 'suspended', 'manager_approval', 'pending', 'onaylandi'];
+
+    test('OLUŞTURMA: currentState yazılmaz ya da başlangıç (initiation); sahte durum reddedilir', async () => {
+        const mk = (id, wf) => setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', id), { id, ...draft, workflow: { ...draft.workflow, ...wf } });
+        for (const st of FAKE) await assertFails(mk('pc_' + st, { currentState: st }));
+        await assertSucceeds(mk('pc1', {}));                              // savePurchaseRequest: alan yok
+        await assertSucceeds(mk('pc2', { currentState: 'initiation' }));
+    });
+    test('BAŞLATMA: yalnız initiation — sahte "completed" (admin listesinde Tamamlandı) ve ilgisiz durumlar reddedilir', async () => {
+        await put('purchaseOrders', 'pb', draft);
+        const start = st => upd('pb', { durum: 'Onay Bekliyor', akis: [...akis, ev('İş akışı başlatıldı')],
+            workflow: { started: true, finished: false, currentStep: 0, currentState: st, steps: [step('uid-s2')], history: [hev('create')] } });
+        for (const st of FAKE) await assertFails(start(st));
+        await assertSucceeds(start('initiation'));
+    });
+    test('DÜZENLEME / EK SİLME: currentState değiştirilemez (yoksa eklenemez)', async () => {
+        await put('purchaseOrders', 'pd', draft);
+        for (const st of ['completed', 'initiation']) await assertFails(upd('pd', { 'workflow.currentState': st, akis: [...akis, ev('Talep güncellendi')] }));
+        await put('purchaseOrders', 'pd2', { ...draft, workflow: { ...draft.workflow, currentState: 'initiation' } });
+        await assertFails(upd('pd2', { 'workflow.currentState': 'completed', akis: [...akis, ev('Talep güncellendi')] }));
+        await assertSucceeds(upd('pd2', { urun: 'Kağıt A3', akis: [...akis, ev('Talep güncellendi')] }));
+        await assertSucceeds(upd('pd', { urun: 'Kağıt A3', akis: [...akis, ev('Talep güncellendi')] }));
+    });
+    test('İPTAL: yalnız cancelled', async () => {
+        await put('purchaseOrders', 'pf', draft);
+        const cancel = st => upd('pf', { durum: 'İptal Edildi', akis: [...akis, ev('Talep İptal Edildi')],
+            workflow: { started: false, finished: true, currentStep: 0, currentState: st, steps: [], history: [] } });
+        for (const st of ['completed', 'suspended', 'initiation', 'manager_approval']) await assertFails(cancel(st));
+        await assertSucceeds(cancel('cancelled'));
+    });
+    test('GERİ ÇEKME: yalnız taslak durumu (initiation)', async () => {
+        await put('purchaseOrders', 'pg', running());
+        const wd = st => upd('pg', { durum: 'Taslak', akis: [...akis, ev(WD)],
+            workflow: { id: 'wf1', started: false, finished: false, currentStep: 0, currentState: st, steps: [], history: [...hist, hev('withdraw')] } });
+        for (const st of FAKE) await assertFails(wd(st));
+        await assertSucceeds(wd('initiation'));
+    });
+    test('KABUL: başlat → 10 adımı sırayla onayla (durum makinesi döngüsü) → completed / Onaylandı', async () => {
+        await put('purchaseOrders', 'pz', draft);
+        const ten = Array.from({ length: 10 }, (_, i) => step(i % 2 ? 'uid-s3' : 'uid-s2'));
+        await assertSucceeds(upd('pz', { durum: 'Onay Bekliyor', akis: [...akis, ev('İş akışı başlatıldı')],
+            workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: ten, history: [hev('create')] } }));
+        let po = { ...draft, durum: 'Onay Bekliyor', akis: [...akis, ev('İş akışı başlatıldı')],
+            workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: ten, history: [hev('create')] } };
+        for (let i = 0; i < 10; i++) {
+            po = approved(po, i);
+            await assertSucceeds(setDoc(item(i % 2 ? ctx.s3() : ctx.s2(), LIVE, 'purchaseOrders', 'pz'), { id: 'pz', ...po }));
+        }
+        assert(po.workflow.currentState === 'completed' && po.durum === 'Onaylandı' && po.workflow.finished === true);
+    });
+});
+
 describe('Görev (tasks) — oluşturan / atanan', () => {
     test('personel kendi creatorUid\'siyle oluşturur; başkası adına / uid\'siz oluşturamaz', async () => {
         await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'tasks', 't2'), { id: 't2', title: 'Yeni', creatorUid: 'uid-s1', creatorId: 'Ayşe Yılmaz' }));

@@ -402,7 +402,9 @@
     //          - sahiplik alanının KENDİSİ çözülemeyen / dolu uid'si bugünkü hesaptan farklı kayıt (ownershipIssues içinden
     //            classifyOwnershipIssues ile ayrılan ENGELLEYİCİ satırlar — onay adımı / atanan gibi UYARI'lar engel değil)
     //          - createdBy personel id'si / bilinen ad / sistem değeri değil ve TEKİL bir personelin koduna indirgenemiyor
-    //            (J11.5: biçimine bakılmaz; hiç kimsenin kodu değil ya da birden fazla kişide ortak): ESKİDEN burada otomatik 'unknown' yazılırdı — bu, bilgiyi geri dönüşsüz siliyordu ve personel.code
+    //            (J11.5: biçimine bakılmaz; hiç kimsenin kodu değil ya da birden fazla kişide ortak)
+    //          - createdBy bir personelin GEÇERLİ kodu ve aynı zamanda BAŞKA bir kişinin id'si / adı ya da sistem değeri (J11.6
+    //            kod / kimlik çakışması) — kod silinmeden önce durdurulur; kod silindikten sonra çakışma tespit edilemez: ESKİDEN burada otomatik 'unknown' yazılırdı — bu, bilgiyi geri dönüşsüz siliyordu ve personel.code
     //            daha önce silinmişse (yarım kalmış bir önceki koşudan) HER ZAMAN 'unknown'a düşüyordu (J11 denetim bulgusu).
     //            Artık böyle kayıtlar plan.blockers.purchaseOrderUnresolved'a düşer; yönetici KAYDI ELLE düzeltmeden plan
     //            hazır sayılmaz, hiçbir alan otomatik 'unknown' yapılmaz.
@@ -428,13 +430,28 @@
         (purchaseOrders || []).forEach(po => {
             if (!po || blank(po.id) || blank(po.createdBy)) return;
             const by = String(po.createdBy).trim();
-            if (index.byId.has(by) || isSystemActor(by) || (index.byName.get(norm(by)) || []).length) return;
-            // J11.5 · P1 (bağımsız denetim): eskiden yalnız /^[A-Za-z0-9]{4,12}$/ biçimindeki değerler kod sayılıyordu; tireli /
-            // özel karakterli eski kodlar (ör. "ab-12") "tanınmayan metin" diye atlanıyor, kapanış denetimi onları TEMİZ sayıyordu.
-            // Artık biçime bakılmaz (sıfır güven): personel id'si, bilinen bir ad ya da sistem değeri olarak çözülemeyen HER createdBy
-            // ya tekil bir personelin koduna indirgenir ya da ENGELDİR. Rapor değeri içermez (kod olabilir).
-            const hits = index.byCode.get(by) || [];
             const lbl = `${po.evrakNo || po.urun || '-'} · ${po.createdByName || po.talepEden || '-'}`;
+            // J11.6 · P1 (bağımsız denetim): değerin TÜM anlamları birlikte değerlendirilir (byId, byName, sistem değeri, byCode).
+            // Eskiden id / ad / sistem değeri eşleşmesi kod kontrolünden ÖNCE "güvenli" sayılıyordu: bir personelin geçerli kodu
+            // başka birinin id'si, adı ya da "admin" gibi bir sistem değeriyle aynıysa dönüşüm atlanıyor, personel.code silinince
+            // değerin kod olduğu bir daha bilinemiyor ve kapanış temiz görünüyordu. Artık geçerli bir kod, farklı bir kişiyi ya da
+            // sistem değerini de gösteriyorsa ENGELDİR — kodlar silinmeden (plan hazır sayılmaz; applyCodeCleanse not-ready). Tüm
+            // anlamlar AYNI kişiyi gösteriyorsa (kod = kendi id'si / adı) değer tek anlamlıdır; id / ad kalıcı olduğu için dokunulmaz.
+            const sys = isSystemActor(by);
+            const idHit = index.byId.get(by) || null;
+            const nameHits = index.byName.get(norm(by)) || [];
+            const hits = index.byCode.get(by) || [];
+            const asIdentity = !!idHit || sys || nameHits.length > 0;
+            if (hits.length && asIdentity) {
+                const people = new Set([idHit, ...nameHits, ...hits].filter(Boolean).map(p => String(p.id)));
+                if (!sys && people.size === 1) return;
+                plan.blockers.purchaseOrderUnresolved.push({ id: String(po.id), label: lbl,
+                    reason: 'kod / kimlik çakışması: değer birden fazla anlama çözülüyor (bir personelin geçerli kodu ve aynı zamanda başka bir personelin id\'si / adı ya da sistem değeri) — otomatik dönüşüm yapılmaz, kayıt elle düzeltilmeli' });
+                return;
+            }
+            if (asIdentity) return;
+            // J11.5 · P1 (bağımsız denetim): biçime bakılmaz (sıfır güven) — personel id'si, bilinen bir ad ya da sistem değeri olarak
+            // çözülemeyen HER createdBy ya tekil bir personelin koduna indirgenir ya da ENGELDİR. Rapor değeri içermez (kod olabilir).
             if (hits.length === 1) { plan.purchaseOrders.push({ id: String(po.id), label: lbl, replaceWith: String(hits[0].id) }); return; }
             // Hiç kimsenin kodu değil (silinmiş personel / tanınmayan değer) ya da birden fazla kişide ortak — otomatik YAZILMAZ.
             plan.blockers.purchaseOrderUnresolved.push({ id: String(po.id), label: lbl, reason: hits.length ? 'bu kod birden fazla personelde ortak'

@@ -194,9 +194,17 @@ service cloud.firestore {
         && d.get('createdByName', '') == me && d.get('talepEden', '') == me
         && string(d.get('createdBy', '')) == staffPid(root)
         && wf.get('history', []).size() == 0
+        && wf.get('currentState', 'initiation') == 'initiation'
         && ownerEventOk([], d.get('akis', []), 'yapan', me, 'islem', ['Talep Oluşturuldu']);
     }
     // Sahibi, akış BAŞLAMAMIŞKEN: düzenler, akışı başlatır (adımlar kararsız, kendisi onaylayıcı değil), iptal eder.
+    // J11.6 · P1 (bağımsız denetim): workflow.currentState sahibin yazmasında İSTEMCİNİN GERÇEK değerine bağlı (WorkflowEngine esas):
+    //   oluşturma alanı yazmaz ya da initiation (poCreateOk) · başlatma INITIATION (confirmStartWorkflow / createWorkflowFromTemplate)
+    //   · düzenleme / ek silme DEĞİŞTİRMEZ · iptal CANCELLED, yalnız motorun cancelled'a geçişe izin verdiği bir durumdan
+    //   (WorkflowEngine.transitions) · geri çekme INITIATION (poWithdrawOk; taslağa dönüş motor geçişi değil, sıfırlamadır — eski
+    //   durum sınırlanmaz, aksi hâlde hr / finance / director'dan meşru geri çekme kırılırdı). Admin listesi başlamış ve
+    //   'completed' akışı "Tamamlandı" gösterir; onaysız talep böylece tamamlanmış görünemez. Üst düzey durum (durum) ve adım
+    //   durumları (steps[].status: freshSteps → pending) ayrı denetlenir.
     // J11 · P1 #7: talep sahibinin görünen kimliği (createdBy / createdByName / talepEden) taslakta da DEĞİŞTİRİLEMEZ. Sahibin her
     // işlemi (düzenleme, ek silme, başlatma, iptal) istemcide en fazla bir history ve bir akış kaydı ekler; eklenen kayıt sahibin
     // KENDİ adını taşımak zorunda (başkası adına "onayladı" kaydı düşülemez). Sahibin adı olarak kayıttaki createdByName
@@ -215,6 +223,11 @@ service cloud.firestore {
         && nwf.get('currentStep', 0) == 0
         && (nwf.get('finished', false) != true || d.get('durum', '') == 'İptal Edildi')
         && (nwf.get('started', false) != true || d.get('durum', '') == 'Onay Bekliyor')
+        && (nwf.get('started', false) == true ? nwf.get('currentState', '') == 'initiation'
+            : (d.get('durum', '') == 'İptal Edildi'
+               ? nwf.get('currentState', '') == 'cancelled'
+                 && wf.get('currentState', 'initiation') in ['initiation', 'manager_approval', 'hr_approval', 'finance_approval', 'director_approval', 'suspended']
+               : nwf.get('currentState', null) == wf.get('currentState', null)))
         && ownerEventOk(wf.get('history', []), nwf.get('history', []), 'actor', me, 'action', nwf.get('started', false) == true ? ['create'] : [])
         && ownerEventOk(old.get('akis', []), d.get('akis', []), 'yapan', me, 'islem', nwf.get('started', false) == true ? ['İş akışı başlatıldı']
              : (d.get('durum', '') == 'İptal Edildi' ? ['Talep İptal Edildi'] : ['Talep güncellendi', 'Ek dosya silindi']));
@@ -229,6 +242,7 @@ service cloud.firestore {
         && d.get('durum', '') == 'Taslak'
         && nwf.get('started', true) == false && nwf.get('finished', true) == false
         && nwf.get('steps', [1]).size() == 0 && nwf.get('currentStep', -1) == 0
+        && nwf.get('currentState', '') == 'initiation'
         && ownerEventOk(wf.get('history', []), nwf.get('history', []), 'actor', me, 'action', ['withdraw'])
         && ownerEventOk(old.get('akis', []), d.get('akis', []), 'yapan', me, 'islem', ['Talep Geri Çekildi (Taslak Moduna Alındı)']);
     }

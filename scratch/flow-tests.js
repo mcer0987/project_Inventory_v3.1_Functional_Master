@@ -4859,7 +4859,7 @@ const SCENARIOS = {
                 const id = 'j11po_' + Date.now();
                 const po = { id, urun: 'J11 onay denetimi ' + MARKER, adet: 1, durum: 'Taslak', createdBy: pid, createdByName: me, createdByUid: uid, talepEden: me,
                     akis: [{ islem: 'Talep Oluşturuldu', yapan: me, uid, tarih: new Date().toLocaleString('tr-TR') }],
-                    workflow: { id: 'wf_' + id, started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [], history: [] } };
+                    workflow: { id: 'wf_' + id, started: false, finished: false, currentStep: 0, steps: [], history: [] } };   // savePurchaseRequest gibi: currentState yok
                 await window.appendItem('purchaseOrders', po);
                 // J11.5 · madde 3: sahip KENDİ taslağına sahte "Onaylandı" olayı / başkasının uid'siyle olay / sahte history ekleyemez
                 const tryW = doc => window.upsertItem('purchaseOrders', doc).then(() => 'yazıldı', e => e.code || e.message);
@@ -4869,15 +4869,34 @@ const SCENARIOS = {
                     fakeHistory: await tryW({ ...po, workflow: { ...po.workflow, history: [{ action: 'transition', actor: me, uid, to: 'completed' }] } }),
                 };
                 const step = tip => ({ user: approver.name, userUid: approver.uid, tip, status: 'pending', note: '', date: '' });
-                await window.upsertItem('purchaseOrders', { ...po, durum: 'Onay Bekliyor',
-                    // J11.5: confirmStartWorkflow ile aynı olay türleri (history 'create', akış "İş akışı başlatıldı") ve uid
-                    akis: [...po.akis, { islem: 'İş akışı başlatıldı', yapan: me, uid, tarih: new Date().toLocaleString('tr-TR') }],
-                    workflow: { ...po.workflow, started: true, steps: [step('Paraf'), step('Onay')],
+                // J11.6 · madde 2: olaylar, uid ve adımlar MEŞRU bir başlatma; tek fark currentState — sahte "completed" (admin
+                // listesinde "Tamamlandı") ve ilgisiz "cancelled" / "suspended" reddedilir
+                const startDoc = st => ({ ...po, durum: 'Onay Bekliyor',
+                    akis: [...po.akis, { islem: 'İş akışı başlatıldı', yapan: me, uid, tarih: 't' }],
+                    workflow: { ...po.workflow, started: true, currentState: st, steps: [step('Paraf'), step('Onay')],
                         history: [{ action: 'create', actor: me, uid, timestamp: new Date().toISOString(), to: 'initiation' }] } });
+                window.__j11OwnerForged.fakeCompletedStart = await tryW(startDoc('completed'));
+                window.__j11OwnerForged.fakeCancelledStart = await tryW(startDoc('cancelled'));
+                window.__j11OwnerForged.fakeSuspendedStart = await tryW(startDoc('suspended'));
+                window.__j11Po = po; window.__j11Step = step;
                 return id;
             }, approver, MARKER);
             out.ownerForged = await page.evaluate(() => window.__j11OwnerForged);
-            out.started = (await emuDoc('purchaseOrders', id))?.workflow?.started === true;
+            const draftAfterForged = await emuDoc('purchaseOrders', id);
+            out.ownerForgedServerUnchanged = draftAfterForged.workflow.started === false && !('currentState' in draftAfterForged.workflow)
+                && draftAfterForged.durum === 'Taslak' && draftAfterForged.akis.length === 1 && draftAfterForged.workflow.history.length === 0;
+            // Hata fırlatmak yerine sonucu kaydeder: başarısızlıkta tüm "out" (sahte yazımların sonuçları dahil) raporda görünür
+            out.legitStart = await page.evaluate(async () => {
+                const po = window.__j11Po, step = window.__j11Step, me = window.Ownership.selfName(), uid = window.userAuth.uid;
+                return window.upsertItem('purchaseOrders', { ...po, durum: 'Onay Bekliyor',
+                    // J11.5: confirmStartWorkflow ile aynı olay türleri (history 'create', akış "İş akışı başlatıldı") ve uid
+                    akis: [...po.akis, { islem: 'İş akışı başlatıldı', yapan: me, uid, tarih: new Date().toLocaleString('tr-TR') }],
+                    workflow: { ...po.workflow, started: true, currentState: 'initiation', steps: [step('Paraf'), step('Onay')],   // confirmStartWorkflow: INITIATION
+                        history: [{ action: 'create', actor: me, uid, timestamp: new Date().toISOString(), to: 'initiation' }] } })
+                    .then(() => 'yazıldı', e => e.code || e.message);
+            });
+            out.started = out.legitStart === 'yazıldı' && (await emuDoc('purchaseOrders', id))?.workflow?.started === true;
+            if (!out.started) throw new Error('j11ApprovalAudit: meşru başlatma yapılamadı: ' + JSON.stringify(out));
             const visible = await settle(s, id => (window.data.purchaseOrders || []).some(x => String(x.id) === id && x.workflow && x.workflow.started), 20000, id);
 
             // 1) Aynı SAYIDA (+1 history, +1 akış) ama SAHTE İÇERİKLİ onay: akış kaydı "red" olayı, history uid'siz → kurallar reddeder
@@ -4947,6 +4966,7 @@ const SCENARIOS = {
         const OF = out.ownerForged || {};
         out.ok = out.approverLogin === true && out.started && !!id && out.forged === 'forbidden' && out.forgedServerUnchanged
             && OF.approvedEvent === 'forbidden' && OF.otherUid === 'forbidden' && OF.fakeHistory === 'forbidden'
+            && OF.fakeCompletedStart === 'forbidden' && OF.fakeCancelledStart === 'forbidden' && OF.fakeSuspendedStart === 'forbidden' && out.ownerForgedServerUnchanged
             && out.forgedState && out.forgedState.cancelled === 'forbidden' && out.forgedState.suspended === 'forbidden' && out.forgedStateServerUnchanged
             && A.state === 'manager_approval'
             && /success/.test(out.approve) && A.step0 === 'approved' && A.currentStep === 1 && A.durum === 'Onay Bekliyor'
