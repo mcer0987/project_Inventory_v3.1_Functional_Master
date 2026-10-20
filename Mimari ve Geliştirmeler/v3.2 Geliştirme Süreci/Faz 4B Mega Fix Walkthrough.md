@@ -4,7 +4,7 @@
 > günceller: kendi bölümünü doldurur, **Durum** tablosunu ve **Zincir devir notu**nu yeniler.
 
 Dal: `feat/phase-4b-identity-model`. J11 kodu ve testleri J10'un (`d35c919`) üstünde yerel commit
-**`06afc6f53da260bdc829e04b8b709c68fb2d706e`** olarak duruyor. Push, merge, deploy ve gerçek ortamda göç **yapılmadı**; hepsi
+**`06afc6f53da260bdc829e04b8b709c68fb2d706e`**, J11.5 düzeltmeleri **`6958aa352813025e6476b4ede6d5f976c021d831`** olarak duruyor. Push, merge, deploy ve gerçek ortamda göç **yapılmadı**; hepsi
 proje sahibinin ayrı onayını bekliyor (madde 10). Teslim ve denetim raporu:
 [Faz 4B Tur J11 Walkthrough](Faz%204B%20Tur%20J11%20Walkthrough.md).
 
@@ -20,6 +20,7 @@ Bağımsız denetim kararı (J10): **57/100 — NO-GO**.
 | Faz 1 · Tur 3 | **P1 #6** demo test silme istisnası · **P1 #7** talep sahibi / katılımcı kimliği · **P1 #8** kalite kapısı · P1 #4 ve P1 #5 düzeltmeleri | Opus | ✅ Tamam — tüm regresyon paketleri yeşil (akış 54/54) |
 | Faz 1 · Tur 4 | Bağımsız denetim: **P1 #5** "aynı sayıda sahte içerik" kapanışı (eski adım `pending`, olay türü / uid / gerekçe bağı) · **madde 9** teslim raporu ([Faz 4B Tur J11 Walkthrough](Faz%204B%20Tur%20J11%20Walkthrough.md)) | Opus | ✅ Tamam — tarih alanı açık risk olarak kaldı |
 | Faz 1 · madde 10 | Yetki ve son karar: yalnız bu dal; başarısızlıkta güvenli kalma tablosu; J11 yerel commit `06afc6f`; bağımsız denetime teslim | Opus | ✅ Teslim edildi — push / merge / deploy / göç sahibin onayında |
+| Tur J11.5 | Bağımsız denetim (76/100) zero-trust bulguları: biçimden bağımsız eski kod engeli · onayda `currentState` ardıl bağı · sahibin olay türü + uid bağı (`ownerEventOk`) · yerel commit `6958aa3` | Opus | ✅ Tamam — rules 197/197, unit 114/114, E2E 55/55. Ayrıntı: [Tur J11 Walkthrough §11](Faz%204B%20Tur%20J11%20Walkthrough.md) |
 | Faz 2 | Kalan denetim bulguları | Sonnet | ⏳ Bekliyor — bkz. Zincir devir notu |
 | Faz 3 | Gerçek ortamda göç ve kilidin açılması (runbook) | Sahip + ajan | ⏳ Bekliyor (onay gerekir) |
 
@@ -354,7 +355,7 @@ sorgu yok.
 |---|---|
 | `requestCreateOk` | `personel == staffName` ve `string(personelId) == staffPid`. Sayısal eski id'ler metin eşlemesiyle eşleşir. Güncellemede bu alanlar zaten değiştirilemez (`hasOnly`). |
 | `poCreateOk` | `createdByName == talepEden == staffName`, `string(createdBy) == staffPid`. Yeni talep geçmişsiz başlar; en fazla tek akış kaydı taşır, o da sahibin adıyla. "Onaylandı" yazan sahte geçmişle talep açılamaz. |
-| `poDraftOk` / `poWithdrawOk` | `createdBy` / `createdByName` / `talepEden` değişmez. Her işlem en fazla bir history ve bir akış kaydı ekler (`appendOneBy`). Eklenen kayıt sahibin adını taşır. |
+| `poDraftOk` / `poWithdrawOk` | `createdBy` / `createdByName` / `talepEden` değişmez. Her işlem en fazla bir history ve bir akış kaydı ekler. Eklenen kayıt sahibin adını taşır. **J11.5:** `appendOneBy` yerine `ownerEventOk` — kayıt ayrıca sahibin uid'sini ve işlemin istemcide ürettiği türü taşımalı (Tur J11 Walkthrough §11.3). |
 | `poApprovalOk` | Sıradaki adımın görünen onaylayıcısı (`steps[cs].user`) onaylayanın gerçek adıyla aynı olmalı (tam ya da küçük harf eşitliği). |
 | Görev oluşturma / `taskUpdateOk` | `creatorId == staffName`; oluşturan sonradan değiştiremez. |
 
@@ -585,7 +586,7 @@ var olmasıdır; 0. adım bunu dışlar.
 4. `auditLogs` create `member()` üzerinden kilitten geçer. Kilit kapalıyken personelin self-approval kaydı da yazılamaz; bu
    bilinçli bir tercih.
 5. Bakım modu (`maintenanceOn`) kilitten bağımsızdır; kilit kapalıyken değerlendirilmez. İkisini birleştirmeyin.
-6. **Kayıt sayısı bağı.** `poApprovalOk`'taki onay +1/+1 ve red +1/+3 sınırları ile `appendOneBy`'ın "işlem başına en fazla bir
+6. **Kayıt sayısı bağı.** `poApprovalOk`'taki onay +1/+1 ve red +1/+3 sınırları ile `ownerEventOk`'ın (J11.5; eski adı `appendOneBy`) "işlem başına en fazla bir
    kayıt" kuralı, `edm-workflow.js` / `purchase-servises.js`'in ürettiği kayıt sayısına bağlıdır. `akis.push` / `history.push`
    sayısı değişirse kural da güncellenmeli. Rules testleri ve akış testleri bu bağı yakalar.
    - **Tur 4 ile içerik bağı da eklendi.** Kural artık bu kayıtların **metnine ve sırasına** da bağlı:

@@ -11,6 +11,7 @@
 |---|---|
 | Dal | `feat/phase-4b-identity-model` |
 | Taban commit | `d35c919e318e1237d566c2529e25ab4f9c11d351` (J10 · "enterprise PRI identity model…") |
+| **Son test edilen commit (J11.5)** | **`6958aa352813025e6476b4ede6d5f976c021d831`**: J11'in üstünde, bağımsız denetimin 3 zero-trust bulgusunun düzeltmesi. Ayrıntı ve sonuçlar **§11**'de. Push / merge / deploy yapılmadı. |
 | **Test edilen J11 commit'i** | **`06afc6f53da260bdc829e04b8b709c68fb2d706e`** — yalnız bu dalda, yerel commit. Push, merge ve deploy **yapılmadı**; üçü de proje sahibinin onayını bekliyor (madde 10). Testler commit'ten hemen önce aynı çalışma ağacında koşuldu; commit'ten sonra J11 dosyalarında çalışma ağacıyla fark kalmadığı `git diff HEAD` ile doğrulandı. Bu rapor ve Mega Fix dosyası ayrı bir belge commit'iyle eklendi. |
 | Test tarihi | 20.10.2026, yerel makine (Windows 11), Firebase Emulator (Firestore + Auth) |
 | Gerçek ortam | **Dokunulmadı.** Canlı (`lifeserver_master`) ve demo (`inventory_demo`) projelerine hiçbir test yazmadı. Deploy ya da göç yapılmadı. |
@@ -379,7 +380,7 @@ Hiçbiri gerçek Firebase projesine yazmaz. `test:*:emu` ve `test:rules` kendi g
 ayrıca açılır.
 
 ```bash
-git checkout 06afc6f53da260bdc829e04b8b709c68fb2d706e
+git checkout 6958aa352813025e6476b4ede6d5f976c021d831   # J11.5 (son); yalnız J11 için: 06afc6f
 npm run test:unit
 npm run test:rules
 npm run test:staff:emu
@@ -401,7 +402,7 @@ ve aynı komutlar orada koşulur.
 
 ## 10. Proje sahibinin kararını bekleyenler
 
-1. **Push / merge / deploy.** J11 yalnız yerel `feat/phase-4b-identity-model` dalında commit'li (`06afc6f`). Deploy, §5'teki
+1. **Push / merge / deploy.** J11 ve J11.5 yalnız yerel `feat/phase-4b-identity-model` dalında commit'li (`06afc6f`, `6958aa3`). Deploy, §5'teki
    sırayla ve kurallar + istemci birlikte yapılmalı.
 2. **Gerçek ortamda göç.** §5 adım 4–5; kök başına (canlı ve demo ayrı).
 3. **Açık risk 1 (yeni kaydın tarihi istemci saati).** Kabul mü, yoksa Faz 2'de sunucu saatli karar alanı (`kararlar.<adım>.at
@@ -410,3 +411,113 @@ ve aynı komutlar orada koşulur.
    bir ön denetim yapılsın mı?
 5. **J11'e ait olmayan çalışma ağacı değişiklikleri** (§0): commit'e alınacak mı, atılacak mı?
 6. **Kapsam dışı sertleştirmeler** (§8): hangileri Faz 2'ye alınacak?
+
+---
+
+## 11. Tur J11.5 — Zero-Trust sözleşme düzeltmeleri (bağımsız denetim, 76/100)
+
+Commit: **`6958aa352813025e6476b4ede6d5f976c021d831`** (J11 `06afc6f`'in üstünde; yalnız bu dal, yerel). Denetçinin üç bulgusu
+önce koddan doğrulandı, sonra düzeltildi. Her biri için yazılan testler, düzeltme **öncesi** koda karşı da koşuldu.
+
+### 11.1 Eski kod tespiti — biçime bağlı açık (P1)
+
+- **Doğrulama:** `ownership.js` `planCodeCleanse`, kod sayılmayan değerleri `/^[A-Za-z0-9]{4,12}$/` ile ayırıyordu. Sahibinin
+  kodu silinmiş bir eski `createdBy` değeri tireli ya da özel karakterliyse (`ab-12`) "tanınmayan metin" sayılıp
+  atlanıyordu. `planStaffAccessClosure` aynı tespiti kullandığı için `purchaseOrderCodes` 0 çıkıyor ve kapanış temiz
+  görünüyordu.
+- **`staff-code-registry.js`:** Bu dosyada böyle bir tespit regex'i **yok**; yalnız kod doğrulaması var (boş / boşluk / en kısa
+  uzunluk / çakışma). Değişiklik gerekmedi.
+- **Düzeltme:** Biçime bakılmaz. `createdBy` şunlardan birine çözülemiyorsa **engeldir** (`purchaseOrderUnresolved` → kapanışta
+  `purchaseOrderCodes`):
+  - personel id'si;
+  - bilinen bir ad;
+  - sistem / rol / havuz değeri (`unknown`, `Admin`, `pool`, `system`, `Yönetici` …).
+
+  Değer bugün tekil bir personelin koduysa eskisi gibi o personelin id'sine çözülür. Rapor değeri içermez. VIP etiketi
+  "kodlu ya da çözülemeyen 'oluşturan' alanı" olarak güncellendi.
+- **Meşru değerler engellenmez:** İstemcinin yazdığı değerler personel id'si (`_purchaseRequester`), şablondan açılanlarda ad
+  ve yöneticinin personel kaydı yoksa `"unknown"`'dır. Bir test bunların hiçbirinin engel olmadığını doğrular.
+- **Operasyonel etki (gizlenmedi):** Canlı veride çözülemeyen bir `createdBy` varsa kilit, yönetici kaydı düzeltene kadar
+  açılmaz. Bu, fail-closed tasarımın beklenen sonucudur. Emülatördeki demo kopyasında böyle bir kayıt çıkmadı
+  (`j10CodeCleanse` geçti); canlı veride göçten önce VIP Kod Temizliği önizlemesi bunu gösterir.
+
+### 11.2 Onaylayıcının `currentState` manipülasyonu (P1)
+
+- **Doğrulama:** `poApprovalOk`'un onay dalı `nwf.currentState`'i hiç sınırlamıyordu; onaylayıcı meşru bir onayla birlikte
+  durumu `cancelled` ya da `suspended` yazabiliyordu. Red dalı zaten `cancelled` istiyordu.
+- **Düzeltme:** Onaydan sonraki durum, `approveStep`'in durum makinesinin **tek meşru ardılına** bağlandı. Kural, sunucudaki
+  eski durumu şu tabloyla eşler; kümeye üyelikten daha sıkıdır.
+
+  | Adım | Eski durum | Yeni durum |
+  |---|---|---|
+  | Son adım | herhangi biri | `completed` |
+  | Ara adım | `initiation`, boş ya da hatalı `completed` (istemci `initiation`'a onarır) | `manager_approval` |
+  | Ara adım | `manager_approval` | `hr_approval` |
+  | Ara adım | `hr_approval` | `finance_approval` |
+  | Ara adım | `finance_approval` | `director_approval` |
+  | Ara adım | `director_approval` | `initiation` (istemci önce `completed`'a geçer, `fixWorkflowCurrentStep` döndürür) |
+
+  Tabloda olmayan bir eski durum reddedilir. Alanı silmek de reddedilir.
+
+### 11.3 Talep sahibinin sahte olay / uid eklemesi (P1)
+
+- **Doğrulama:** `appendOneBy` yalnız eklenen kaydın aktör adını denetliyordu. Sahip kendi taslağına kendi adıyla
+  "✅ Onaylandı" akış kaydı, `transition` / `approved` history kaydı ya da başkasının uid'sini taşıyan kayıt ekleyebiliyordu.
+- **Düzeltme:** `appendOneBy` yerine `ownerEventOk` geldi. Eklenen tek kayıt şunları taşımak zorunda:
+  - sahibin adı;
+  - `uid == request.auth.uid` (ek `get()` yok);
+  - işlemin istemcide ürettiği türlerden biri:
+
+  | İşlem | History türü | Akış türü (`islem`) |
+  |---|---|---|
+  | Oluşturma (`poCreateOk`) | kayıt yok | "Talep Oluşturuldu" |
+  | Taslak düzenleme / ek silme | **kayıt eklenemez** | "Talep güncellendi" / "Ek dosya silindi" |
+  | Akış başlatma | `create` | "İş akışı başlatıldı" |
+  | İptal | **kayıt eklenemez** | "Talep İptal Edildi" |
+  | Geri çekme (`poWithdrawOk`) | `withdraw` | "Talep Geri Çekildi (Taslak Moduna Alındı)" |
+
+  Türler, kod tabanındaki tüm `islem:` / `action:` yazanları taranarak çıkarıldı. İstemci bu kayıtların hepsine `uid` yazıyor
+  (`purchase-servises.js` 6 yer, `edm-workflow.js` 3 yer). Yalnız **yeni** kayıtlar denetlenir; eski kayıtlar değişmez.
+
+### 11.4 İfade bütçesi
+
+Sahibin olay denetimi ilk denemede 10 adımlı başlatmayı ek koşul olmadan bile 1000 ifade sınırının üstüne çıkardı. Bu ölçümle
+yakalandı; test gevşetilmedi.
+
+**Çözüm:** Sahibin satın alma yolunda `textOk` (9 etiket regex'i) yalnız `textOk`'un baktığı alanlardan biri değişiyorsa
+çalışır. Başlatma, geri çekme ve iptal bu alanlara dokunmaz. Değişmeyen değer sahibin bu yazmada getirdiği yeni metin
+olmadığı için etiket savunması aynı kalır. Bu alanlardan birini değiştiren düzenleme tam `textOk`'tan geçer.
+
+| İstek | J11 payı | J11.5 payı |
+|---|---|---|
+| 10 adımlı başlatma | 3–5 | **12'den fazla** |
+| 10. adım onayı | 12'den fazla | **12'den fazla** |
+| 10. adım reddi | 6–8 | **6–8** |
+
+### 11.5 Sonuçlar (J11.5 commit'i, 20.10.2026; hepsi emülatörde)
+
+| Paket | J11 | J11.5 | Düzeltme öncesi koda karşı (yeni testler) |
+|---|---|---|---|
+| `npm run test:rules` | 189 | **197/197** | Önceki kurallarla 189/197: **başarısız 8 testin 8'i de J11.5 testi** (madde 2: 3, madde 3: 5) |
+| `npm run test:unit` | 110 | **114/114** | Önceki `ownership.js` ile 23/25: tireli kod engeli ve kapanış engeli testleri başarısız. Meşru değer ve bugünkü özel karakterli kod testleri iki sürümde de geçiyor (regresyon koruması). |
+| `test:staff:emu` / `test:ownership:emu` / `test:atomic:emu` | 15 / 16 / 5 | **15/15 · 16/16 · 5/5** | — |
+| E2E `flow-tests --emu` (temiz emülatör + tohum) | 55 | **55/55**, 0 CSP ihlali, 0 sayfa hatası | — |
+| `lint:xss` · `hosting-files` | 0 · 55 | **0 izinsiz · 55/55** | — |
+
+**E2E — `j11ApprovalAudit` genişletildi** (gerçek istemci + gerçek kurallar):
+- **Sahip, kendi taslağında:** sahte "✅ Onaylandı" olayı, başkasının uid'siyle olay ve sahte `transition` history kaydı
+  denendi. Üçü de `forbidden`.
+- **Onaylayıcı:** içeriği, sayısı, uid'si ve aktörü meşru olan bir onayı `currentState: 'cancelled'` ve `'suspended'` ile
+  denedi. İkisi de `forbidden`; sunucu değişmedi.
+- **Gerçek `approveStep`:** sonuç `manager_approval`.
+- **Gerçek `rejectStep`:** sonuç `cancelled`.
+
+### 11.6 Kalan / yeni açık noktalar
+
+1. **Sahibin taslak, iptal ve geri çekme yolunda `currentState` serbest.** Bu yollar karar vermez; akış başlamamış ya da
+   taslağa dönmüştür. Onay dalı bağlıdır. Denetçinin bulgusu onaylayıcıya yönelikti; bu yol kapsam dışı bırakıldı ve
+   istenirse aynı tabloyla bağlanabilir.
+2. **Yeni kaydın tarihi istemci saati** (§8 açık risk 1) değişmedi.
+3. **Yalnız yeni kayıtlar denetlenir.** J11.5 öncesi uid'siz kayıtlar geçerli kalır; eski kayıtlar değiştirilemez
+   (`appendOnly`).
+4. **Canlı veride çözülemeyen `createdBy`.** Kilidin açılmasını engeller (11.1). Yönetici elle düzeltir.
