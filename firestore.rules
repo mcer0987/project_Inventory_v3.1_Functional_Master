@@ -108,16 +108,13 @@ service cloud.firestore {
       return c == 'requests' ? 'personelUid' : (c == 'purchaseOrders' ? 'createdByUid' : 'creatorUid');
     }
     function ownerUnchanged(c, d, old) { return d.get(ownerField(c), null) == old.get(ownerField(c), null); }
-    // Liste yalnız sona ekleme ile büyüyebilir (geçmiş / akış kayıtları). Not: kurallar dilinde BOŞ dilim ([0:0]) hata verir —
-    // boş durum ayrıca karşılanır.
-    function appendOnly(a, b) { return b.size() >= a.size() && (a.size() == 0 || b[0:a.size()] == a); }
     // J11 · P1 #7 + J11.5 (bağımsız denetim): liste ya AYNEN kalır ya da sona TEK kayıt eklenir (önek korunur). Eklenen kayıt:
     //   - aktör alanı (f) sahibin adı (me),
     //   - uid'si oturumun uid'si (request.auth.uid — ek get() yok),
     //   - türü (tf alanı: history 'action', akış 'islem') o işlemin istemcide ürettiği türlerden biri (kinds). kinds boşsa o işlem
     //     o listeye HİÇ kayıt ekleyemez (ör. taslak düzenleme history'ye yazmaz).
-    // Kayda özel anahtar allowlist'i create history'nin manuel ve şablon biçimlerinin birleşimidir; required=true, kayıtsız yazmayı
-    // da reddeder. metadata kök alanı tanınır; metadata nesnesinin iç anahtarları bu sözleşmenin kapsamı dışındadır.
+    // Akış history'sinde manuel create, metadata içeren şablon create ve withdraw ayrı allowlist'lerle sınırlandırılır;
+    // required=true kayıtsız yazmayı da reddeder. metadata nesnesinin iç anahtarları bu sözleşmenin kapsamı dışındadır.
     // Sahibin taslak / başlatma / geri çekme / iptal işlemleri istemcide en fazla bir history ve bir akış kaydı ekler; sahibin
     // kendi taslağına "Onaylandı" ya da başkasının uid'siyle olay eklemesi böylece reddedilir.
     function ownerEventOk(a, b, f, me, tf, kinds, required) {
@@ -125,9 +122,13 @@ service cloud.firestore {
       return (b.size() == k && !required && b == a)
         || (b.size() == k + 1 && b[k].get(f, '') == me && b[k].get('uid', '') == request.auth.uid
            && b[k].get(tf, '') in kinds
-           && b[k].keys().hasOnly(tf == 'action'
-             ? ['id', 'from', 'to', 'actor', 'uid', 'timestamp', 'action', 'note', 'metadata']
-             : ['islem', 'yapan', 'uid', 'tarih'])
+           && (tf != 'action'
+             ? b[k].keys().hasOnly(['islem', 'yapan', 'uid', 'tarih'])
+             : (b[k].get('action', '') == 'create'
+               ? (b[k].get('metadata', null) != null
+                 ? b[k].keys().hasOnly(['id', 'from', 'to', 'actor', 'uid', 'timestamp', 'action', 'note', 'metadata'])
+                 : b[k].keys().hasOnly(['action', 'actor', 'uid', 'timestamp', 'to']))
+               : b[k].keys().hasOnly(['action', 'actor', 'uid', 'timestamp', 'from', 'to', 'note'])))
            && (k == 0 || b[0:k] == a));
     }
 

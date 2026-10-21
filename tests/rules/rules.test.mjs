@@ -294,7 +294,7 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
         await put('purchaseOrders', 'po2-template', draft);
         await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2-template'), {
             durum: 'Onay Bekliyor', akis: [...akis, ev('İş akışı başlatıldı')],
-            workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2')], history: [templateHev()] } }));
+            workflow: { templateId: 'template-1', started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2')], history: [templateHev()] } }));
     });
     test('sahibi akışı kendisini onaylayıcı yaparak / önceden onaylı adımla / 11 adımla başlatamaz', async () => {
         await put('purchaseOrders', 'po2', draft);
