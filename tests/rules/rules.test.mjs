@@ -507,6 +507,29 @@ describe('J11 · P1 #5 kapanışı — aynı sayıda farklı içerikli history /
         await assertFails(write(ctx.s2(), { ...ok, workflow: { ...ok.workflow, steps } }));
     });
 
+    // G6A-1 (C3) · M4 [ŞEMA] — BULGU (P1, bkz. denetim raporu Risk Matrisi): ownerEventOk/poApprovalOk/poRejectAkisOk yeni
+    // akis/history kaydının YALNIZ belirli alanlarını (.get(f, '') ile) denetler; kaydın TAMAMININ anahtar kümesini
+    // (.keys().hasOnly([...])) hiçbir yerde kısıtlamaz. Sonuç: sırası gelmiş onaylayıcı / talep sahibi, gerekli alanlar
+    // (islem/yapan/uid/tarih/…) doğruyken kayda SAHTE ek alan (ör. `meta`, sahte `timestamp`) iliştirebilir — bu test
+    // GERÇEK davranışı belgeler (assertSucceeds); "RET bekleniyor" İDDİASI DEĞİLDİR. Düzeltme bu turda YAPILMADI çünkü
+    // gerçek istemci kodu (edm-workflow.js) call site'a göre TUTARSIZ şemalar üretiyor — ör. createWorkflowFromTemplate'in
+    // 'create' history kaydı `metadata:{templateId,...}` taşırken confirmStartWorkflow'unki taşımaz; transitionWorkflowState
+    // (onay/red) `metadata:{userAgent}` + `id` + `from` taşır ama bu dosyadaki test fikstürleri (hev/approved()) bu alanları
+    // modellemiyor. Fikstürler gerçek şemayla hizalanıp bütçe ölçülmeden hasOnly() eklemek, üretimdeki GERÇEK onay/red
+    // akışını kırma riski taşır (test yeşil kalır ama canlı istemci yazması REDDEDİLİR) — bkz. Bölüm 4 CERRAHİ DEĞİŞİKLİK.
+    test('G6A-1 (C3) · M4a [ŞEMA] BULGU: onayın YENİ akis kaydına istenmeyen EK alan iliştirilebiliyor', async () => {
+        const ok = approved(running(), 0);
+        await assertSucceeds(write(ctx.s2(), withA(ok, N, { meta: { evil: true } })));
+    });
+    test('G6A-1 (C3) · M4b [ŞEMA] BULGU: onayın YENİ history kaydına istenmeyen EK alan iliştirilebiliyor', async () => {
+        const ok = approved(running(), 0);
+        await assertSucceeds(write(ctx.s2(), withH(ok, { extra: 'sahte alan' })));
+    });
+    test('G6A-1 (C3) · M4c [ŞEMA] BULGU: reddin YENİ akis kaydına istenmeyen EK alan iliştirilebiliyor', async () => {
+        const red = rejected(running(), 0, 'bütçe yok');
+        await assertSucceeds(write(ctx.s2(), withA(red, N, { meta: 'sahte' })));
+    });
+
     test('RED · akış: üç kaydın sırası / türü / gerekçesi / uid\'si rejectStep\'le birebir olmalı', async () => {
         const ok = rejected(running(), 0, 'bütçe yok');
         const [r1, r2, r3] = ok.akis.slice(N);
