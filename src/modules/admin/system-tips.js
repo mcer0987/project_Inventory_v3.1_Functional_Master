@@ -25,27 +25,27 @@
 // ─────────────────────────────────────────────────────────────
 const SystemTips = {
     // ── DEPOLAR ──────────────────────────────────────────────
-    b1: 'Tabloda birden fazla satır seçerek sol alttaki menüden toplu işlem yapabilirsiniz. Arama ve sıralama ile hızlıca ürün bulabilirsiniz.',
-    b2: 'B2 Deposu için de aynı şekilde satır seçimi ve toplu işlem desteklenir. Filtreleri kullanarak stok durumunu daraltabilirsiniz.',
+    b1: 'Birden fazla satır seçerek toplu işlem yapabilir, talebin tamamı yerine yalnızca seçtiğiniz adedi hedefe gönderen kısmi sevk/transfer uygulayabilirsiniz. Demirbaş kalemlerde her birim için seri no istenir.',
+    b2: 'B2 Deposu için de aynı kısmi sevk ve toplu işlem mantığı geçerlidir. B1 ↔ B2 arası iç transferler yalnızca bir konum değişikliğidir; kimlik veya imza gerektirmez.',
 
     // ── ÇIKIŞ KAYITLARI ─────────────────────────────────────
-    b3: 'Çıkış kayıtları burada listelenir. Demirbaş çıkışları otomatik olarak işaretlenir ve takip edilir.',
+    b3: 'Çıkış, zimmet ve hurda hareketleri burada tek bir kronolojik akışta listelenir. Hurdaya ayrılan cihazlar "♻️ Hurdaya Ayrıldı" etiketiyle işaretlenir.',
 
     // ── PERSONEL ────────────────────────────────────────────
-    personel: 'Personel listesini yönetebilir, yeni personel ekleyebilir veya mevcut kayıtları düzenleyebilirsiniz.',
+    personel: 'Personel listesini yönetebilir, yeni personel ekleyebilirsiniz. Her personele, girişte kullanacağı "ad.soyad" formatındaki kurumsal kimlik (PRI) otomatik oluşturulur.',
 
     // ── BİRİM YÖNETİMİ ──────────────────────────────────────
     unitsTab: 'Birim tanımlamalarını buradan yönetebilirsiniz. Her birim bir veya daha fazla personeli kapsar.',
 
     // ── TALEPLER ────────────────────────────────────────────
-    requests: 'Gelen talepleri buradan onaylayabilir veya reddedebilirsiniz. Onay süreci otomatik olarak ilerletilir.',
+    requests: 'Gelen talepleri sıralı onay akışına göre onaylayabilir veya reddedebilirsiniz. Kendinize ait bir talebi onaylamanız sistem tarafından otomatik olarak engellenir.',
     myRequests: 'Kendi taleplerinizi oluşturabilir, takip edebilir ve iade işlemleri yapabilirsiniz.',
 
     // ── ONAYLAR ─────────────────────────────────────────────
-    myApprovals: 'Onay bekleyen talepleri buradan hızlıca yönetebilirsiniz. Bekleyen onaylarınız üst menüde bildirim olarak da görünür.',
+    myApprovals: 'Sıra size geldiğinde bekleyen onaylar burada görünür; önceki onay adımı tamamlanmadan bir sonraki adım açılmaz. Bekleyen onaylar üst menüde bildirim olarak da görünür.',
 
     // ── KİŞİ ENVANTERİ ──────────────────────────────────────
-    personnelInventoryTab: 'Size zimmetlenmiş tüm ürünleri burada görebilirsiniz. Detay butonuyla ürün geçmişini inceleyebilirsiniz.',
+    personnelInventoryTab: 'Size zimmetlenmiş tüm ürünleri burada görebilir, resmi Zimmet Teslim-Tesellüm Tutanağınızı PDF olarak indirebilirsiniz. Detay butonuyla ürün geçmişini inceleyebilirsiniz.',
 
     // ── GEÇMİŞ ─────────────────────────────────────────────
     history: 'Tüm işlem geçmişi kronolojik olarak burada listelenir. Tarih ve personel bazlı filtreleme yapabilirsiniz.',
@@ -54,7 +54,7 @@ const SystemTips = {
     myTasksTab: 'Size atanmış görevleri buradan takip edebilirsiniz. Tamamlanan görevler otomatik işaretlenir.',
 
     // ── SATIN ALMA (EBYS) ───────────────────────────────────
-    purchaseTab: 'Satın alma talepleri ve elektronik belge yönetimi (EBYS) işlemleri burada yapılır.',
+    purchaseTab: 'Satın alma talepleri burada oluşturulur ve sıralı onay akışıyla (EBYS) ilerletilir. Her onay adımı, sonradan değiştirilemeyen bir denetim kaydına işlenir.',
 
     // ── ADMIN PANEL ─────────────────────────────────────────
     'dashboard-content': 'Yönetici panelinden genel istatistiklere, stok özetlerine ve sistem ayarlarına ulaşabilirsiniz.',
@@ -73,10 +73,10 @@ const SystemTips = {
     todoTab: 'Sistem görevlerini buradan atayabilir ve takip edebilirsiniz. Görev durumları gerçek zamanlı güncellenir.',
 
     // ── ADMIN: ZİMMET YÖNETİMİ ─────────────────────────────
-    inventoryManagementTab: 'Tüm zimmet işlemlerini merkezden yönetebilirsiniz. Personel zimmetleri, iadeler ve geçmiş kayıtlar burada.',
+    inventoryManagementTab: 'Tüm zimmet işlemlerini, kısmi sevkleri ve hurdaya ayırma kayıtlarını merkezden yönetebilirsiniz. Hurdaya ayırma işlemi geri alınamaz ve yalnızca yöneticiye açıktır.',
 
     // ── ADMIN: SİSTEM KONTROL ──────────────────────────────
-    systemControlTab: 'Sistem ayarları, yedekleme ve bakım işlemleri buradan yapılır.',
+    systemControlTab: 'Sistem sağlığını (VIP Operasyon Merkezi), tekerrür temizlemeyi ve birleşik yedeklemeyi buradan yönetebilirsiniz. Bir ortama ait yedek, yanlışlıkla farklı bir ortama geri yüklenemez.',
 
     // ── ADMIN: TANIMLAR (ALT SEKMELER) ─────────────────────
     mahal: 'Mahal (lokasyon) tanımlarını buradan ekleyip düzenleyebilirsiniz. Her mahal bir fiziksel konumu temsil eder.',
