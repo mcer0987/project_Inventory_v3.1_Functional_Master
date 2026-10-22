@@ -160,6 +160,29 @@ describe('KVKK: oturumsuz okuma yok · personel hesap eşlemesi (staffAccounts)'
     test('tanımsız kökte eşleme admin için de kapalı',() => assertFails(getDoc(item(ctx.admin(), 'rogue_root', 'staffAccounts', 'uid-s1'))));
 });
 
+// G6A-1 · Faz 4B isStaff() zincirinin fail-closed davranışı — brifte N3/N5/N6 olarak adlandırılan tam senaryoların izole kanıtı.
+// Diğer describe bloklarındaki testler (KÖTÜ NİYET: uid/eşleme/ghost/wrongPri vb.) bu mekanizmaları zaten dolaylı kanıtlıyor;
+// burada yalnız brifin net ayrım istediği üç uç durum TEK DEĞİŞKENLE izole edilir.
+describe('G6A-1 · isStaff() zincirinin izole uç durumları (N3/N5/N6)', () => {
+    test('N3: personel kaydı doğru uid+pri ile var ama staffAccounts/{uid} HİÇ YAZILMAMIŞ → erişim yok', async () => {
+        await put('personel', 'siz', { name: 'İzole Kişi', pri: 'izole.kisi', uid: 'uid-izole' });
+        // staffAccounts/uid-izole kasıtlı olarak yazılmadı: staffAccount() get() boş map döner, personelId == '' → staffPersonOk reddeder.
+        await assertFails(getDoc(item(staffCtx('uid-izole', 'izole.kisi')(), LIVE, 'b1', 'p1')));
+    });
+    test('N5: pri kolizyonu — staffAccounts.pri = "ayse.yilmaz", personel.pri = "ayse.yilmaz2" → erişim yok', async () => {
+        await put('personel', 's1', { name: 'Ayşe Yılmaz', pri: 'ayse.yilmaz2', uid: 'uid-s1' });
+        // staffAccounts/uid-s1.pri seed'den hâlâ 'ayse.yilmaz' (bu alan kuralda hiç okunmaz — bkz. RİSK MATRİSİ P2 notu);
+        // asıl kanıt personel.pri'nin GERÇEK oturum e-postasındaki PRI ile (ayse.yilmaz) uyuşmamasıdır.
+        await assertFails(getDoc(item(staffCtx('uid-s1', 'ayse.yilmaz')(), LIVE, 'b1', 'p1')));
+    });
+    test('N6: oturum e-postası <pri>@staff.medipol.local deseni dışında (gmail.com, boşluklu yerel kısım) → erişim yok', async () => {
+        const gmail = () => env.authenticatedContext('uid-s1', { email: 'ayse.yilmaz@gmail.com', firebase: { sign_in_provider: 'password' } }).firestore();
+        const spaced = () => env.authenticatedContext('uid-s1', { email: 'ayse yilmaz@staff.medipol.local', firebase: { sign_in_provider: 'password' } }).firestore();
+        await assertFails(getDoc(item(gmail(), LIVE, 'b1', 'p1')));
+        await assertFails(getDoc(item(spaced(), LIVE, 'b1', 'p1')));
+    });
+});
+
 describe('Admin kimliği', () => {
     test('admin b1 yazar', () => assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'b1', 'p2'), { id: 'p2', ürün: 'Yeni' })));
     test('başka e-postalı hesap b1 yazamaz', () => assertFails(setDoc(item(ctx.otherUser(), LIVE, 'b1', 'p2'), { id: 'p2' })));
@@ -217,11 +240,19 @@ describe('Envanter talebi (requests) — sahiplik', () => {
 // J11 · P1 #5/#7: adım adları, aktörler ve akış kayıtları personel kayıtlarındaki GERÇEK adlar (kurallar staffName ile eşler)
 const NAME = { 'uid-s1': 'Ayşe Yılmaz', 'uid-s2': 'Bora Kaya', 'uid-s3': 'Cem Demir' };
 const step = (uid, extra = {}) => ({ user: NAME[uid] || 'Ayşe Yılmaz', userUid: uid, tip: 'Paraf', status: 'pending', note: '', date: '', ...extra });
-const hist = [{ action: 'create', actor: 'Ayşe Yılmaz', timestamp: 't0' }];
+const hev = (action, over = {}) => action === 'transition'
+    ? ({ id: 'trans_1', from: 'initiation', to: 'manager_approval', actor: 'Bora Kaya', uid: 'uid-s2', timestamp: 't', action, note: 'Paraf onaylandı', metadata: { userAgent: 'rules-test-agent' }, ...over })
+    : action === 'withdraw'
+        ? ({ action, actor: 'Ayşe Yılmaz', uid: 'uid-s1', timestamp: 't', from: 'initiation', to: 'initiation', note: 'Talep geri çekildi (Taslak moduna alındı)', ...over })
+        : ({ action, actor: 'Ayşe Yılmaz', uid: 'uid-s1', timestamp: 't0', to: 'initiation', ...over });
+const hist = [hev('create')];
 const akis = [{ islem: 'Talep Oluşturuldu', yapan: 'Ayşe Yılmaz', uid: 'uid-s1', tarih: 't0' }];
 // J11.5: sahibin (s1) istemcide ürettiği olaylar — tür, aktör ve uid'si ile (purchase-servises.js / confirmStartWorkflow)
 const ev = (islem, over = {}) => ({ islem, yapan: 'Ayşe Yılmaz', uid: 'uid-s1', tarih: 't', ...over });
-const hev = (action, over = {}) => ({ action, actor: 'Ayşe Yılmaz', uid: 'uid-s1', timestamp: 't', to: 'initiation', ...over });
+const templateHev = () => hev('create', {
+    id: 'hist_1', from: null, note: 'Workflow başlatıldı',
+    metadata: { templateId: 'template-1', templateName: 'Standart', hasParallelSteps: false },
+});
 const WD = 'Talep Geri Çekildi (Taslak Moduna Alındı)';
 const OWNER = { createdByUid: 'uid-s1', createdBy: 's1', createdByName: 'Ayşe Yılmaz', talepEden: 'Ayşe Yılmaz' };
 const running = (over = {}) => ({
@@ -242,7 +273,10 @@ function approved(po, i, wfOver = {}, top = {}) {
     return { ...po, durum: last ? 'Onaylandı' : 'Onay Bekliyor',
         akis: [...po.akis, { islem: '✅ Onaylandı: ' + s.tip, yapan: s.user, uid: s.userUid || '', tarih: 't1', note: 'Süreç: x' }],
         workflow: { ...po.workflow, steps, currentStep: i + 1, finished: last, currentState: to,
-            history: [...po.workflow.history, { id: 'trans_1', from: po.workflow.currentState, to, actor: s.user, uid: s.userUid || '', timestamp: 't1', action: 'transition', note: s.tip + ' onaylandı' }], ...wfOver }, ...top };
+            history: [...po.workflow.history, hev('transition', {
+                from: po.workflow.currentState, to, actor: s.user, uid: s.userUid || '', timestamp: 't1',
+                note: s.tip + ' onaylandı',
+            })], ...wfOver }, ...top };
 }
 // Onaylayıcının istemcide yaptığı geçerli red (rejectStep: +1 history, sırasıyla üç akış kaydı, gerekçe hepsinde aynı)
 function rejected(po, i, why = 'bütçe yok') {
@@ -255,7 +289,10 @@ function rejected(po, i, why = 'bütçe yok') {
             { islem: '🔄 State Geçişi: İptal Edildi', ...who, tarih: 't1', not: 'Reddedildi: ' + why },
             { islem: '❌ Reddedildi: ' + s.tip, ...who, tarih: 't1', not: why, stateNote: 'State: İptal Edildi' }],
         workflow: { ...po.workflow, steps, finished: true, currentState: 'cancelled',
-            history: [...po.workflow.history, { id: 'trans_1', from: po.workflow.currentState, to: 'cancelled', actor: s.user, uid: s.userUid || '', timestamp: 't1', action: 'transition', note: 'Reddedildi: ' + why }] } };
+            history: [...po.workflow.history, hev('transition', {
+                from: po.workflow.currentState, to: 'cancelled', actor: s.user, uid: s.userUid || '', timestamp: 't1',
+                note: 'Reddedildi: ' + why,
+            })] } };
 }
 
 describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
@@ -277,6 +314,10 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
         await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), {
             durum: 'Onay Bekliyor', akis: [...akis, ev('Talep güncellendi'), ev('İş akışı başlatıldı')],
             workflow: { started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2'), step('uid-s3')], history: [hev('create')] } }));
+        await put('purchaseOrders', 'po2-template', draft);
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2-template'), {
+            durum: 'Onay Bekliyor', akis: [...akis, ev('İş akışı başlatıldı')],
+            workflow: { templateId: 'template-1', started: true, finished: false, currentStep: 0, currentState: 'initiation', steps: [step('uid-s2')], history: [templateHev()] } }));
     });
     test('sahibi akışı kendisini onaylayıcı yaparak / önceden onaylı adımla / 11 adımla başlatamaz', async () => {
         await put('purchaseOrders', 'po2', draft);
@@ -507,6 +548,26 @@ describe('J11 · P1 #5 kapanışı — aynı sayıda farklı içerikli history /
         await assertFails(write(ctx.s2(), { ...ok, workflow: { ...ok.workflow, steps } }));
     });
 
+    // G6A-1 (C3) · M4 [ŞEMA]: bu testler, ilgili Rules allowlist'leri eklenene kadar gerçek istemci olaylarına
+    // sahte anahtar eklenmesinin kabul edildiğini kanıtlar. approved/rejected/hev fikstürleri transitionWorkflowState
+    // tarafından üretilen id/from/to/actor/uid/timestamp/action/note/metadata.userAgent alanlarını taşır.
+    test('G6A-1 (C3) · M4a [ŞEMA]: onayın yeni akis kaydındaki sahte ek alan reddedilir', async () => {
+        const ok = approved(running(), 0);
+        await assertFails(write(ctx.s2(), withA(ok, N, { meta: { evil: true } })));
+    });
+    test('G6A-1 (C3) · M4b [ŞEMA]: onayın yeni history kaydındaki sahte ek alan reddedilir', async () => {
+        const ok = approved(running(), 0);
+        await assertFails(write(ctx.s2(), withH(ok, { extra: 'sahte alan' })));
+    });
+    test('G6A-1 (C3) · M4c [ŞEMA]: reddeki akis/history kayıtlarına sahte ek alan reddedilir', async () => {
+        const red = rejected(running(), 0, 'bütçe yok');
+        for (const index of [N, N + 1, N + 2]) {
+            await assertFails(write(ctx.s2(), withA(red, index, { meta: 'sahte' })));
+        }
+        await assertFails(write(ctx.s2(), withH(red, { extra: 'sahte alan' })));
+        await assertSucceeds(write(ctx.s2(), red));
+    });
+
     test('RED · akış: üç kaydın sırası / türü / gerekçesi / uid\'si rejectStep\'le birebir olmalı', async () => {
         const ok = rejected(running(), 0, 'bütçe yok');
         const [r1, r2, r3] = ok.akis.slice(N);
@@ -626,6 +687,8 @@ describe('J11.5 · madde 3 — talep sahibi kendi talebine sahte tür / sahte ui
         await assertFails(upd('pe', startWf(ev('✅ Onaylandı: Paraf'), hev('create'))));
         await assertFails(upd('pe', startWf(ev('Talep güncellendi'), hev('create'))));
         await assertFails(upd('pe', startWf(ev('İş akışı başlatıldı', { uid: 'uid-s3' }), hev('create'))));
+        await assertFails(upd('pe', startWf(ev('İş akışı başlatıldı', { meta: 'sahte' }), hev('create'))));
+        await assertFails(upd('pe', startWf(ev('İş akışı başlatıldı'), hev('create', { extra: 'sahte' }))));
         await assertSucceeds(upd('pe', startWf(ev('İş akışı başlatıldı'), hev('create'))));
     });
     test('İPTAL: akış yalnız "Talep İptal Edildi"; history eklenemez', async () => {

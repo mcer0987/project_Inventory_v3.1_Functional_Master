@@ -108,21 +108,29 @@ service cloud.firestore {
       return c == 'requests' ? 'personelUid' : (c == 'purchaseOrders' ? 'createdByUid' : 'creatorUid');
     }
     function ownerUnchanged(c, d, old) { return d.get(ownerField(c), null) == old.get(ownerField(c), null); }
-    // Liste yalnız sona ekleme ile büyüyebilir (geçmiş / akış kayıtları). Not: kurallar dilinde BOŞ dilim ([0:0]) hata verir —
-    // boş durum ayrıca karşılanır.
-    function appendOnly(a, b) { return b.size() >= a.size() && (a.size() == 0 || b[0:a.size()] == a); }
     // J11 · P1 #7 + J11.5 (bağımsız denetim): liste ya AYNEN kalır ya da sona TEK kayıt eklenir (önek korunur). Eklenen kayıt:
     //   - aktör alanı (f) sahibin adı (me),
     //   - uid'si oturumun uid'si (request.auth.uid — ek get() yok),
     //   - türü (tf alanı: history 'action', akış 'islem') o işlemin istemcide ürettiği türlerden biri (kinds). kinds boşsa o işlem
     //     o listeye HİÇ kayıt ekleyemez (ör. taslak düzenleme history'ye yazmaz).
+    // Akış history'sinde manuel create, metadata içeren şablon create ve withdraw ayrı allowlist'lerle sınırlandırılır;
+    // required=true kayıtsız yazmayı da reddeder. metadata nesnesinin iç anahtarları bu sözleşmenin kapsamı dışındadır.
     // Sahibin taslak / başlatma / geri çekme / iptal işlemleri istemcide en fazla bir history ve bir akış kaydı ekler; sahibin
     // kendi taslağına "Onaylandı" ya da başkasının uid'siyle olay eklemesi böylece reddedilir.
-    function ownerEventOk(a, b, f, me, tf, kinds) {
+    function ownerEventOk(a, b, me, tf, kinds, required, templateStart) {
       let k = a.size();
-      return b.size() == k ? b == a
-        : (b.size() == k + 1 && b[k].get(f, '') == me && b[k].get('uid', '') == request.auth.uid
-           && b[k].get(tf, '') in kinds && (k == 0 || b[0:k] == a));
+      let f = tf == 'action' ? 'actor' : 'yapan';
+      return (b.size() == k && !required && b == a)
+        || (b.size() == k + 1 && b[k].get(f, '') == me && b[k].get('uid', '') == request.auth.uid
+           && b[k].get(tf, '') in kinds
+           && (tf != 'action'
+             ? b[k].keys().hasOnly(['islem', 'yapan', 'uid', 'tarih'])
+             : (b[k].get('action', '') == 'create'
+               ? (templateStart
+                 ? b[k].keys().hasOnly(['id', 'from', 'to', 'actor', 'uid', 'timestamp', 'action', 'note', 'metadata'])
+                 : b[k].keys().hasOnly(['action', 'actor', 'uid', 'timestamp', 'to']))
+               : b[k].keys().hasOnly(['action', 'actor', 'uid', 'timestamp', 'from', 'to', 'note'])))
+           && (k == 0 || b[0:k] == a));
     }
 
     // ─── J11 · P1 #5/#7: oturum sahibinin GERÇEK personel kimliği ─────────────────────────────────────────
@@ -195,7 +203,7 @@ service cloud.firestore {
         && string(d.get('createdBy', '')) == staffPid(root)
         && wf.get('history', []).size() == 0
         && wf.get('currentState', 'initiation') == 'initiation'
-        && ownerEventOk([], d.get('akis', []), 'yapan', me, 'islem', ['Talep Oluşturuldu']);
+        && ownerEventOk([], d.get('akis', []), me, 'islem', ['Talep Oluşturuldu'], false, false);
     }
     // Sahibi, akış BAŞLAMAMIŞKEN: düzenler, akışı başlatır (adımlar kararsız, kendisi onaylayıcı değil), iptal eder.
     // J11.6 · P1 (bağımsız denetim): workflow.currentState sahibin yazmasında İSTEMCİNİN GERÇEK değerine bağlı (WorkflowEngine esas):
@@ -230,12 +238,11 @@ service cloud.firestore {
                : nwf.get('currentState', null) == wf.get('currentState', null)))
         // J11.7 · P1 (bağımsız denetim): ownerEventOk "kayıt eklenmemesini" de kabul eder; başlatma ve iptalde istemcinin ürettiği
         // kayıt ZORUNLU (başlatma: +1 history 'create' +1 akış; iptal: +1 akış). Düzenleme / ek silme dalı değişmedi.
-        && (nwf.get('started', false) != true
-            || (nwf.get('history', []).size() == wf.get('history', []).size() + 1 && d.get('akis', []).size() == old.get('akis', []).size() + 1))
-        && (d.get('durum', '') != 'İptal Edildi' || d.get('akis', []).size() == old.get('akis', []).size() + 1)
-        && ownerEventOk(wf.get('history', []), nwf.get('history', []), 'actor', me, 'action', nwf.get('started', false) == true ? ['create'] : [])
-        && ownerEventOk(old.get('akis', []), d.get('akis', []), 'yapan', me, 'islem', nwf.get('started', false) == true ? ['İş akışı başlatıldı']
-             : (d.get('durum', '') == 'İptal Edildi' ? ['Talep İptal Edildi'] : ['Talep güncellendi', 'Ek dosya silindi']));
+        && ownerEventOk(wf.get('history', []), nwf.get('history', []), me, 'action', nwf.get('started', false) == true ? ['create'] : [],
+             nwf.get('started', false) == true, nwf.get('templateId', null) != null)
+        && ownerEventOk(old.get('akis', []), d.get('akis', []), me, 'islem', nwf.get('started', false) == true ? ['İş akışı başlatıldı']
+             : (d.get('durum', '') == 'İptal Edildi' ? ['Talep İptal Edildi'] : ['Talep güncellendi', 'Ek dosya silindi']),
+             nwf.get('started', false) == true || d.get('durum', '') == 'İptal Edildi', false);
     }
     // Sahibi, akış SÜRERKEN: yalnız geri çeker (taslağa döner; içerik değişmez, geçmiş korunur).
     function poWithdrawOk(old, d) {
@@ -249,9 +256,8 @@ service cloud.firestore {
         && nwf.get('steps', [1]).size() == 0 && nwf.get('currentStep', -1) == 0
         && nwf.get('currentState', '') == 'initiation'
         // J11.7 · P1: geri çekme kaydı zorunlu (istemci: +1 history 'withdraw' +1 akış); tür / uid / aktör ownerEventOk'ta
-        && nwf.get('history', []).size() == wf.get('history', []).size() + 1 && d.get('akis', []).size() == old.get('akis', []).size() + 1
-        && ownerEventOk(wf.get('history', []), nwf.get('history', []), 'actor', me, 'action', ['withdraw'])
-        && ownerEventOk(old.get('akis', []), d.get('akis', []), 'yapan', me, 'islem', ['Talep Geri Çekildi (Taslak Moduna Alındı)']);
+        && ownerEventOk(wf.get('history', []), nwf.get('history', []), me, 'action', ['withdraw'], true, false)
+        && ownerEventOk(old.get('akis', []), d.get('akis', []), me, 'islem', ['Talep Geri Çekildi (Taslak Moduna Alındı)'], true, false);
     }
     // ONAY ADIMI (GPT-6 + J11 · P1 #5): yalnız SIRASI GELMİŞ adımın onaylayıcısı (steps[currentStep].userUid == auth.uid; talep
     // sahibi olamaz), yalnız o adımın karar alanlarını (status/date/actor/note) değiştirir. Diğer adımlar birebir aynı kalır
@@ -306,16 +312,17 @@ service cloud.firestore {
         && (cs + 1 == n || nwf.steps[cs + 1:n] == wf.steps[cs + 1:n])
         && nwf.steps[cs].diff(wf.steps[cs]).affectedKeys().hasOnly(['status', 'date', 'actor', 'note'])
         && nwf.steps[cs].get('actor', '') == me
-        && appendOnly(wf.get('history', []), nwf.get('history', []))
+        && (hSize == 0 || nwf.history[0:hSize] == wf.get('history', []))
         && nwf.get('history', []).size() == hSize + 1
         && nwf.history[hSize].get('actor', '') == me
         && nwf.history[hSize].get('uid', '') == uid
         && nwf.history[hSize].get('action', '') == 'transition'
-        && appendOnly(old.get('akis', []), d.get('akis', []))
+        && (aSize == 0 || d.akis[0:aSize] == old.get('akis', []))
         && (st == 'approved'
           ? (nwf.get('currentStep', -1) == cs + 1 && nwf.get('finished', false) == (cs + 1 == n)
               && d.get('durum', '') == (cs + 1 == n ? 'Onaylandı' : 'Onay Bekliyor')
               && nwf.steps[cs].get('note', '') == wf.steps[cs].get('note', '')
+              && nwf.history[hSize].keys().hasOnly(['id', 'from', 'to', 'actor', 'uid', 'timestamp', 'action', 'note', 'metadata'])
               && nwf.history[hSize].get('to', '') != 'cancelled'
               // J11.5 · P1 (bağımsız denetim): onaylayıcı akışın genel durumunu sahte bir değere (cancelled / suspended / …)
               // çekemez. Son adımda 'completed'; değilse approveStep'in durum makinesinin TEK meşru ardılı (eski durumdan):
@@ -327,22 +334,28 @@ service cloud.firestore {
                       'finance_approval': 'director_approval', 'director_approval': 'initiation'}.get(wf.get('currentState', ''), '-'))
               && d.get('akis', []).size() == aSize + 1
               && d.akis[aSize].get('yapan', '') == me && d.akis[aSize].get('uid', '') == uid
-              && d.akis[aSize].get('islem', '').matches('✅ Onaylandı: .*'))
+              && d.akis[aSize].get('islem', '').matches('✅ Onaylandı: .*')
+              && d.akis[aSize].keys().hasOnly(['islem', 'yapan', 'uid', 'tarih', 'note']))
           : (st == 'rejected' && nwf.get('currentStep', -1) == cs && nwf.get('finished', false) == true
               && d.get('durum', '') == 'Reddedildi' && nwf.get('currentState', '') == 'cancelled'
               && poRejectAkisOk(d.akis, aSize, nwf.history[hSize], nwf.steps[cs].get('note', ''), me, uid)));
     }
     // Red: tam +3 akış kaydı, üçü de onaylayanın adı + uid'siyle, rejectStep'in sırası ve türleriyle; gerekçe boş olamaz ve her
-    // kayıtta aynı. history kaydı 'cancelled'a geçiş ve notu "Reddedildi: <gerekçe>".
+    // kayıtta aynı. Üç kayıt şeması (ortak + stateNote) ve history kök anahtarları sınırlıdır; metadata içeriği kapsam dışıdır.
+    // history kaydı 'cancelled'a geçiş ve notu "Reddedildi: <gerekçe>".
     function poRejectAkisOk(a, k, h, why, me, uid) {
       return why is string && why.trim() != '' && a.size() == k + 3
+        && h.keys().hasOnly(['id', 'from', 'to', 'actor', 'uid', 'timestamp', 'action', 'note', 'metadata'])
         && h.get('to', '') == 'cancelled' && h.get('note', '') == 'Reddedildi: ' + why
         && a[k].get('yapan', '') == me && a[k].get('uid', '') == uid
         && a[k].get('islem', '').matches('❌ REDDEDİLDİ: .*') && a[k].get('not', '') == why
+        && a[k].keys().hasOnly(['islem', 'yapan', 'uid', 'tarih', 'not'])
         && a[k + 1].get('yapan', '') == me && a[k + 1].get('uid', '') == uid
         && a[k + 1].get('islem', '').matches('🔄 State Geçişi: .*') && a[k + 1].get('not', '') == 'Reddedildi: ' + why
+        && a[k + 1].keys() == a[k].keys()
         && a[k + 2].get('yapan', '') == me && a[k + 2].get('uid', '') == uid
-        && a[k + 2].get('islem', '').matches('❌ Reddedildi: .*') && a[k + 2].get('not', '') == why;
+        && a[k + 2].get('islem', '').matches('❌ Reddedildi: .*') && a[k + 2].get('not', '') == why
+        && a[k + 2].keys().hasOnly(['islem', 'yapan', 'uid', 'tarih', 'not', 'stateNote']);
     }
     // Sahibi: akış başlamamışsa taslak işlemleri, başlamışsa yalnız geri çekme (sahibi değilse onay adımı: poApprovalOk; dağıtım
     // update kuralında ?: ile — yalnız seçilen dal değerlendirilir).
