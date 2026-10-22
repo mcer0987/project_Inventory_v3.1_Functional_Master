@@ -160,6 +160,29 @@ describe('KVKK: oturumsuz okuma yok · personel hesap eşlemesi (staffAccounts)'
     test('tanımsız kökte eşleme admin için de kapalı',() => assertFails(getDoc(item(ctx.admin(), 'rogue_root', 'staffAccounts', 'uid-s1'))));
 });
 
+// G6A-1 · Faz 4B isStaff() zincirinin fail-closed davranışı — brifte N3/N5/N6 olarak adlandırılan tam senaryoların izole kanıtı.
+// Diğer describe bloklarındaki testler (KÖTÜ NİYET: uid/eşleme/ghost/wrongPri vb.) bu mekanizmaları zaten dolaylı kanıtlıyor;
+// burada yalnız brifin net ayrım istediği üç uç durum TEK DEĞİŞKENLE izole edilir.
+describe('G6A-1 · isStaff() zincirinin izole uç durumları (N3/N5/N6)', () => {
+    test('N3: personel kaydı doğru uid+pri ile var ama staffAccounts/{uid} HİÇ YAZILMAMIŞ → erişim yok', async () => {
+        await put('personel', 'siz', { name: 'İzole Kişi', pri: 'izole.kisi', uid: 'uid-izole' });
+        // staffAccounts/uid-izole kasıtlı olarak yazılmadı: staffAccount() get() boş map döner, personelId == '' → staffPersonOk reddeder.
+        await assertFails(getDoc(item(staffCtx('uid-izole', 'izole.kisi')(), LIVE, 'b1', 'p1')));
+    });
+    test('N5: pri kolizyonu — staffAccounts.pri = "ayse.yilmaz", personel.pri = "ayse.yilmaz2" → erişim yok', async () => {
+        await put('personel', 's1', { name: 'Ayşe Yılmaz', pri: 'ayse.yilmaz2', uid: 'uid-s1' });
+        // staffAccounts/uid-s1.pri seed'den hâlâ 'ayse.yilmaz' (bu alan kuralda hiç okunmaz — bkz. RİSK MATRİSİ P2 notu);
+        // asıl kanıt personel.pri'nin GERÇEK oturum e-postasındaki PRI ile (ayse.yilmaz) uyuşmamasıdır.
+        await assertFails(getDoc(item(staffCtx('uid-s1', 'ayse.yilmaz')(), LIVE, 'b1', 'p1')));
+    });
+    test('N6: oturum e-postası <pri>@staff.medipol.local deseni dışında (gmail.com, boşluklu yerel kısım) → erişim yok', async () => {
+        const gmail = () => env.authenticatedContext('uid-s1', { email: 'ayse.yilmaz@gmail.com', firebase: { sign_in_provider: 'password' } }).firestore();
+        const spaced = () => env.authenticatedContext('uid-s1', { email: 'ayse yilmaz@staff.medipol.local', firebase: { sign_in_provider: 'password' } }).firestore();
+        await assertFails(getDoc(item(gmail(), LIVE, 'b1', 'p1')));
+        await assertFails(getDoc(item(spaced(), LIVE, 'b1', 'p1')));
+    });
+});
+
 describe('Admin kimliği', () => {
     test('admin b1 yazar', () => assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'b1', 'p2'), { id: 'p2', ürün: 'Yeni' })));
     test('başka e-postalı hesap b1 yazamaz', () => assertFails(setDoc(item(ctx.otherUser(), LIVE, 'b1', 'p2'), { id: 'p2' })));
