@@ -120,7 +120,10 @@ test('emülatör: önizleme ile uygulama arasında değişen kayıt yazılmaz (c
     const res = plain(await O.applyMigration({ plan: p, store: store(db), accountEmail: SP.accountEmailOf }));
     assert.equal(res.status, 'done');
     assert.deepEqual(res.skipped, [{ col: 'requests', id: 'r1', reason: 'changed-since-preview' }]);
+    // G6A-1 (C2) · N4: KISMİ başarı — yalnız değişen kayıt atlanır, planın GERİ KALANI (diğer tüm kayıtlar) yazılır; orphan yok.
+    assert.equal(res.written.length, p.items.length - 1, 'değişen TEK kayıt hariç planın tamamı yazıldı');
     assert.equal((await get('requests', 'r1')).personelUid, undefined);
+    assert.equal((await get('requests', 'r0')).personelUid, 'uid-ayse', 'r1 dışındaki kayıtlar normal yazıldı');
     const again = plain(await plan(db));
     assert.deepEqual(again.items.map(i => i.id), ['r1'], 'yeniden önizleme güncel sahibi gösterir');
     assert.equal(again.items[0].patch.personelUid, 'uid-seher');
@@ -170,6 +173,46 @@ test('emülatör + üretim kuralları: göçten sonra sahiplik alanı personel t
     await updateDoc(ref(s, 'requests', 'r0'), { durum: 'draft' });   // sahipliğe dokunmayan güncelleme serbest
     assert.equal((await get('requests', 'r0')).personelUid, 'uid-ayse');
     assert.equal((await get('requests', 'r0')).durum, 'draft');
+});
+
+// G6A-1 (C2) · M3: personel oturumu BAŞKA bir meslektaşının personel.uid'sini spoofed uid ile değiştirmeye kalkar.
+// "Yönetici koleksiyonları" bloğundaki jenerik "personel ${col} yazamaz" testi YENİ bir doküman (create) dener; bu test brifin
+// M3 diliyle birebir: VAR OLAN başka bir personelin kaydını (update) hedefler — staffWritable(col) 'personel'i hiç içermediği
+// için sonuç aynıdır, ama izole kanıt burada.
+test('G6A-1 (C2) · M3: personel, BAŞKA bir meslektaşının personel.uid alanını spoofed uid ile güncelleyemez (Rules RET)', async () => {
+    const s = staffDb();   // uid-ayse / p_ayse
+    await assert.rejects(updateDoc(ref(s, 'personel', 'p_ali1'), { uid: 'uid-ayse' }), e => /PERMISSION_DENIED|permission/i.test(e.code + e.message));
+    assert.equal((await get('personel', 'p_ali1')).uid, 'uid-ali1', 'kurban kaydın uid\'si değişmedi');
+});
+
+// G6A-1 (C2) · N1: dolu personelUid alanına farklı (ama resolveOwner'ın bugün hesaplayacağı) bir uid asla yazılmaz — ne
+// plan bir patch üretir ne de applyMigration dokunur; yalnız 'mismatch' olarak raporlanır (ownership.js planDoc:151-166).
+test("G6A-1 (C2) · N1: dolu personelUid (bugünkü çözümden FARKLI/bayat bir uid) ASLA değiştirilmez; yalnız 'mismatch' raporlanır", async () => {
+    const db = adminDb();
+    // personelId='p_ayse' → bugün resolveOwner uid-ayse'ye çözer; ama alan ZATEN dolu ve BAŞKA (bayat/yanlış) bir uid taşıyor.
+    await setDoc(ref(db, 'requests', 'r_already'), { id: 'r_already', personelId: 'p_ayse', personel: 'Ayşe Yılmaz', ürün: 'Zaten sahipli', durum: 'Beklemede', personelUid: 'uid-ali1' });
+    const p = plain(await plan(db));
+    assert.ok(!p.items.some(i => i.id === 'r_already'), 'dolu alan için patch ÜRETİLMEDİ (items listesinde yok)');
+    const issue = p.issues.find(i => i.id === 'r_already');
+    assert.deepEqual([issue.field, issue.status], ['personelUid', 'mismatch']);
+
+    const res = plain(await O.applyMigration({ plan: p, store: store(db), accountEmail: SP.accountEmailOf }));
+    assert.equal(res.status, 'done');
+    assert.equal((await get('requests', 'r_already')).personelUid, 'uid-ali1', 'bayat/yanlış uid DOKUNULMADAN kaldı — hiçbir yoldan ezilmedi');
+});
+
+// G6A-1 (C2) · M5: önizleme alındıktan sonra (başka bir sekmede) VAR OLAN bir personelin pri'si değişir (yeni personel eklenmez) →
+// uygulama hiçbir şey yazmadan durur (personelFingerprint farklı); iki uid YAZILMAZ (tam durdurma, kısmi değil).
+test("G6A-1 (C2) · M5: önizlemeden sonra VAR OLAN personelin pri'si değişirse uygulama hiçbir şey yazmadan durur (iki uid yazmaz)", async () => {
+    const db = adminDb();
+    const p = await plan(db);   // "sekme 1" önizlemesi
+    await updateDoc(ref(adminDb(), 'personel', 'p_ayse'), { pri: 'p_ayse_degisti' });   // "sekme 2": aynı personelin PRI'si değişti
+    const res = plain(await O.applyMigration({ plan: p, store: store(db), accountEmail: SP.accountEmailOf }));
+    assert.equal(res.status, 'aborted');
+    assert.equal(res.error.code, 'personel-changed');
+    assert.equal(res.written.length, 0, 'tam durdurma — kısmi yazma yok');
+    for (const r of SEED.requests) assert.equal((await get('requests', r.id)).personelUid, undefined, `${r.id} personelUid yazılmadı`);
+    assert.equal((await get('purchaseOrders', 'po1')).createdByUid, undefined);
 });
 
 // ─── J11 · P0: personel erişim kilidi — kapanış denetimi uçtan uca (üretim kuralları) ───────────────────────────────────
@@ -420,6 +463,34 @@ test('J11 · P1 #4: çözülemeyen sahiplik (sahipsiz talep) varken plan hazır 
     await updateDoc(ref(db, 'requests', 'r2'), { personel: 'Ayşe Yılmaz', personelUid: 'uid-a' });   // yönetici elle düzeltti
     const p2 = (await freshCleansePlan(db)).plan;
     assert.equal(p2.ready, true, JSON.stringify(p2.blockers));
+});
+
+// G6A-1 (C2) · N5: Kod Temizliği, Adım 4 (sahiplik bekleyen) engeli dururken çalıştırılırsa sunucu yazmadan reddeder.
+// [GERÇEK KAPSAM NOTU]: 'not-ready' reddi firebase-handler.applyCodeCleanse'de uygulanır (src/services/firebase-handler.js:1691-1693:
+//   `if (!fp.ready) throw new SaveDataError('not-ready', ...)`); o dosya tarayıcı CDN modüllerinden import ettiği için (gstatic.com)
+// Node/vm'de yüklenemez — bu yüzden hiçbir otomatik test o satırı DOĞRUDAN tetikleyemez (bkz. RİSK MATRİSİ P2 notu). Burada aynı ön
+// koşulun (Ownership.planCodeCleanse().ready) GERÇEK emülatöre karşı, applyCodeCleanse ile AYNI mantıkla uygulanan bir kopyası
+// (guardedApplyCodeCleanse) ile kanıtlanır: sahiplik bekleyen bir kayıt dururken aynı kapı tetiklenir ve HİÇBİR commit gönderilmez.
+async function guardedApplyCodeCleanse(db) {
+    const { plan: fp, rows } = await freshCleansePlan(db);
+    if (!fp.ready) { const e = new Error('not-ready'); e.code = 'not-ready'; e.freshPlan = fp; throw e; }
+    return runCleanse(db, fp, rows);
+}
+test("G6A-1 (C2) · N5: Adım 4 engeli (ownershipPending) dururken Kod Temizliği 'not-ready' ile reddeder; hiçbir commit gönderilmez", async () => {
+    await cleanseSeed({ requests: [{ id: 'r2', ürün: 'Sahipsiz', personel: 'Hiç Kimse' }] });   // sahiplik göçü henüz bunu yazmadı
+    const db = adminDb();
+    const before = await state(db);
+    await assert.rejects(guardedApplyCodeCleanse(db), e => e.code === 'not-ready' && e.freshPlan.ready === false);
+    assert.deepEqual(await state(db), before, 'reddedilen koşu hiçbir şeyi değiştirmedi (kod / createdBy / günlük / kilit aynı)');
+});
+test("G6A-1 (C2) · N5: Adım 3 engeli (hesabı olmayan personel) dururken da aynı kapı reddeder", async () => {
+    await cleanseSeed({ personel: [{ id: 'p_noacc', name: 'Hesapsız Kişi', code: 'noacc1' }] });   // PRI/Hesap göçü henüz bunu açmadı
+    const db = adminDb();
+    const before = await state(db);
+    const p0 = (await freshCleansePlan(db)).plan;
+    assert.ok(p0.blockers.noAccount.length >= 1, JSON.stringify(p0.blockers));
+    await assert.rejects(guardedApplyCodeCleanse(db), e => e.code === 'not-ready');
+    assert.deepEqual(await state(db), before);
 });
 
 test('J11 · P1 #4: önizlemeden sonra veri değişirse (eşzamanlı yönetici) fingerprint farklıdır — applyCodeCleanse hiçbir şey yazmadan durur', async () => {
