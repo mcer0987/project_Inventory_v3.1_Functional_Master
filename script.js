@@ -339,6 +339,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.openTemplateModal !== 'function' || window.openTemplateModal.toString().includes('STUB')) {
             console.warn('[BRIDGE] openTemplateModal not available after module load - check ESM for errors');
         }
+
+        // Faz 6 · UI-01: Operasyon Merkezi'ndeki "Hızlı Envanter Çıkış Masası"ndan gelen tek tık çıkış talebi.
+        // [WHY]: #exitModal yalnız bu sayfada var; admin panelindeki buton bayrağı bırakıp buraya yönlendirir.
+        try {
+            if (sessionStorage.getItem('pendingQuickExit') === '1') {
+                sessionStorage.removeItem('pendingQuickExit');
+                if (typeof window.openExitModal === 'function') window.openExitModal();
+            }
+        } catch (e) { /* depolama kapalıysa sorun değil */ }
     }, 500);
 });
 

@@ -1563,27 +1563,21 @@ window.renderTemplateSteps = function () {
     WorkflowState.tempTplSteps.forEach((s, i) => s.order = i);
 
     area.innerHTML = WorkflowState.tempTplSteps.map((step, index) => `
-        <tr>
-            <td class="text-center">
-                <button type="button" class="btn-delete-row" style="color: #ef4444; font-size: 1rem;" onclick="window.removeStepFromTemplate(${index})">
-                    <i class="fas fa-times"></i>
-                </button>
-            </td>
+        <div class="wf-step-row">
+            <div class="wf-col-idx">${index + 1}</div>
 
-            <td>
-                <div class="position-relative w-100">
-                    <input type="text"
-                        class="form-control workflow-select-ghost w-100"
-                        value="${escapeHtml(step.user || '')}"
-                        placeholder="Personel..."
-                        onkeyup="window.searchPersonnelForTemplate(this.value, 'step', ${index})">
-                    
-                    <div id="tplStepResults_${index}" class="search-results-popover"></div>
-                </div>
-            </td>
+            <div class="wf-step-personnel">
+                <input type="text"
+                    class="wf-input"
+                    value="${escapeHtml(step.user || '')}"
+                    placeholder="Personel..."
+                    onkeyup="window.searchPersonnelForTemplate(this.value, 'step', ${index})">
 
-            <td>
-                <select class="form-select workflow-select-ghost w-100"
+                <div id="tplStepResults_${index}" class="search-results-popover"></div>
+            </div>
+
+            <div class="wf-col-type">
+                <select class="wf-select"
                     onchange="WorkflowState.tempTplSteps[${index}].tip = this.value">
 
                     ${[
@@ -1596,12 +1590,14 @@ window.renderTemplateSteps = function () {
                         <option value="${escapeHtml(t)}" ${step.tip === t ? 'selected' : ''}>${escapeHtml(t)}</option>
                     `).join('')}
                 </select>
-            </td>
+            </div>
 
-            <td class="text-center">
-                <i class="fas fa-bars" style="cursor:grab;"></i>
-            </td>
-        </tr>
+            <div class="wf-col-del">
+                <button type="button" class="wf-step-del" title="Adımı Sil" onclick="window.removeStepFromTemplate(${index})">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
     `).join('');
 };
 
