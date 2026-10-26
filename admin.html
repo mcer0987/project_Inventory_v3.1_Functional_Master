@@ -608,64 +608,35 @@
             <div class="row" style="display: flex; gap: 20px; align-items: flex-start;">
                 <div style="flex: 2; display: flex; flex-direction: column; gap: 20px;">
 
+                    <!-- Faz 6 · UI-01: "Dinamik Ürün Türü Yönetimi" buradan kaldırıldı (Tanımlar > Ürün Türleri'nde
+                         zaten birebir yönetiliyor — bkz. #defTab-products / window.defAddNewProductType). "Bekleyen
+                         Envanter Talepleri" ait olduğu yere, Talep Ve Süreçler sekmesine taşındı. Açılan alana,
+                         onun kapladığı kadar yer tutan bir Hızlı Envanter Çıkış Masası eklendi. -->
                     <div class="card shadow-sm border-0">
                         <div class="card-header bg-white py-3">
-                            <h3 class="m-0 font-weight-bold text-primary">⚙️ Dinamik Ürün Türü Yönetimi</h3>
+                            <h3 class="m-0 font-weight-bold text-primary">📤 Hızlı Envanter Çıkış Masası</h3>
                         </div>
                         <div class="p-3">
-                            <div class="input-group mb-4 shadow-sm custom-input-group"
-                                style="border-radius: 10px; overflow: hidden;">
-                                <input type="text" id="newProductType" class="form-control"
-                                    placeholder="Yeni Tür (Örn: Access Point)" autocomplete="off">
-
-                                <div class="input-group-text">
-                                    <div class="d-flex align-items-center justify-content-center">
-                                        <input class="form-check-input m-0" type="checkbox" id="isDemirbasCheck"
-                                            style="width: 18px; height: 18px;">
-                                        <label class="ms-2 mb-0 text-dark small fw-bold" for="isDemirbasCheck"
-                                            style="cursor: pointer;">
-                                            🛡️ DEMİRBAŞ
-                                        </label>
-                                    </div>
-                                </div>
-
-                                <button onclick="addNewProductType()" class="btn btn-dark fw-bold">
-                                    EKLE
+                            <div class="d-flex gap-2 mb-3">
+                                <button onclick="window.quickExitToIndex()" class="btn btn-dark fw-bold" style="flex: 1;">
+                                    <i class="fas fa-right-from-bracket me-2"></i>Envanter Çıkışı Yap
+                                </button>
+                                <button onclick="window.openBulkExitComingSoon()" class="btn btn-outline-dark fw-bold" style="flex: 1;">
+                                    <i class="fas fa-layer-group me-2"></i>Toplu Çıkış / Sepet
                                 </button>
                             </div>
 
                             <div class="table-responsive">
-                                <table class="table table-hover align-middle">
-                                    <thead class="bg-light">
-                                    </thead>
-                                    <tbody id="productTypeTableBody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card shadow-sm border-0">
-                        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-                            <h3 class="m-0 font-weight-bold text-danger">📨 Bekleyen Envanter Talepleri</h3>
-                            <span class="badge rounded-pill bg-danger shadow-sm" id="pendingRequestCount">0</span>
-                        </div>
-                        <div class="card-body p-0">
-                            <!-- Faz 5 · K3.5: table-layout:fixed (global table kuralı) dar ekranda İşlem sütunundaki
-                                 iki sabit genişlikli ikon butonunu sıkıştırıp taşırıyordu. Bu tabloya özel table-layout:
-                                 auto (sütunlar içeriğe göre genişler) + İşlem başlığına min-width; table-responsive
-                                 sarmalayıcı hâlâ çok dar ekranlarda yatay kaydırma sağlar. -->
-                            <div class="table-responsive">
-                                <table class="table table-hover mb-0 align-middle" style="table-layout: auto;">
+                                <table class="table table-hover align-middle mb-0" style="table-layout: auto; font-size: 0.8rem;">
                                     <thead class="bg-light">
                                         <tr>
                                             <th class="ps-3">Tarih</th>
                                             <th>Personel</th>
                                             <th>Ürün</th>
-                                            <th class="text-center">Durum</th>
-                                            <th class="text-end pe-3" style="min-width: 92px;">İşlem</th>
+                                            <th class="text-end pe-3">Adet</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="adminPendingRequestsBody">
+                                    <tbody id="quickExitDeskBody">
                                     </tbody>
                                 </table>
                             </div>
@@ -698,22 +669,138 @@
                  gerçek bir widget'a dönüşecek). Stil tamamen bu dosyaya gömülü (future-widget-*) — paylaşılan CSS
                  dosyalarına (style.css/admin-add-style.css) dokunulmadı. -->
             <div class="row mt-4" style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <div class="future-widget-card" style="flex: 1; min-width: 260px;">
+                <div class="future-widget-card" style="flex: 1; min-width: 260px; cursor: pointer;"
+                    onclick="window.openFutureFeatureModal('active_assignment')">
                     <div class="future-widget-icon"><i class="fas fa-right-left"></i></div>
                     <div class="future-widget-label">Yakında</div>
                     <div class="future-widget-title">Aktif Zimmet & İade Takibi</div>
                 </div>
-                <div class="future-widget-card" style="flex: 1; min-width: 260px;">
+                <div class="future-widget-card" style="flex: 1; min-width: 260px; cursor: pointer;"
+                    onclick="window.openFutureFeatureModal('scrap_service')">
                     <div class="future-widget-icon"><i class="fas fa-satellite-dish"></i></div>
                     <div class="future-widget-label">Yakında</div>
                     <div class="future-widget-title">Hurda & Servis Radarı</div>
                 </div>
-                <div class="future-widget-card" style="flex: 1; min-width: 260px;">
+                <div class="future-widget-card" style="flex: 1; min-width: 260px; cursor: pointer;"
+                    onclick="window.openFutureFeatureModal('critical_stock')">
                     <div class="future-widget-icon"><i class="fas fa-triangle-exclamation"></i></div>
                     <div class="future-widget-label">Yakında</div>
                     <div class="future-widget-title">Kritik Sipariş İhtiyacı</div>
                 </div>
+                <div class="future-widget-card" style="flex: 1; min-width: 260px; cursor: pointer;"
+                    onclick="window.openFutureFeatureModal('ai_burn_rate')">
+                    <div class="future-widget-icon"><i class="fas fa-brain"></i></div>
+                    <div class="future-widget-label">Yakında</div>
+                    <div class="future-widget-title">🧠 AI Sarf Tüketim & Tahminleme Motoru</div>
+                </div>
             </div>
+
+            <!-- 🔭 Özellik Vizyonu (Blueprint) Modalı — future-widget kartlarına tıklanınca açılır -->
+            <div id="futureFeatureModal" class="ff-modal" onclick="if(event.target===this) window.closeFutureFeatureModal()">
+                <div class="ff-modal-content">
+                    <button type="button" class="ff-modal-close" onclick="window.closeFutureFeatureModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                    <div class="ff-modal-icon"><i id="ffModalIcon" class="fas fa-circle-info"></i></div>
+                    <div class="ff-modal-badge">ÖZELLİK VİZYONU · YAKINDA</div>
+                    <h4 id="ffModalTitle" class="ff-modal-title"></h4>
+                    <p id="ffModalDetail" class="ff-modal-detail"></p>
+                </div>
+            </div>
+
+            <style>
+                /* 🔭 Özellik Vizyonu (Blueprint) modalı — koyu temalı, animasyonlu bilgilendirme kartı. */
+                .ff-modal {
+                    display: none;
+                    position: fixed;
+                    inset: 0;
+                    z-index: 10500;
+                    background: rgba(2, 6, 23, 0.75);
+                    backdrop-filter: blur(6px);
+                    align-items: center;
+                    justify-content: center;
+                    animation: ff-modal-fade 0.2s ease;
+                }
+                .ff-modal.show {
+                    display: flex;
+                }
+                .ff-modal-content {
+                    position: relative;
+                    width: 92%;
+                    max-width: 460px;
+                    background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 100%);
+                    border: 1px solid rgba(99, 102, 241, 0.35);
+                    border-radius: 18px;
+                    padding: 32px 28px 28px;
+                    text-align: center;
+                    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.1);
+                    animation: ff-modal-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+                }
+                .ff-modal-close {
+                    position: absolute;
+                    top: 14px;
+                    right: 14px;
+                    width: 30px;
+                    height: 30px;
+                    border: none;
+                    border-radius: 50%;
+                    background: rgba(255, 255, 255, 0.08);
+                    color: #cbd5e1;
+                    cursor: pointer;
+                    transition: background 0.15s, transform 0.15s;
+                }
+                .ff-modal-close:hover {
+                    background: rgba(239, 68, 68, 0.25);
+                    color: #fecaca;
+                    transform: rotate(90deg);
+                }
+                .ff-modal-icon {
+                    width: 64px;
+                    height: 64px;
+                    margin: 0 auto 16px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: rgba(99, 102, 241, 0.15);
+                    color: #818cf8;
+                    font-size: 26px;
+                    animation: future-widget-pulse 2.4s ease-in-out infinite;
+                }
+                .ff-modal-badge {
+                    display: inline-block;
+                    font-size: 10.5px;
+                    font-weight: 800;
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                    color: #a5b4fc;
+                    background: rgba(99, 102, 241, 0.15);
+                    padding: 4px 12px;
+                    border-radius: 999px;
+                    margin-bottom: 14px;
+                }
+                .ff-modal-title {
+                    font-size: 1.1rem;
+                    font-weight: 700;
+                    color: #f1f5f9;
+                    margin: 0 0 12px;
+                    line-height: 1.4;
+                }
+                .ff-modal-detail {
+                    font-size: 0.85rem;
+                    line-height: 1.6;
+                    color: #94a3b8;
+                    margin: 0;
+                }
+                @keyframes ff-modal-fade {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
+                }
+                @keyframes ff-modal-pop {
+                    from { opacity: 0; transform: scale(0.92) translateY(10px); }
+                    to { opacity: 1; transform: scale(1) translateY(0); }
+                }
+            </style>
 
             <style>
                 /* Faz 5 · K3.5: Operasyon Merkezi — gelecek widget yer tutucuları (pulse/glow efektli). */
@@ -785,6 +872,54 @@
                     border-color: var(--color-border, #334155);
                 }
             </style>
+
+            <script>
+                // 🔭 Özellik Vizyonu (Blueprint) modalı — "Yakında" kartlarına tıklanınca içerik basılır.
+                // [WHY]: Kartlar şu an statik yer tutucu; adminin ne geleceğini merak etmesine karşılık
+                //        verip beklenti yönetmek için her kartın vizyon metnini gösteren hafif bir modal.
+                window.openFutureFeatureModal = function (key) {
+                    let icon = 'fa-circle-info', title = '', detail = '';
+                    switch (key) {
+                        case 'active_assignment':
+                            icon = 'fa-right-left';
+                            title = 'Canlı Zimmet Radarı & Anlık İade Masası';
+                            detail = 'Kurum genelinde personellerin üzerinde bulunan tüm aktif zimmetleri ve yaklaşan iade tarihlerini tek bir kontrol merkezinden izlemek; süresi dolan cihazlar için otomatik uyarılar üretmek ve tek tıkla depoya iade kabulü sağlamak üzere tasarlanmaktadır.';
+                            break;
+                        case 'scrap_service':
+                            icon = 'fa-satellite-dish';
+                            title = 'Donanım Sağlığı & Yaşam Döngüsü İzleme (Lifecycle)';
+                            detail = 'Servisteki cihazların canlı onarım durumlarını izlemek, mükerrer arıza kaydı açılan kronik sorunlu cihazları (SN) otomatik tespit etmek ve hurdaya ayrılan donanımların sicil/maliyet dökümünü raporlamak üzere tasarlanmaktadır.';
+                            break;
+                        case 'critical_stock':
+                            icon = 'fa-triangle-exclamation';
+                            title = 'Kritik Stok Emniyet Kilidi & Otomatik Talep Tetikleyici';
+                            detail = 'Depolardaki minimum stok limitlerini sürekli tarayarak tükenme eşiğindeki sarf malzemeleri için kırmızı alarm üretmek ve tek tıkla EBYS satın alma talebi başlatmak üzere tasarlanmaktadır.';
+                            break;
+                        case 'ai_burn_rate':
+                            icon = 'fa-brain';
+                            title = "Akıllı Tüketim Analitiği & Öngörücü Tedarik Pipeline'ı";
+                            detail = "B3 hareket defteri loglarını analiz ederek aylık sarf tüketim hızını (Burn Rate) hesaplayan, 'A4 Kağıdı 18 gün sonra tükenecektir' şeklinde öngörücü uyarılar üreten yapay zeka destekli bir tahminleme motorudur.";
+                            break;
+                        default:
+                            return;
+                    }
+
+                    const modal = document.getElementById('futureFeatureModal');
+                    if (!modal) return;
+                    const iconEl = document.getElementById('ffModalIcon');
+                    if (iconEl) iconEl.className = 'fas ' + icon;
+                    const titleEl = document.getElementById('ffModalTitle');
+                    if (titleEl) titleEl.textContent = title;
+                    const detailEl = document.getElementById('ffModalDetail');
+                    if (detailEl) detailEl.textContent = detail;
+                    modal.classList.add('show');
+                };
+
+                window.closeFutureFeatureModal = function () {
+                    const modal = document.getElementById('futureFeatureModal');
+                    if (modal) modal.classList.remove('show');
+                };
+            </script>
         </div>
 
         <!-- 📦 Satın Alma Yönetimi -->
@@ -821,6 +956,35 @@
                     <div class="dashboard-info">
                         <span class="dashboard-title">TAMAMLANAN</span>
                         <span id="totalCompletedAction" class="dashboard-value">12</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Faz 6 · UI-01: Operasyon Merkezi'nden buraya taşındı — ait olduğu doğal yer burası. -->
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h3 class="m-0 font-weight-bold text-danger">📨 Bekleyen Envanter Talepleri</h3>
+                    <span class="badge rounded-pill bg-danger shadow-sm" id="pendingRequestCount">0</span>
+                </div>
+                <div class="card-body p-0">
+                    <!-- Faz 5 · K3.5: table-layout:fixed (global table kuralı) dar ekranda İşlem sütunundaki
+                         iki sabit genişlikli ikon butonunu sıkıştırıp taşırıyordu. Bu tabloya özel table-layout:
+                         auto (sütunlar içeriğe göre genişler) + İşlem başlığına min-width; table-responsive
+                         sarmalayıcı hâlâ çok dar ekranlarda yatay kaydırma sağlar. -->
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 align-middle" style="table-layout: auto;">
+                            <thead class="bg-light">
+                                <tr>
+                                    <th class="ps-3">Tarih</th>
+                                    <th>Personel</th>
+                                    <th>Ürün</th>
+                                    <th class="text-center">Durum</th>
+                                    <th class="text-end pe-3" style="min-width: 92px;">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminPendingRequestsBody">
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -930,6 +1094,9 @@
                 <button class="btn def-nav-btn" onclick="switchDefTab('workflows')"
                     style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">İş
                     Akışları</button>
+                <button class="btn def-nav-btn" onclick="switchDefTab('personnel')"
+                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">👥
+                    Personel Tanımları</button>
             </div>
 
             <!-- 1. MAHAL SEKMESİ -->
@@ -1078,6 +1245,36 @@
                 </div>
             </div>
 
+            <!-- 5. PERSONEL TANIMLARI SEKMESİ -->
+            <div id="defTab-personnel" class="def-tab-content" style="display: none;">
+                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                    <div>
+                        <h2 class="fw-bold mb-0">👥 Personel Tanımları</h2>
+                        <small class="text-muted">Personel Kayıtları ve Kurumsal Kimlik (PRI) Yönetimi</small>
+                    </div>
+                    <button onclick="window.openPersonelModal('add')"
+                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                        <i class="fas fa-plus me-2"></i>Personel Ekle
+                    </button>
+                </div>
+                <div class="modern-card">
+                    <div class="table-responsive" style="min-height: 400px;">
+                        <table class="modern-table" id="tablePersonel">
+                            <thead>
+                                <tr>
+                                    <th style="width: 5%;">Seç</th>
+                                    <th style="width: 25%;">Ad Soyad</th>
+                                    <th style="width: 20%;">Birim</th>
+                                    <th style="width: 30%;">Kurumsal Kimlik / Hesap</th>
+                                    <th style="width: 20%;" class="text-end">İşlemler</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <style>
                 .def-nav-btn.active {
                     background: var(--color-info) !important;
@@ -1103,6 +1300,8 @@
                         window.renderProductTypesTable();
                     } else if (tabId === 'mahal' && typeof window.renderLocationsTable === 'function') {
                         window.renderLocationsTable();
+                    } else if (tabId === 'personnel' && typeof window.renderPersonelTable === 'function') {
+                        window.renderPersonelTable();
                     }
 
                     // 💡 Contextual tip for definitions sub-tabs
@@ -1857,86 +2056,52 @@
                 </h5>
             </div>
 
-            <div class="modal-body p-4 pt-3">
+            <div class="modal-body wf-builder">
 
-                <!-- Şablon Adı Satırı (Yan Yana) -->
-                <div class="d-flex align-items-center gap-3 mb-4">
-                    <label class="modern-label-slim mb-0"
-                        style="font-size: 0.75rem; letter-spacing: 0.5px; color: #475569; font-weight: 700; min-width: 200px;">ŞABLON
-                        ADI</label>
-                    <input type="text" id="tplName" class="form-control"
-                        style="padding: 6px 12px; font-size: 0.9rem; border: 1px solid #cbd5e1; border-radius: 6px; flex: 1; max-width:350px;"
-                        placeholder="Örn: Standart Onay" autocomplete="off">
+                <!-- Şablon Adı -->
+                <div class="wf-field">
+                    <label class="wf-field-label" for="tplName">Şablon Adı</label>
+                    <input type="text" id="tplName" class="wf-input" placeholder="Örn: Standart Onay Süreci"
+                        autocomplete="off">
                 </div>
 
-                <!-- Yetki Satırı (Yan Yana) -->
-                <div class="mb-4">
-                    <div class="d-flex align-items-center gap-3">
-                        <label class="modern-label-slim mb-0"
-                            style="font-size: 0.75rem; letter-spacing: 0.5px; color: #475569; font-weight: 700; min-width: 200px;">BU
-                            ŞABLONU KİMLER KULLANABİLİR?</label>
-                        <div class="position-relative flex-1">
-                            <div class="input-group"
-                                style="border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; background: #fff; max-width: 380px;">
-                                <span class="input-group-text bg-white border-0 pe-2 text-muted"
-                                    style="padding-left: 12px;">
-                                    <i class="fas fa-search"></i>
-                                </span>
-                                <input type="text" id="tplAuthSearch" class="form-control border-0 bg-white"
-                                    style="font-size: 0.9rem; padding: 8px 10px 8px 0; box-shadow: none;"
-                                    placeholder="Personel ara ve ekle..."
-                                    onkeyup="window.searchPersonnelForTemplate(this.value, 'auth')" autocomplete="off">
-                            </div>
-                            <div id="tplAuthResults" class="search-results-popover shadow-lg border-0 mt-1"></div>
+                <!-- Yetki + Seçili Kişiler -->
+                <div class="wf-field">
+                    <label class="wf-field-label" for="tplAuthSearch">Bu Şablonu Kimler Kullanabilir?</label>
+                    <div class="wf-search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="tplAuthSearch" class="wf-search-input"
+                            placeholder="Personel ara ve ekle..."
+                            onkeyup="window.searchPersonnelForTemplate(this.value, 'auth')" autocomplete="off">
+                        <div id="tplAuthResults" class="search-results-popover"></div>
+                    </div>
+                    <div id="tplAuthList" class="wf-chip-list"></div>
+                </div>
+
+                <!-- Onay Adımları -->
+                <div class="wf-field">
+                    <div class="wf-steps-head">
+                        <label class="wf-field-label mb-0">Onay Adımları (Akış Sırası)</label>
+                        <button type="button" onclick="window.addStepToTemplate()" class="wf-add-step-btn">
+                            <i class="fas fa-plus"></i> Adım Ekle
+                        </button>
+                    </div>
+                    <p class="wf-hint">Sürükle-bırak ile sıralama yakında eklenecektir.</p>
+
+                    <div class="wf-steps-wrap">
+                        <div class="wf-steps-colhead">
+                            <span class="wf-col-idx">#</span>
+                            <span>Sorumlu Personel</span>
+                            <span class="wf-col-type">İşlem Türü</span>
+                            <span class="wf-col-del"></span>
+                        </div>
+                        <div class="wf-steps-list" id="templateStepsArea">
+                            <!-- JS ile dolacak -->
                         </div>
                     </div>
                 </div>
 
-                <!-- Seçili Kişiler Listesi -->
-                <div class="mb-4">
-                    <div id="tplAuthList" class="d-flex flex-wrap gap-2"></div>
-                </div>
-
-                <hr style="border: 0; height: 1px; background: #e2e8f0; margin: 1.5rem 0;">
-
-                <!-- Onay Adımları Bölümü -->
-                <div class="mb-3">
-                    <label class="modern-label-slim mb-1 d-block justify-content-end"
-                        style="font-size: 0.75rem; letter-spacing: 0.5px; color: #475569; font-weight: 700;">ONAY
-                        ADIMLARI (AKIŞ SIRASI)</label>
-
-                    <button type="button" onclick="window.addStepToTemplate()" class="btn btn-sm"
-                        style="background: #f1f5f9; color: #1e293b; font-weight: 600; border-radius: 8px; padding: 6px 14px; font-size: 0.8rem; border: none;">
-                        <i class="fas fa-plus-circle" style="color: #334155;"></i> ADIM EKLE
-                    </button>
-                    <p class="text-muted mb-3" style="font-size: 0.6rem;">Sürükle-bırak ile sıralama yakında
-                        eklenecektir.</p>
-                </div>
-
-                <!-- Tablo -->
-                <div class="workflow-table-container">
-                    <table class="workflow-table mb-0 w-100"
-                        style="border-top: 1px solid #e2e8f0; border-left: none; border-right: none;">
-                        <thead>
-                            <tr style="border-bottom: 2px solid #e2e8f0;">
-                                <th style="width: 5%; font-size: 0.7rem; letter-spacing: 0.5px; color: #64748b;"
-                                    class="text-center">#</th>
-                                <th
-                                    style="width: 55%; font-size: 0.7rem; letter-spacing: 0.5px; color: #64748b; border-left: 1px solid #e2e8f0;">
-                                    SORUMLU PERSONEL</th>
-                                <th
-                                    style="width: 30%; font-size: 0.7rem; letter-spacing: 0.5px; color: #64748b; border-left: 1px solid #e2e8f0;">
-                                    İŞLEM TÜRÜ</th>
-                                <th style="width: 10%; border-left: 1px solid #e2e8f0;" class="text-center"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="templateStepsArea">
-                            <!-- JS ile dolacak -->
-                        </tbody>
-                    </table>
-                </div>
-
-                <div id="selectedTemplateName" class="mt-3 small text-muted text-end fw-medium"></div>
+                <div id="selectedTemplateName" class="wf-selected-name"></div>
             </div>
 
             <!-- Alt Butonlar -->
@@ -1974,6 +2139,239 @@
             right: 10px;
             color: #ef4444;
             cursor: pointer;
+        }
+
+        /* 🧩 Süreç Akış Editörü — "Yeni Şablon Oluştur" modalının kompakt/modern iç yapısı.
+           Eski .workflow-table / .form-control tabanlı yapı devasa hücreler ve çakışan
+           sınırlar üretiyordu; bu blok yalnız bu modal'a özel, sıfırdan ve kendi kendine
+           yeten bir sınıf kümesiyle (eski genel sınıflarla çakışmaz) yeniden kurar. */
+        #templateModal .wf-builder {
+            padding: 20px 28px 24px;
+            background: #ffffff;
+        }
+
+        #templateModal .wf-field {
+            margin-bottom: 18px;
+        }
+
+        #templateModal .wf-field-label {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 6px;
+        }
+
+        #templateModal .wf-builder .wf-input,
+        #templateModal .wf-builder .wf-select {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 0.85rem;
+            font-family: inherit;
+            color: #1e293b;
+            background: #fff;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        #templateModal .wf-builder .wf-input:focus,
+        #templateModal .wf-builder .wf-select:focus {
+            border-color: var(--color-info, #3b82f6);
+        }
+
+        #templateModal .wf-builder #tplName {
+            max-width: 340px;
+        }
+
+        #templateModal .wf-search-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            max-width: 380px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 0 12px;
+            background: #fff;
+            transition: border-color 0.15s;
+        }
+
+        #templateModal .wf-search-box:focus-within {
+            border-color: var(--color-info, #3b82f6);
+        }
+
+        #templateModal .wf-search-box i {
+            color: #94a3b8;
+            font-size: 0.8rem;
+        }
+
+        #templateModal .wf-search-input {
+            flex: 1;
+            border: none;
+            outline: none;
+            padding: 8px 0;
+            font-size: 0.85rem;
+            font-family: inherit;
+            background: transparent;
+        }
+
+        #templateModal .wf-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        #templateModal .wf-steps-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        #templateModal .wf-add-step-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #f1f5f9;
+            color: #1e293b;
+            font-weight: 600;
+            font-size: 0.78rem;
+            border: none;
+            border-radius: 8px;
+            padding: 6px 12px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        #templateModal .wf-add-step-btn:hover {
+            background: #e2e8f0;
+        }
+
+        #templateModal .wf-hint {
+            font-size: 0.68rem;
+            color: #94a3b8;
+            margin: 4px 0 10px;
+        }
+
+        #templateModal .wf-steps-wrap {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        #templateModal .wf-steps-colhead,
+        #templateModal .wf-step-row {
+            display: grid;
+            grid-template-columns: 28px 1fr 170px 32px;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+        }
+
+        #templateModal .wf-steps-colhead {
+            background: #f8fafc;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            color: #64748b;
+        }
+
+        #templateModal .wf-steps-list .wf-step-row + .wf-step-row {
+            border-top: 1px solid #f1f5f9;
+        }
+
+        #templateModal .wf-step-row:hover {
+            background: #f8fafc;
+        }
+
+        #templateModal .wf-col-idx {
+            text-align: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #94a3b8;
+        }
+
+        #templateModal .wf-step-personnel {
+            position: relative;
+        }
+
+        #templateModal .wf-step-del {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            margin: 0 auto;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: #ef4444;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: background 0.15s;
+        }
+
+        #templateModal .wf-step-del:hover {
+            background: #fee2e2;
+        }
+
+        #templateModal .wf-selected-name {
+            margin-top: 12px;
+            font-size: 0.78rem;
+            color: #94a3b8;
+            text-align: right;
+            font-weight: 500;
+        }
+
+        @media (max-width: 600px) {
+            #templateModal .wf-steps-colhead,
+            #templateModal .wf-step-row {
+                grid-template-columns: 22px 1fr 120px 28px;
+                padding: 8px;
+            }
+        }
+
+        [data-theme="dark"] #templateModal .wf-builder {
+            background: var(--color-surface, #1e293b);
+        }
+
+        [data-theme="dark"] #templateModal .wf-field-label,
+        [data-theme="dark"] #templateModal .wf-steps-colhead,
+        [data-theme="dark"] #templateModal .wf-hint {
+            color: #94a3b8;
+        }
+
+        [data-theme="dark"] #templateModal .wf-builder .wf-input,
+        [data-theme="dark"] #templateModal .wf-builder .wf-select,
+        [data-theme="dark"] #templateModal .wf-search-box {
+            background: var(--color-surface-alt, #0f172a);
+            border-color: var(--color-border, #334155);
+            color: #e2e8f0;
+        }
+
+        [data-theme="dark"] #templateModal .wf-steps-colhead {
+            background: var(--color-surface-alt, #0f172a);
+        }
+
+        [data-theme="dark"] #templateModal .wf-steps-wrap,
+        [data-theme="dark"] #templateModal .wf-steps-list .wf-step-row + .wf-step-row {
+            border-color: var(--color-border, #334155);
+        }
+
+        [data-theme="dark"] #templateModal .wf-step-row:hover {
+            background: var(--color-surface-alt, #0f172a);
+        }
+
+        [data-theme="dark"] #templateModal .wf-add-step-btn {
+            background: var(--color-surface-alt, #0f172a);
+            color: #e2e8f0;
         }
 
         /* Sistem Kılavuzu — dar ekranlarda sol nav yatay sekme çubuğuna döner */
@@ -2032,6 +2430,28 @@
         </div>
     </div>
 
+    <!-- 👥 Personel Modal — Tanımlar > Personel Tanımları alt sekmesinden açılır.
+         index.html'deki #personelModal ile birebir aynı (işlevi script.js'te ortak: openPersonelModal/addPersonel/editPersonel). -->
+    <div id="personelModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closePersonelModal()">&times;</span>
+            <h2 id="personelModalTitle">Personel Düzenle</h2>
+            <form id="personelForm" autocomplete="off">
+                <label>Ad Soyad: <input type="text" id="personelName" required></label>
+                <label>Kurumsal Kimlik (PRI): <input type="text" id="personelPri" placeholder="ad.soyad"
+                        autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+                <p id="personelPriHint" style="font-size:12px; color:#64748b; margin:4px 0 10px;">Personel bu
+                    kimlikle girer.</p>
+                <label>Birim: <select id="personelUnit"><option value="">— Birim seçin —</option></select></label>
+                <label id="personelCodeRow">Giriş Kodu: <input type="text" id="personelCode"
+                        autocomplete="off"></label>
+                <p id="personelCodeHint" style="font-size:12px; color:#64748b; margin:4px 0 10px;">Kod giriş
+                    hesabının parolasıdır; sistemde saklanmaz. Kaydettikten sonra personele iletin.</p>
+                <button type="submit" class="save-btn">Kaydet</button>
+            </form>
+        </div>
+    </div>
+
     <div id="customAlertOverlay"
         style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
         <div
@@ -2052,6 +2472,7 @@
     <script src="security.js"></script>
     <script type="module" src="src/modules/admin/admin-main.js"></script>
     <script src="script.js"></script>
+    <script src="personel.js"></script>
     <script src="pdf-generator.js"></script>
     <script src="src/modules/admin/admin-system-control.js"></script>
     <script src="src/modules/admin/admin-sitemap.js"></script>

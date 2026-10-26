@@ -329,6 +329,52 @@ window.renderAdminRequestTable = function () {
     }
 };
 
+// Faz 6 · UI-01: Operasyon Merkezi — Hızlı Envanter Çıkış Masası.
+// [WHY]: "Bekleyen Envanter Talepleri" Talep Ve Süreçler sekmesine taşınınca Operasyon Merkezi'nde
+//        açılan alana, son çıkış hareketlerini özetleyen hafif bir masa eklendi (B3 hareket defterinden).
+window.renderQuickExitDesk = function () {
+    const tableBody = document.getElementById('quickExitDeskBody');
+    if (!tableBody) return;
+
+    const esc = window.escapeHtml;
+    const entries = (window.data.b3 || [])
+        .map(e => window.Schema.normalizeB3(e))
+        .sort((a, b) => (b.ts || 0) - (a.ts || 0))
+        .slice(0, 8);
+
+    if (entries.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted p-3">Henüz çıkış hareketi yok.</td></tr>';
+        return;
+    }
+
+    tableBody.innerHTML = entries.map(n => `
+        <tr>
+            <td class="ps-3">${esc(n.tarih || '-')}</td>
+            <td>${esc(n.alanKisi || '-')}</td>
+            <td>${esc(n.urunAciklama || '-')}</td>
+            <td class="text-end pe-3">${esc(n.adet || 1)}</td>
+        </tr>
+    `).join('');
+};
+
+// [WHY]: Envanter çıkış modalı (#exitModal, ui-components.js) yalnız index.html'de var; admin panelinde
+//        yeniden kurmak yerine tek tık ile operatör ekranına gönderip çıkışı doğrudan orada açıyoruz.
+// [HOW]: sessionStorage bayrağı index.html'nin script.js açılışında okunur (bkz. script.js DOMContentLoaded).
+window.quickExitToIndex = function () {
+    try { sessionStorage.setItem('pendingQuickExit', '1'); } catch (e) { /* depolama kapalıysa sorun değil */ }
+    window.location.href = 'index.html';
+};
+
+// [WHY]: "Toplu Çıkış / Sepet" hızlı çıkış masasının ikinci aksiyonu; sepet/çoklu seçim akışı henüz
+//        tasarlanmadı (bkz. Faz 6 planı). Yanlış beklenti oluşturmamak için şimdilik net bir bilgi verir.
+window.openBulkExitComingSoon = function () {
+    if (typeof showAppAlert === 'function') {
+        showAppAlert('📦 Toplu Çıkış / Sepet özelliği yakında eklenecektir.', 'info');
+    } else {
+        alert('Toplu Çıkış / Sepet özelliği yakında eklenecektir.');
+    }
+};
+
 // 3. FİREBASE DİNLEYİCİSİ
 // Hem envanteri hem de çıkışları/talepleri dinlemek için döngüye alıyoruz
 // 3. FİREBASE DİNLEYİCİSİ (MEVCUT YAPI KORUNDU)
@@ -520,7 +566,8 @@ window.renderProductTypesTable = function () {
     });
 
     if (types.length === 0) {
-        listBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted p-4">Tanımlı ürün türü bulunamadı.</td></tr>';
+        if (listBody) listBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted p-4">Tanımlı ürün türü bulunamadı.</td></tr>';
+        if (defListBody) defListBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted p-4">Tanımlı ürün türü bulunamadı.</td></tr>';
     }
 };
 
@@ -1133,8 +1180,8 @@ window.showAdminTab = function (tabId) {
     } else if (tabId === 'productTypeSettings') {
         requestAnimationFrame(() => {
             setTimeout(() => {
-                if (typeof window.renderAdminRequestTable === 'function') window.renderAdminRequestTable();
                 if (typeof window.renderExitCharts === 'function') window.renderExitCharts();
+                if (typeof window.renderQuickExitDesk === 'function') window.renderQuickExitDesk();
             }, 0);
         });
     } else if (tabId === 'definitionsTab') {
@@ -1153,6 +1200,7 @@ window.showAdminTab = function (tabId) {
         requestAnimationFrame(() => {
             setTimeout(() => {
                 if (typeof window.renderServicesModule === 'function') window.renderServicesModule();
+                if (typeof window.renderAdminRequestTable === 'function') window.renderAdminRequestTable();
             }, 0);
         });
     }
