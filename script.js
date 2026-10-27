@@ -9,12 +9,10 @@
  *        tanımlanmış ve local state ile config ayarları muhafaza edilmiştir.
  */
 
-// // GELİŞTİRME MODU: Sayfa her yüklendiğinde (F5) tüm admin yetkilerini sıfırla
 (function () {
     const isMainPage = window.location.pathname.includes('index.html') || window.location.pathname === '/' || window.location.pathname.endsWith('/');
     if (isMainPage) {
         sessionStorage.removeItem('adminVizesi');
-        console.log("🛡️ Ana sayfa: Admin vizesi temizlendi.");
     }
 })();
 
@@ -1552,51 +1550,6 @@ window.exportToExcel = function (depo) {
 // [HOW]: Tek kaynak Firestore snapshot'larıdır; kalmış önbellek bir kez silinir.
 localStorage.removeItem('inventoryData');
 
-window.loadFromDB = function (storeName) {
-    return new Promise((resolve) => {
-        if (!db) { setTimeout(() => window.loadFromDB(storeName).then(resolve), 100); return; }
-        const tx = db.transaction(storeName, 'readonly');
-        const store = tx.objectStore(storeName);
-        const request = store.getAll();
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => resolve([]);
-    });
-};
-
-function checkPermission(event) {
-    if (!checkIsAdmin()) {
-        if (event) { event.preventDefault(); event.stopPropagation(); }
-        showAppAlert("Bu işlem sadece yönetici tarafından yapılabilir.", "error");
-        return false;
-    }
-    return true;
-}
-
-function setupPermissionListeners() {
-    const adminActions = ['#btnTopluSil', '#btnPdfExport', '.edit-btn', '.delete-btn', '.inc-btn', '.dec-btn'];
-    adminActions.forEach(selector => {
-        document.querySelectorAll(selector).forEach(btn => {
-            const originalOnClick = btn.onclick;
-            btn.onclick = (e) => {
-                if (checkPermission(e)) {
-                    if (originalOnClick) originalOnClick.call(btn, e);
-                }
-            };
-        });
-    });
-}
-
-function toggleFixture() {
-    const btn = document.getElementById('fixtureToggle');
-    const hiddenInput = document.getElementById('isFixtureHidden');
-    if (!btn || !hiddenInput) return;
-    if (hiddenInput.value === "false") {
-        hiddenInput.value = "true"; btn.innerText = "DEMİRBAŞ"; btn.classList.add('active');
-    } else {
-        hiddenInput.value = "false"; btn.innerText = "Sarf Malzeme"; btn.classList.remove('active');
-    }
-}
-
 function closeProductModal() {
     const modal = document.getElementById('productModal');
     if (modal) modal.style.display = "none";
@@ -1617,24 +1570,6 @@ window.addEventListener("load", () => {
 // [WHY]: Eski talep şemasını (status/person/product) kullanan ve tüm veritabanını yazan ölü kod kaldırıldı: addRequest,
 //        submitRequest, updateRequestStatus (sabit "Muhammed Cer"), renderRequestAction (tanımsız confirmReceipt).
 //        Hiçbiri çağrılmıyordu; talep akışı saveRequest / confirmRequest / receiveProduct üzerinden (H2, DATA-10 benzeri gizli risk).
-
-async function createLog(action, detail) {
-    const parsed = window.getActiveUser();
-    const userName = (parsed && parsed.name) || "Bilinmeyen Kullanıcı";
-    const newLog = {
-        date: getTurkiyeSaati(),
-        user: userName,
-        action: action,
-        detail: detail
-    };
-    await saveToDB('logs', [...await getLogsFromDB(), newLog]);
-}
-
-function checkCategory(selectElement) {
-    const selectedOption = selectElement.options[selectElement.selectedIndex];
-    const isDemirbas = selectedOption.getAttribute('data-is-demirbas') === 'true';
-    document.getElementById('isDemirbas').value = isDemirbas;
-}
 
 function openTab(tabId) {
     const contents = ['b1', 'b2', 'b3', 'personel', 'requestsTab'];
