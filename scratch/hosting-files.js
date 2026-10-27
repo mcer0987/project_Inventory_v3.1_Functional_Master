@@ -33,7 +33,8 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
 //        53 = + Faz 4B · J7 src/services/staff-provisioning.js.
 //        54 = + Faz 4B · J7.5 src/utils/staff-code-registry.js.
 //        55 = + Faz 4B · J9 src/utils/ownership.js (code-hash.js GPT-6 kararıyla iptal edildi).
-const EXPECTED_COUNT = 55;
+//        53 = - Faz 7 ölü kod temizliği: db.js ve src/services/data-loader.js silindi.
+const EXPECTED_COUNT = 53;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {
