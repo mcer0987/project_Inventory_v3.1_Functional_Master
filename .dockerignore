@@ -17,6 +17,8 @@
 # Zimmet tutanağı fontları (Faz 5 · K1) + lisansı; README derleme bağlamına girmez
 !pdf-fonts/
 pdf-fonts/*.md
+!release-journal/
+!release-journal/**
 
 # Yerel depo dökümleri (repomix) — beyaz liste zaten dışlar; ileride bir genişletme bunu açmasın diye açıkça
 repomix-output*

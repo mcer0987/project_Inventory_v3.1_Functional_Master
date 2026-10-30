@@ -22,12 +22,13 @@ COPY nginx/sites/                   /etc/nginx/sites/
 COPY nginx/snippets/                /etc/nginx/snippets/
 COPY nginx/templates/               /etc/nginx/templates/
 
-# Uygulama: iki sayfa + 404, kök CSS/JS, src/ ve pdf-fonts/. Başka hiçbir şey web köküne girmez.
+# Uygulama: iki sayfa + 404, kök CSS/JS, src/, pdf-fonts/ ve bağımsız statik gelişim günlüğü.
 # pdf-fonts/ (Faz 5 · K1): zimmet tutanağı Türkçe fontları, pdf-generator.js PDF üretirken tembel yükler; yoksa 404.
 COPY index.html admin.html 404.html /usr/share/nginx/html/
 COPY *.css *.js                     /usr/share/nginx/html/
 COPY src/                           /usr/share/nginx/html/src/
 COPY pdf-fonts/                     /usr/share/nginx/html/pdf-fonts/
+COPY release-journal/               /usr/share/nginx/html/release-journal/
 
 # Derleme anında doğrulama: şablon varsayılan değerle üretilir, yapılandırma sözdizimi denetlenir (çalışırken yeniden üretilir).
 RUN envsubst '${CSP_CONNECT_EXTRA}' < /etc/nginx/templates/security-headers.inc.template > /etc/nginx/generated/security-headers.inc \

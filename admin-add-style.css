@@ -2252,3 +2252,8 @@ input:checked+.slider::before {
     display: none;
   }
 }
+
+/* Ürün gelişim günlüğüne modal altından hafif bağlantı. */
+.sitemap-release-link-wrap { flex: 0 0 auto; padding: 0 20px 14px; border-top: 1px solid rgba(255,255,255,.08); }
+.sitemap-release-link { display: inline-flex; align-items: center; gap: 8px; padding-top: 12px; color: #7dd3fc; font-size: .82rem; text-decoration: none; }
+.sitemap-release-link:hover, .sitemap-release-link:focus-visible { color: #bae6fd; text-decoration: underline; outline-offset: 3px; }
