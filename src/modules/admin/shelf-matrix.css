@@ -1,4 +1,6 @@
 .shelf-matrix {
+    container: shelf-map / inline-size;
+    min-width: 0;
     --shelf-surface: var(--color-surface, #fff);
     --shelf-surface-alt: var(--color-surface-alt, #f8fafc);
     --shelf-border: var(--color-border, #e2e8f0);
@@ -64,30 +66,54 @@
    talebi). shelf-matrix-toolbar'ın (depo sekmesi/arama/sıralama) ÜSTÜNDE, ayrı bir şerit; depo SEÇİMİNDEN bağımsızdır
    (her iki depo da her zaman görünür) — WMS'in o an hangi depoyu gösterdiğiyle karışmasın diye bilinçli olarak ayrı. */
 .shelf-matrix-actions {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
     align-items: center;
-    gap: 10px 18px;
-    padding: 10px 14px;
+    gap: 12px 18px;
+    min-width: 0;
+    padding: 16px;
     margin-bottom: 14px;
     border: 1px solid var(--shelf-border);
     border-radius: 12px;
     background: var(--shelf-surface-alt);
 }
 
-.shelf-matrix-actions-label {
-    font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--shelf-muted);
-    flex-shrink: 0;
+.shelf-matrix-actions-group {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1.2fr);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
 }
 
-.shelf-matrix-actions-group {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+.shelf-matrix-actions .uab-btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    height: auto;
+    padding: 9px 10px;
+    white-space: normal;
+    line-height: 1.35;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
+.shelf-matrix-actions .import-help-shared {
+    margin-left: 0;
+    min-height: 42px;
+    padding-inline: 16px;
+}
+
+@container shelf-map (max-width: 780px) {
+    .shelf-matrix-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .shelf-matrix-actions .import-help-shared { grid-column: 1 / -1; }
+}
+
+@container shelf-map (max-width: 520px) {
+    .shelf-matrix-actions { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px; }
+    .shelf-matrix-actions-group { grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1.2fr); gap: 6px; }
+    .shelf-matrix-actions .uab-btn { min-height: 44px; }
+    .shelf-matrix-actions .import-help-shared { margin-top: 2px; }
 }
 
 .shelf-matrix-actions-depot {
@@ -99,14 +125,17 @@
 
 .shelf-matrix-toolbar {
     display: grid;
-    grid-template-columns: auto minmax(220px, 1fr) minmax(190px, auto);
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 250px);
+    min-width: 0;
     gap: 12px;
     align-items: center;
     margin-bottom: 14px;
 }
 
 .shelf-matrix-depots {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.18fr) minmax(0, .7fr);
+    min-width: 0;
     gap: 6px;
     padding: 4px;
     border: 1px solid var(--shelf-border);
@@ -124,10 +153,13 @@
 }
 
 .shelf-depot-btn {
-    min-height: 38px;
+    min-width: 0;
+    min-height: 44px;
     padding: 8px 12px;
     cursor: pointer;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.4;
 }
 
 .shelf-depot-btn.active {
@@ -141,7 +173,9 @@
     align-items: center;
     gap: 9px;
     min-width: 0;
-    height: 42px;
+    width: 100%;
+    height: 44px;
+    box-sizing: border-box;
     padding: 0 12px;
     border: 1px solid var(--shelf-border);
     border-radius: 11px;
@@ -159,13 +193,30 @@
     font: inherit;
 }
 
+/* Arama etiketi ekran okuyucuya açık kalır; dar alanda input genişliğini tüketmez. */
+.shelf-search .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
 .shelf-search input::placeholder {
     color: var(--shelf-muted);
     opacity: 0.8;
 }
 
 .shelf-sort {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    min-width: 0;
+    width: 100%;
     align-items: center;
     gap: 8px;
     color: var(--shelf-muted);
@@ -173,10 +224,28 @@
 }
 
 .shelf-sort select {
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
-    height: 42px;
+    height: 44px;
     padding: 0 10px;
-    flex: 1;
+    box-sizing: border-box;
+}
+
+/* Kenar çubuğu / bölünmüş ekran dahil, kullanılabilir panel genişliğine göre yerleşim. */
+@container shelf-map (max-width: 1100px) {
+    .shelf-matrix-toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 280px); }
+    .shelf-matrix-depots { grid-column: 1 / -1; }
+}
+
+@container shelf-map (max-width: 560px) {
+    .shelf-matrix-toolbar { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    .shelf-matrix-depots,
+    .shelf-search,
+    .shelf-sort { grid-column: 1; }
+    .shelf-matrix-depots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .shelf-depot-btn { padding: 9px 8px; font-size: .8rem; }
+    .shelf-depot-btn-pool { grid-column: 1 / -1; }
 }
 
 .shelf-matrix-metrics {
@@ -914,38 +983,9 @@ body.shelf-dialog-open {
     to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@media (max-width: 900px) {
-    .shelf-matrix-toolbar {
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .shelf-matrix-depots {
-        grid-column: 1 / -1;
-    }
-
-    .shelf-depot-btn {
-        flex: 1;
-    }
-}
-
 @media (max-width: 560px) {
     .shelf-matrix {
         padding: 16px 12px;
-    }
-
-    .shelf-matrix-toolbar {
-        grid-template-columns: 1fr;
-    }
-
-    .shelf-matrix-depots,
-    .shelf-search,
-    .shelf-sort {
-        grid-column: 1;
-    }
-
-    .shelf-depot-btn {
-        padding: 8px 7px;
-        font-size: 0.75rem;
     }
 
     .shelf-drawer-overlay {

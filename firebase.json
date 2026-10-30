@@ -19,6 +19,7 @@
       "plan.json",
       "package*.json",
       "firestore.rules",
+      "saha-hotfix-diff.txt",
       ".agents/**",
       "tests/**",
       "audits/**",

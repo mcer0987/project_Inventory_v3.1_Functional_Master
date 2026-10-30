@@ -1273,6 +1273,12 @@ describe('v3.3 · Raf kataloğu (shelves) ve stok işlem defteri (stockOperation
         await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'shelves', 'b1_RAF-A 1'), { capacity: 9, updatedAt: serverTimestamp(), updatedBy: 'admin-uid' }));
         await assertFails(setDoc(item(ctx.admin(), 'rogue_root', 'shelves', 'b1_RAF-B 1'), shelfData({ code: 'RAF-B 1' })));
     });
+    test('admin canlı ve localhost/demo köklerinde raf kataloğunu listeleyebilir; ziyaretçi listeleyemez', async () => {
+        for (const root of [LIVE, DEMO]) {
+            await assertSucceeds(getDocs(collection(ctx.admin(), root, 'shelves', 'items')));
+            await assertFails(getDocs(collection(ctx.none(), root, 'shelves', 'items')));
+        }
+    });
     test('stok işlem defteri yalnız admin okur; personel okuyamaz / yazamaz', async () => {
         await seed(db => setDoc(item(db, LIVE, 'stockOperations', 'op_seeded_0001'), { id: 'op_seeded_0001', kind: 'transfer' }));
         await assertSucceeds(getDoc(item(ctx.admin(), LIVE, 'stockOperations', 'op_seeded_0001')));

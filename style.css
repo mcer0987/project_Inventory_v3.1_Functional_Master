@@ -1838,46 +1838,56 @@ button {
 
 /* Import yardım tetikleyicisi: hover yerine sakin, sürekli bir ışık halkası. */
 .import-help-trigger.uab-btn {
+    --help-ink: #087f8c;
+    --help-rgb: 8, 127, 140;
     position: relative;
     isolation: isolate;
-    color: #087f8c;
-    background: rgba(8, 127, 140, .09);
-    border: 1px solid rgba(8, 127, 140, .24);
+    color: var(--help-ink);
+    background: rgba(var(--help-rgb), .1);
+    border: 1px solid rgba(var(--help-rgb), .4);
     border-radius: 12px;
     overflow: visible;
     transition: none;
-    animation: import-help-glow 3.6s ease-in-out infinite;
+    animation: import-help-glow 2.6s ease-in-out infinite;
 }
 .import-help-trigger.uab-btn::after {
     content: '';
     position: absolute;
-    inset: -4px;
-    border: 1px solid rgba(8, 127, 140, .32);
+    inset: -3px;
+    border: 2px solid rgba(var(--help-rgb), .7);
     border-radius: 15px;
     pointer-events: none;
-    animation: import-help-ring 3.6s ease-out infinite;
+    animation: import-help-ring 2.6s ease-out infinite;
 }
 .import-help-trigger.uab-btn:hover {
     transform: none;
-    color: #087f8c;
-    background: rgba(8, 127, 140, .09);
-    border-color: rgba(8, 127, 140, .24);
+    color: var(--help-ink);
+    background: rgba(var(--help-rgb), .1);
+    border-color: rgba(var(--help-rgb), .4);
 }
 .import-help-symbol {
     display: block;
     flex: none;
     width: 20px;
     height: 20px;
+    animation: import-help-beacon 2.6s ease-in-out infinite;
 }
 .import-help-trigger:focus-visible { outline: 3px solid #67c5cd; outline-offset: 5px; }
+[data-theme="dark"] .import-help-trigger.uab-btn {
+    --help-ink: #fff4dc;
+    --help-rgb: 255, 244, 220;
+}
 @keyframes import-help-glow {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(8, 127, 140, 0); }
-    50% { box-shadow: 0 0 18px 2px rgba(8, 127, 140, .16); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(var(--help-rgb), 0); }
+    45%, 55% { box-shadow: 0 0 0 4px rgba(var(--help-rgb), .13), 0 0 24px 2px rgba(var(--help-rgb), .28); }
 }
 @keyframes import-help-ring {
-    0%, 15% { opacity: 0; transform: scale(.92); }
-    30% { opacity: .65; }
-    85%, 100% { opacity: 0; transform: scale(1.15); }
+    0% { opacity: .85; transform: scale(1); }
+    75%, 100% { opacity: 0; transform: scale(1.07, 1.25); }
+}
+@keyframes import-help-beacon {
+    0%, 25%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-2px) scale(1.12); }
 }
 
 .import-help-shared { margin-left: auto; gap: 8px; white-space: nowrap; }
@@ -1970,6 +1980,10 @@ button {
 .import-guide-overlay #alertConfirmBtn:hover { transform: none; background: #087f8c; }
 .import-guide-overlay #alertConfirmBtn:focus-visible { outline: 3px solid #67c5cd; outline-offset: 3px; }
 .import-guide-overlay #alertCancelBtn[hidden] { display: none; }
+[data-theme="dark"] #customAlertOverlay.import-guide-overlay > div { --guide-accent: #fff4dc; }
+[data-theme="dark"] .import-guide-depot,
+[data-theme="dark"] .import-guide-required { background: rgba(255, 244, 220, .1); }
+[data-theme="dark"] .import-guide-notes { border-left-color: #e6d9bb; }
 @media (max-width: 600px) {
     #customAlertOverlay.import-guide-overlay { padding: 12px; }
     #customAlertOverlay.import-guide-overlay > div { max-height: calc(100dvh - 24px); border-radius: 18px; }
@@ -1985,7 +1999,7 @@ button {
     .import-guide-overlay #alertConfirmBtn { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .import-help-trigger.uab-btn, .import-help-trigger.uab-btn::after { animation: none; }
+    .import-help-trigger.uab-btn, .import-help-trigger.uab-btn::after, .import-help-symbol { animation: none; }
 }
 
 /* Onay overlay'i */

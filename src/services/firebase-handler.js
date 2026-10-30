@@ -467,10 +467,11 @@ window.startRealtimeSync = function () {
     //     transfer yöneticide; personel dinleyicisi kota yerdi). COLLECTIONS dışında: saveData / yedek sayaçlara dokunmaz.
     if (typeof window.isDbAdmin === 'function' && window.isDbAdmin()) {
         _syncUnsubscribers.push(onSnapshot(collection(fireDb, COLLECTION_ROOT, 'shelves', 'items'), (snapshot) => {
+            _markListenerHealthy('shelves');
             window.data.shelves = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
             _bumpDataRevision();
             window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'shelves', isPatch: false, changes: [] } }));
-        }, (err) => console.error('❌ [shelves] Raf kataloğu dinlenemedi:', err.code || err.message)));
+        }, (err) => reportListenerError('shelves', err)));
     }
 
     // B. SİSTEM AYARLARINI DİNLE

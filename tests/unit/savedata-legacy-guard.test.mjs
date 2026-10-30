@@ -17,7 +17,7 @@ const plain = x => JSON.parse(JSON.stringify(x));
 
 // ─── Firebase SDK taklidi: her writeBatch ve commit sayılır ──────────────────────────────────────────────────────
 const SDK_STUB = `
-const sdk = globalThis.__fbStub = { batches: 0, commits: 0, ops: [] };
+const sdk = globalThis.__fbStub = { batches: 0, commits: 0, ops: [], listeners: [] };
 const noop = () => {};
 export const initializeApp = () => ({});
 export const getApps = () => [];
@@ -28,7 +28,11 @@ export const createUserWithEmailAndPassword = async () => ({}), signInWithEmailA
 export const initializeFirestore = () => ({}), connectFirestoreEmulator = noop;
 export const collection = (...p) => p.slice(1).join('/');
 export const doc = (...p) => p.slice(1).join('/');
-export const onSnapshot = () => noop;
+export const onSnapshot = (ref, next, error) => {
+    const listener = { ref, next, error, stopped: false };
+    sdk.listeners.push(listener);
+    return () => { listener.stopped = true; };
+};
 export const getDoc = async () => ({ exists: () => false, data: () => null });
 export const getDocFromServer = getDoc;
 export const getDocs = async () => ({ docs: [] });
@@ -204,4 +208,33 @@ test('saveData: çok kayıtlı çağrıda TEK bir dondurulmuş alan ihlali tüm 
     assert.equal(error && error.code, 'schema-violation');
     assert.equal(sdk().batches, 0);
     assert.equal(sdk().commits, 0);
+});
+
+test('raf dinleyicisi: yetki reddi sağlık durumuna yansır ve ensureRealtimeSync ölü dinleyiciyi yeniden kurar', () => {
+    const previousDocument = globalThis.document;
+    globalThis.document = { getElementById: () => null, body: null };
+    window.userAuth = { uid: 'admin-uid' };
+    window.isDbAdmin = () => true;
+    sdk().listeners = [];
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+        window.startRealtimeSync();
+        const shelf = sdk().listeners.find(l => l.ref === 'inventory_demo/shelves/items');
+        assert.ok(shelf, 'yönetici raf kataloğunu dinler');
+        shelf.error({ code: 'permission-denied' });
+        assert.deepEqual(window.getSyncHealth().denied, ['shelves']);
+        assert.equal(window.ensureRealtimeSync(), 'restarted');
+        assert.equal(shelf.stopped, true);
+        const replacement = sdk().listeners.filter(l => l.ref === shelf.ref).at(-1);
+        assert.notEqual(replacement, shelf);
+        replacement.next({ docs: [{ id: 'b1_R1', data: () => ({ code: 'R1', depot: 'b1' }) }] });
+        assert.deepEqual(window.getSyncHealth().denied, []);
+        assert.equal(window.data.shelves[0].code, 'R1');
+        assert.equal(window.ensureRealtimeSync(), 'healthy');
+    } finally {
+        console.error = originalError;
+        window.stopRealtimeSync();
+        globalThis.document = previousDocument;
+    }
 });

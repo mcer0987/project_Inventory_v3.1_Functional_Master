@@ -26,8 +26,16 @@ const files = [];
 // Beklenen: iki sayfa + 404, kök CSS/JS, kök manifest.json (PWA — index/admin.html'de <link rel="manifest">), src/
 // altındaki JS/CSS (WMS'in shelf-matrix.css'i — admin.html'de <link> ile), pdf-fonts/ (Faz 5 · K1: tembel yüklenen
 // Roboto + OFL lisansı). (Docker beyaz listesiyle aynı küme.)
+// Yerel Font Awesome paketi iki sayfada da kullanılır; yalnız bu beş dosya yayınlanabilir.
+const iconAssets = new Set([
+    'assets/fontawesome/css/all.min.css',
+    'assets/fontawesome/webfonts/fa-brands-400.woff2',
+    'assets/fontawesome/webfonts/fa-regular-400.woff2',
+    'assets/fontawesome/webfonts/fa-solid-900.woff2',
+    'assets/fontawesome/webfonts/fa-v4compatibility.woff2',
+]);
 const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/.test(f) || /^manifest\.json$/.test(f)
-    || /^src\/.+\.(js|css)$/.test(f) || /^pdf-fonts\/(Roboto-[A-Za-z]+\.js|OFL\.txt)$/.test(f);
+    || /^src\/.+\.(js|css)$/.test(f) || /^pdf-fonts\/(Roboto-[A-Za-z]+\.js|OFL\.txt)$/.test(f) || iconAssets.has(f);
 // [WHY]: Faz 5 kapanışı — desen tek başına "fazladan meşru görünen" bir dosyayı (ör. kökte unutulan bir .js dökümü) yakalamaz.
 // [HOW]: Toplam sayı da sabitlenir; uygulamaya dosya eklenip çıkarıldığında bu sayı bilinçli olarak güncellenir.
 //        52 = Faz 5 öncesi 47 + P0-P1 (atomic-writer.js, stock-import.js) 2 + pdf-fonts 3.
@@ -39,7 +47,8 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
 //             mobile-responsive.css; src/ altında shelf-matrix.js + .css, stock-ledger.js, mobile-nav-enhancements.js,
 //             admin-quick-unlock.js, dialog-stack.js, shelf-capacity.js. (Global-Architecture.md ve "Mimari ve
 //             Geliştirmeler/" zaten firebase.json "ignore"da, bu sayıma girmez.)
-const EXPECTED_COUNT = 63;
+//        68 = + yerel Font Awesome CSS ve webfont paketi (5 dosya).
+const EXPECTED_COUNT = 68;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {
