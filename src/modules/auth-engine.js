@@ -764,8 +764,3 @@ export const handleLogout = async function (reason = 'manual') {
 // HTML onclick ve eski legacy modüller için window bağlamalarını yapıyoruz.
 window.handleLogout = handleLogout;
 window.logout = handleLogout;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Module init log
-// ─────────────────────────────────────────────────────────────────────────────
-console.log('✅ [auth-engine.js] Kimlik doğrulama motoru yüklendi (checkIsAdmin, checkAuth, handleLogin, updateNavbarUI, setupUI, checkAdminAndGo, handleLogout).');

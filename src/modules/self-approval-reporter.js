@@ -315,5 +315,3 @@ window.addEventListener('onNavbarRendered', () => {
 export const SelfApproval = { showReportModal, closeReportModal };
 
 window.AppModules.SelfApproval = SelfApproval;
-
-console.log('✅ [self-approval-reporter.js] Self-approval denetim raporu modülü yüklendi.');

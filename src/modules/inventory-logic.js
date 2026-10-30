@@ -466,5 +466,3 @@ window.deleteB3Row = window.AppModules.Inventory.deleteB3Row;
 window.toggleStatus = window.AppModules.Inventory.toggleStatus;
 window._bulkDeleteSelected = window.AppModules.Inventory._bulkDeleteSelected;
 window.toggleSelectAll = window.AppModules.Inventory.toggleSelectAll;
-
-console.log('✅ [inventory-logic.js] Envanter iş mantığı motoru yüklendi (saveProduct, deleteItem, saveExit, bulkDelete, deleteB3Row, toggleWatch, receiveProduct, addExit, updateStock).');

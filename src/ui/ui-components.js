@@ -1041,4 +1041,3 @@ window._bulkDeleteSelected      = UIComponents._bulkDeleteSelected.bind(UICompon
 
 // [STATUS]: UIComponents Namespace'i window.AppModules.UI'ye bağlandı.
 //           Legacy köprüleri (bridge) kuruldu. Phase 5 tamamlandı.
-console.log('✅ [ui-components.js] UIComponents yüklendi → window.AppModules.UI');

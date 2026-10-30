@@ -51,5 +51,3 @@ window.addEventListener('onInventoryDataUpdated', (e) => {
         requestAnimationFrame(flush);
     }
 });
-
-console.log('✅ [admin-router.js] Admin canlı veri yönlendiricisi yüklendi.');

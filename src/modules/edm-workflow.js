@@ -1335,7 +1335,6 @@ window.renderMyApprovals = function () {
     const rawUser = window.currentUser;
 
     const me = (rawUser?.name || "").trim().toLocaleLowerCase('tr-TR');
-    console.log("👤 Aktif Kullanıcı (Normalize):", me);
 
     if (!me) {
         console.warn("⚠️ Uyarı: Aktif kullanıcı ismi boş!");
