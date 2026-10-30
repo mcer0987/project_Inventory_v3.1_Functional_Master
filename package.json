@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:all": "npm run lint:xss && npm run test:unit && npm run test:rules",
     "emu": "firebase emulators:start --only firestore,auth --project medipol-inventory-v3",
     "emu:seed": "node scratch/emu-seed.mjs push",
     "emu:pull": "node scratch/emu-seed.mjs pull",

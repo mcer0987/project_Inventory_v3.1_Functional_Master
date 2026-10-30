@@ -52,6 +52,27 @@ const _dom = {
 // ─────────────────────────────────────────────────────────────────────────────
 // UIComponents Nesnesi
 // ─────────────────────────────────────────────────────────────────────────────
+// [WHY]: KJ-6 — tablo/kart seçiminden açılan ürün işlemleri kayıt verisini JS'e gömmez.
+// [HOW]: bindActions dataset okur; eski çağrı sırası ve menü/seçim kapatma davranışı korunur.
+function _bindProductActions(container, mobile = false) {
+    const finish = action => {
+        if (mobile) window.closeMobileBottomSheet();
+        else if (['editProduct', 'cloneProduct', 'transferProduct', 'deleteItem'].includes(action)) window.clearRowSelection();
+    };
+    const run = (action, fn) => el => { fn(el.dataset); finish(action); };
+    window.bindActions(container, {
+        increaseStock: run('increaseStock', d => window.updateStock(d.depo, d.id, 1)),
+        decreaseStock: run('decreaseStock', d => window.updateStock(d.depo, d.id, -1)),
+        editProduct: run('editProduct', d => window.openProductModal('edit', d.id, d.depo)),
+        cloneProduct: run('cloneProduct', d => window.cloneProduct(d.depo, d.id)),
+        transferProduct: run('transferProduct', d => window.openTransferModal(d.depo, d.id)),
+        toggleWatch: run('toggleWatch', d => window.toggleWatch(d.depo, d.id)),
+        deleteItem: run('deleteItem', d => window.deleteItem(d.depo, d.id)),
+        bulkDelete: el => window._bulkDeleteSelected(el.dataset.depo, JSON.parse(el.dataset.ids)),
+        bulkTransfer: () => window.showAppAlert('Toplu Sevk özelliği yakında!', 'info'),
+    });
+}
+
 export const UIComponents = {
 
     // =========================================================================
@@ -762,6 +783,8 @@ export const UIComponents = {
         tbody._fabListenerAttached = true;
 
         tbody.addEventListener('click', function (e) {
+            // [WHY]/[HOW]: Tooltip aynı tbody üzerinde delege edilir; bu tıklama satır seçimini değiştirmez.
+            if (e.target.closest('[data-action="mobileTooltip"]')) return;
             // Checkbox tıklaması kendi mantığını yönetir
             if (e.target.type === 'checkbox') return;
 
@@ -843,27 +866,27 @@ export const UIComponents = {
             // TEKİL MOD: Tüm işlemler
             const item      = (window.data[first.depo] || []).find(x => x && String(x.id) === String(first.id)) || {};
             const isWatched = item.isWatched;
-            const d = jsArg(first.depo), i = jsArg(first.id);
+            const d = escapeHtml(first.depo), i = escapeHtml(first.id);
             buttonsHtml = `
-                <button class="fab-btn fab-btn-inc" onclick="updateStock(${d}, ${i}, 1)">
+                <button class="fab-btn fab-btn-inc" data-action="increaseStock" data-depo="${d}" data-id="${i}">
                     <i class="fas fa-plus"></i> Artır
                 </button>
-                <button class="fab-btn fab-btn-dec" onclick="updateStock(${d}, ${i}, -1)">
+                <button class="fab-btn fab-btn-dec" data-action="decreaseStock" data-depo="${d}" data-id="${i}">
                     <i class="fas fa-minus"></i> Azalt
                 </button>
-                <button class="fab-btn fab-btn-edit" onclick="openProductModal('edit', ${i}, ${d}); window.clearRowSelection();">
+                <button class="fab-btn fab-btn-edit" data-action="editProduct" data-depo="${d}" data-id="${i}">
                     <i class="fas fa-pen"></i> Düzenle
                 </button>
-                <button class="fab-btn fab-btn-clone" onclick="cloneProduct(${d}, ${i}); window.clearRowSelection();">
+                <button class="fab-btn fab-btn-clone" data-action="cloneProduct" data-depo="${d}" data-id="${i}">
                     <i class="fas fa-copy"></i> Kopyala
                 </button>
-                <button class="fab-btn fab-btn-transfer" onclick="openTransferModal(${d}, ${i}); window.clearRowSelection();">
+                <button class="fab-btn fab-btn-transfer" data-action="transferProduct" data-depo="${d}" data-id="${i}">
                     <i class="fas fa-shipping-fast"></i> Sevk
                 </button>
-                <button class="fab-btn fab-btn-watch" onclick="toggleWatch(${d}, ${i})">
+                <button class="fab-btn fab-btn-watch" data-action="toggleWatch" data-depo="${d}" data-id="${i}">
                     <i class="fas ${isWatched ? 'fa-eye-slash' : 'fa-eye'}"></i> ${isWatched ? 'Bırak' : 'Takip'}
                 </button>
-                <button class="fab-btn fab-btn-del" onclick="deleteItem(${d}, ${i}); window.clearRowSelection();">
+                <button class="fab-btn fab-btn-del" data-action="deleteItem" data-depo="${d}" data-id="${i}">
                     <i class="fas fa-trash-alt"></i> Sil
                 </button>`;
         } else {
@@ -871,16 +894,19 @@ export const UIComponents = {
             const depo = first.depo;
             const ids  = items.map(x => x.id);
             buttonsHtml = `
-                <button class="fab-btn fab-btn-bulk-del" onclick="window._bulkDeleteSelected(${jsArg(depo)}, ${jsArg(ids)})">
+                <button class="fab-btn fab-btn-bulk-del" data-action="bulkDelete" data-depo="${escapeHtml(depo)}" data-ids="${escapeHtml(JSON.stringify(ids))}">
                     <i class="fas fa-trash-alt"></i> Toplu Sil (${count})
                 </button>
-                <button class="fab-btn fab-btn-bulk-transfer" onclick="showAppAlert('Toplu Sevk özelliği yakında!', 'info')">
+                <button class="fab-btn fab-btn-bulk-transfer" data-action="bulkTransfer">
                     <i class="fas fa-shipping-fast"></i> Toplu Sevk (${count})
                 </button>`;
         }
 
         const fabBtns = _dom.fabBtns();
-        if (fabBtns) fabBtns.innerHTML = buttonsHtml;
+        if (fabBtns) {
+            fabBtns.innerHTML = buttonsHtml;
+            _bindProductActions(fabBtns);
+        }
         fab.classList.add('fab-visible');
     },
 
@@ -894,34 +920,35 @@ export const UIComponents = {
         if (!itemData) return;
         const item      = (window.data[itemData.depo] || []).find(x => x && String(x.id) === String(itemData.id)) || {};
         const isWatched = item.isWatched;
-        const d = jsArg(itemData.depo), i = jsArg(itemData.id);
+        const d = escapeHtml(itemData.depo), i = escapeHtml(itemData.id);
         const bsName    = _dom.bsName();
         const bsBtns    = _dom.bsBtns();
 
         if (bsName) bsName.textContent = itemData.name || 'Ürün';
         if (bsBtns) bsBtns.innerHTML = `
-            <button class="bs-action-btn bs-btn-inc" onclick="updateStock(${d}, ${i}, 1); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-inc" data-action="increaseStock" data-depo="${d}" data-id="${i}">
                 <i class="fas fa-plus"></i> Artır
             </button>
-            <button class="bs-action-btn bs-btn-dec" onclick="updateStock(${d}, ${i}, -1); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-dec" data-action="decreaseStock" data-depo="${d}" data-id="${i}">
                 <i class="fas fa-minus"></i> Azalt
             </button>
-            <button class="bs-action-btn bs-btn-edit" onclick="openProductModal('edit', ${i}, ${d}); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-edit" data-action="editProduct" data-depo="${d}" data-id="${i}">
                 <i class="fas fa-pen"></i> Düzenle
             </button>
-            <button class="bs-action-btn bs-btn-clone" onclick="cloneProduct(${d}, ${i}); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-clone" data-action="cloneProduct" data-depo="${d}" data-id="${i}">
                 <i class="fas fa-copy"></i> Kopyala
             </button>
-            <button class="bs-action-btn bs-btn-transfer" onclick="openTransferModal(${d}, ${i}); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-transfer" data-action="transferProduct" data-depo="${d}" data-id="${i}">
                 <i class="fas fa-shipping-fast"></i> Sevk
             </button>
-            <button class="bs-action-btn bs-btn-watch" onclick="toggleWatch(${d}, ${i}); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-watch" data-action="toggleWatch" data-depo="${d}" data-id="${i}">
                 <i class="fas ${isWatched ? 'fa-eye-slash' : 'fa-eye'}"></i> ${isWatched ? 'Takibi Bırak' : 'Takibe Al'}
             </button>
-            <button class="bs-action-btn bs-btn-del" onclick="deleteItem(${d}, ${i}); window.closeMobileBottomSheet();">
+            <button class="bs-action-btn bs-btn-del" data-action="deleteItem" data-depo="${d}" data-id="${i}">
                 <i class="fas fa-trash-alt"></i> Sil
             </button>`;
 
+        _bindProductActions(bsBtns, true);
         const bsOverlay = _dom.bsOverlay();
         const bsSheet   = _dom.bsSheet();
         if (bsOverlay) bsOverlay.classList.add('bs-active');

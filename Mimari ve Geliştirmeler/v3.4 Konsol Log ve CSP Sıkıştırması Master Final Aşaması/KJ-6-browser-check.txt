@@ -1,0 +1,1 @@
+KJ-6 Chromium: PASS — CSP inline kapalı; dataset round-trip, ikon tıklaması, modal argümanları, checkbox, tooltip ve tekrar çizim; pageErrors=0.

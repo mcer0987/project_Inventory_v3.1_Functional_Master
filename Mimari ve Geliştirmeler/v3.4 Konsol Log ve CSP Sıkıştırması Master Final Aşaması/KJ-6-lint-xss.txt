@@ -1,0 +1,11 @@
+
+> lint:xss
+> node scratch/xss-lint.js
+
+xss-lint · 50 dosya · 204 sink · 262 HTML şablonu · 907 dinamik ifade
+  güvenli 894 · izinli (xss-ok) 13 · İZİNSİZ 0
+npm notice
+npm notice New major version of npm available! 11.19.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
