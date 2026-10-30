@@ -1,0 +1,108 @@
+Bu soru, web dünyasının en eğlenceli, en yaratıcı ve adeta bir siber "kedi-fare
+oyunu" olan alanına kapı açıyor: İstemci Tarafı Bütünlüğü (Client-Side
+Integrity) ve Hile / Manipülasyon Karşıtı (Anti-Cheat / Anti-Tamper)
+Teknolojiler.
+
+Bankacılık, online sınav sistemleri (ÖSYM, üniversiteler), web tabanlı oyunlar
+ve Netflix/Spotify gibi şirketler F12'nin çok ötesinde tehditlerle uğraşıyorlar.
+
+F12 dışında geliştiricilerin karşılaştığı en popüler manipülasyon yöntemleri ve
+bunlara karşı dünyada geliştirilen akıl almaz savunma mekanizmaları şunlardır:
+
+1. "Araya Girme" (Proxy / Man-in-the-Middle - Burp Suite, Charles, Fiddler)
+
+  - Nasıl Yapılır? Kullanıcı F12'ye hiç dokunmaz. Bilgisayarına bir yerel proxy
+    kurar. Tarayıcıdan Firebase'e giden paketi (HTTP/WebSocket) havada yakalar,
+    veriyi değiştirir (örneğin talep adedini 1 iken havada 999 yapar) ve
+    sunucuya öyle yollar.
+  - Geliştirilen Savunma: "Request Signing (İstek İmzalama) & HMAC"
+      - İstemci bir istek atmadan önce, o anki milisaniye zaman damgası + gizli
+        bir tuz ile verinin özetini (HMAC-SHA256) çıkarır ve isteğin başlığına
+        (X-Signature) koyar.
+      - Proxy ile aradaki veri 1 harf bile değiştirilirse imza bozulur ve sunucu
+        isteği anında çöpe atar.
+  - Firebase'in Çözümü: "Firebase App Check"
+      - Google bunu doğrudan bir servise dönüştürdü. reCAPTCHA Enterprise
+        kullanarak, gelen isteğin gerçekten senin web sitenden mi çıktığını,
+        yoksa Postman, Python scripti veya Burp Suite gibi harici bir araçtan mı
+        geldiğini donanım seviyesinde doğrular.
+
+2. Tarayıcı Eklentileri ve Kullanıcı Scriptleri (Tampermonkey, Greasemonkey)
+
+  - Nasıl Yapılır? Kullanıcı tarayıcısına bir eklenti kurar. Bu eklenti, senin
+    siten daha yüklenmeye başlamadan önce (document_start anında) sayfaya kendi
+    JavaScript kodunu enjekte eder.
+  - Geliştirilen Savunma: "Prototype Freezing & Zehirlenme Koruması"
+      - Eklentiler genellikle window.fetch veya Array.prototype.push gibi temel
+        JavaScript fonksiyonlarını zehirler (hook eder).
+      - Modern savunma sistemleri, sayfa açılır açılmaz JavaScript'in çekirdek
+        prototiplerini dondurur:
+        Object.freeze(Object.prototype);
+        Object.freeze(Array.prototype);
+        Object.freeze(Function.prototype);
+      - Eklenti temel bir JavaScript motoru fonksiyonunu değiştirmeye çalıştığı
+        an tarayıcı hata verir ve eklenti çalışamaz.
+
+3. "Runtime Hooking" (Öz Fonksiyonları Klonlama - Pristine Closures)
+
+  - Nasıl Yapılır? Saldırgan konsoldan veya eklentiyle window.fetch =
+    function(...) diyerek senin sunucuyla konuşan fonksiyonunun arasına casus
+    kod yerleştirir ve giden token'ları çalar.
+  - Geliştirilen Savunma: "Bozulmamış Klonlar (Pristine API)"
+      - Gelişmiş sistemler, site açıldığı milisaniyede tarayıcının orijinal
+        fonksiyonlarını hemen bir "Closure" (özel kapsül) içine kopyalar:
+        // Kimsenin erişemeyeceği özel kapsülde sakla
+        const _pristineFetch = window.fetch.bind(window);
+        const _pristineJSONParse = JSON.parse.bind(JSON);
+      - Saldırgan dışarıda window.fetch'i istediği kadar bozsun veya casus
+        yerleştirsin; uygulamanın içi hep bu dokunulmamış özel klonları
+        kullanır.
+
+4. Başsız Tarayıcılar ve Bot Otomasyonu (Puppeteer, Selenium, Playwright)
+
+  - Nasıl Yapılır? Sisteme insan girmez. Bir Python veya Node.js kodu, arkada
+    görünmez (headless) bir Chrome açar. 1 saniyede 500 defa şifre dener veya
+    verileri çeker (scraping).
+  - Geliştirilen Savunma: "Biyometrik Davranış Analizi & Entropi"
+      - Fare Hareketi Analizi: İnsan faresi ekranda doğrusal (dümdüz) hareket
+        etmez; ivmelenir, yavaşlar, titrer (Bezier eğrisi çizer). Botlar ise
+        koordinattan koordinata düz çizgi çeker. Sistem fare hareketinin
+        "insanlık entropisini" ölçer.
+      - navigator.webdriver Kontrolü: Başsız tarayıcılar arkada bir bayrak
+        bırakır. Sistem bu bayrağı koklar.
+      - Canvas & WebGL Parmak İzi (Fingerprinting): Ekran kartına görünmez
+        bir 3D üçgen çizdirilir. Her işletim sistemi ve GPU bu üçgeni piksel
+        seviyesinde mikroskobik olarak farklı işler. Bu farktan kullanıcının
+        benzersiz bir "Donanım Parmak İzi" çıkarılır.
+
+5. Görsel Hırsızlık ve Clickjacking (Tıklama Kaçırma)
+
+  - Nasıl Yapılır? Saldırgan senin siteni kendi açtığı sahte bir sitenin içine
+    görünmez (şeffaf) bir iframe olarak gömer. Kullanıcı kendi sitesinde bir
+    şeye tıkladığını sanırken, aslında senin sitendeki "Talebi Onayla" butonuna
+    tıklar.
+  - Geliştirilen Savunma: "Frame Busting & CSP"
+      - Faz 4'te firebase.json ve Nginx içine koyduğumuz frame-ancestors 'none'
+        ve X-Frame-Options: DENY başlıkları tam olarak bu saldırıyı engeller;
+        tarayıcı sitenin başka bir sitenin içine gömülmesine izin vermez.
+      - Sekme Değiştirince Kör Etme (Page Visibility API): Kullanıcı başka
+        sekmeye geçtiği an, banka siteleri ekranı anında bembeyaz yapar. Böylece
+        ekran kaydedici eklentiler veya arkadan gizlice ekran görüntüsü alan
+        casus yazılımlar sadece beyaz bir sayfa çeker.
+
+6. Bellek (Memory) Seviyesinde Hileler (WebAssembly & Memory Obfuscation)
+
+  - Web tabanlı oyunlarda (örneğin tarayıcıdan oynanan FPS oyunlarında)
+    kullanıcı Cheat Engine açıp can değerini 100'den 999'a çıkarır.
+  - Buna karşı geliştirilen savunma: Veriyi bellekte asla tek bir değişken
+    olarak tutmazlar. can = 100 demek yerine; can_parca_A = 450, can_parca_B
+    = 350 tutarlar ve matematiksel olarak (A - B) yaparlar. Bellekte sürekli bu
+    sayıların yerini değiştirirler (Polymorphic Memory).
+
+Bizim Proje İçin En Şık Olanı Hangisi?
+
+Bizim gibi kurumsal bir ERP/ITSM sisteminde gelecekte uygulanabilecek en havalı
+ve en profesyonel teknoloji **"Firebase App Check"**tir. App Check açıldığında,
+Firebase veritabanına gelen her isteğin arkasında Google'ın kriptografik onay
+damgası aranır. Yani birisi senin API anahtarını çalsa bile, senin alan adından
+(tarayıcından) gelmeyen hiçbir istekle veritabanına tek bir harf yazamaz!

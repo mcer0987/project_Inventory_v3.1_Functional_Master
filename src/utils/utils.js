@@ -114,8 +114,3 @@ export const formatCurrency = function (amount, currency = 'TRY') {
 };
 
 window.formatCurrency = formatCurrency;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Module init log (Geliştirici doğrulama için)
-// ─────────────────────────────────────────────────────────────────────────────
-console.log('✅ [utils.js] Yardımcı fonksiyonlar yüklendi (getTurkiyeSaati, getTurkiyeTarihi, tsToTurkiye, formatCurrency).');

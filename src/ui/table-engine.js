@@ -42,10 +42,10 @@ window.pageSize = PAGE_SIZE;
 // ─────────────────────────────────────────────────────────────────────────────
 // [WHY]: Faz 4 · J2 (SEC-01) — B1/B2 tabloları ve kartları ürün, marka, raf, durum, tür alanlarını ham basıyordu; tarih
 //        satır içi handler'a JS dizgesi olarak gömülüyordu ('…' tırnağıyla kaçılabilir).
-// [HOW]: Her ham alan şablona girdiği yerde escapeHtml; tarih data-tip niteliğinde, handler this.dataset.tip okur.
+// [HOW]: Her ham alan şablona girdiği yerde escapeHtml; tarih data-tip niteliğinde, delege handler dataset.tip okur.
 function _buildQtyDisplay(itemQty, updateDate) {
     if (window.innerWidth <= 768) {
-        return `${escapeHtml(itemQty)} <span class="mobile-info-trigger" data-tip="${escapeHtml(updateDate)}" onclick="window.showMobileTooltip(event, this.dataset.tip)" style="margin-left: 6px; cursor: pointer; color: #3498db; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.85em; transition: opacity 0.2s;"><i class="fas fa-info-circle"></i></span>`;
+        return `${escapeHtml(itemQty)} <span class="mobile-info-trigger" data-tip="${escapeHtml(updateDate)}" data-action="mobileTooltip" style="margin-left: 6px; cursor: pointer; color: #3498db; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.85em; transition: opacity 0.2s;"><i class="fas fa-info-circle"></i></span>`;
     }
     return escapeHtml(itemQty);
 }
@@ -88,10 +88,7 @@ function _buildRowHtml(depo, item, realIndex) {
                 data-depo="${escapeHtml(depo)}"
                 data-index="${escapeHtml(realIndex)}"
                 data-name="${safeName}"
-                data-tip="${escapeHtml(updateDate)}"
-                onmouseenter="window.showRowTooltip(event, this.dataset.tip)"
-                onmousemove="window.moveRowTooltip(event)"
-                onmouseleave="window.hideRowTooltip()">
+                data-tip="${escapeHtml(updateDate)}">
                 ${innerHtml}
             </tr>`;
 }
@@ -114,17 +111,43 @@ function _renderLoadMoreButton(depo, filteredCount) {
         loadMoreBtn.style.margin = '20px auto';
         loadMoreBtn.style.display = 'block';
 
-        loadMoreBtn.onclick = () => {
+        loadMoreBtn.dataset.action = 'loadMore';
+        loadMoreBtn.dataset.depo = depo;
+        window.bindActions(loadMoreBtn, { loadMore: el => {
             _currentPage++;
-            window.renderTable(depo, true);
-        };
+            window.renderTable(el.dataset.depo, true);
+        } });
 
         const tableElement = document.querySelector(`#table${depo.toUpperCase()}`);
         if (tableElement) tableElement.after(loadMoreBtn);
     }
 }
 
+// [WHY]: KJ-6 — yeniden çizilen satırlarda tooltip davranışı inline JS gerektirmemeli.
+// [HOW]: Click bindActions ile; hover, mouseover/out ve relatedTarget ile satır sınırında çalışır.
+function _bindTableActions(tbody) {
+    window.bindActions(tbody, { mobileTooltip: (el, event) => window.showMobileTooltip(event, el.dataset.tip) });
+    if (tbody._tooltipActionsBound) return;
+    tbody._tooltipActionsBound = true;
+    const rowFor = event => event.target.closest('tr.selectable-row');
+    tbody.addEventListener('mouseover', event => {
+        const row = rowFor(event);
+        if (row && !row.contains(event.relatedTarget)) window.showRowTooltip(event, row.dataset.tip);
+    });
+    tbody.addEventListener('mousemove', event => {
+        if (rowFor(event)) window.moveRowTooltip(event);
+    });
+    tbody.addEventListener('mouseout', event => {
+        const row = rowFor(event);
+        if (row && !row.contains(event.relatedTarget)) window.hideRowTooltip();
+    });
+}
+
 function _setupCardViewSelection(container) {
+    window.bindActions(container, {
+        cardCheckbox: (el, event) => event.stopPropagation(),
+        toggleCardGroup: el => window._toggleCardGroup(el.dataset.body, el.dataset.icon),
+    });
     if (!container || container._cardFabListenerAttached) return;
     container._cardFabListenerAttached = true;
 
@@ -245,6 +268,7 @@ export const renderTable = function (depo, append = false, customLimit = null) {
         tbody.innerHTML = rowsHtml.join('');
     }
 
+    _bindTableActions(tbody);
     _renderLoadMoreButton(depo, allData.length);
 
     if (typeof window.setupRowSelection === 'function') {
@@ -306,6 +330,7 @@ export const renderSearchResults = function (depo, results) {
     }).join('');
 
     tbody.innerHTML = rowsHtml;
+    _bindTableActions(tbody);
 
     const loadMoreBtn = document.getElementById('loadMoreBtn');
     if (loadMoreBtn) loadMoreBtn.style.display = 'none';
@@ -356,7 +381,7 @@ export const renderCardSearchResults = function (depo, results) {
                 <div class="pci-left">
                     <input type="checkbox" class="row-select card-checkbox"
                            data-index="${escapeHtml(realIndex)}" data-id="${escapeHtml(item.id ?? '')}"
-                           onclick="event.stopPropagation()">
+                           data-action="cardCheckbox">
                     <div class="pci-info">
                         <span class="pci-name">${safeName}</span>
                         <span class="pci-meta">
@@ -387,7 +412,6 @@ export const renderCardSearchResults = function (depo, results) {
 
     const freshContainer = document.getElementById(`cardView${depo.toUpperCase()}`);
     if (freshContainer) {
-        freshContainer._cardFabListenerAttached = false;
         _setupCardViewSelection(freshContainer);
     }
 };
@@ -449,7 +473,7 @@ export const renderMobileCards = function (depo) {
                     <div class="pci-left">
                         <input type="checkbox" class="row-select card-checkbox"
                                data-index="${escapeHtml(item._realIndex)}" data-id="${escapeHtml(item.id ?? '')}"
-                               onclick="event.stopPropagation()">
+                               data-action="cardCheckbox">
                         <div class="pci-info">
                             <span class="pci-name">${safeName}</span>
                             <span class="pci-meta">
@@ -472,7 +496,7 @@ export const renderMobileCards = function (depo) {
         return `
             <div class="type-group-card" id="typeGroup_${gid /* xss-ok: depo sabiti + sıra */}">
                 <div class="type-group-header"
-                     onclick="window._toggleCardGroup('typeGroupBody_${gid /* xss-ok: depo sabiti + sıra */}', 'typeGroupIcon_${gid /* xss-ok: depo sabiti + sıra */}')">
+                     data-action="toggleCardGroup" data-body="typeGroupBody_${escapeHtml(gid)}" data-icon="typeGroupIcon_${escapeHtml(gid)}">
                     <div class="tgh-left">
                         <i class="fas fa-layer-group tgh-icon"></i>
                         <span class="tgh-name">${escapeHtml(turAdi)}</span>

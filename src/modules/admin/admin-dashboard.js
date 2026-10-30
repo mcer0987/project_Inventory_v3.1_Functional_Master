@@ -38,14 +38,19 @@ window.customConfirmAlert = function (title, message) {
         if (msgEl) msgEl.innerText = message;
         overlay.style.display = 'flex';
         return new Promise((resolve) => {
-            confirmBtn.onclick = () => {
-                overlay.style.display = 'none';
-                resolve(true);
-            };
-            cancelBtn.onclick = () => {
-                overlay.style.display = 'none';
-                resolve(false);
-            };
+            // [WHY]/[HOW]: KJ-6 — tekrar açılışta bindActions çözümleyicileri yeniler, dinleyici çoğalmaz.
+            confirmBtn.dataset.action = 'confirmDashboardAlert';
+            cancelBtn.dataset.action = 'cancelDashboardAlert';
+            window.bindActions(overlay, {
+                confirmDashboardAlert: () => {
+                    overlay.style.display = 'none';
+                    resolve(true);
+                },
+                cancelDashboardAlert: () => {
+                    overlay.style.display = 'none';
+                    resolve(false);
+                },
+            });
         });
     }
     if (typeof window.showCustomConfirm === 'function') {
@@ -239,6 +244,13 @@ window.renderAdminRequestTable = function () {
     const countBadge = document.getElementById('pendingRequestCount');
     if (!tableBody) return;
 
+    // [WHY]: KJ-6 — talep verisi çalıştırılabilir JS içinde taşınmaz.
+    // [HOW]: bindActions en yakın eylemin dataset değerini mevcut işleve iletir.
+    window.bindActions(tableBody, {
+        confirmRequest: el => window.confirmRequest(el.dataset.id),
+        rejectRequest: el => window.rejectRequest(el.dataset.id),
+        deleteRequest: el => window.deleteRequest(el.dataset.id),
+    });
     const esc = window.escapeHtml;
     const allRequests = window.data.requests || [];
     tableBody.innerHTML = '';
@@ -302,14 +314,14 @@ window.renderAdminRequestTable = function () {
                 <td class="text-end pe-3">
                     <div class="d-flex justify-content-end gap-2" style="flex-wrap: wrap; row-gap: 6px;">
                         ${isPending ? `
-                            <button onclick="window.confirmRequest(${jsArg(req.id)})" class="p-btn-icon play" title="Onayla">
+                            <button data-action="confirmRequest" data-id="${escapeHtml(req.id)}" class="p-btn-icon play" title="Onayla">
                                 <i class="fas fa-check"></i>
                             </button>
-                            <button onclick="window.rejectRequest(${jsArg(req.id)})" class="p-btn-icon delete" title="Reddet">
+                            <button data-action="rejectRequest" data-id="${escapeHtml(req.id)}" class="p-btn-icon delete" title="Reddet">
                                 <i class="fas fa-times"></i>
                             </button>
                         ` : `
-                            <button onclick="window.deleteRequest(${jsArg(req.id)})" class="p-btn-icon delete" title="Kayıttan Sil">
+                            <button data-action="deleteRequest" data-id="${escapeHtml(req.id)}" class="p-btn-icon delete" title="Kayıttan Sil">
                                 <i class="fas fa-trash"></i>
                             </button>
                         `}
@@ -491,6 +503,12 @@ window.renderProductTypesTable = function () {
     const listBody = document.getElementById('productTypeTableBody');
     const defListBody = document.getElementById('adminDefProductTypeTableBody');
 
+    // [WHY]: KJ-6 — iki tür tablosunda aynı delegasyon sözleşmesi kullanılır.
+    // [HOW]: Boolean nitelik eski boolean argümana açık karşılaştırmayla dönüştürülür.
+    for (const body of [listBody, defListBody]) window.bindActions(body, {
+        editProductType: el => window.editProductType(el.dataset.id, el.dataset.name, el.dataset.demirbas === 'true'),
+        deleteProductType: el => window.deleteProductType(el.dataset.id),
+    });
     const types = window.getActiveProductTypes();
     if (listBody) listBody.innerHTML = '';
     if (defListBody) defListBody.innerHTML = '';
@@ -519,10 +537,10 @@ window.renderProductTypesTable = function () {
                     </td>
                     <td class="text-end pe-3">
                         <div class="action-buttons justify-content-end">
-                            <button onclick="editProductType(${jsArg(String(type.id))}, ${jsArg(String(type.name))}, ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                            <button data-action="editProductType" data-id="${escapeHtml(String(type.id))}" data-name="${escapeHtml(String(type.name))}" data-demirbas="${isDemirbas}" class="btn-action btn-buy shadow-sm" title="Düzenle">
                                 <i class="fa-solid fa-arrows-rotate"></i>
                             </button>
-                            <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
+                            <button data-action="deleteProductType" data-id="${escapeHtml(String(type.id))}" class="btn-action btn-passive shadow-sm" title="Sil">
                                 <i class="fas fa-trash fa-xs"></i>
                             </button>
                         </div>
@@ -552,10 +570,10 @@ window.renderProductTypesTable = function () {
                     </td>
                     <td class="text-end pe-3">
                         <div class="action-buttons justify-content-end">
-                            <button onclick="editProductType(${jsArg(String(type.id))}, ${jsArg(String(type.name))}, ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                            <button data-action="editProductType" data-id="${escapeHtml(String(type.id))}" data-name="${escapeHtml(String(type.name))}" data-demirbas="${isDemirbas}" class="btn-action btn-buy shadow-sm" title="Düzenle">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
+                            <button data-action="deleteProductType" data-id="${escapeHtml(String(type.id))}" class="btn-action btn-passive shadow-sm" title="Sil">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -649,14 +667,20 @@ window.saveProductTypeUpdate = async function () {
     const newIsDemirbas = checkInput.checked;
     if (!newName) { showAppAlert("Tür adı boş olamaz!", "error"); return; }
 
+    let definitionSaved = false;
     try {
+        const oldName = window.cachedEditingTypeName;
+        // İki depo da tanım yazılmadan önce doğrulanır; eski alias alanları salt-okunur kalır.
+        const plan = oldName && oldName !== newName ? _planProductTypeRename(oldName, newName) : [];
         const { updateDoc } = window.FirebaseModules;
         await updateDoc(_productTypeDoc(docId), { name: newName, isDemirbas: newIsDemirbas });
+        definitionSaved = true;
 
-        const oldName = window.cachedEditingTypeName;
-        if (oldName && oldName !== newName) {
-            const synced = await window.syncProductTypesToProducts(oldName, newName);
-            if (synced === false) showAppAlert("Tür güncellendi ancak ürünlerdeki tür adı kaydedilemedi.", "warning");
+        const synced = await window.syncProductTypesToProducts(oldName, newName, plan);
+        if (!synced.ok) {
+            showAppAlert(`Tür tanımı kaydedildi. Tamamlanan depolar: ${synced.saved.join(', ') || 'yok'}. ` +
+                `Tamamlanamayan depolar: ${synced.failed.join(', ')}. Bu depolarda kısmi yazma olabilir; ürünleri kontrol edin.`, 'warning');
+            return;
         }
 
         window.forceProductTypeSync();
@@ -664,7 +688,9 @@ window.saveProductTypeUpdate = async function () {
         showAppAlert("Ürün türü güncellendi.", "success");
     } catch (error) {
         console.error("❌ Kayıt hatası:", error);
-        showAppAlert("Güncelleme başarısız.", "error");
+        showAppAlert(definitionSaved
+            ? 'Tür tanımı kaydedildi ancak işlem tamamlanamadı. Ürünlerdeki tür adlarını kontrol edin.'
+            : `Tür tanımı kaydedilemedi; ürün güncellemesi başlatılmadı. ${error.message || ''}`, "error");
     }
 };
 
@@ -926,13 +952,14 @@ window.renderCriticalStockTable = function () {
                         <div class="action-buttons">
                             <button class="btn-action btn-buy" title="Satın Al"><i class="fas fa-shopping-cart"></i></button>
                             <button class="btn-action btn-mail" title="Bildirim Gönder"><i class="fas fa-envelope"></i></button>
-                            <button class="btn-action btn-passive" onclick="deleteType(${jsArg(String(item.name))})" title="Pasif Yap"><i class="fas fa-trash"></i></button>
+                            <button class="btn-action btn-passive" data-action="deleteType" data-name="${escapeHtml(String(item.name))}" title="Pasif Yap"><i class="fas fa-trash"></i></button>
                         </div>
                     </td>
                 </tr>`);
         }
     });
 
+    window.bindActions(tableBody, { deleteType: el => window.deleteType(el.dataset.name) });
     // TEK DOM ataması — 1×reflow
     tableBody.innerHTML = rows.length
         ? rows.join('')
@@ -1467,23 +1494,42 @@ window.updateProductTypeDropdowns = function () {
 };
 
 // [WHY]: Ad değişikliği b1/b2 ürünlerinde yalnız bellekte yapılıyordu; kaydedilmediği için snapshot ile geri geliyordu (ADM-02).
-window.syncProductTypesToProducts = async function (oldName, newName) {
-    let ok = true;
+function _planProductTypeRename(oldName, newName) {
+    const S = window.Schema;
+    const plan = [];
     for (const depo of ['b1', 'b2']) {
+        const validate = depo === 'b1' ? S.validateB1 : S.validateB2;
         let changed = false;
         const items = (window.data?.[depo] || []).map(item => {
-            if (item.tür !== oldName && item.type !== oldName && item.prodType !== oldName) return item;
+            if ((item.tür || item.type || item.prodType || '') !== oldName) return item;
             changed = true;
-            const next = { ...item };
-            if (next.tür === oldName) next.tür = newName;
-            if (next.type === oldName) next.type = newName;
-            if (next.prodType === oldName) next.prodType = newName;
+            const next = { ...item, tür: newName };
+            const { checked, frozen } = S.legacyStockPatch(depo, item, next);
+            const errors = validate(item).length ? validate(checked, { partial: true }) : validate(next);
+            if (frozen.length || errors.length) {
+                const error = new Error(`${depo}/${item.id}: ${errors.concat(frozen.map(f => `eski alan değiştirilemez: ${f.key}`)).join('; ')}`);
+                error.code = 'schema-violation';
+                throw error;
+            }
             return next;
         });
-        if (changed && !(await window.writeOk(window.saveData(depo, items)))) ok = false;
+        if (changed) plan.push({ depo, items });
     }
-    console.log(`✔ Tür güncellendi: ${oldName} → ${newName}`);
-    return ok;
+    return plan;
+}
+
+window.syncProductTypesToProducts = async function (oldName, newName, plan = _planProductTypeRename(oldName, newName)) {
+    const saved = [], failed = [];
+    for (const { depo, items } of plan) {
+        try {
+            const result = await window.saveData(depo, items);
+            (result === false ? failed : saved).push(depo);
+        } catch (error) {
+            failed.push(depo);
+            console.error(`Tür adı ${depo} deposunda kaydedilemedi:`, error);
+        }
+    }
+    return { ok: failed.length === 0, saved, failed };
 };
 
 // "Özel Takip" Dashboard'u
@@ -1766,6 +1812,9 @@ window.searchPersonnelForLocation = function (query) {
         return;
     }
 
+    window.bindActions(resultsDiv, {
+        addLocationPerson: el => window.addPersonToLocation({ name: el.dataset.name, unit: el.dataset.unit }),
+    });
     const allPersonel = window.data.personel || [];
     const filtered = allPersonel.filter(p => p.name.toLocaleLowerCase('tr-TR').includes(query.toLocaleLowerCase('tr-TR'))).slice(0, 5);
 
@@ -1774,7 +1823,7 @@ window.searchPersonnelForLocation = function (query) {
             // Personel verisinde birim hangi isimle tutuluyor olabilirse hepsini dene
             const pUnit = p.birim || p.unit || p.department || p.bolum || p.departman || p.birimAdi || '';
             return `
-                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" onclick="window.addPersonToLocation({name:${jsArg(String(p.name))}, unit:${jsArg(String(pUnit))}})">
+                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" data-action="addLocationPerson" data-name="${escapeHtml(String(p.name))}" data-unit="${escapeHtml(String(pUnit))}">
                     <strong>${escapeHtml(p.name)}</strong> ${pUnit ? `<small class="text-muted">(${escapeHtml(pUnit)})</small>` : ''}
                 </div>
             `;
@@ -1791,9 +1840,10 @@ window.searchPersonnelForLocation = function (query) {
 function _renderLocationPersons() {
     const container = document.getElementById('loc_selectedPersons');
     if (!container) return;
+    window.bindActions(container, { removeLocationPerson: el => window.removePersonFromLocation(el.dataset.name) });
     container.innerHTML = window.locationSelectedPersons.map(p => `
         <span class="badge bg-light text-dark border d-flex align-items-center gap-2 p-2">${escapeHtml(p.name)}
-            <i class="fas fa-times text-danger" style="cursor:pointer;" onclick="window.removePersonFromLocation(${jsArg(String(p.name))})"></i></span>`).join('');
+            <i class="fas fa-times text-danger" style="cursor:pointer;" data-action="removeLocationPerson" data-name="${escapeHtml(String(p.name))}"></i></span>`).join('');
 }
 
 window.addPersonToLocation = function (person) {
@@ -1856,6 +1906,10 @@ window.renderLocationsTable = function () {
     const body = document.getElementById('locationTableBody');
     if (!body) return;
 
+    window.bindActions(body, {
+        openLocationModal: el => window.openLocationModal(el.dataset.id),
+        deleteLocation: el => window.deleteLocation(el.dataset.id),
+    });
     const locArray = window.data.locations || [];
 
     // Kopya alıp sırala
@@ -1892,10 +1946,10 @@ window.renderLocationsTable = function () {
             </td>
             <td class="text-end">
                 <div class="d-flex justify-content-end gap-2">
-                    <button onclick="window.openLocationModal(${jsArg(String(loc.id))})" class="p-btn-icon play" title="Düzenle">
+                    <button data-action="openLocationModal" data-id="${escapeHtml(String(loc.id))}" class="p-btn-icon play" title="Düzenle">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button onclick="window.deleteLocation(${jsArg(String(loc.id))})" class="p-btn-icon delete" title="Sil">
+                    <button data-action="deleteLocation" data-id="${escapeHtml(String(loc.id))}" class="p-btn-icon delete" title="Sil">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>

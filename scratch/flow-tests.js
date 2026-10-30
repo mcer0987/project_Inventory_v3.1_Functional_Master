@@ -220,11 +220,12 @@ async function _stockContractBody(repo) {
     const orig = {
         items: window.data[repo], otherItems: window.data[other], personel: window.data.personel, service: window.data.serviceRecords,
         append: window.appendItem, update: window.updateItem, apply: window.applyItemOps, ops: window.runStockOps,
+        ledger: window.runStockTransferTransaction, productSave: window.runProductSave,
         adm: window.isDbAdmin, chk: window.checkIsAdmin, valid: window.validateAdminAction,
         alert: window.showAppAlert, confirm: window.showCustomConfirm,
     };
     window.isDbAdmin = () => true; window.checkIsAdmin = () => true; window.validateAdminAction = () => true;
-    window.showAppAlert = () => {}; window.showCustomConfirm = async () => true;
+    const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, String(m)]); window.showCustomConfirm = async () => true;
 
     // 'stock' ayrı tutulur: runStockOps'un stok deltası (ör. scrap/hurda) {op,col,...} şeklinde bir 'write' değildir —
     // writes dizisinden ayrı, doğrudan {col,id,delta} olarak gelir (bkz. confirmTransfer'ın scrap kolu).
@@ -233,10 +234,38 @@ async function _stockContractBody(repo) {
     window.appendItem = async (col, item) => { capture([{ op: 'set', col, item }]); return { written: 1, ids: [item && item.id] }; };
     window.updateItem = async (col, id, fields) => { capture([{ op: 'update', col, id, fields }]); return { written: 1, ids: [id] }; };
     window.applyItemOps = async ops => { capture(ops); return { written: (ops || []).length, ids: (ops || []).map(o => (o.item && o.item.id) || o.id) }; };
+    // v3.3 Aşama 4: saveProduct artık appendItem/updateItem değil runProductSave çağırır; AYNI capture() havuzuna, aynı
+    // {op:'set',item} / {op:'update',id,fields} biçimiyle yazar — aşağıdaki addNew/editExisting sözleşme denetimleri
+    // (errorsOf/exactKeys/knownKeysOnly) değişmeden geçerli kalır.
+    window.runProductSave = async input => {
+        capture([input.isNew ? { op: 'set', col: input.col, item: { id: input.id, ...input.fields } }
+            : { op: 'update', col: input.col, id: input.id, fields: input.fields }]);
+        return { col: input.col, id: input.id, created: !!input.isNew, shelves: [] };
+    };
     window.runStockOps = async arg => {
         capture(arg.writes || []);
         captured.stock.push(...(arg.stock || []));
         return { stock: (arg.stock || []).map(s => ({ col: s.col, id: s.id, name: s.id, before: 9, after: 9 + (s.delta || 0) })) };
+    };
+    // v3.3 Aşama 2: iç transfer runStockTransferTransaction'a geçti. Yakalayıcı GERÇEK planlayıcıyı (StockLedger.planTransfer)
+    // bellekteki kaynak + boş raf belgeleriyle çalıştırır ve ürettiği b1/b2 yazmalarını eski {op,col,item|fields} biçiminde
+    // kaydeder — aşağıdaki sözleşme denetimleri (tam: hedef set aynı id + kaynak delete; kısmi: kaynak update + yeni id) aynen geçerli.
+    window.runStockTransferTransaction = async input => {
+        const S = window.Schema;
+        const source = (window.data[input.sourceCol] || []).find(x => String(x.id) === String(input.sourceId)) || null;
+        const shelves = {};
+        [[input.targetCol, input.targetShelf], [input.sourceCol, source && source.raf]].forEach(([col, code]) => {
+            if (S.isValidShelfCode(S.normShelfCode(code))) {
+                shelves[S.shelfDocId(col, code)] = { code: S.normShelfCode(code), depot: col, capacity: 5, usedSlots: 0, active: true };
+            }
+        });
+        const plan = window.StockLedger.planTransfer({ ...input, uid: 'flow-test', newTargetId: `${input.targetCol}_${S.makeId()}` },
+            { op: null, source, targetSameId: null, shelves });
+        plan.writes.filter(w => w.col === 'b1' || w.col === 'b2').forEach(w => capture([
+            w.kind === 'set' ? { op: 'set', col: w.col, item: w.data }
+                : w.kind === 'update' ? { op: 'update', col: w.col, id: w.id, fields: w.data } : { op: 'delete', col: w.col, id: w.id },
+        ]));
+        return { ...plan.result, duplicate: false };
     };
     const takeAll = () => {
         const snap = { b1: [...captured.b1], b2: [...captured.b2], b3: [...captured.b3], serviceRecords: [...captured.serviceRecords], stock: [...captured.stock] };
@@ -289,7 +318,9 @@ async function _stockContractBody(repo) {
         window.openTransferModal(repo, `${repo}_src2`);
         document.getElementById('transTarget').value = JSON.stringify({ name: other.toUpperCase() + ' Depo', type: 'internal', key: other });
         window.handleTransferTargetChange({ value: document.getElementById('transTarget').value });
-        document.getElementById('transNewCol').value = 'S-2'; document.getElementById('transNewShelf').value = 'R-2';
+        // Seçim kutuları INV_CONFIG seçenekleriyle dolar; test değeri listede yoksa seçenek eklenir (yoksa select '' döner).
+        const pickOpt = (id, v) => { const el = document.getElementById(id); if (![...el.options].some(x => x.value === v)) el.add(new Option(v, v)); el.value = v; };
+        pickOpt('transNewCol', 'S-2'); pickOpt('transNewShelf', 'R-2');
         document.getElementById('transQty').value = '1';
         document.getElementById('transNote').value = 'tam taşıma testi';
         await window.confirmTransfer();
@@ -299,7 +330,7 @@ async function _stockContractBody(repo) {
         window.openTransferModal(repo, `${repo}_src1`);
         document.getElementById('transTarget').value = JSON.stringify({ name: other.toUpperCase() + ' Depo', type: 'internal', key: other });
         window.handleTransferTargetChange({ value: document.getElementById('transTarget').value });
-        document.getElementById('transNewCol').value = 'S-3'; document.getElementById('transNewShelf').value = 'R-3';
+        pickOpt('transNewCol', 'S-3'); pickOpt('transNewShelf', 'R-3');
         document.getElementById('transQty').value = '4';
         document.getElementById('transNote').value = 'kısmi taşıma testi';
         await window.confirmTransfer();
@@ -323,6 +354,7 @@ async function _stockContractBody(repo) {
     } finally {
         Object.assign(window, {
             appendItem: orig.append, updateItem: orig.update, applyItemOps: orig.apply, runStockOps: orig.ops,
+            runStockTransferTransaction: orig.ledger, runProductSave: orig.productSave,
             isDbAdmin: orig.adm, checkIsAdmin: orig.chk, validateAdminAction: orig.valid, showAppAlert: orig.alert, showCustomConfirm: orig.confirm,
         });
         window.data[repo] = orig.items; window.data[other] = orig.otherItems; window.data.personel = orig.personel; window.data.serviceRecords = orig.service;
@@ -349,6 +381,7 @@ async function _stockContractBody(repo) {
             targetErrors: o.internalPartial[other].filter(w => w.op === 'set').map(w => otherValidator(w.item)).flat(),
             newIdDiffers: !!(o.internalPartial[other][0] || {}).item && o.internalPartial[other][0].item.id !== `${repo}_src1`,
         },
+        errorAlerts: alerts.filter(a => a[0] === 'error' || a[0] === 'warning'),
         scrap: {
             // Hurda stoğu applyItemOps'un 'writes' dizisiyle değil runStockOps'un ayrı 'stock' deltasıyla düşer (bkz. confirmTransfer).
             stockDelta: (o.scrap.stock[0] || {}),
@@ -1257,6 +1290,17 @@ const SCENARIOS = {
             const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
             const tx = []; window.runStockTransaction = async (c, id, d) => { tx.push([c, id, d]); return { before: 5, after: 5 + d }; };
             const realAdm = window.isDbAdmin, realExit = window.runExitTransaction; window.isDbAdmin = () => true;
+            // v3.3 Aşama 2: iç transfer tek transaction'lı yola geçti (runStockTransferTransaction); çağrı kaydedilir, yazılmaz.
+            const realLedger = window.runStockTransferTransaction;
+            window.runStockTransferTransaction = async input => { ops.push(['runStockTransferTransaction', [JSON.parse(JSON.stringify(input))]]); return { ...input, duplicate: false, fullMove: true, stockAfter: 0, shelves: [] }; };
+            // v3.3 Aşama 4: saveProduct artık appendItem/updateItem değil runProductSave çağırır; eski (col,id,fields)/(col,item)
+            // çağrı biçimiyle KAYDEDİLİR ki aşağıdaki out.edit erişimi (last()[0]/[1][0]/[1][1]/[1][2]) değişmeden çalışsın.
+            const realProductSave = window.runProductSave;
+            window.runProductSave = async input => {
+                ops.push(input.isNew ? ['appendItem', [input.col, JSON.parse(JSON.stringify({ id: input.id, ...input.fields }))]]
+                    : ['updateItem', [input.col, input.id, JSON.parse(JSON.stringify(input.fields))]]);
+                return { col: input.col, id: input.id, created: !!input.isNew, shelves: [] };
+            };
             window.runExitTransaction = async a => { tx.push([a.repo, a.productId, -a.qty]); ops.push(['runExitTransaction', [a.repo, a.b3Entry]]); return { stock: [{ before: 5, after: 5 - a.qty }] }; };
             const P = (id, name, extra) => ({ id, ürün: name, raf: 'R', sütun: 'S', adet: 5, durumu: 'Kullanıma Hazır', tür: 'Laptop', ...extra });
             const shift = () => window.data.b1.unshift(P('b1_new_' + Math.random(), 'SONRADAN EKLENEN'));
@@ -1285,6 +1329,7 @@ const SCENARIOS = {
             document.getElementById('prodName').value = 'B (düz.)';
             await window.saveProduct(new Event('submit'));
             out.edit = { op: last()[0], col: last()[1][0], id: last()[1][1], name: last()[1][2].ürün, keepsLimitUntouched: !('limit' in last()[1][2]) };
+            window.runProductSave = realProductSave;
 
             // bulk "pasife al" via checkboxes (data-id)
             window.renderTable('b1');
@@ -1306,7 +1351,10 @@ const SCENARIOS = {
             const internal = [...t.options].find(o => { try { return JSON.parse(o.value).type === 'internal'; } catch (e) { return false; } });
             if (internal) { t.value = internal.value; window.handleTransferTargetChange(t); }
             await window.confirmTransfer();
-            out.transfer = last()[0] === 'applyItemOps' ? last()[1][0].map(o => `${o.op}:${o.col}:${o.id || o.item.id}`) : { last: last(), hadInternal: !!internal };
+            out.transfer = last()[0] === 'runStockTransferTransaction'
+                ? (({ sourceCol, sourceId, targetCol, qty, operationId }) => ({ sourceCol, sourceId, targetCol, qty, hasOperationId: !!operationId }))(last()[1][0])
+                : { last: last(), hadInternal: !!internal };
+            window.runStockTransferTransaction = realLedger;
 
             // multi-select bulk delete -> bulkRemove by ids
             await window._bulkDeleteSelected('b1', ['b1_A', 'b1_C']);
@@ -1321,6 +1369,73 @@ const SCENARIOS = {
             orig.api.forEach(([k, f]) => { window[k] = f; });
             Object.assign(window, { checkIsAdmin: orig.admin, validateAdminAction: orig.val, showCustomConfirm: orig.confirm, showAppAlert: orig.alert, runStockTransaction: orig.tx });
             window.clearRowSelection(); window.closeProductModal?.(); window.closeExitModal?.(); window.closeTransferModal?.();
+            window.renderTable('b1');
+            out.alerts = alerts.filter(a => a[0] === 'error');
+            return out;
+        });
+    },
+
+    // v3.3 · "Ürünü Kopyala" — kopyalama modu orijinal id'ye bağlanmaz (makeId() ile yeni kayıt), B2'de klonlanan
+    // kaydın alanları aynen taşınır, Vazgeç/çarpı kapatması onay ister ama Kaydet onay sormaz.
+    async cloneProduct(page) {
+        return page.evaluate(async () => {
+            const out = {}, ops = [];
+            const orig = { b1: window.data.b1, b2: window.data.b2, admin: window.checkIsAdmin, confirm: window.showCustomConfirm, alert: window.showAppAlert,
+                api: ['appendItem', 'updateItem'].map(k => [k, window[k]]), productSave: window.runProductSave };
+            ['appendItem', 'updateItem'].forEach(k => { window[k] = async (...a) => { ops.push([k, JSON.parse(JSON.stringify(a))]); return { written: 1, ids: ['stub'] }; }; });
+            // v3.3 Aşama 4: saveProduct artık runProductSave çağırır; appendItem'ın (col,item) biçimiyle KAYDEDİLİR ki
+            // aşağıdaki out.save erişimi (saveOp[1][1].id) değişmeden çalışsın.
+            window.runProductSave = async input => {
+                ops.push(input.isNew ? ['appendItem', [input.col, { id: input.id, ...input.fields }]] : ['updateItem', [input.col, input.id, input.fields]]);
+                return { col: input.col, id: input.id, created: !!input.isNew, shelves: [] };
+            };
+            window.checkIsAdmin = () => true;
+            let confirmAnswer = true; let confirmCalls = 0;
+            window.showCustomConfirm = async () => { confirmCalls++; return confirmAnswer; };
+            const alerts = []; window.showAppAlert = (m, t) => alerts.push([t, m]);
+
+            const P = (id, name, extra) => ({ id, ürün: name, raf: 'R1', sütun: 'S1', adet: 5, durumu: 'Kullanıma Hazır', marka: 'ACME', tür: 'Laptop', ...extra });
+            window.data.b1 = [P('b1_A', 'A'), P('b1_B', 'B', { açıklama: 'orijinal açıklama' })];
+            window.data.b2 = [P('b2_A', 'Demirbaş A', { isDemirbas: true, status: 'Aktif' })];
+            window.switchTab && window.switchTab('b1');
+            window.renderTable('b1');
+
+            // 1) Kopyala modalı B1 ürününü id'siz doldurur
+            window.openProductModal('clone', 'b1_B', 'b1');
+            const form = document.getElementById('productForm');
+            out.title = document.getElementById('modalTitle')?.innerText;
+            out.prefilled = document.getElementById('prodName')?.value;
+            out.noEditId = !form.dataset.editId;
+            out.isCloningFlag = form.dataset.isCloning === 'true';
+
+            // 2) Kaydet → onay SORULMADAN appendItem ile yeni kayıt (editId/id bağlanmaz, makeId üretir)
+            document.getElementById('prodName').value = 'B (kopya)';
+            await window.saveProduct(new Event('submit'));
+            const saveOp = ops.at(-1);
+            out.save = { op: saveOp[0], createdId: saveOp[1][1]?.id, sentOriginalId: saveOp[1][1]?.id === 'b1_B', confirmCallsOnSave: confirmCalls };
+            out.isCloningClearedAfterSave = !form.dataset.isCloning;
+            ops.length = 0;
+
+            // 3) İptal emniyeti: kopyala modunda çarpıya basınca onay istenir; Vazgeç edilirse modal AÇIK kalır
+            window.openProductModal('clone', 'b2_A', 'b2');
+            out.b2NoSerialField = !document.getElementById('prodSn');
+            confirmAnswer = false; confirmCalls = 0;
+            await window.closeProductModal();
+            out.cancelDeclined = { confirmAsked: confirmCalls === 1, modalStillOpen: document.getElementById('productModal').style.display === 'block', flagStillSet: form.dataset.isCloning === 'true' };
+
+            confirmAnswer = true; confirmCalls = 0;
+            await window.closeProductModal();
+            out.cancelAccepted = { confirmAsked: confirmCalls === 1, modalClosed: document.getElementById('productModal').style.display === 'none', flagCleared: !form.dataset.isCloning };
+
+            // 4) Normal düzenleme kapatması onay istemez (yalnız kopyalama bayrağı tetikler)
+            window.openProductModal('edit', 'b1_A', 'b1');
+            confirmCalls = 0;
+            await window.closeProductModal();
+            out.editCloseNoConfirm = { confirmNotAsked: confirmCalls === 0, modalClosed: document.getElementById('productModal').style.display === 'none' };
+
+            Object.assign(window.data, { b1: orig.b1, b2: orig.b2 });
+            orig.api.forEach(([k, f]) => { window[k] = f; });
+            Object.assign(window, { checkIsAdmin: orig.admin, showCustomConfirm: orig.confirm, showAppAlert: orig.alert });
             window.renderTable('b1');
             out.alerts = alerts.filter(a => a[0] === 'error');
             return out;
@@ -2975,7 +3090,9 @@ const SCENARIOS = {
     // Faz 3.5 · toplu silme kilidi eşiği: ≤10 kayıtlı koleksiyonda yalnız mutlak sınır (5), >10'da ayrıca %20.
     // Tablo saf fonksiyonla; küçük koleksiyon davranışı 'requests' üzerinde işaretli kayıtlarla gerçek yazmayla.
     // Faz 5 denetimi (P0 + P1) — gerçek sayfada:
-    //   P1: importExcel gerçek UI fonksiyonuyla (CSV/XLSX File nesneleri) sürülür; yazıcı (atomicInsertItems) yakalanır.
+    //   P1: importExcel gerçek UI fonksiyonuyla (CSV/XLSX File nesneleri) sürülür; GERÇEK atomicImportStock (firebase-handler)
+    //       çalışır, yalnız motorun Firestore'a dokunan ucu (AtomicWriter.run) yakalanır: plan, sahte "sunucu" raf belgeleriyle
+    //       entries(store) üzerinden kurulur ve şema muhafızından geçer. v3.3 P1: ürünler + yeni raf + raf sayaçları TEK işte.
     //       saveData b1 yeni kayıt tam sözleşmesi, kanonik kaydın bozulamaması. Bunlar Firestore'a yazmadan reddedilir.
     //   P0: toplu yazma kilidi (restoreLock) saveData/applyItemOps/runStockOps'u durdurur; restoreCollections/atomicInsertItems
     //       yönetici dışında reddedilir. --emu: gerçek admin oturumuyla firebase-handler köprüleri üzerinden 600 kayıtlık
@@ -2983,11 +3100,23 @@ const SCENARIOS = {
     async p5AuditAtomicImport(page) {
         const out = await page.evaluate(async (EMU) => {
             const o = {};
-            const orig = { ins: window.atomicInsertItems, req: window.requireDbAdmin, conf: window.showCustomConfirm, alert: window.showAppAlert, adm: window.isDbAdmin, cfg: window.data.config };
-            const calls = [], alerts = [];
-            window.atomicInsertItems = async (col, recs) => { calls.push({ col, recs }); return { status: 'committed' }; };
+            const orig = { run: window.AtomicWriter.run, req: window.requireDbAdmin, conf: window.showCustomConfirm, alert: window.showAppAlert, adm: window.isDbAdmin, cfg: window.data.config, shelves: window.data.shelves, auth: window.userAuth };
+            const calls = [], alerts = [], confirms = [];
+            let serverShelves = [];   // entries(store)'un "sunucudan taze" okuduğu raf belgeleri
+            window.AtomicWriter.run = async (job) => {
+                const entries = await job.entries({ readCollection: async col => (col === 'shelves' ? serverShelves : []).map(d => ({ id: `${d.depot}_${d.code}`, data: d })) });
+                const g = job.guard ? job.guard(entries) : null;
+                if (g) throw g;
+                calls.push({ kind: job.kind, col: job.collections[0], entries: JSON.parse(JSON.stringify(entries)) });
+                return { status: 'committed', journaled: false, written: entries.length, deleted: 0, chunks: 1 };
+            };
+            const recsOf = c => c.entries.filter(e => e.col === c.col).map(e => e.next);
+            const shelvesOf = c => c.entries.filter(e => e.col === 'shelves').map(e => `${e.id}:${e.prev ? e.prev.usedSlots : 'yeni'}->${e.next.usedSlots}${e.cas ? '' : '!cas'}`).join(',');
+            const shelf = (code, capacity, usedSlots) => ({ code, depot: 'b1', capacity, usedSlots, active: true, updatedAt: 1, updatedBy: 'x' });
             window.requireDbAdmin = () => true;
-            window.showCustomConfirm = async () => true;
+            window.isDbAdmin = () => true;
+            if (!window.userAuth) window.userAuth = { uid: 'ft-admin' };
+            window.showCustomConfirm = async (title, message) => { confirms.push(String(message)); return true; };
             window.showAppAlert = (m, t) => alerts.push({ m: String(m), t });
             const fire = async (file, depo) => {
                 const input = document.getElementById('fileInput');
@@ -2996,25 +3125,80 @@ const SCENARIOS = {
                 await window.importExcel({ target: input });
             };
             try {
-                o.singleImporter = window.importExcel.toString().includes('StockImport');   // pdf-generator'daki eski kopya yok
-                // 1) CSV (; ayraçlı, BOM'lu, tırnaklı) → kanonik b1
+                o.singleImporter = window.importExcel.toString().includes('StockImport') && window.importExcel.toString().includes('atomicImportStock')
+                    && !window.importExcel.toString().includes('saveShelfCapacity');   // ayrı (atomik olmayan) raf yaratma yolu yok
+                // 1) CSV (; ayraçlı, BOM'lu, tırnaklı) → kanonik b1. R-9 katalogda (0/5) → sayaç 0→1; R-4 katalogda yok → AYNI işte yaratılır (1).
+                serverShelves = [shelf('R-9', 5, 0)];
+                window.data.shelves = [{ id: 'b1_R-9', ...shelf('R-9', 5, 0) }];
                 await fire(new File(['﻿Ürün Adı;Cihaz Türü;Raf No;Adet;Marka\r\n"Kablo; HDMI";Kablo;R-4;5;Acme\r\nThinkPad;Laptop;R-9;2;Lenovo\r\n'], 'test.csv', { type: 'text/csv' }), 'b1');
                 const c = calls.at(-1);
-                o.csv = c && { col: c.col, n: c.recs.length, contract: c.recs.map(r => window.Schema.validateB1(r).length), noRafNo: c.recs.every(r => !('rafNo' in r)),
-                               raf: c.recs.map(r => r.raf).join(','), demirbas: c.recs.map(r => typeof r.isDemirbas).join(','), name: c.recs[0].ürün };
+                const cr = c ? recsOf(c) : [];
+                o.csv = c && { kind: c.kind, col: c.col, n: cr.length, contract: cr.map(r => window.Schema.validateB1(r).length), noRafNo: cr.every(r => !('rafNo' in r)),
+                               raf: cr.map(r => r.raf).join(','), demirbas: cr.map(r => typeof r.isDemirbas).join(','), name: cr[0] && cr[0].ürün };
+                o.autoCreate = { confirmMentionsNewShelf: /R-4/.test(confirms.at(-1) || ''), shelfWrites: c ? shelvesOf(c) : null,
+                                 shelvesFirst: !!c && c.entries.findIndex(e => e.col !== 'shelves') === 2,
+                                 success: /1 yeni raf oluşturuldu/.test(alerts.at(-1).m) && /1 rafın sayacı güncellendi/.test(alerts.at(-1).m) };
+
+                // 1b) Hedef raf DOLU (1/1) → ürün Havuz'a, sayaç yazılmaz, raf yaratılmaz.
+                serverShelves = [shelf('R-FULL', 1, 1)];
+                window.data.shelves = [{ id: 'b1_R-FULL', ...shelf('R-FULL', 1, 1) }];
+                await fire(new File(['Ürün,Adet,Raf No\nDolu Ürün,1,R-FULL\n'], 'full.csv'), 'b1');
+                const fcall = calls.at(-1);
+                o.poolOverflow = fcall && { raf: recsOf(fcall)[0].raf, confirmMentionsHavuz: /Havuz/.test(confirms.at(-1) || ''), shelfWrites: shelvesOf(fcall),
+                                            alertWarns: alerts.at(-1).t === 'warning' && /dolu olduğu için Havuz'a alındı/.test(alerts.at(-1).m) };
+
+                // 1c) Önizleme BAYAT (yerelde 0/5 boş görünür) ama sunucuda raf 5/5 dolu → kesin karar sunucudan: Havuz, sayaç yazılmaz.
+                serverShelves = [shelf('R-STALE', 5, 5)];
+                window.data.shelves = [{ id: 'b1_R-STALE', ...shelf('R-STALE', 5, 0) }];
+                await fire(new File(['Ürün,Adet,Raf No\nBayat Ürün,1,R-STALE\n'], 'stale.csv'), 'b1');
+                const scall = calls.at(-1);
+                o.stalePreview = scall && { confirmMentionsHavuz: /Havuz/.test(confirms.at(-1) || ''), raf: recsOf(scall)[0].raf, shelfWrites: shelvesOf(scall),
+                                            alertReportsPool: /dolu olduğu için Havuz'a alındı/.test(alerts.at(-1).m) };
+
+                serverShelves = [];
+                window.data.shelves = orig.shelves;   // sonraki (xlsx, hatalı satır) adımlarda raf yok
                 // 2) XLSX → kanonik b2
                 const ws = XLSX.utils.json_to_sheet([{ 'Ürün': 'Monitör 24', 'Adet': 3, 'Durum': 'Kullanıma Hazır', 'Demirbaş': 'Evet' }]);
                 const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'S1');
                 const bin = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
                 await fire(new File([bin], 'test.xlsx'), 'b2');
                 const x = calls.at(-1);
-                o.xlsx = x && { col: x.col, contract: window.Schema.validateB2(x.recs[0]), status: x.recs[0].status, isDemirbas: x.recs[0].isDemirbas };
+                const xr = x ? recsOf(x) : [];
+                o.xlsx = x && { col: x.col, contract: window.Schema.validateB2(xr[0]), status: xr[0].status, isDemirbas: xr[0].isDemirbas };
                 // 3) bir satırı hatalı CSV → hiç yazma yok
                 const before = calls.length;
                 await fire(new File(['Ürün,Adet\nA,1\nB,iki\n'], 'bad.csv'), 'b1');
                 o.badRowNoWrite = calls.length === before && /hiçbir kayıt yazılmadı/.test(alerts.at(-1).m) && /Satır 3/.test(alerts.at(-1).m);
+
+                // 4) v3.3 P1 ek (proje sahibinin talebi): MAX_IMPORT_ROWS=200, admin dahil aşılamaz.
+                // 4a) UI yolu: 201 satırlık bir CSV → önizlemede (buildStockRecords) tek hata ile reddedilir, hiç yazma yok.
+                const beforeCap = calls.length, confirmsBeforeCap = confirms.length;
+                const bigCsv = 'Ürün\n' + Array.from({ length: 201 }, (_, i) => `Ürün ${i}`).join('\n') + '\n';
+                await fire(new File([bigCsv], 'big.csv'), 'b1');
+                o.rowCapUi = {
+                    noWrite: calls.length === beforeCap, confirmNeverShown: confirms.length === confirmsBeforeCap,
+                    rejected: calls.length === beforeCap && /201 satır/.test(alerts.at(-1).m) && /en fazla 200/.test(alerts.at(-1).m),
+                };
+                // 4b) Doğrudan çağrı yolu: UI'yi (önizlemeyi) tamamen atlayıp GERÇEK atomicImportStock'u 201 GEÇERLİ
+                // kayıtla admin oturumuyla çağırmak da reddedilir — sınır yazma fonksiyonunun kendisinde, yalnız UI'de değil.
+                const bypassRecs = Array.from({ length: 201 }, (_, i) => window.Schema.toCanonicalStock({ id: `cap_${i}`, ürün: `Kapak ${i}`, adet: 1 }, 'b1'));
+                const beforeRunCalls = calls.length;
+                try {
+                    await window.atomicImportStock('b1', bypassRecs, []);
+                    o.rowCapBypass = { threw: false };
+                } catch (bypassErr) {
+                    o.rowCapBypass = { threw: true, code: bypassErr && bypassErr.code, runNeverCalled: calls.length === beforeRunCalls };
+                }
             } finally {
-                Object.assign(window, { atomicInsertItems: orig.ins, requireDbAdmin: orig.req, showCustomConfirm: orig.conf, showAppAlert: orig.alert });
+                window.AtomicWriter.run = orig.run;
+                Object.assign(window, { requireDbAdmin: orig.req, showCustomConfirm: orig.conf, showAppAlert: orig.alert, isDbAdmin: orig.adm });
+                if (!orig.auth) window.userAuth = orig.auth;
+                window.data.shelves = orig.shelves;
+                // Yakalanan (Firestore'a hiç gitmemiş) kayıtları yerel bellekten temizle — atomicImportStock commit sonrası ekler.
+                const fake = new Set(calls.flatMap(c => recsOf(c).map(r => String(r.id))));
+                ['b1', 'b2'].forEach(col => [window.data, window._dbMirror].forEach(st => {
+                    if (Array.isArray(st[col])) st[col] = st[col].filter(r => !fake.has(String(r && r.id)));
+                }));
             }
 
             // P1 · saveData b1/b2 tam sözleşme (guard Firestore'dan önce)
@@ -3078,10 +3262,20 @@ const SCENARIOS = {
 
         const e = out.emu;
         out.ok = out.singleImporter
-            && out.csv && out.csv.col === 'b1' && out.csv.n === 2 && out.csv.contract.join() === '0,0' && out.csv.noRafNo && out.csv.raf === 'R-4,R-9'
+            && out.csv && out.csv.kind === 'atomicImportStock' && out.csv.col === 'b1' && out.csv.n === 2 && out.csv.contract.join() === '0,0' && out.csv.noRafNo
+            // v3.3 P1: yeni raf (R-4) ve mevcut rafın sayacı (R-9 0→1) ürünlerle AYNI işte, raf girdileri önce ve cas'lı.
+            && out.csv.raf === 'R-4,R-9' && out.autoCreate.confirmMentionsNewShelf && out.autoCreate.shelfWrites === 'b1_R-4:yeni->1,b1_R-9:0->1'
+            && out.autoCreate.shelvesFirst && out.autoCreate.success
             && out.csv.demirbas === 'boolean,boolean' && out.csv.name === 'Kablo; HDMI'
+            // Hedef raf DOLU → Havuz, sayaç ve raf yazılmaz, kapasite artırılmaz.
+            && out.poolOverflow && out.poolOverflow.raf === '' && out.poolOverflow.confirmMentionsHavuz && out.poolOverflow.shelfWrites === '' && out.poolOverflow.alertWarns
+            // Bayat önizleme (yerelde boş) → kesin karar taze sunucu belgesinden: Havuz, sonuç bildirimi gerçeği söyler.
+            && out.stalePreview && !out.stalePreview.confirmMentionsHavuz && out.stalePreview.raf === '' && out.stalePreview.shelfWrites === '' && out.stalePreview.alertReportsPool
             && out.xlsx && out.xlsx.col === 'b2' && out.xlsx.contract.length === 0 && out.xlsx.status === 'Kullanıma Hazır' && out.xlsx.isDemirbas === true
             && out.badRowNoWrite
+            // v3.3 P1 ek: MAX_IMPORT_ROWS=200 hem UI (önizleme) hem doğrudan atomicImportStock çağrısında (admin dahil) aşılamaz.
+            && out.rowCapUi.noWrite && out.rowCapUi.confirmNeverShown && out.rowCapUi.rejected
+            && out.rowCapBypass.threw && out.rowCapBypass.code === 'import-too-large' && out.rowCapBypass.runNeverCalled
             && out.saveDataNewLegacy === 'schema-violation' && out.saveDataDegrade === 'schema-violation' && out.saveDataDropField === 'schema-violation'
             && out.lockSaveData === 'bulk-locked' && ['bulk-locked', 'no-b1'].includes(out.lockApply) && ['bulk-locked', 'no-b1'].includes(out.lockStock)
             && out.nonAdminRestore === 'forbidden' && out.nonAdminInsert === 'forbidden'

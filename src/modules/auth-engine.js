@@ -162,6 +162,8 @@ export const updateNavbarUI = function (user) {
 
     userDisplay = document.createElement('div');
     userDisplay.id = 'userDisplay';
+    userDisplay.setAttribute('role', 'group');
+    userDisplay.setAttribute('aria-label', 'Kullanıcı işlemleri');
     userDisplay.style.cssText = `
         margin-left: auto; 
         display: flex; 
@@ -179,25 +181,27 @@ export const updateNavbarUI = function (user) {
     // J3: parola sonrası kimlik personel listesinde yoksa "Yönetici" etiketi taşır; düğme Firebase admin oturumunda da görünür.
     const isAdmin = (user.name === 'Muhammed Cer' || user.name === 'Admin') || window.isDbAdmin();
     const adminButtonHTML = isAdmin ? `
-        <button type="button" class="btn-admin-panel" 
+        <button type="button" class="btn-admin-panel user-action-button user-admin-button"
+                aria-label="Yönetici paneline geç" title="Yönetici paneline geç"
                 onclick="window.location.href='admin.html'" 
                 style="padding: 6px 12px; width: auto; margin-top: 0; font-size: 12px; background: #3498db;">
-                📊 Panele Geç
+                <i class="fas fa-chart-column" aria-hidden="true"></i><span>Panele Geç</span>
         </button>
     ` : '';
 
     userDisplay.innerHTML = `
-        <div class="todo-nav-badge-container" id="nav-todo-badge" 
+        <button type="button" class="todo-nav-badge-container user-tasks-button" id="nav-todo-badge"
+             aria-label="Görevlerim: bekleyen görevleri göster" title="Bekleyen Görevleriniz"
              onclick="if(typeof switchTab === 'function') switchTab('myTasksTab')" 
-             style="margin-right: 10px;" title="Bekleyen Görevleriniz">
-            <i class="fas fa-bell todo-nav-icon"></i>
+             style="margin-right: 10px;">
+            <i class="fas fa-bell todo-nav-icon" aria-hidden="true"></i>
             <span class="todo-nav-badge badge-hidden" id="nav-todo-count">0</span>
-        </div>
-        <span style="font-weight: bold; color: white; font-size: 14px;">👤 ${escapeHtml(user.name)}</span>
+        </button>
+        <span class="user-display-name" title="${escapeHtml(user.name)}">👤 ${escapeHtml(user.name)}</span>
         ${adminButtonHTML}
-        <button onclick="handleLogout()" 
+        <button type="button" class="user-action-button user-logout-button" aria-label="Oturumu kapat" title="Oturumu kapat" onclick="handleLogout()"
                 style="background: #e74c3c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                Çıkış Yap
+                <i class="fas fa-right-from-bracket" aria-hidden="true"></i><span>Çıkış Yap</span>
         </button>
     `;
 
@@ -624,6 +628,14 @@ async function completeAdminLogin(code) {
             }
         }
 
+        if (typeof window.AdminQuickUnlock?.offerPinSetup === 'function') {
+            try {
+                await window.AdminQuickUnlock.offerPinSetup(code);
+            } catch (error) {
+                console.error('[auth-engine] İlk giriş hızlı PIN kurulumu başarısız:', error);
+            }
+        }
+
         window.setActiveUser(user);
 
         if (typeof updateNavbarUI === 'function') updateNavbarUI(user);
@@ -752,8 +764,3 @@ export const handleLogout = async function (reason = 'manual') {
 // HTML onclick ve eski legacy modüller için window bağlamalarını yapıyoruz.
 window.handleLogout = handleLogout;
 window.logout = handleLogout;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Module init log
-// ─────────────────────────────────────────────────────────────────────────────
-console.log('✅ [auth-engine.js] Kimlik doğrulama motoru yüklendi (checkIsAdmin, checkAuth, handleLogin, updateNavbarUI, setupUI, checkAdminAndGo, handleLogout).');

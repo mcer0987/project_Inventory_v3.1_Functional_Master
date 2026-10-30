@@ -171,7 +171,6 @@ window.todoModule = {
         }
 
         return filteredTasks.sort((a, b) => b.id - a.id).map(task => {
-            console.log(`Render Card: ${task.title} | ID: ${task.id}`);
             const isCompleted = task.status === 'Completed';
             const priorityClass = `priority-${escapeHtml(String(task.priority || 'Medium').toLowerCase())}`;
             const typeClass = task.isPersonal ? 'personal-task' : 'assigned-task';
@@ -459,51 +458,35 @@ window.todoModule = {
     //     }
     // },
 
-    /**
-        * 🕵️ SAVING PROCESS WITH DEEP DEBUGGING (Gelişmiş Hata Yakalama)
-        */
     saveChecklist: async function (taskId) {
         try {
-            console.group("🚀 Alt Madde Kayıt Süreci Başladı");
-            console.log("1. Gelen taskId:", taskId, " Tipi:", typeof taskId);
             if (!taskId || taskId === 'undefined' || taskId === 'null') {
                 throw new Error("KRİTİK: taskId 'undefined' veya boş geldi! Modal hangi göreve ait olduğunu bilmiyor.");
             }
             const allTasks = this.getAllTasks();
-            console.log("2. Toplam Görev Sayısı:", allTasks.length);
             // ID'yi hem string hem number olarak zorlayarak arama yapıyoruz
             const task = allTasks.find(t => String(t.id) === String(taskId));
 
             if (!task) {
-                console.error("3. Mevcut Tüm Görev ID'leri:", allTasks.map(t => t.id));
                 throw new Error(`BAĞLANTI HATASI: ID'si '${taskId}' olan görev window.data.tasks içinde bulunamadı.`);
             }
-            console.log("4. Hedef Görev Bulundu:", task.title, "(ID: " + task.id + ")");
-            console.log("5. Kaydedilecek Alt Maddeler:", this.tempChecklist);
             // Veriyi yerel objeye işle
             task.checklist = this.tempChecklist;
             task.updatedAt = new Date().toISOString();
             // Firebase'e gönder (window.saveData projenin ana kayıt fonksiyonudur)
-            console.log("6. window.saveData çağrılıyor...");
             await window.saveData('tasks', allTasks);
 
-            console.log("7. Veri başarıyla Firebase'e iletildi.");
             showAppAlert("Alt maddeler güncellendi.", "success");
             this.closeChecklistModal();
             // Arayüzü anlık tazele
             if (document.getElementById('todoTab')) {
-                console.log("8. Admin paneli yenileniyor...");
                 this.renderAdminTodo();
             } else if (document.getElementById('myTasksTab')) {
-                console.log("8. Personel paneli yenileniyor...");
                 this.renderPersonnelTodo();
             }
-            console.groupEnd();
         } catch (error) {
-            console.group("❌ KAYIT HATASI DETAYI");
             console.error("Hata Mesajı:", error.message);
             console.error("Hata Stack:", error.stack);
-            console.groupEnd();
             showAppAlert("Hata: " + error.message, "danger");
         }
     },
@@ -866,11 +849,6 @@ window.todoModule = {
         });
 
         const globalPendingCount = notifyTasks.length;
-
-        // 🔍 DEBUG: Hangi görevler sayılıyor? (Konsoldan takip edilebilir)
-        if (globalPendingCount > 0) {
-            console.log("📊 [Admin Sayaç] Sayılan Görevler:", notifyTasks.map(t => t.description || t.id));
-        }
 
         if (globalPendingCount > 0) {
             badgeCountEl.textContent = globalPendingCount;

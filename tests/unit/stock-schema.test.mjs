@@ -75,11 +75,100 @@ test('validateB2: B1 sözleşmesiyle çapraz kontrol edilmez (B1 eski alanı sta
     assert.ok(S.B1_LEGACY_KEYS.includes('status'), 'status B1 için eski alan olmalı (yalnız B2 taşır)');
 });
 
-test('{legacy:true}: eksik alan göz ardı edilir, eski alan adı yine reddedilir', () => {
+test('{partial:true}: eksik alan göz ardı edilir, eski alan adı yine reddedilir', () => {
     const S = loadSchema();
     const sparse = { ürün: 'Eski Kayıt', adet: 3 };
-    assert.equal(S.validateB1(sparse, { legacy: true }).length, 0);
-    assert.ok(S.validateB1({ ...sparse, name: 'x' }, { legacy: true }).some(e => e.includes('eski alan: name')));
+    assert.equal(S.validateB1(sparse, { partial: true }).length, 0);
+    assert.ok(S.validateB1({ ...sparse, name: 'x' }, { partial: true }).some(e => e.includes('eski alan: name')));
+});
+
+// ─── v3.3 P1 · Katı Şema (Astra): TAM KAPALI sözleşme, set ve update aynı kurallar ─────────────────────────────────────
+// Her senaryo iki yolda da koşar: 'set' (tam kayıt) ve 'update' ({partial:true} — yalnız gönderilen alanlar).
+const MODES = [
+    { name: 'set', b1: extra => ({ ...validB1(), ...extra }), b2: extra => ({ ...validB2(), ...extra }), opts: {} },
+    { name: 'update', b1: extra => ({ ...extra }), b2: extra => ({ ...extra }), opts: { partial: true } },
+];
+const has = (errors, text) => errors.some(e => e.includes(text));
+
+for (const m of MODES) {
+    test(`[${m.name}] bilinmeyen/sahte alan B1 ve B2'de reddedilir`, () => {
+        const S = loadSchema();
+        assert.ok(has(S.validateB1(m.b1({ sahteAlan: 'x' }), m.opts), 'bilinmeyen alan: sahteAlan'));
+        assert.ok(has(S.validateB2(m.b2({ sahteAlan: 'x' }), m.opts), 'bilinmeyen alan: sahteAlan'));
+        assert.ok(has(S.validateB2(m.b2({ __proto_hack: 1, createdAt: 5 }), m.opts), 'bilinmeyen alan: createdAt'));
+    });
+
+    test(`[${m.name}] ürün adı sayı (ürün: 123) reddedilir; boş/boşluk ad da reddedilir`, () => {
+        const S = loadSchema();
+        assert.ok(has(S.validateB1(m.b1({ ürün: 123 }), m.opts), 'ürün string değil'));
+        assert.ok(has(S.validateB2(m.b2({ ürün: 123 }), m.opts), 'ürün string değil'));
+        assert.ok(has(S.validateB1(m.b1({ ürün: '   ' }), m.opts), 'ürün adı boş olamaz'));
+        assert.ok(has(S.validateB2(m.b2({ ürün: null }), m.opts), 'ürün string değil'));
+    });
+
+    test(`[${m.name}] B2 envanterNo: yokken KABUL, string KABUL, sayı/nesne/null RET`, () => {
+        const S = loadSchema();
+        assert.deepEqual([...S.validateB2(m.b2({}), m.opts)], [], 'envanterNo olmadan geçerli');
+        assert.deepEqual([...S.validateB2(m.b2({ envanterNo: 'ENV-2026-001' }), m.opts)], []);
+        assert.deepEqual([...S.validateB2(m.b2({ envanterNo: '' }), m.opts)], [], 'boş metin de string');
+        assert.ok(has(S.validateB2(m.b2({ envanterNo: 12345 }), m.opts), 'envanterNo string değil'));
+        assert.ok(has(S.validateB2(m.b2({ envanterNo: { no: 'x' } }), m.opts), 'envanterNo string değil'));
+        assert.ok(has(S.validateB2(m.b2({ envanterNo: null }), m.opts), 'envanterNo string değil'));
+    });
+
+    test(`[${m.name}] B1'e envanterNo yazılması REDDEDİLİR (değer tipi ne olursa olsun)`, () => {
+        const S = loadSchema();
+        for (const v of ['ENV-1', '', 7]) {
+            assert.ok(has(S.validateB1(m.b1({ envanterNo: v }), m.opts), 'envanterNo yalnız B2 (demirbaş) kaydında olabilir'), `değer: ${JSON.stringify(v)}`);
+        }
+    });
+
+    test(`[${m.name}] yanlış tipler reddedilir (string yerine sayı, boolean yerine metin, limit)`, () => {
+        const S = loadSchema();
+        assert.ok(has(S.validateB1(m.b1({ raf: 5 }), m.opts), 'raf string değil'));
+        assert.ok(has(S.validateB2(m.b2({ status: 1 }), m.opts), 'status string değil'));
+        assert.ok(has(S.validateB1(m.b1({ isWatched: 'evet' }), m.opts), 'isWatched boolean değil'));
+        assert.ok(has(S.validateB1(m.b1({ adet: '5' }), m.opts), 'geçersiz adet'));
+        assert.ok(has(S.validateB1(m.b1({ limit: '5' }), m.opts), 'geçersiz limit'));
+        assert.ok(has(S.validateB2(m.b2({ limit: -1 }), m.opts), 'geçersiz limit'));
+        assert.ok(has(S.validateB1(m.b1({ stokOncekiDurum: 0 }), m.opts), 'stokOncekiDurum string değil'));
+        assert.ok(has(S.validateB1(m.b1({ id: '' }), m.opts), 'id boş olmayan'));
+    });
+
+    test(`[${m.name}] canlı yazıcıların meşru isteğe bağlı alanları KABUL (regresyon koruması)`, () => {
+        const S = loadSchema();
+        const legit = { isWatched: true, limit: 5, stokOncekiDurum: 'Kullanıma Hazır' };
+        assert.deepEqual([...S.validateB1(m.b1(legit), m.opts)], [], 'B1: takip, limit, önceki durum');
+        assert.deepEqual([...S.validateB2(m.b2({ ...legit, envanterNo: 'E-1' }), m.opts)], [], 'B2: + envanterNo');
+        assert.deepEqual([...S.validateB2(m.b2({ limit: null }), m.opts)], [], 'B2 limit tanımsız (null) olabilir');
+        assert.deepEqual([...S.validateB1(m.b1({ limit: 0 }), m.opts)], []);
+        assert.deepEqual([...S.validateB1(m.b1({ id: 1760000000123 }), m.opts)], [], 'makeId sayısal id');
+    });
+}
+
+test('[update] yalnız "eksik zorunlu alan" muafiyeti: set aynı kısmi kaydı eksik alanla reddeder', () => {
+    const S = loadSchema();
+    const patch = { adet: 2, lastUpdate: 1 };
+    assert.deepEqual([...S.validateB2(patch, { partial: true })], []);
+    assert.ok(has(S.validateB2(patch), 'eksik alan: ürün'));
+});
+
+test('alan kümeleri AYRI ve açık: B1 ⊂ B2 değil — envanterNo ve status yalnız B2', () => {
+    const S = loadSchema();
+    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['isWatched', 'limit', 'stokOncekiDurum']);
+    assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'stokOncekiDurum']);
+    assert.ok(!S.stockKnownKeys('b1').includes('envanterNo') && !S.stockKnownKeys('b1').includes('status'));
+    assert.ok(S.stockKnownKeys('b2').includes('envanterNo') && S.stockKnownKeys('b2').includes('status'));
+});
+
+test('toCanonicalStock çıktısı kapalı sözleşmeden geçer ve meşru alanları kaybetmez (alan kaybı yok)', () => {
+    const S = loadSchema();
+    const b1 = S.toCanonicalStock({ id: 'k1', name: 'Eski Ad', qty: '4', limit: 2, isWatched: true, stokOncekiDurum: 'Mevcut' }, 'b1', { now: 1 });
+    assert.deepEqual([...S.validateB1(b1)], []);
+    assert.equal(b1.limit, 2); assert.equal(b1.isWatched, true); assert.equal(b1.stokOncekiDurum, 'Mevcut');
+    const b2 = S.toCanonicalStock({ id: 'k2', ürün: 'Laptop', adet: 1, envanterNo: 'E-9' }, 'b2', { now: 1 });
+    assert.deepEqual([...S.validateB2(b2)], []);
+    assert.equal(b2.envanterNo, 'E-9');
 });
 
 test("B3_TIP.HURDA: buildB3Entry/normalizeB3/validateB3 'hurda' tipini tanır", () => {

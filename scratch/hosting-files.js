@@ -23,10 +23,19 @@ const files = [];
     }
 })(ROOT, '');
 
-// Beklenen: iki sayfa + 404, kök CSS/JS, src/ altındaki JS, pdf-fonts/ (Faz 5 · K1: tembel yüklenen Roboto + OFL lisansı).
-// (Docker beyaz listesiyle aynı küme.)
-const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/.test(f) || /^src\/.+\.js$/.test(f)
-    || /^pdf-fonts\/(Roboto-[A-Za-z]+\.js|OFL\.txt)$/.test(f);
+// Beklenen: iki sayfa + 404, kök CSS/JS, kök manifest.json (PWA — index/admin.html'de <link rel="manifest">), src/
+// altındaki JS/CSS (WMS'in shelf-matrix.css'i — admin.html'de <link> ile), pdf-fonts/ (Faz 5 · K1: tembel yüklenen
+// Roboto + OFL lisansı). (Docker beyaz listesiyle aynı küme.)
+// Yerel Font Awesome paketi iki sayfada da kullanılır; yalnız bu beş dosya yayınlanabilir.
+const iconAssets = new Set([
+    'assets/fontawesome/css/all.min.css',
+    'assets/fontawesome/webfonts/fa-brands-400.woff2',
+    'assets/fontawesome/webfonts/fa-regular-400.woff2',
+    'assets/fontawesome/webfonts/fa-solid-900.woff2',
+    'assets/fontawesome/webfonts/fa-v4compatibility.woff2',
+]);
+const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/.test(f) || /^manifest\.json$/.test(f)
+    || /^src\/.+\.(js|css)$/.test(f) || /^pdf-fonts\/(Roboto-[A-Za-z]+\.js|OFL\.txt)$/.test(f) || iconAssets.has(f);
 // [WHY]: Faz 5 kapanışı — desen tek başına "fazladan meşru görünen" bir dosyayı (ör. kökte unutulan bir .js dökümü) yakalamaz.
 // [HOW]: Toplam sayı da sabitlenir; uygulamaya dosya eklenip çıkarıldığında bu sayı bilinçli olarak güncellenir.
 //        52 = Faz 5 öncesi 47 + P0-P1 (atomic-writer.js, stock-import.js) 2 + pdf-fonts 3.
@@ -34,7 +43,12 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
 //        54 = + Faz 4B · J7.5 src/utils/staff-code-registry.js.
 //        55 = + Faz 4B · J9 src/utils/ownership.js (code-hash.js GPT-6 kararıyla iptal edildi).
 //        53 = - Faz 7 ölü kod temizliği: db.js ve src/services/data-loader.js silindi.
-const EXPECTED_COUNT = 53;
+//        63 = + v3.3 Aşama 0-5 (Denetim sonrası) 10 yeni dosya: kökte manifest.json (PWA), login-redesign.css,
+//             mobile-responsive.css; src/ altında shelf-matrix.js + .css, stock-ledger.js, mobile-nav-enhancements.js,
+//             admin-quick-unlock.js, dialog-stack.js, shelf-capacity.js. (Global-Architecture.md ve "Mimari ve
+//             Geliştirmeler/" zaten firebase.json "ignore"da, bu sayıma girmez.)
+//        68 = + yerel Font Awesome CSS ve webfont paketi (5 dosya).
+const EXPECTED_COUNT = 68;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

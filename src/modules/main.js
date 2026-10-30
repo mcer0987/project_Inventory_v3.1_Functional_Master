@@ -191,5 +191,3 @@ window.addEventListener('onInventoryDataUpdated', (e) => {
         if (typeof window.checkPendingTasks === 'function') window.checkPendingTasks();
     }
 });
-
-console.log("✅ [modules/main.js] Merkezi Orchestrator ve PubSub Router yüklendi.");

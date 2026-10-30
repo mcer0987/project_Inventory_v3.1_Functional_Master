@@ -19,5 +19,3 @@ window.AppModules = window.AppModules || {};
 window.currentUser = window.getActiveUser();
 const welcomeEl = document.getElementById('welcomeUserName');
 if (welcomeEl) welcomeEl.textContent = ((window.currentUser && window.currentUser.name) || 'Admin').toLocaleUpperCase('tr-TR');
-
-console.log('✅ [admin-main.js] Admin giriş modülü yüklendi.');

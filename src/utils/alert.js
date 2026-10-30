@@ -128,7 +128,7 @@ function showSuccessBanner(message) {
  * @param {string|Node} message
  * @param {Function|Object|string} [arg3] onayda çağrılacak fonksiyon | seçenekler | onay düğmesi metni (geri uyum)
  * @param {Object|string} [arg4] seçenekler | vazgeç düğmesi metni (geri uyum)
- *        Seçenekler: { html, confirmText, cancelText, danger }
+ *        Seçenekler: { html, confirmText, cancelText, danger, variant:'import-guide' }
  * @returns {Promise<boolean>} Evet → true, Hayır → false
  */
 function showCustomConfirm(title, message, arg3, arg4) {
@@ -151,6 +151,16 @@ function showCustomConfirm(title, message, arg3, arg4) {
         return Promise.resolve(res);
     }
 
+    const importGuide = opts.variant === 'import-guide';
+    const messageTabIndex = messageEl.getAttribute('tabindex');
+    overlay.classList.toggle('import-guide-overlay', importGuide);
+    const box = overlay.firstElementChild;
+    if (importGuide) {
+        box.setAttribute('role', 'dialog');
+        box.setAttribute('aria-modal', 'true');
+        box.setAttribute('aria-labelledby', 'alertTitle');
+        messageEl.setAttribute('tabindex', '0');
+    }
     document.getElementById('alertTitle').innerText = title;
     messageEl.textContent = '';
     messageEl.style.whiteSpace = 'pre-line';
@@ -163,12 +173,22 @@ function showCustomConfirm(title, message, arg3, arg4) {
                        cancel: cancelBtn.dataset.defaultText ?? (cancelBtn.dataset.defaultText = cancelBtn.textContent) };
     confirmBtn.textContent = opts.confirmText || defaults.confirm;
     cancelBtn.textContent = opts.cancelText || defaults.cancel;
+    const cancelWasHidden = cancelBtn.hidden;
+    if (importGuide) cancelBtn.hidden = true;
     confirmBtn.style.backgroundColor = opts.danger ? '#e74c3c' : '';
     overlay.style.display = 'flex';
+    // v3.3 Aşama 5 (P2-08): projedeki EN ÇOK kullanılan onay kutusunda Escape hiç çalışmıyordu; DialogStack ile hem
+    // Escape (yalnız bu kutu başkasının üstündeyse de yalnız bunu kapatır) hem Tab odak hapsi hem kapanışta odak
+    // iadesi eklenir. DialogStack yoksa (yüklenmemişse) önceki davranış (yalnız düğmeyle kapanır) aynen sürer.
 
     return new Promise((resolve) => {
         const close = (answer) => {
+            if (window.DialogStack) window.DialogStack.close(box);
             overlay.style.display = 'none';
+            overlay.classList.remove('import-guide-overlay');
+            cancelBtn.hidden = cancelWasHidden;
+            if (messageTabIndex === null) messageEl.removeAttribute('tabindex');
+            else messageEl.setAttribute('tabindex', messageTabIndex);
             confirmBtn.textContent = defaults.confirm;
             cancelBtn.textContent = defaults.cancel;
             confirmBtn.style.backgroundColor = '';
@@ -177,6 +197,7 @@ function showCustomConfirm(title, message, arg3, arg4) {
         };
         confirmBtn.onclick = () => close(true);
         cancelBtn.onclick = () => close(false);
+        if (window.DialogStack) window.DialogStack.open(box, { onEscape: () => close(false), initialFocus: importGuide ? messageEl : undefined });
     });
 }
 window.showCustomConfirm = showCustomConfirm;

@@ -384,13 +384,42 @@ service cloud.firestore {
     // (zimmet ve servis kayıtları dahil). Test temizliği artık yalnız yönetici oturumuyla ya da emülatörde kuralları atlayan yönetim
     // erişimiyle yapılır (scratch/flow-tests.js).
 
+    // ─── v3.3 · Aşama 2/3 · B1/B2 yazma sözleşmesi (Denetim P1-02 · sunucu tarafı) ─────────────────────────────────────
+    // [WHY]: b1/b2'ye yönetici yazmaları hiç içerik denetiminden geçmiyordu: eksi / ondalık adet ya da eski alan adı (ör. b1'e
+    //        'status' — toplu pasife alma hatası) yalnız istemci muhafızına bağlıydı.
+    // [HOW]: Yeni eski alan EKLENEMEZ (var olan eski alan göç edilmemiş belgede değişebilir: computeStockPatch onu da yazar);
+    //        adet yazılıyorsa ≥ 0 tam sayı. Toplu geri yükleme / içe aktarma kilidi (admin_settings.restoreLock — atomic-writer)
+    //        sürerken muaf: geri alma, belgelerin ÖNCEKİ (eski biçimli olabilen) hâlini yazabilmelidir; yoksa geri alma takılır.
+    //        Kilit okuması yalnız sözleşme tutmazsa yapılır (|| kısa devre) — olağan yazmada ek belge okuması yok.
+    //        Sınır (Spark planı, tek yönetici kimliği): kurallar b1/b2 adet değişiminin raf sayacıyla AYNI commit'te yapıldığını
+    //        zorlamaz; bütün yazma yolları stok defterine geçirilene kadar (Aşama 3 devamı) sayaç Aşama 6'da uzlaştırılır.
+    function stockLegacyKeys(c) { return c == 'b1' ? ['name', 'type', 'shelf', 'qty', 'status'] : ['name', 'type', 'shelf', 'qty']; }
+    function stockQtyOk(d) { return d.get('adet', 0) is int && d.get('adet', 0) >= 0; }
+    function restoreLockOn(r) {
+      let p = /databases/$(database)/documents/$(r)/system_config/items/admin_settings;
+      return exists(p) && get(p).data.get('restoreLock', null) != null;
+    }
+    function stockCreateOk(r, c, d) {
+      return (!d.keys().hasAny(stockLegacyKeys(c)) && stockQtyOk(d)) || restoreLockOn(r);
+    }
+    function stockUpdateOk(r, c, d, old) {
+      return (!d.diff(old).addedKeys().hasAny(stockLegacyKeys(c))
+              && (!d.diff(old).affectedKeys().hasAny(['adet']) || stockQtyOk(d)))
+        || restoreLockOn(r);
+    }
+
     match /{root}/{col}/items/{docId} {
       // Ek D "Ziyaretçi ✗": oturumsuz / anonim / personele bağlı olmayan hesap hiçbir şey okuyamaz.
       allow read: if validRoot(root) && knownCol(col) && member(root);
 
       // Admin: tüm bilinen koleksiyonlar; bakım modundan etkilenmez. Personel kaydına düz metin kod yeniden giremez.
-      allow create, update: if validRoot(root) && knownCol(col) && isAdmin()
-        && (col != 'personel' || personelCodeOk(request.resource.data));
+      // v3.3: b1/b2 içerik sözleşmesi (stockCreateOk / stockUpdateOk).
+      allow create: if validRoot(root) && knownCol(col) && isAdmin()
+        && (col != 'personel' || personelCodeOk(request.resource.data))
+        && (!(col in ['b1', 'b2']) || stockCreateOk(root, col, request.resource.data));
+      allow update: if validRoot(root) && knownCol(col) && isAdmin()
+        && (col != 'personel' || personelCodeOk(request.resource.data))
+        && (!(col in ['b1', 'b2']) || stockUpdateOk(root, col, request.resource.data, resource.data));
       allow delete: if validRoot(root) && knownCol(col) && isAdmin();
 
       // Personel: yalnız iş akışı koleksiyonları, bakım kapalıyken, etiketsiz metinle; sahiplik zorunlu ve değişmez.
@@ -459,6 +488,85 @@ service cloud.firestore {
       allow read: if validRoot(root) && gateId == 'staff' && (isAdmin() || staffIdentity(root));
       allow create, update: if validRoot(root) && gateId == 'staff' && isAdmin() && gateWriteOk(request.resource.data);
       allow delete: if validRoot(root) && gateId == 'staff' && isAdmin();
+    }
+
+    // ─── v3.3 · Aşama 2/3 · Raf kataloğu (Denetim P1-02) — ${root}/shelves/items/{depot}_{KOD} ───────────────────────
+    // [WHY]: Raf kapasitesi tarayıcıya özel localStorage'daydı; ortak ve sunucuda denetlenen bir kapasite yoktu.
+    // [HOW]: İstemci sözleşmesi Schema.validateShelfDoc / shelfDocId ile birebir: yalnız SHELF_KEYS, kimlik = depo + '_' + kod,
+    //        kanonik kod deseni, kapasite 1–200, usedSlots ≥ 0, sunucu saati ve yazanın uid'i. Kod ve depo değiştirilemez.
+    //        Slot ARTIŞI kapasiteyi aşamaz (eşzamanlı son-slot yarışında transaction + bu kural); AZALIŞ her zaman serbest
+    //        (geçiş sonrası aşımdaki raf boşaltılabilmeli — Aşama 6). Kapasite güncel kullanımın altına indirilemez.
+    //        Oluşturmada usedSlots > capacity serbest (geçişte mevcut aşım görünür kalmalı; istemci servisi yeni rafı
+    //        kullanımın altında kapasiteyle oluşturmaz). Silme yalnız boş rafta.
+    //        Okuma: member (personel dahil). Denetim raporu "signedIn" öneriyordu; istemciden hesap açma açıkken bu, personele
+    //        bağlı olmayan herhangi bir hesaba okuma verirdi (KVKK Ek D ilkesi) — bilinçli olarak daha dar.
+    //        v3.3 P1 (Excel içe aktarma sayacı): raf sayaçları ürünlerle AYNI AtomicWriter işinde yazılır. Çok parçalı işin geri
+    //        alınması rafın ÖNCEKİ belgesini (eski updatedAt / updatedBy) yazar ve bu işte yaratılmış — dolu — rafı siler;
+    //        ikisi de olağan kurala takılır. Bu yüzden YALNIZ toplu yazma kilidi (restoreLock) sürerken: şekli geçerli belge
+    //        zaman/uid kanıtı olmadan yazılabilir, dolu raf silinebilir (b1/b2 muafiyetiyle aynı desen). Kod/depo yine sabit.
+    function shelfShapeOk(shelfId, d) {
+      return d.keys().hasOnly(['code', 'depot', 'capacity', 'usedSlots', 'active', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['code', 'depot', 'capacity', 'usedSlots', 'active', 'updatedAt', 'updatedBy'])
+        && d.depot in ['b1', 'b2']
+        && d.code is string && d.code.size() >= 1 && d.code.size() <= 40
+        && d.code.matches('[A-Z0-9ÇĞÖŞÜ][A-Z0-9ÇĞÖŞÜ ._-]*')
+        && shelfId == d.depot + '_' + d.code
+        && d.capacity is int && d.capacity >= 1 && d.capacity <= 200
+        && d.usedSlots is int && d.usedSlots >= 0
+        && d.active is bool;
+    }
+    function shelfDocOk(shelfId, d) {
+      return shelfShapeOk(shelfId, d)
+        && d.updatedAt == request.time
+        && d.updatedBy == request.auth.uid;
+    }
+    match /{root}/shelves/items/{shelfId} {
+      allow read: if validRoot(root) && member(root);
+      allow create: if validRoot(root) && isAdmin() && shelfDocOk(shelfId, request.resource.data);
+      allow update: if validRoot(root) && isAdmin()
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.depot == resource.data.depot
+        && ((shelfDocOk(shelfId, request.resource.data)
+             && (request.resource.data.usedSlots <= resource.data.usedSlots
+                 || request.resource.data.usedSlots <= request.resource.data.capacity)
+             && (request.resource.data.capacity == resource.data.capacity
+                 || request.resource.data.capacity >= request.resource.data.usedSlots))
+            || (restoreLockOn(root) && shelfShapeOk(shelfId, request.resource.data)));
+      allow delete: if validRoot(root) && isAdmin()
+        && (resource.data.get('usedSlots', 0) == 0 || restoreLockOn(root));
+    }
+
+    // ─── v3.3 · Aşama 2 · Stok işlem defteri (Denetim P1-01 mükerrerlik) — ${root}/stockOperations/items/{operationId} ──
+    // [WHY]: Yanıtı kaybolan bir transfer tekrar gönderildiğinde stok ikinci kez düşebiliyordu.
+    // [HOW]: Transaction işlem kaydını ürün ve sayaç yazmalarıyla AYNI commit'te oluşturur; kayıt varsa istemci stoğa dokunmaz.
+    //        Yalnız ekleme (create; aynı kimliğe ikinci yazma update'tir → reddedilir), değiştirilemez, silinemez.
+    //        Kayıt GERÇEK sonuçla çapraz denetlenir (getAfter: commit sonrası hâl): hedef kaydın adedi = qty; kaynak kayıt
+    //        tam taşımada silinmiş, kısmi taşımada adedi = stockAfter (aynı depoda tam taşımada kaynak = hedef).
+    function stockDoc(r, c, id) { return /databases/$(database)/documents/$(r)/$(c)/items/$(id); }
+    function stockOpOk(r, opId, d) {
+      return d.keys().hasOnly(['id', 'kind', 'sourceCol', 'sourceId', 'targetCol', 'targetId', 'targetShelfId', 'qty', 'fullMove',
+                               'stockBefore', 'stockAfter', 'shelves', 'uid', 'ts'])
+        && d.keys().hasAll(['id', 'kind', 'sourceCol', 'sourceId', 'targetCol', 'targetId', 'targetShelfId', 'qty', 'fullMove',
+                            'stockBefore', 'stockAfter', 'shelves', 'uid', 'ts'])
+        && opId.matches('[A-Za-z0-9_-]{8,80}') && d.id == opId
+        && d.kind == 'transfer'
+        && d.sourceCol in ['b1', 'b2'] && d.targetCol in ['b1', 'b2']
+        && d.sourceId is string && d.targetId is string && d.targetShelfId is string
+        && d.qty is int && d.qty >= 1 && d.fullMove is bool
+        && d.stockBefore is int && d.stockAfter is int && d.stockAfter == d.stockBefore - d.qty && d.stockAfter >= 0
+        && d.fullMove == (d.stockAfter == 0)
+        && d.shelves is list && d.shelves.size() <= 2
+        && d.uid == request.auth.uid && d.ts == request.time
+        && getAfter(stockDoc(r, d.targetCol, d.targetId)).data.get('adet', -1) == d.qty
+        && (d.sourceCol == d.targetCol && d.sourceId == d.targetId
+            ? true
+            : (d.fullMove ? !existsAfter(stockDoc(r, d.sourceCol, d.sourceId))
+                          : getAfter(stockDoc(r, d.sourceCol, d.sourceId)).data.get('adet', -1) == d.stockAfter));
+    }
+    match /{root}/stockOperations/items/{opId} {
+      allow read: if validRoot(root) && isAdmin();
+      allow create: if validRoot(root) && isAdmin() && stockOpOk(root, opId, request.resource.data);
+      allow update, delete: if false;
     }
 
     // Denetim günlüğü (4.7 · KJ-7): yalnız ekleme, katı şema, sunucu saati, kendi uid'i; admin dahil kimse düzeltemez/silemez.

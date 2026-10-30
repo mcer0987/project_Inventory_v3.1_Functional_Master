@@ -1,0 +1,445 @@
+diff --git a/src/ui/table-engine.js b/src/ui/table-engine.js
+index ebe6643..ce8ecf5 100644
+--- a/src/ui/table-engine.js
++++ b/src/ui/table-engine.js
+@@ -42,10 +42,10 @@ window.pageSize = PAGE_SIZE;
+ // ─────────────────────────────────────────────────────────────────────────────
+ // [WHY]: Faz 4 · J2 (SEC-01) — B1/B2 tabloları ve kartları ürün, marka, raf, durum, tür alanlarını ham basıyordu; tarih
+ //        satır içi handler'a JS dizgesi olarak gömülüyordu ('…' tırnağıyla kaçılabilir).
+-// [HOW]: Her ham alan şablona girdiği yerde escapeHtml; tarih data-tip niteliğinde, handler this.dataset.tip okur.
++// [HOW]: Her ham alan şablona girdiği yerde escapeHtml; tarih data-tip niteliğinde, delege handler dataset.tip okur.
+ function _buildQtyDisplay(itemQty, updateDate) {
+     if (window.innerWidth <= 768) {
+-        return `${escapeHtml(itemQty)} <span class="mobile-info-trigger" data-tip="${escapeHtml(updateDate)}" onclick="window.showMobileTooltip(event, this.dataset.tip)" style="margin-left: 6px; cursor: pointer; color: #3498db; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.85em; transition: opacity 0.2s;"><i class="fas fa-info-circle"></i></span>`;
++        return `${escapeHtml(itemQty)} <span class="mobile-info-trigger" data-tip="${escapeHtml(updateDate)}" data-action="mobileTooltip" style="margin-left: 6px; cursor: pointer; color: #3498db; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.85em; transition: opacity 0.2s;"><i class="fas fa-info-circle"></i></span>`;
+     }
+     return escapeHtml(itemQty);
+ }
+@@ -88,10 +88,7 @@ function _buildRowHtml(depo, item, realIndex) {
+                 data-depo="${escapeHtml(depo)}"
+                 data-index="${escapeHtml(realIndex)}"
+                 data-name="${safeName}"
+-                data-tip="${escapeHtml(updateDate)}"
+-                onmouseenter="window.showRowTooltip(event, this.dataset.tip)"
+-                onmousemove="window.moveRowTooltip(event)"
+-                onmouseleave="window.hideRowTooltip()">
++                data-tip="${escapeHtml(updateDate)}">
+                 ${innerHtml}
+             </tr>`;
+ }
+@@ -114,17 +111,43 @@ function _renderLoadMoreButton(depo, filteredCount) {
+         loadMoreBtn.style.margin = '20px auto';
+         loadMoreBtn.style.display = 'block';
+
+-        loadMoreBtn.onclick = () => {
++        loadMoreBtn.dataset.action = 'loadMore';
++        loadMoreBtn.dataset.depo = depo;
++        window.bindActions(loadMoreBtn, { loadMore: el => {
+             _currentPage++;
+-            window.renderTable(depo, true);
+-        };
++            window.renderTable(el.dataset.depo, true);
++        } });
+
+         const tableElement = document.querySelector(`#table${depo.toUpperCase()}`);
+         if (tableElement) tableElement.after(loadMoreBtn);
+     }
+ }
+
++// [WHY]: KJ-6 — yeniden çizilen satırlarda tooltip davranışı inline JS gerektirmemeli.
++// [HOW]: Click bindActions ile; hover, mouseover/out ve relatedTarget ile satır sınırında çalışır.
++function _bindTableActions(tbody) {
++    window.bindActions(tbody, { mobileTooltip: (el, event) => window.showMobileTooltip(event, el.dataset.tip) });
++    if (tbody._tooltipActionsBound) return;
++    tbody._tooltipActionsBound = true;
++    const rowFor = event => event.target.closest('tr.selectable-row');
++    tbody.addEventListener('mouseover', event => {
++        const row = rowFor(event);
++        if (row && !row.contains(event.relatedTarget)) window.showRowTooltip(event, row.dataset.tip);
++    });
++    tbody.addEventListener('mousemove', event => {
++        if (rowFor(event)) window.moveRowTooltip(event);
++    });
++    tbody.addEventListener('mouseout', event => {
++        const row = rowFor(event);
++        if (row && !row.contains(event.relatedTarget)) window.hideRowTooltip();
++    });
++}
++
+ function _setupCardViewSelection(container) {
++    window.bindActions(container, {
++        cardCheckbox: (el, event) => event.stopPropagation(),
++        toggleCardGroup: el => window._toggleCardGroup(el.dataset.body, el.dataset.icon),
++    });
+     if (!container || container._cardFabListenerAttached) return;
+     container._cardFabListenerAttached = true;
+
+@@ -245,6 +268,7 @@ export const renderTable = function (depo, append = false, customLimit = null) {
+         tbody.innerHTML = rowsHtml.join('');
+     }
+
++    _bindTableActions(tbody);
+     _renderLoadMoreButton(depo, allData.length);
+
+     if (typeof window.setupRowSelection === 'function') {
+@@ -306,6 +330,7 @@ export const renderSearchResults = function (depo, results) {
+     }).join('');
+
+     tbody.innerHTML = rowsHtml;
++    _bindTableActions(tbody);
+
+     const loadMoreBtn = document.getElementById('loadMoreBtn');
+     if (loadMoreBtn) loadMoreBtn.style.display = 'none';
+@@ -356,7 +381,7 @@ export const renderCardSearchResults = function (depo, results) {
+                 <div class="pci-left">
+                     <input type="checkbox" class="row-select card-checkbox"
+                            data-index="${escapeHtml(realIndex)}" data-id="${escapeHtml(item.id ?? '')}"
+-                           onclick="event.stopPropagation()">
++                           data-action="cardCheckbox">
+                     <div class="pci-info">
+                         <span class="pci-name">${safeName}</span>
+                         <span class="pci-meta">
+@@ -387,7 +412,6 @@ export const renderCardSearchResults = function (depo, results) {
+
+     const freshContainer = document.getElementById(`cardView${depo.toUpperCase()}`);
+     if (freshContainer) {
+-        freshContainer._cardFabListenerAttached = false;
+         _setupCardViewSelection(freshContainer);
+     }
+ };
+@@ -449,7 +473,7 @@ export const renderMobileCards = function (depo) {
+                     <div class="pci-left">
+                         <input type="checkbox" class="row-select card-checkbox"
+                                data-index="${escapeHtml(item._realIndex)}" data-id="${escapeHtml(item.id ?? '')}"
+-                               onclick="event.stopPropagation()">
++                               data-action="cardCheckbox">
+                         <div class="pci-info">
+                             <span class="pci-name">${safeName}</span>
+                             <span class="pci-meta">
+@@ -472,7 +496,7 @@ export const renderMobileCards = function (depo) {
+         return `
+             <div class="type-group-card" id="typeGroup_${gid /* xss-ok: depo sabiti + sıra */}">
+                 <div class="type-group-header"
+-                     onclick="window._toggleCardGroup('typeGroupBody_${gid /* xss-ok: depo sabiti + sıra */}', 'typeGroupIcon_${gid /* xss-ok: depo sabiti + sıra */}')">
++                     data-action="toggleCardGroup" data-body="typeGroupBody_${escapeHtml(gid)}" data-icon="typeGroupIcon_${escapeHtml(gid)}">
+                     <div class="tgh-left">
+                         <i class="fas fa-layer-group tgh-icon"></i>
+                         <span class="tgh-name">${escapeHtml(turAdi)}</span>
+diff --git a/src/modules/admin/admin-dashboard.js b/src/modules/admin/admin-dashboard.js
+index 07eb235..d0f0273 100644
+--- a/src/modules/admin/admin-dashboard.js
++++ b/src/modules/admin/admin-dashboard.js
+@@ -38,14 +38,19 @@ window.customConfirmAlert = function (title, message) {
+         if (msgEl) msgEl.innerText = message;
+         overlay.style.display = 'flex';
+         return new Promise((resolve) => {
+-            confirmBtn.onclick = () => {
+-                overlay.style.display = 'none';
+-                resolve(true);
+-            };
+-            cancelBtn.onclick = () => {
+-                overlay.style.display = 'none';
+-                resolve(false);
+-            };
++            // [WHY]/[HOW]: KJ-6 — tekrar açılışta bindActions çözümleyicileri yeniler, dinleyici çoğalmaz.
++            confirmBtn.dataset.action = 'confirmDashboardAlert';
++            cancelBtn.dataset.action = 'cancelDashboardAlert';
++            window.bindActions(overlay, {
++                confirmDashboardAlert: () => {
++                    overlay.style.display = 'none';
++                    resolve(true);
++                },
++                cancelDashboardAlert: () => {
++                    overlay.style.display = 'none';
++                    resolve(false);
++                },
++            });
+         });
+     }
+     if (typeof window.showCustomConfirm === 'function') {
+@@ -239,6 +244,13 @@ window.renderAdminRequestTable = function () {
+     const countBadge = document.getElementById('pendingRequestCount');
+     if (!tableBody) return;
+
++    // [WHY]: KJ-6 — talep verisi çalıştırılabilir JS içinde taşınmaz.
++    // [HOW]: bindActions en yakın eylemin dataset değerini mevcut işleve iletir.
++    window.bindActions(tableBody, {
++        confirmRequest: el => window.confirmRequest(el.dataset.id),
++        rejectRequest: el => window.rejectRequest(el.dataset.id),
++        deleteRequest: el => window.deleteRequest(el.dataset.id),
++    });
+     const esc = window.escapeHtml;
+     const allRequests = window.data.requests || [];
+     tableBody.innerHTML = '';
+@@ -302,14 +314,14 @@ window.renderAdminRequestTable = function () {
+                 <td class="text-end pe-3">
+                     <div class="d-flex justify-content-end gap-2" style="flex-wrap: wrap; row-gap: 6px;">
+                         ${isPending ? `
+-                            <button onclick="window.confirmRequest(${jsArg(req.id)})" class="p-btn-icon play" title="Onayla">
++                            <button data-action="confirmRequest" data-id="${escapeHtml(req.id)}" class="p-btn-icon play" title="Onayla">
+                                 <i class="fas fa-check"></i>
+                             </button>
+-                            <button onclick="window.rejectRequest(${jsArg(req.id)})" class="p-btn-icon delete" title="Reddet">
++                            <button data-action="rejectRequest" data-id="${escapeHtml(req.id)}" class="p-btn-icon delete" title="Reddet">
+                                 <i class="fas fa-times"></i>
+                             </button>
+                         ` : `
+-                            <button onclick="window.deleteRequest(${jsArg(req.id)})" class="p-btn-icon delete" title="Kayıttan Sil">
++                            <button data-action="deleteRequest" data-id="${escapeHtml(req.id)}" class="p-btn-icon delete" title="Kayıttan Sil">
+                                 <i class="fas fa-trash"></i>
+                             </button>
+                         `}
+@@ -491,6 +503,12 @@ window.renderProductTypesTable = function () {
+     const listBody = document.getElementById('productTypeTableBody');
+     const defListBody = document.getElementById('adminDefProductTypeTableBody');
+
++    // [WHY]: KJ-6 — iki tür tablosunda aynı delegasyon sözleşmesi kullanılır.
++    // [HOW]: Boolean nitelik eski boolean argümana açık karşılaştırmayla dönüştürülür.
++    for (const body of [listBody, defListBody]) window.bindActions(body, {
++        editProductType: el => window.editProductType(el.dataset.id, el.dataset.name, el.dataset.demirbas === 'true'),
++        deleteProductType: el => window.deleteProductType(el.dataset.id),
++    });
+     const types = window.getActiveProductTypes();
+     if (listBody) listBody.innerHTML = '';
+     if (defListBody) defListBody.innerHTML = '';
+@@ -519,10 +537,10 @@ window.renderProductTypesTable = function () {
+                     </td>
+                     <td class="text-end pe-3">
+                         <div class="action-buttons justify-content-end">
+-                            <button onclick="editProductType(${jsArg(String(type.id))}, ${jsArg(String(type.name))}, ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
++                            <button data-action="editProductType" data-id="${escapeHtml(String(type.id))}" data-name="${escapeHtml(String(type.name))}" data-demirbas="${isDemirbas}" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                                 <i class="fa-solid fa-arrows-rotate"></i>
+                             </button>
+-                            <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
++                            <button data-action="deleteProductType" data-id="${escapeHtml(String(type.id))}" class="btn-action btn-passive shadow-sm" title="Sil">
+                                 <i class="fas fa-trash fa-xs"></i>
+                             </button>
+                         </div>
+@@ -552,10 +570,10 @@ window.renderProductTypesTable = function () {
+                     </td>
+                     <td class="text-end pe-3">
+                         <div class="action-buttons justify-content-end">
+-                            <button onclick="editProductType(${jsArg(String(type.id))}, ${jsArg(String(type.name))}, ${isDemirbas})" class="btn-action btn-buy shadow-sm" title="Düzenle">
++                            <button data-action="editProductType" data-id="${escapeHtml(String(type.id))}" data-name="${escapeHtml(String(type.name))}" data-demirbas="${isDemirbas}" class="btn-action btn-buy shadow-sm" title="Düzenle">
+                                 <i class="fas fa-edit"></i>
+                             </button>
+-                            <button onclick="deleteProductType(${jsArg(String(type.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
++                            <button data-action="deleteProductType" data-id="${escapeHtml(String(type.id))}" class="btn-action btn-passive shadow-sm" title="Sil">
+                                 <i class="fas fa-trash"></i>
+                             </button>
+                         </div>
+@@ -934,13 +952,14 @@ window.renderCriticalStockTable = function () {
+                         <div class="action-buttons">
+                             <button class="btn-action btn-buy" title="Satın Al"><i class="fas fa-shopping-cart"></i></button>
+                             <button class="btn-action btn-mail" title="Bildirim Gönder"><i class="fas fa-envelope"></i></button>
+-                            <button class="btn-action btn-passive" onclick="deleteType(${jsArg(String(item.name))})" title="Pasif Yap"><i class="fas fa-trash"></i></button>
++                            <button class="btn-action btn-passive" data-action="deleteType" data-name="${escapeHtml(String(item.name))}" title="Pasif Yap"><i class="fas fa-trash"></i></button>
+                         </div>
+                     </td>
+                 </tr>`);
+         }
+     });
+
++    window.bindActions(tableBody, { deleteType: el => window.deleteType(el.dataset.name) });
+     // TEK DOM ataması — 1×reflow
+     tableBody.innerHTML = rows.length
+         ? rows.join('')
+@@ -1793,6 +1812,9 @@ window.searchPersonnelForLocation = function (query) {
+         return;
+     }
+
++    window.bindActions(resultsDiv, {
++        addLocationPerson: el => window.addPersonToLocation({ name: el.dataset.name, unit: el.dataset.unit }),
++    });
+     const allPersonel = window.data.personel || [];
+     const filtered = allPersonel.filter(p => p.name.toLocaleLowerCase('tr-TR').includes(query.toLocaleLowerCase('tr-TR'))).slice(0, 5);
+
+@@ -1801,7 +1823,7 @@ window.searchPersonnelForLocation = function (query) {
+             // Personel verisinde birim hangi isimle tutuluyor olabilirse hepsini dene
+             const pUnit = p.birim || p.unit || p.department || p.bolum || p.departman || p.birimAdi || '';
+             return `
+-                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" onclick="window.addPersonToLocation({name:${jsArg(String(p.name))}, unit:${jsArg(String(pUnit))}})">
++                <div class="p-2 search-item-hover" style="cursor:pointer; border-bottom:1px solid #eee;" data-action="addLocationPerson" data-name="${escapeHtml(String(p.name))}" data-unit="${escapeHtml(String(pUnit))}">
+                     <strong>${escapeHtml(p.name)}</strong> ${pUnit ? `<small class="text-muted">(${escapeHtml(pUnit)})</small>` : ''}
+                 </div>
+             `;
+@@ -1818,9 +1840,10 @@ window.searchPersonnelForLocation = function (query) {
+ function _renderLocationPersons() {
+     const container = document.getElementById('loc_selectedPersons');
+     if (!container) return;
++    window.bindActions(container, { removeLocationPerson: el => window.removePersonFromLocation(el.dataset.name) });
+     container.innerHTML = window.locationSelectedPersons.map(p => `
+         <span class="badge bg-light text-dark border d-flex align-items-center gap-2 p-2">${escapeHtml(p.name)}
+-            <i class="fas fa-times text-danger" style="cursor:pointer;" onclick="window.removePersonFromLocation(${jsArg(String(p.name))})"></i></span>`).join('');
++            <i class="fas fa-times text-danger" style="cursor:pointer;" data-action="removeLocationPerson" data-name="${escapeHtml(String(p.name))}"></i></span>`).join('');
+ }
+
+ window.addPersonToLocation = function (person) {
+@@ -1883,6 +1906,10 @@ window.renderLocationsTable = function () {
+     const body = document.getElementById('locationTableBody');
+     if (!body) return;
+
++    window.bindActions(body, {
++        openLocationModal: el => window.openLocationModal(el.dataset.id),
++        deleteLocation: el => window.deleteLocation(el.dataset.id),
++    });
+     const locArray = window.data.locations || [];
+
+     // Kopya alıp sırala
+@@ -1919,10 +1946,10 @@ window.renderLocationsTable = function () {
+             </td>
+             <td class="text-end">
+                 <div class="d-flex justify-content-end gap-2">
+-                    <button onclick="window.openLocationModal(${jsArg(String(loc.id))})" class="p-btn-icon play" title="Düzenle">
++                    <button data-action="openLocationModal" data-id="${escapeHtml(String(loc.id))}" class="p-btn-icon play" title="Düzenle">
+                         <i class="fas fa-edit"></i>
+                     </button>
+-                    <button onclick="window.deleteLocation(${jsArg(String(loc.id))})" class="p-btn-icon delete" title="Sil">
++                    <button data-action="deleteLocation" data-id="${escapeHtml(String(loc.id))}" class="p-btn-icon delete" title="Sil">
+                         <i class="fas fa-trash"></i>
+                     </button>
+                 </div>
+diff --git a/src/ui/ui-components.js b/src/ui/ui-components.js
+index a2c3310..f3b0cd4 100644
+--- a/src/ui/ui-components.js
++++ b/src/ui/ui-components.js
+@@ -52,6 +52,27 @@ const _dom = {
+ // ─────────────────────────────────────────────────────────────────────────────
+ // UIComponents Nesnesi
+ // ─────────────────────────────────────────────────────────────────────────────
++// [WHY]: KJ-6 — tablo/kart seçiminden açılan ürün işlemleri kayıt verisini JS'e gömmez.
++// [HOW]: bindActions dataset okur; eski çağrı sırası ve menü/seçim kapatma davranışı korunur.
++function _bindProductActions(container, mobile = false) {
++    const finish = action => {
++        if (mobile) window.closeMobileBottomSheet();
++        else if (['editProduct', 'cloneProduct', 'transferProduct', 'deleteItem'].includes(action)) window.clearRowSelection();
++    };
++    const run = (action, fn) => el => { fn(el.dataset); finish(action); };
++    window.bindActions(container, {
++        increaseStock: run('increaseStock', d => window.updateStock(d.depo, d.id, 1)),
++        decreaseStock: run('decreaseStock', d => window.updateStock(d.depo, d.id, -1)),
++        editProduct: run('editProduct', d => window.openProductModal('edit', d.id, d.depo)),
++        cloneProduct: run('cloneProduct', d => window.cloneProduct(d.depo, d.id)),
++        transferProduct: run('transferProduct', d => window.openTransferModal(d.depo, d.id)),
++        toggleWatch: run('toggleWatch', d => window.toggleWatch(d.depo, d.id)),
++        deleteItem: run('deleteItem', d => window.deleteItem(d.depo, d.id)),
++        bulkDelete: el => window._bulkDeleteSelected(el.dataset.depo, JSON.parse(el.dataset.ids)),
++        bulkTransfer: () => window.showAppAlert('Toplu Sevk özelliği yakında!', 'info'),
++    });
++}
++
+ export const UIComponents = {
+
+     // =========================================================================
+@@ -762,6 +783,8 @@ export const UIComponents = {
+         tbody._fabListenerAttached = true;
+
+         tbody.addEventListener('click', function (e) {
++            // [WHY]/[HOW]: Tooltip aynı tbody üzerinde delege edilir; bu tıklama satır seçimini değiştirmez.
++            if (e.target.closest('[data-action="mobileTooltip"]')) return;
+             // Checkbox tıklaması kendi mantığını yönetir
+             if (e.target.type === 'checkbox') return;
+
+@@ -843,27 +866,27 @@ export const UIComponents = {
+             // TEKİL MOD: Tüm işlemler
+             const item      = (window.data[first.depo] || []).find(x => x && String(x.id) === String(first.id)) || {};
+             const isWatched = item.isWatched;
+-            const d = jsArg(first.depo), i = jsArg(first.id);
++            const d = escapeHtml(first.depo), i = escapeHtml(first.id);
+             buttonsHtml = `
+-                <button class="fab-btn fab-btn-inc" onclick="updateStock(${d}, ${i}, 1)">
++                <button class="fab-btn fab-btn-inc" data-action="increaseStock" data-depo="${d}" data-id="${i}">
+                     <i class="fas fa-plus"></i> Artır
+                 </button>
+-                <button class="fab-btn fab-btn-dec" onclick="updateStock(${d}, ${i}, -1)">
++                <button class="fab-btn fab-btn-dec" data-action="decreaseStock" data-depo="${d}" data-id="${i}">
+                     <i class="fas fa-minus"></i> Azalt
+                 </button>
+-                <button class="fab-btn fab-btn-edit" onclick="openProductModal('edit', ${i}, ${d}); window.clearRowSelection();">
++                <button class="fab-btn fab-btn-edit" data-action="editProduct" data-depo="${d}" data-id="${i}">
+                     <i class="fas fa-pen"></i> Düzenle
+                 </button>
+-                <button class="fab-btn fab-btn-clone" onclick="cloneProduct(${d}, ${i}); window.clearRowSelection();">
++                <button class="fab-btn fab-btn-clone" data-action="cloneProduct" data-depo="${d}" data-id="${i}">
+                     <i class="fas fa-copy"></i> Kopyala
+                 </button>
+-                <button class="fab-btn fab-btn-transfer" onclick="openTransferModal(${d}, ${i}); window.clearRowSelection();">
++                <button class="fab-btn fab-btn-transfer" data-action="transferProduct" data-depo="${d}" data-id="${i}">
+                     <i class="fas fa-shipping-fast"></i> Sevk
+                 </button>
+-                <button class="fab-btn fab-btn-watch" onclick="toggleWatch(${d}, ${i})">
++                <button class="fab-btn fab-btn-watch" data-action="toggleWatch" data-depo="${d}" data-id="${i}">
+                     <i class="fas ${isWatched ? 'fa-eye-slash' : 'fa-eye'}"></i> ${isWatched ? 'Bırak' : 'Takip'}
+                 </button>
+-                <button class="fab-btn fab-btn-del" onclick="deleteItem(${d}, ${i}); window.clearRowSelection();">
++                <button class="fab-btn fab-btn-del" data-action="deleteItem" data-depo="${d}" data-id="${i}">
+                     <i class="fas fa-trash-alt"></i> Sil
+                 </button>`;
+         } else {
+@@ -871,16 +894,19 @@ export const UIComponents = {
+             const depo = first.depo;
+             const ids  = items.map(x => x.id);
+             buttonsHtml = `
+-                <button class="fab-btn fab-btn-bulk-del" onclick="window._bulkDeleteSelected(${jsArg(depo)}, ${jsArg(ids)})">
++                <button class="fab-btn fab-btn-bulk-del" data-action="bulkDelete" data-depo="${escapeHtml(depo)}" data-ids="${escapeHtml(JSON.stringify(ids))}">
+                     <i class="fas fa-trash-alt"></i> Toplu Sil (${count})
+                 </button>
+-                <button class="fab-btn fab-btn-bulk-transfer" onclick="showAppAlert('Toplu Sevk özelliği yakında!', 'info')">
++                <button class="fab-btn fab-btn-bulk-transfer" data-action="bulkTransfer">
+                     <i class="fas fa-shipping-fast"></i> Toplu Sevk (${count})
+                 </button>`;
+         }
+
+         const fabBtns = _dom.fabBtns();
+-        if (fabBtns) fabBtns.innerHTML = buttonsHtml;
++        if (fabBtns) {
++            fabBtns.innerHTML = buttonsHtml;
++            _bindProductActions(fabBtns);
++        }
+         fab.classList.add('fab-visible');
+     },
+
+@@ -894,34 +920,35 @@ export const UIComponents = {
+         if (!itemData) return;
+         const item      = (window.data[itemData.depo] || []).find(x => x && String(x.id) === String(itemData.id)) || {};
+         const isWatched = item.isWatched;
+-        const d = jsArg(itemData.depo), i = jsArg(itemData.id);
++        const d = escapeHtml(itemData.depo), i = escapeHtml(itemData.id);
+         const bsName    = _dom.bsName();
+         const bsBtns    = _dom.bsBtns();
+
+         if (bsName) bsName.textContent = itemData.name || 'Ürün';
+         if (bsBtns) bsBtns.innerHTML = `
+-            <button class="bs-action-btn bs-btn-inc" onclick="updateStock(${d}, ${i}, 1); window.closeMobileBottomSheet();">
++            <button class="bs-action-btn bs-btn-inc" data-action="increaseStock" data-depo="${d}" data-id="${i}">
+                 <i class="fas fa-plus"></i> Artır
+             </button>
+-            <button class="bs-action-btn bs-btn-dec" onclick="updateStock(${d}, ${i}, -1); window.closeMobileBottomSheet();">
++            <button class="bs-action-btn bs-btn-dec" data-action="decreaseStock" data-depo="${d}" data-id="${i}">
+                 <i class="fas fa-minus"></i> Azalt
+             </button>
+-            <button class="bs-action-btn bs-btn-edit" onclick="openProductModal('edit', ${i}, ${d}); window.closeMobileBottomSheet();">
++            <button class="bs-action-btn bs-btn-edit" data-action="editProduct" data-depo="${d}" data-id="${i}">
+                 <i class="fas fa-pen"></i> Düzenle
+             </button>
+-            <button class="bs-action-btn bs-btn-clone" onclick="cloneProduct(${d}, ${i}); window.closeMobileBottomSheet();">
++            <button class="bs-action-btn bs-btn-clone" data-action="cloneProduct" data-depo="${d}" data-id="${i}">
+                 <i class="fas fa-copy"></i> Kopyala
+             </button>
+-            <button class="bs-action-btn bs-btn-transfer" onclick="openTransferModal(${d}, ${i}); window.closeMobileBottomSheet();">
++            <button class="bs-action-btn bs-btn-transfer" data-action="transferProduct" data-depo="${d}" data-id="${i}">
+                 <i class="fas fa-shipping-fast"></i> Sevk
+             </button>
+-            <button class="bs-action-btn bs-btn-watch" onclick="toggleWatch(${d}, ${i}); window.closeMobileBottomSheet();">
++            <button class="bs-action-btn bs-btn-watch" data-action="toggleWatch" data-depo="${d}" data-id="${i}">
+                 <i class="fas ${isWatched ? 'fa-eye-slash' : 'fa-eye'}"></i> ${isWatched ? 'Takibi Bırak' : 'Takibe Al'}
+             </button>
+-            <button class="bs-action-btn bs-btn-del" onclick="deleteItem(${d}, ${i}); window.closeMobileBottomSheet();">
++            <button class="bs-action-btn bs-btn-del" data-action="deleteItem" data-depo="${d}" data-id="${i}">
+                 <i class="fas fa-trash-alt"></i> Sil
+             </button>`;
+
++        _bindProductActions(bsBtns, true);
+         const bsOverlay = _dom.bsOverlay();
+         const bsSheet   = _dom.bsSheet();
+         if (bsOverlay) bsOverlay.classList.add('bs-active');

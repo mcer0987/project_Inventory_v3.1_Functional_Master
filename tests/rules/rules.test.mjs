@@ -1255,4 +1255,40 @@ describe('J11 · P0 — kilidi açma yalnız doğrulanmış kapanışla; kapatma
     });
 });
 
+// v3.3 · Aşama 2/3 — raf kataloğu ve stok işlem defteri: kim okur / kim yazar. Transaction ve sayaç kuralları
+// tests/integration/stock-ledger.emu.test.mjs'te (npm run test:ledger:emu).
+describe('v3.3 · Raf kataloğu (shelves) ve stok işlem defteri (stockOperations)', () => {
+    const shelfData = (extra = {}) => ({ code: 'RAF-A 1', depot: 'b1', capacity: 5, usedSlots: 0, active: true, updatedAt: serverTimestamp(), updatedBy: 'admin-uid', ...extra });
+    beforeEach(() => seed(db => setDoc(item(db, LIVE, 'shelves', 'b1_RAF-A 1'), { ...shelfData(), updatedAt: new Date(0) })));
+    test('bağlı personel raf kataloğunu okur ama yazamaz', async () => {
+        await assertSucceeds(getDoc(item(ctx.s1(), LIVE, 'shelves', 'b1_RAF-A 1')));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'shelves', 'b1_RAF-B 1'), shelfData({ code: 'RAF-B 1', updatedBy: 'uid-s1' })));
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'shelves', 'b1_RAF-A 1'), { capacity: 9, updatedAt: serverTimestamp(), updatedBy: 'uid-s1' }));
+    });
+    test('KVKK: personele bağlı olmayan hesap / ziyaretçi raf kataloğunu okuyamaz ("signedIn" yetmez)', async () => {
+        for (const db of [ctx.none(), ctx.anon(), ctx.signup(), ctx.otherUser(), ctx.squatter()]) await assertFails(getDoc(item(db, LIVE, 'shelves', 'b1_RAF-A 1')));
+    });
+    test('admin raf oluşturur / kapasite günceller; tanımsız kök kapalı', async () => {
+        await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'shelves', 'b1_RAF-B 1'), shelfData({ code: 'RAF-B 1' })));
+        await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'shelves', 'b1_RAF-A 1'), { capacity: 9, updatedAt: serverTimestamp(), updatedBy: 'admin-uid' }));
+        await assertFails(setDoc(item(ctx.admin(), 'rogue_root', 'shelves', 'b1_RAF-B 1'), shelfData({ code: 'RAF-B 1' })));
+    });
+    test('admin canlı ve localhost/demo köklerinde raf kataloğunu listeleyebilir; ziyaretçi listeleyemez', async () => {
+        for (const root of [LIVE, DEMO]) {
+            await assertSucceeds(getDocs(collection(ctx.admin(), root, 'shelves', 'items')));
+            await assertFails(getDocs(collection(ctx.none(), root, 'shelves', 'items')));
+        }
+    });
+    test('stok işlem defteri yalnız admin okur; personel okuyamaz / yazamaz', async () => {
+        await seed(db => setDoc(item(db, LIVE, 'stockOperations', 'op_seeded_0001'), { id: 'op_seeded_0001', kind: 'transfer' }));
+        await assertSucceeds(getDoc(item(ctx.admin(), LIVE, 'stockOperations', 'op_seeded_0001')));
+        await assertFails(getDoc(item(ctx.s1(), LIVE, 'stockOperations', 'op_seeded_0001')));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'stockOperations', 'op_staff_0001'), { id: 'op_staff_0001', kind: 'transfer' }));
+    });
+    test('shelves / stockOperations genel koleksiyon kuralından yazılamaz (knownCol dışı)', async () => {
+        await assertFails(setDoc(item(ctx.admin(), LIVE, 'shelves', 'serbest'), { id: 'serbest' }));
+        await assertFails(setDoc(item(ctx.admin(), LIVE, 'stockOperations', 'op_free_00001'), { id: 'op_free_00001' }));
+    });
+});
+
 function assert(v) { if (!v) throw new Error('assert'); }

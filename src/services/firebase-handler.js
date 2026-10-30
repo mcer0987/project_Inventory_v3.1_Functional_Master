@@ -463,6 +463,17 @@ window.startRealtimeSync = function () {
         }, (err) => reportListenerError(colName, err)));
     });
 
+    // A2. RAF KATALOĞU (v3.3 Aşama 2 · P1-02): ortak kapasite/slot sayaçları. Yalnız yönetici oturumunda (raf ekranı ve
+    //     transfer yöneticide; personel dinleyicisi kota yerdi). COLLECTIONS dışında: saveData / yedek sayaçlara dokunmaz.
+    if (typeof window.isDbAdmin === 'function' && window.isDbAdmin()) {
+        _syncUnsubscribers.push(onSnapshot(collection(fireDb, COLLECTION_ROOT, 'shelves', 'items'), (snapshot) => {
+            _markListenerHealthy('shelves');
+            window.data.shelves = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            _bumpDataRevision();
+            window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'shelves', isPatch: false, changes: [] } }));
+        }, (err) => reportListenerError('shelves', err)));
+    }
+
     // B. SİSTEM AYARLARINI DİNLE
     _syncUnsubscribers.push(onSnapshot(systemConfigRef("admin_settings"), (docSnap) => {
         _markListenerHealthy('admin_settings');
@@ -740,15 +751,31 @@ export const saveData = window.saveData = async function (arg1, arg2, arg3) {
         // kanonik olmayana dönüştürülemez: saveData merge yazdığı için kaydın yazma SONRASI hâli tam sözleşmeyle denetlenir.
         if (colName === 'b3' || colName === 'b1' || colName === 'b2') {
             const stock = colName !== 'b3';
-            const guard = _schemaGuardError(writes.map(w => {
+            // v3.3 P1 (Astra): eski biçimli b1/b2 kaydında sözleşme dışı alanlar SALT-OKUNURDUR — yalnız değeri aynen
+            // kalıyorsa korunur. Değeri değişen bir eski alan (ör. qty: 5 → -10) tüm çağrıyı reddeder; hiçbir batch
+            // kurulmaz. Alan silinmez, eski değere döndürülmez, dönüştürülmez (bkz. Schema.legacyStockPatch).
+            const prepared = [];
+            for (const w of writes) {
                 const prev = mirrorById.get(w.key);
-                if (!prev) return { op: 'set', col: colName, id: w.key, data: w.data };
+                if (!prev) { prepared.push({ op: 'set', col: colName, id: w.key, data: w.data }); continue; }
                 if (stock && !_stockViolation({ op: 'set', col: colName, data: prev })) {
-                    return { op: 'set', col: colName, id: w.key, data: { ...prev, ...w.data } };
+                    prepared.push({ op: 'set', col: colName, id: w.key, data: { ...prev, ...w.data } });
+                    continue;
                 }
-                const added = Object.fromEntries(Object.entries(w.data).filter(([k]) => !(k in prev)));
-                return { op: 'update', col: colName, id: w.key, data: added };
-            }), opts);
+                if (!stock) {
+                    // b3 eski kayıt yolu değişmedi: yalnız yeni eklenen alan adları denetlenir.
+                    prepared.push({ op: 'update', col: colName, id: w.key, data: Object.fromEntries(Object.entries(w.data).filter(([k]) => !(k in prev))) });
+                    continue;
+                }
+                const { checked, frozen } = window.Schema.legacyStockPatch(colName, prev, w.data);
+                if (frozen.length) {
+                    return fail('schema-violation',
+                        `${colName} kaydı şema sözleşmesine uymuyor (update ${w.key}): sözleşme dışı eski alan değiştirilemez: ${frozen.map(f => f.key).join(', ')}`,
+                        { collection: colName, id: w.key, op: 'update', errors: frozen.map(f => `eski alan değiştirilemez: ${f.key}`), frozen });
+                }
+                prepared.push({ op: 'update', col: colName, id: w.key, data: checked });
+            }
+            const guard = _schemaGuardError(prepared, opts);
             if (guard) return fail(guard.code, guard.message, guard.details);
         }
         // Faz 4B · J9: sahiplik alanları (personelUid/createdByUid/creatorUid) değiştirilemez; tam yazmada eski değer taşınır.
@@ -858,25 +885,30 @@ function _b3Violation(p, opts = {}) {
 //        planStockOps'un KENDİ hesapladığı stok deltası (patch/full) bu guard'ın kapsamı DIŞINDA kalır — tıpkı B3 guard'ının
 //        da yalnız çağıranın `writes` dizisini denetleyip stok deltasını denetlemediği gibi (bkz. runStockOps).
 //        Faz 5 denetimi (P1): 'set' için gevşetme bayrağı (stockLegacy) YOK — hiçbir yazma yolu eksik alanlı b1/b2 yazamaz.
+// v3.3 P1 (Katı Şema): 'set' ve 'update' aynı kapalı sözleşme (Schema.validateB1/B2); update yalnız eksik zorunlu alandan muaf.
 function _stockViolation(p) {
     if (p.op === 'delete') return null;
     const S = window.Schema;
     const isB1 = p.col === 'b1';
     if (!S || typeof S[isB1 ? 'validateB1' : 'validateB2'] !== 'function') return ['şema modülü (schema.js) yüklenmemiş'];
-    const KEYS = isB1 ? S.B1_KEYS : S.B2_KEYS;
-    const LEGACY_KEYS = isB1 ? S.B1_LEGACY_KEYS : S.B2_LEGACY_KEYS;
-    if (p.op === 'set') {
-        const errors = (isB1 ? S.validateB1 : S.validateB2)(p.data);
-        return errors.length ? errors : null;
-    }
-    const bad = Object.keys(p.data || {}).filter(k => !KEYS.includes(k));
-    return bad.length ? bad.map(k => (LEGACY_KEYS.includes(k) ? `eski alan: ${k}` : `bilinmeyen alan: ${k}`)) : null;
+    const errors = (isB1 ? S.validateB1 : S.validateB2)(p.data || {}, { partial: p.op !== 'set' });
+    return errors.length ? errors : null;
 }
 
 function _schemaViolation(p, opts) {
     if (p.col === 'b3') return _b3Violation(p, opts);
     if (p.col === 'b1' || p.col === 'b2') return _stockViolation(p);
+    if (p.col === 'shelves') return _shelfViolation(p);
     return null;
+}
+// Toplu yazmadaki raf belgesi (v3.3 P1 içe aktarma): tam raf sözleşmesi; updatedAt commit'te sunucu saatine çevrilir.
+function _shelfViolation(p) {
+    if (!p.data) return null;
+    const S = window.Schema;
+    if (!S || typeof S.validateShelfDoc !== 'function') return ['Schema.validateShelfDoc yok'];
+    const data = p.data.updatedAt === window.AtomicWriter.SERVER_TIME ? { ...p.data, updatedAt: Date.now() } : p.data;
+    const errors = S.validateShelfDoc(data, { id: p.id });
+    return errors.length ? errors : null;
 }
 function _schemaGuardError(prepared, opts) {
     for (const p of prepared) {
@@ -1261,13 +1293,45 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
         return fail('bulk-locked', BULK_LOCK_MESSAGE);
     }
 
-    let stockResults;
+    // v3.3 Aşama 4 (Denetim P1-02 devamı): bir stok deltası işgal durumunu DEĞİŞTİRİYORSA (0↔pozitif geçiş, ya da
+    // createIfMissing ile yeniden oluşturma) ilgili raf sayacı (usedSlots) AYNI transaction'da güncellenir. Matematik
+    // src/services/stock-ledger.js'teki planShelfCounterWrites ile PAYLAŞILIR (planTransfer'ın da kullandığı fonksiyon);
+    // requireCatalog:false — yalnız KATALOGDA KAYITLI raflarda kapasite/aktiflik uygulanır, katalogda olmayan (WMS'ten
+    // henüz kapasitesi tanımlanmamış) rafların günlük kullanımı (çıkış, sepet, zimmet ata/iade, servis dönüşü, FAB ±1)
+    // ENGELLENMEZ (geçiş dönemi; bkz. stock-ledger.js dosya başı notu). Occupancy değişmiyorsa (ör. 9→8 adet, ikisi de
+    // pozitif) hiçbir ek okuma/yazma yapılmaz — yaygın durumda sıfır ek maliyet.
+    const _shelfDeltaFor = (col, snap, result) => {
+        const S = window.Schema, L = window.StockLedger;
+        if (!S || !L) return [];
+        const prevDoc = snap.exists() ? snap.data() : null;
+        const nextDoc = result.created ? result.full : (prevDoc ? { ...prevDoc, ...result.patch } : null);
+        const out = [];
+        if (prevDoc && S.isSlotOccupying(prevDoc)) out.push([L.shelfIdOf(col, S.itemShelfCode(prevDoc)), -1]);
+        if (nextDoc && S.isSlotOccupying(nextDoc)) out.push([L.shelfIdOf(col, S.itemShelfCode(nextDoc)), +1]);
+        return out;
+    };
+
+    let stockResults, shelfResults;
     try {
-        stockResults = await runTransaction(fireDb, async (tx) => {
+        ({ results: stockResults, shelves: shelfResults } = await runTransaction(fireDb, async (tx) => {
             const entries = [...stockByKey.values()];
             const snaps = [];
             for (const e of entries) snaps.push(await tx.get(_docRef(e.col, e.id)));   // tüm okumalar yazmalardan önce
             const results = planStockOps(entries, snaps.map(sn => sn.exists() ? sn.data() : null));
+
+            const deltas = new Map();
+            results.forEach((r, i) => {
+                _shelfDeltaFor(r.col, snaps[i], r).forEach(([sid, d]) => { if (sid) deltas.set(sid, (deltas.get(sid) || 0) + d); });
+            });
+            const shelfReads = {};
+            for (const sid of deltas.keys()) {
+                const s = await tx.get(_docRef('shelves', sid));   // raf okumaları da yazmalardan ÖNCE (Firestore kuralı)
+                shelfReads[sid] = s.exists() ? s.data() : null;
+            }
+            const shelfPlan = window.StockLedger
+                ? window.StockLedger.planShelfCounterWrites(deltas, shelfReads, window.userAuth.uid, { requireCatalog: false })
+                : { shelves: [], writes: [] };
+
             results.forEach(r => {
                 const ref = _docRef(r.col, r.id);
                 if (r.created) tx.set(ref, r.full);
@@ -1279,10 +1343,15 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
                 else if (p.op === 'update') tx.update(ref, p.data);
                 else tx.delete(ref);
             });
-            return results;
-        });
+            shelfPlan.writes.forEach(w => {
+                const data = {};
+                Object.keys(w.data).forEach(k => { data[k] = w.data[k] === window.StockLedger.SERVER_TIME ? serverTimestamp() : w.data[k]; });
+                tx.update(_docRef(w.col, w.id), data);
+            });
+            return { results, shelves: shelfPlan.shelves };
+        }));
     } catch (e) {
-        if (e && e.name === 'SaveDataError') return fail(e.code, e.message, e.details);
+        if (e && (e.name === 'SaveDataError' || e.name === 'LedgerError')) return fail(e.code, e.message, e.details);
         if (e && e.code === 'permission-denied') return fail('forbidden', opts.forbiddenMessage || EXIT_ADMIN_ONLY_MESSAGE, { code: e.code });
         if (e && e.code === 'not-found') return fail('not-found', 'Güncellenecek kayıt bulunamadı; başka biri silmiş olabilir.', { code: e.code });
         return fail('write-failed', `İşlem kaydedilemedi: ${e && e.message}`, { code: e && e.code });
@@ -1297,8 +1366,10 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
         }
     });
     prepared.forEach(p => _applyLocal(p.col, p));
+    shelfResults.forEach(s => _shelfLocal(s.id, { usedSlots: s.after }));
     const out = { stock: stockResults.map(({ patch, full, clearPrev, ...rest }) => rest), ids: prepared.map(p => p.id) };
-    console.log('☁️ runStockOps:', out.stock.map(s => `${s.col}/${s.id} ${s.before}→${s.after}`).join(' · '), '| kayıt:', prepared.map(p => `${p.op}:${p.col}`).join(', '));
+    console.log('☁️ runStockOps:', out.stock.map(s => `${s.col}/${s.id} ${s.before}→${s.after}`).join(' · '), '| kayıt:', prepared.map(p => `${p.op}:${p.col}`).join(', '),
+        shelfResults.length ? `| raf: ${shelfResults.map(s => `${s.id} ${s.before}→${s.after}`).join(' · ')}` : '');
     return out;
 };
 
@@ -1318,6 +1389,147 @@ export const runStockTransaction = window.runStockTransaction = async function (
     return res.stock[0];
 };
 
+// ─── v3.3 · Aşama 2 · Transaction'lı iç transfer ve raf kapasitesi (Denetim P1-01, P1-02) ────────────────────────────
+// [WHY]: İç transfer kaynak adedini window.data'dan hesaplayıp kör batch'le yazıyordu (eşzamanlı yazmada stok kaybı,
+//        tekrar gönderimde çift düşüm); kapasite localStorage'daydı. Spark planı: Cloud Functions yok.
+// [HOW]: Motor src/services/stock-ledger.js (saf plan + runTransaction; ayrıntı orada). Burada yalnız: modül/oturum/admin/
+//        toplu kilit ön denetimi, Firestore bağımlılıkları, LedgerError → SaveDataError ve commit SONRASI yerel bellek.
+//        Raf belgeleri ${ROOT}/shelves/items/{depot}_{KOD} (COLLECTIONS'a bilerek EKLENMEZ: saveData / yedek / geri yükleme
+//        sayaçlara dokunamaz); işlem kayıtları ${ROOT}/stockOperations/items/{operationId} (yalnız ekleme).
+const _ledgerDeps = () => ({
+    db: fireDb, root: COLLECTION_ROOT,
+    fns: { runTransaction, doc, getDoc, serverTimestamp },
+    uid: window.userAuth ? window.userAuth.uid : null,
+});
+function _ledgerPreflight(cols, forbiddenMessage) {
+    if (!window.StockLedger) throw new SaveDataError('write-failed', 'Stok defteri modülü (stock-ledger.js) yüklenmemiş; işlem yapılmadı.');
+    if (!window.userAuth) throw new SaveDataError('no-auth', 'Oturum bulunamadı; işlem yapılamadı.');
+    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) throw new SaveDataError('forbidden', forbiddenMessage);
+    if (_bulkLockBlocks(cols)) {
+        _announceDenied('bulk-locked', BULK_LOCK_MESSAGE);
+        throw new SaveDataError('bulk-locked', BULK_LOCK_MESSAGE);
+    }
+}
+function _ledgerError(e, label) {
+    let err;
+    if (e && e.name === 'SaveDataError') err = e;
+    else if (e && e.name === 'LedgerError') err = new SaveDataError(e.code, e.message, e.details);
+    else if (e && e.code === 'permission-denied') err = new SaveDataError('forbidden', 'Sunucu kuralları işlemi reddetti (yetki, raf şeması ya da kapasite).', { code: e.code });
+    else err = new SaveDataError('write-failed', `İşlem kaydedilemedi: ${e && e.message}`, { code: e && e.code });
+    console.error(`❌ ${label} [${err.code}]: ${err.message}`, err.details || '');
+    return err;
+}
+// Raf belgesinin yerel kopyası (dinleyici gelmeden doğru çizim için).
+function _shelfLocal(id, data, op = 'update') {
+    if (!Array.isArray(window.data.shelves)) window.data.shelves = [];
+    const list = window.data.shelves;
+    const idx = list.findIndex(s => s && s.id === id);
+    const next = op === 'set' ? { id, ...data } : { ...(idx !== -1 ? list[idx] : { id }), ...data };
+    if (idx !== -1) list[idx] = next; else list.push(next);
+    _bumpDataRevision();
+}
+
+/**
+ * İç transfer (B1↔B2 ya da aynı depoda başka rafa). input: { operationId, sourceCol, sourceId, targetCol, qty, targetShelf,
+ * targetColumn?, note? }. Aynı operationId ile tekrar → { duplicate:true } ve stoğa dokunulmaz. Hata: SaveDataError
+ * (not-found | insufficient-stock | shelf-missing | shelf-inactive | shelf-full | operation-conflict | conflict | forbidden …).
+ */
+export const runStockTransferTransaction = window.runStockTransferTransaction = async function (input = {}) {
+    _ledgerPreflight([input.sourceCol, input.targetCol].filter(Boolean), 'Transfer işlemi yalnızca sistem yöneticisi tarafından yapılabilir.');
+    let res;
+    try {
+        res = await window.StockLedger.runTransfer(_ledgerDeps(), input);
+    } catch (e) {
+        throw _ledgerError(e, 'runStockTransferTransaction');
+    }
+    const { localWrites, ...out } = res;
+    localWrites.forEach(w => {
+        if (w.col === window.StockLedger.SHELF_COL) _shelfLocal(w.id, w.data);
+        else _applyLocal(w.col, { op: w.kind, id: w.id, data: w.data });
+    });
+    console.log(`☁️ transfer ${out.operationId}${out.duplicate ? ' (tekrar — önceki sonuç)' : ''}: ${out.sourceCol}/${out.sourceId} ${out.stockBefore}→${out.stockAfter} ⇒ ${out.targetCol}/${out.targetId} (${out.qty})`,
+        out.shelves.map(s => `${s.id} ${s.before}→${s.after}`).join(' · '));
+    return out;
+};
+
+// Rafın güncel slot kullanımı: depo koleksiyonu SUNUCUDAN taze okunur (transaction içinde sorgu yapılamaz).
+async function _countShelfUsage(depot, code) {
+    const snap = await getDocsFromServer(collection(fireDb, COLLECTION_ROOT, depot, 'items'));
+    return window.Schema.computeUsedSlots(snap.docs.map(d => d.data()), code);
+}
+
+/**
+ * Raf kapasitesi / aktifliği (raf kataloğunda yoksa oluşturur). Kapasite güncel kullanımın altına inemez (kuralla da
+ * denetlenir). Dönüş: { id, code, depot, capacity, usedSlots, active, created }.
+ */
+export const saveShelfCapacity = window.saveShelfCapacity = async function (depot, code, capacity, opts = {}) {
+    _ledgerPreflight([depot].filter(Boolean), 'Raf kapasitesi yalnızca sistem yöneticisi tarafından değiştirilebilir.');
+    let res;
+    try {
+        res = await window.StockLedger.saveShelf({ ..._ledgerDeps(), countUsage: _countShelfUsage },
+            { depot, code, capacity, active: opts.active });
+    } catch (e) {
+        throw _ledgerError(e, 'saveShelfCapacity');
+    }
+    const { local, ...out } = res;
+    _shelfLocal(out.id, local, 'set');
+    console.log(`☁️ raf ${out.id}: kapasite ${out.capacity}, kullanım ${out.usedSlots}${out.created ? ' (yeni)' : ''}`);
+    return out;
+};
+
+// ─── v3.3 · Aşama 4 · saveProduct transaction'a bağlanması (Denetim P1-02 devamı) ───────────────────────────────────
+// [WHY]: Yeni ürün (appendItem) ve düzenleme (updateItem) kör batch'tir; raf sayacına hiç dokunmaz (P2-04). Düzenleme
+//        ayrıca window.data'nın bayat kopyasıyla çalışıyordu — eşzamanlı bir raf değişikliğiyle yarışabilirdi.
+// [HOW]: Motor src/services/stock-ledger.js: runProductSave (TAZE okuma + planProductSave + raf sayacı,
+//        requireCatalog:false — geçiş dönemi, bkz. dosya başı notu). Yeni kayıt kimliği (appendItem'daki
+//        `${col}_${makeId()}` ile aynı desen) çağıran tarafından (inventory-logic.js) ÜRETİLİR.
+export const runProductSave = window.runProductSave = async function (input = {}) {
+    _ledgerPreflight([input.col].filter(Boolean), 'Ürün kaydı yalnızca sistem yöneticisi tarafından yapılabilir.');
+    let res;
+    try {
+        res = await window.StockLedger.runProductSave(_ledgerDeps(), input);
+    } catch (e) {
+        throw _ledgerError(e, 'runProductSave');
+    }
+    const { localWrites, ...out } = res;
+    localWrites.forEach(w => {
+        if (w.col === window.StockLedger.SHELF_COL) _shelfLocal(w.id, w.data);
+        else _applyLocal(w.col, { op: w.kind, id: w.id, data: w.data });
+    });
+    console.log(`☁️ ürün kaydı ${out.col}/${out.id}${out.created ? ' (yeni)' : ' (düzenleme)'}`,
+        out.shelves.length ? `| raf: ${out.shelves.map(s => `${s.id} ${s.before}→${s.after}`).join(' · ')}` : '');
+    return out;
+};
+
+// ─── v3.3 · Aşama 6 · Veri Geçişi — raf sayaçlarını gerçek stokla uzlaştırma (WMS "Sistem Raf Sayaçlarını Eşitle") ──
+// [WHY]: P1-02 (Aşama 2/4) yalnız KENDİNDEN SONRAKİ stok değişikliklerinde usedSlots'u günceller; ondan önce yazılmış
+//        veri ve kataloğa SONRADAN eklenen eski raflar için sayaç gerçek durumu yansıtmayabilir. Bu, tek seferlik,
+//        geçici bir göç/uzlaştırma aracıdır (WMS sekmesinde yalnız admin görür) — kalıcı bir günlük işlem DEĞİLDİR.
+// [HOW]: b1/b2/shelves SUNUCUDAN TAZE okunur (getDocsFromServer — transaction içinde sorgu yapılamaz ve zaten bu bir
+//        transaction değildir: her raf BAĞIMSIZ düzeltilir, "hepsi ya da hiçbiri" uygulanmaz — bkz. StockLedger.planShelfSync).
+//        Düzeltmeler 450'lik parçalar hâlinde writeBatch ile yazılır (atomic-writer.js'teki LIMITS.maxOps ile aynı pay).
+//        Rafı katalogda olmayan (unregistered) ya da kapasiteyi aşan (capacityRaised — kapasite otomatik sayıma
+//        yükseltilir, firestore.rules'un "usedSlots yalnız capacity içinde artabilir" kuralı bunu gerektirir) durumlar
+//        işlemi DURDURMAZ; yalnız dönüş değerinde raporlanır (admin incelemesi gerekir).
+export const syncShelfCounters = window.syncShelfCounters = async function () {
+    _ledgerPreflight(['b1', 'b2'], 'Raf sayaçlarını eşitleme yalnız yönetici oturumuyla yapılabilir.');
+    let out;
+    try {
+        out = await window.StockLedger.runShelfSync({
+            db: fireDb, root: COLLECTION_ROOT, uid: window.userAuth.uid,
+            fns: { doc, serverTimestamp, getDocsFromServer, collection, writeBatch },
+        });
+    } catch (e) {
+        throw _ledgerError(e, 'syncShelfCounters');
+    }
+    [...out.updated, ...out.capacityRaised].forEach(u => {
+        _shelfLocal(u.id, u.capacityBefore !== undefined ? { usedSlots: u.after, capacity: u.after } : { usedSlots: u.after });
+    });
+    console.log(`🔄 [Sync] Raf sayaçları eşitlendi: ${out.updated.length} güncellendi, ${out.capacityRaised.length} kapasite yükseltilerek düzeltildi, `
+        + `${out.unchanged} zaten doğruydu, ${out.unregistered.length} katalog dışı raf, havuzda ${out.pool.total} ürün (B1 ${out.pool.b1} · B2 ${out.pool.b2}).`);
+    return out;
+};
+
 // ─── Hepsi-ya-da-hiçbiri toplu yazma (Faz 5 denetimi · P0/P1) ─────────────────────────────────────
 // [WHY]: Yedekten geri yükleme ve CSV/Excel içe aktarma saveData'nın 490'lık bağımsız batch'leriyle yazılıyordu; ara bir
 //        batch başarısız olursa Firestore'da yarım veri kalıyordu. Bkz. src/services/atomic-writer.js (günlük + geri alma).
@@ -1326,7 +1538,7 @@ export const runStockTransaction = window.runStockTransaction = async function (
 //        (b1/b2 tam 'set' sözleşmesi, gevşetme yok) ve yalnız Firebase admin oturumuyla çalışır. Hata sözleşmesi saveData ile
 //        aynı (strict → SaveDataError); motor kodları korunur: 'rolled-back' | 'rollback-pending' | 'pending-journal' | …
 const _atomicStore = () => window.AtomicWriter.createFirestoreStore({
-    db: fireDb, root: COLLECTION_ROOT, fns: { doc, collection, getDoc, getDocs, writeBatch, Timestamp },
+    db: fireDb, root: COLLECTION_ROOT, fns: { doc, collection, getDoc, getDocs, writeBatch, Timestamp, runTransaction, serverTimestamp },
 });
 
 // Toplu yazmanın şema muhafızı: b1/b2 → tam sözleşme ('set'); b3 → yeni doküman tam sözleşme, var olan dokümanda yalnız
@@ -1405,22 +1617,25 @@ export const restoreCollections = window.restoreCollections = async function (ta
     return res;
 };
 
-/** Yeni kayıtları (id'leri dolu ve benzersiz) hepsi-ya-da-hiçbiri olarak ekler — CSV/Excel içe aktarma. */
-export const atomicInsertItems = window.atomicInsertItems = async function (col, items, opts = {}) {
+// Yeni kayıt kümesi: id'ler dolu, kendi içinde ve depodaki kayıtlarla çakışmıyor. Hata → SaveDataError, yoksa null.
+function _newItemsError(col, items, label) {
     if (!Array.isArray(items) || !items.length || items.some(x => !x || x.id == null || String(x.id).trim() === '')) {
-        if (opts.strict === false) return false;
-        throw new SaveDataError('invalid-argument', 'atomicInsertItems id\'li kayıt dizisi bekliyor.');
+        return new SaveDataError('invalid-argument', `${label} id'li kayıt dizisi bekliyor.`);
     }
     const known = new Set([...(window._dbMirror[col] || []), ...(window.data[col] || [])].map(x => x && String(x.id)));
     const seen = new Set();
     for (const it of items) {
         const id = String(it.id);
-        if (known.has(id) || seen.has(id)) {
-            if (opts.strict === false) return false;
-            throw new SaveDataError('duplicate-id', `"${col}" içinde ${id} id'li kayıt zaten var.`, { collection: col, id });
-        }
+        if (known.has(id) || seen.has(id)) return new SaveDataError('duplicate-id', `"${col}" içinde ${id} id'li kayıt zaten var.`, { collection: col, id });
         seen.add(id);
     }
+    return null;
+}
+
+/** Yeni kayıtları (id'leri dolu ve benzersiz) hepsi-ya-da-hiçbiri olarak ekler. */
+export const atomicInsertItems = window.atomicInsertItems = async function (col, items, opts = {}) {
+    const bad = _newItemsError(col, items, 'atomicInsertItems');
+    if (bad) { if (opts.strict === false) return false; throw bad; }
     const clean = items.map(x => _clean(_stripRenderFields(x)));
     const res = await _runBulk({
         name: 'atomicInsertItems', collections: [col], opts,
@@ -1428,6 +1643,90 @@ export const atomicInsertItems = window.atomicInsertItems = async function (col,
     });
     if (res) clean.forEach(x => _applyLocal(col, { op: 'set', id: x.id, data: x }));
     return res;
+};
+
+// ─── v3.3 · P1 · Excel içe aktarma: ürünler + yeni raflar + raf sayaçları TEK hepsi-ya-da-hiçbiri işte ─────────────────
+// [WHY]: İçe aktarma ürünleri atomicInsertItems ile yazıp yeni rafları ayrıca saveShelfCapacity ile yaratıyordu; MEVCUT
+//        rafların usedSlots sayacı hiç artmıyordu → ardışık içe aktarmalar kapasiteyi deliyordu. Ayrı yazmalar ayrıca
+//        "ürün yazıldı ama raf yaratılamadı" kısmi başarısına izin veriyordu.
+// [HOW]: Plan AtomicWriter'ın entries(store) adımında SUNUCUDAN taze okunan raf belgeleriyle kurulur
+//        (StockImport.planImportEntries — önizlemeyle aynı saf kural: dolu/pasif raf → Havuz, kapasite artırılmaz).
+//        Raf girdileri cas:true'dur: tek batch'lik işte koşullar ve yazmalar aynı transaction'da, çok parçalı işte kilit
+//        alındıktan sonra doğrulanır; araya giren bir raf değişikliği 'conflict' verir ve iş baştan (taze okumayla)
+//        planlanır (en çok 3 deneme). Geri alma ürünleri, yaratılan rafları ve sayaçları BİRLİKTE geri döndürür
+//        (firestore.rules: kilit altındaki raf geri yazımı muafiyeti). Kilit koleksiyonu içe aktarılan depodur: o deponun
+//        raflarına dokunan tüm defter işlemleri (_ledgerPreflight) kilit sürerken durur.
+// [WHY — proje sahibinin talebi]: Çok parçalı/günlüklü büyük içe aktarmalarda kilidin diğer sekmelere ulaşması kısa bir
+//        gecikmeyle olur (P1 FIX RAPORU'nda belgelenmiş genel-ölçek riski); bu proje için kabul edilmedi.
+// [HOW]: IMPORT_MAX_RECORDS = StockImport.MAX_IMPORT_ROWS (200) — stock-import.js'teki önizleme denetimiyle AYNI sabit,
+//        ama BAĞIMSIZ ikinci bir uygulama noktası: bu kontrol önizlemeyi (buildStockRecords) hiç çağırmadan, doğrudan
+//        atomicImportStock'u (ör. konsoldan) çağıran bir admin oturumunu da durdurur — yönetici dahil aşılamaz. 200 kayıt
+//        + raf girdileri AtomicWriter'ın tek-batch sınırının (LIMITS.maxOps=450) HER ZAMAN altında kalır; bu yüzden bu
+//        giriş noktasından artık hiçbir içe aktarma çok parçalı/günlüklü işe düşmez (kilit hiç kurulmaz).
+const IMPORT_CONFLICT_ATTEMPTS = 3;
+
+/**
+ * @param {'b1'|'b2'} col
+ * @param {object[]} records   StockImport.buildStockRecords().records
+ * @param {{id,code,occupying,line}[]} requests  buildStockRecords().shelfRequests
+ * @returns {Promise<false|{status, journaled, chunks, records:object[], placement:{created:string[], updated:object[],
+ *          poolOverflowCount:number, poolInactiveCount:number, warnings:string[]}}>}
+ */
+export const atomicImportStock = window.atomicImportStock = async function (col, records, requests = [], opts = {}) {
+    const strict = opts.strict !== false;
+    const fail = err => { if (strict) throw err; return false; };
+    if (col !== 'b1' && col !== 'b2') return fail(new SaveDataError('invalid-argument', `Geçersiz depo: ${col}`));
+    if (!window.StockImport || typeof window.StockImport.planImportEntries !== 'function') {
+        return fail(new SaveDataError('write-failed', 'İçe aktarma modülü (stock-import.js) yüklenmemiş.'));
+    }
+    const maxRows = (window.StockImport && window.StockImport.MAX_IMPORT_ROWS) || 200;
+    if (Array.isArray(records) && records.length > maxRows) {
+        return fail(new SaveDataError('import-too-large',
+            `İçe aktarma ${records.length} kayıt içeriyor; tek işlemde en fazla ${maxRows} kayıt yazılabilir (yönetici dahil aşılamaz).`,
+            { count: records.length, max: maxRows }));
+    }
+    const bad = _newItemsError(col, records, 'atomicImportStock');
+    if (bad) return fail(bad);
+    const clean = records.map(x => _clean(_stripRenderFields(x)));
+
+    let plan = null, res = null;
+    for (let attempt = 1; ; attempt++) {
+        try {
+            res = await _runBulk({
+                name: 'atomicImportStock', collections: [col], opts: { ...opts, strict: true },
+                entries: async store => {
+                    const shelfDocs = (await store.readCollection(window.StockLedger ? window.StockLedger.SHELF_COL : 'shelves')).map(d => d.data);
+                    const p = window.StockImport.planImportEntries({
+                        col, records: clean, requests, shelfDocs,
+                        uid: window.userAuth ? window.userAuth.uid : null, serverTime: window.AtomicWriter.SERVER_TIME,
+                    });
+                    plan = p.plan;
+                    return p.entries;
+                },
+            });
+            break;
+        } catch (e) {
+            if (e && e.code === 'conflict' && attempt < IMPORT_CONFLICT_ATTEMPTS) {
+                console.warn(`♻️ atomicImportStock: raf kataloğu plan sırasında değişti; yeniden planlanıyor (${attempt + 1}/${IMPORT_CONFLICT_ATTEMPTS}).`);
+                continue;
+            }
+            return fail(e);
+        }
+    }
+
+    plan.records.forEach(x => _applyLocal(col, { op: 'set', id: x.id, data: x }));
+    plan.shelfEntries.forEach(e => _shelfLocal(e.id, { ...e.next, updatedAt: Date.now() }, 'set'));
+    return {
+        ...res,
+        records: plan.records,
+        placement: {
+            created: plan.shelfChanges.filter(c => c.created).map(c => c.code),
+            updated: plan.shelfChanges.filter(c => !c.created).map(({ code, before, after }) => ({ code, before, after })),
+            poolOverflowCount: plan.poolOverflowCount,
+            poolInactiveCount: plan.poolInactiveCount,
+            warnings: plan.warnings,
+        },
+    };
 };
 
 /** Yarım kalmış toplu yazmayı kurtarır (yazılmış parçaları geri alır ya da tamamlanmış işin günlüğünü temizler). */

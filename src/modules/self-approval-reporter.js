@@ -298,8 +298,10 @@ window.addEventListener('onNavbarRendered', () => {
     const reportBtn = document.createElement('button');
     reportBtn.id = 'btn-security-report';
     reportBtn.type = 'button';
-    reportBtn.className = 'btn-admin-panel';
-    reportBtn.innerHTML = '<i class="fas fa-shield-alt"></i> Güvenlik Raporu';
+    reportBtn.className = 'btn-admin-panel user-action-button user-security-button';
+    reportBtn.setAttribute('aria-label', 'Güvenlik raporunu aç');
+    reportBtn.title = 'Güvenlik Raporu';
+    reportBtn.innerHTML = '<i class="fas fa-shield-alt" aria-hidden="true"></i><span>Güvenlik Raporu</span>';
     reportBtn.style.cssText = 'padding: 6px 12px; width: auto; margin-top: 0; font-size: 12px; background: #e67e22; border: none; border-radius: 4px; color: white; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;';
     reportBtn.onclick = () => showReportModal();
     const logoutBtn = userDisplay.querySelector('button[onclick="handleLogout()"]');
@@ -313,5 +315,3 @@ window.addEventListener('onNavbarRendered', () => {
 export const SelfApproval = { showReportModal, closeReportModal };
 
 window.AppModules.SelfApproval = SelfApproval;
-
-console.log('✅ [self-approval-reporter.js] Self-approval denetim raporu modülü yüklendi.');
