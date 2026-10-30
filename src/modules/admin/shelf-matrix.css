@@ -1,0 +1,992 @@
+.shelf-matrix {
+    --shelf-surface: var(--color-surface, #fff);
+    --shelf-surface-alt: var(--color-surface-alt, #f8fafc);
+    --shelf-border: var(--color-border, #e2e8f0);
+    --shelf-text: var(--color-text, #1e293b);
+    --shelf-muted: var(--color-text-muted, #64748b);
+    color: var(--shelf-text);
+    padding: clamp(16px, 2.5vw, 30px);
+}
+
+.shelf-matrix-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+/* v3.3 Aşama 6: geçici/tek seferlik göç aracı — gündelik eylemlerden (raf kartları, filtre) bilinçli olarak ayrı,
+   "dikkat" tonunda (amber — .shelf-card-critical/.shelf-card-unregistered ile aynı aile) bir yardımcı araç görünümü. */
+.shelf-sync-btn {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    border-radius: 10px;
+    background: rgba(245, 158, 11, 0.1);
+    color: #92400e;
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 150ms ease, opacity 150ms ease;
+}
+
+.shelf-sync-btn:hover {
+    background: rgba(245, 158, 11, 0.18);
+}
+
+.shelf-sync-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+[data-theme="dark"] .shelf-sync-btn {
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.14);
+}
+
+.shelf-matrix-header h2 {
+    margin: 0;
+    font-size: clamp(1.3rem, 2vw, 1.8rem);
+    color: var(--shelf-text);
+}
+
+.shelf-matrix-header p {
+    margin: 6px 0 0;
+    color: var(--shelf-muted);
+    font-size: 0.9rem;
+}
+
+/* v3.3 P1 ek: "Depo Aksiyonları" — WMS'ten index.html'e dönmeden B1/B2 Excel import/export erişimi (proje sahibinin
+   talebi). shelf-matrix-toolbar'ın (depo sekmesi/arama/sıralama) ÜSTÜNDE, ayrı bir şerit; depo SEÇİMİNDEN bağımsızdır
+   (her iki depo da her zaman görünür) — WMS'in o an hangi depoyu gösterdiğiyle karışmasın diye bilinçli olarak ayrı. */
+.shelf-matrix-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 18px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 12px;
+    background: var(--shelf-surface-alt);
+}
+
+.shelf-matrix-actions-label {
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--shelf-muted);
+    flex-shrink: 0;
+}
+
+.shelf-matrix-actions-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.shelf-matrix-actions-depot {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--shelf-text);
+    margin-right: 2px;
+}
+
+.shelf-matrix-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(220px, 1fr) minmax(190px, auto);
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.shelf-matrix-depots {
+    display: flex;
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 12px;
+    background: var(--shelf-surface);
+}
+
+.shelf-depot-btn,
+.shelf-sort select {
+    border: 1px solid var(--shelf-border);
+    border-radius: 9px;
+    background: var(--shelf-surface);
+    color: var(--shelf-text);
+    font: inherit;
+}
+
+.shelf-depot-btn {
+    min-height: 38px;
+    padding: 8px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.shelf-depot-btn.active {
+    border-color: var(--color-primary, #2563eb);
+    background: var(--color-primary, #2563eb);
+    color: #fff;
+}
+
+.shelf-search {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    height: 42px;
+    padding: 0 12px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 11px;
+    background: var(--shelf-surface);
+    color: var(--shelf-muted);
+}
+
+.shelf-search input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--shelf-text);
+    font: inherit;
+}
+
+.shelf-search input::placeholder {
+    color: var(--shelf-muted);
+    opacity: 0.8;
+}
+
+.shelf-sort {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--shelf-muted);
+    font-size: 0.8rem;
+}
+
+.shelf-sort select {
+    min-width: 0;
+    height: 42px;
+    padding: 0 10px;
+    flex: 1;
+}
+
+.shelf-matrix-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.shelf-metric {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 11px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 999px;
+    background: var(--shelf-surface);
+    color: var(--shelf-muted);
+    font-size: 0.78rem;
+}
+
+.shelf-metric strong {
+    color: var(--shelf-text);
+    font-weight: 600;
+}
+
+.shelf-metric > span {
+    min-width: 20px;
+    text-align: center;
+    font-weight: 700;
+    color: var(--shelf-text);
+}
+
+.shelf-metric-alert > span {
+    color: #dc2626;
+}
+
+.shelf-metric-muted {
+    border-style: dashed;
+}
+
+.shelf-matrix-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 245px), 1fr));
+    gap: 12px;
+    align-items: stretch;
+}
+
+.shelf-card {
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--shelf-border);
+    border-radius: 15px;
+    background: var(--shelf-surface);
+    box-shadow: 0 3px 12px rgba(15, 23, 42, 0.045);
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.shelf-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.09);
+}
+
+.shelf-card-normal {
+    border-top: 3px solid #16a34a;
+}
+
+.shelf-card-critical {
+    border-top: 3px solid #f59e0b;
+}
+
+.shelf-card-full {
+    border-top: 3px solid #dc2626;
+}
+
+.shelf-card-unassigned {
+    border-top: 3px solid #64748b;
+    border-style: dashed;
+}
+
+.shelf-card-open {
+    display: flex;
+    width: 100%;
+    min-height: 164px;
+    padding: 16px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.shelf-card-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 28px;
+    padding-right: 22px;
+}
+
+.shelf-card-code {
+    overflow: hidden;
+    color: var(--shelf-text);
+    font-size: 1rem;
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.shelf-card-count,
+.shelf-card-types,
+.shelf-capacity-label {
+    color: var(--shelf-muted);
+    font-size: 0.76rem;
+}
+
+.shelf-card-types {
+    margin-top: -6px;
+}
+
+/* v3.3 Aşama 4: WMS'ten kapasitesi henüz tanımlanmamış (geçiş dönemi) raflar için küçük rozet — bkz. shelf-matrix.js
+   collectShelves. Vurgu rengi .shelf-card-critical ile aynıdır (#f59e0b): bu dosyadaki tek "dikkat" tonu. */
+.shelf-card-unregistered {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.16);
+    color: #b45309;
+    font-weight: 600;
+    font-size: 0.68rem;
+    letter-spacing: 0.02em;
+    cursor: help;
+}
+
+.shelf-capacity-btn {
+    position: absolute;
+    z-index: 1;
+    top: 10px;
+    right: 10px;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--shelf-border);
+    border-radius: 9px;
+    background: var(--shelf-surface-alt);
+    color: var(--shelf-text);
+    cursor: pointer;
+}
+
+.shelf-progress {
+    display: block;
+    height: 7px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--shelf-surface-alt);
+}
+
+.shelf-progress > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #16a34a;
+    transition: width 180ms ease;
+}
+
+.shelf-card-critical .shelf-progress > span {
+    background: #f59e0b;
+}
+
+.shelf-card-full .shelf-progress > span {
+    background: #dc2626;
+}
+
+.shelf-slots {
+    display: flex;
+    gap: 5px;
+    min-height: 8px;
+}
+
+.shelf-slot {
+    width: 8px;
+    height: 8px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 3px;
+    background: var(--shelf-surface-alt);
+}
+
+.shelf-slot.occupied {
+    border-color: #16a34a;
+    background: #16a34a;
+}
+
+.shelf-card-critical .shelf-slot.occupied {
+    border-color: #f59e0b;
+    background: #f59e0b;
+}
+
+.shelf-card-full .shelf-slot.occupied {
+    border-color: #dc2626;
+    background: #dc2626;
+}
+
+.shelf-card-hint {
+    display: flex;
+    justify-content: space-between;
+    margin-top: auto;
+    padding-top: 4px;
+    color: var(--color-primary, #2563eb);
+    font-size: 0.75rem;
+    font-weight: 650;
+}
+
+.shelf-empty {
+    grid-column: 1 / -1;
+    padding: 28px 16px;
+    border: 1px dashed var(--shelf-border);
+    border-radius: 14px;
+    color: var(--shelf-muted);
+    text-align: center;
+}
+
+.shelf-error {
+    color: #dc2626;
+}
+
+.shelf-drawer-overlay {
+    --shelf-surface: var(--color-surface, #fff);
+    --shelf-surface-alt: var(--color-surface-alt, #f8fafc);
+    --shelf-border: var(--color-border, #e2e8f0);
+    --shelf-text: var(--color-text, #1e293b);
+    --shelf-muted: var(--color-text-muted, #64748b);
+    --shelf-drawer-accent: var(--color-primary, #2563eb);
+    position: fixed;
+    z-index: 13000;
+    inset: 0;
+    display: flex;
+    justify-content: flex-end;
+    visibility: hidden;
+    opacity: 0;
+    background: rgba(8, 15, 30, 0.68);
+    backdrop-filter: blur(7px) saturate(115%);
+    -webkit-backdrop-filter: blur(7px) saturate(115%);
+    pointer-events: none;
+    transition: opacity 200ms ease, visibility 200ms ease;
+}
+
+.shelf-drawer-overlay.is-open {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.shelf-drawer {
+    box-sizing: border-box;
+    display: flex;
+    width: min(480px, calc(100vw - 24px));
+    height: calc(100% - 24px);
+    margin: 12px;
+    flex-direction: column;
+    overflow: auto;
+    overflow-x: hidden;
+    border: 1px solid var(--shelf-border);
+    border-radius: 24px;
+    background:
+        radial-gradient(ellipse at 100% 0, color-mix(in srgb, var(--shelf-drawer-accent) 11%, transparent), transparent 42%),
+        var(--shelf-surface);
+    color: var(--shelf-text);
+    box-shadow: 0 30px 90px rgba(2, 8, 23, 0.42), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+    transform: translateX(100%);
+    transition: transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.shelf-drawer *,
+.shelf-drawer *::before,
+.shelf-drawer *::after {
+    box-sizing: border-box;
+}
+
+.shelf-drawer::-webkit-scrollbar {
+    width: 7px;
+}
+
+.shelf-drawer::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--shelf-muted) 35%, transparent);
+}
+
+.shelf-drawer-overlay.is-open .shelf-drawer {
+    transform: translateX(0);
+}
+
+.shelf-drawer-header {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 -1px;
+    padding: 22px 22px 20px;
+    border-bottom: 1px solid var(--shelf-border);
+    border-radius: 23px 23px 0 0;
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--shelf-drawer-accent) 13%, var(--shelf-surface)), var(--shelf-surface) 70%);
+}
+
+.shelf-drawer-heading {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 14px;
+}
+
+.shelf-drawer-mark {
+    display: grid;
+    width: 52px;
+    height: 52px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--shelf-drawer-accent) 28%, var(--shelf-border));
+    border-radius: 17px;
+    background: color-mix(in srgb, var(--shelf-drawer-accent) 12%, var(--shelf-surface));
+    color: var(--shelf-drawer-accent);
+    font-size: 2rem;
+    font-weight: 500;
+    box-shadow: 0 7px 18px color-mix(in srgb, var(--shelf-drawer-accent) 12%, transparent);
+}
+
+.shelf-drawer-eyebrow,
+.shelf-drawer-list-header small {
+    display: block;
+    color: var(--shelf-muted);
+    font-size: 0.62rem;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+}
+
+.shelf-drawer-depot {
+    display: block;
+    margin-top: 5px;
+    color: var(--shelf-muted);
+    font-size: 0.78rem;
+}
+
+.shelf-drawer-header h2 {
+    margin: 2px 0 0;
+    color: var(--shelf-text);
+    font-size: 1.55rem;
+    font-weight: 780;
+    letter-spacing: -0.035em;
+}
+
+.shelf-drawer-close {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--shelf-border);
+    border-radius: 12px;
+    background: var(--shelf-surface);
+    color: var(--shelf-muted);
+    font-size: 1.45rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.shelf-drawer-close:hover {
+    transform: rotate(90deg);
+    border-color: var(--shelf-drawer-accent);
+    color: var(--shelf-drawer-accent);
+}
+
+.shelf-drawer-summary {
+    position: relative;
+    margin: 18px 22px 0;
+    padding: 14px 15px 14px 42px;
+    border: 1px solid color-mix(in srgb, var(--shelf-drawer-accent) 20%, var(--shelf-border));
+    border-radius: 13px;
+    background: color-mix(in srgb, var(--shelf-drawer-accent) 6%, var(--shelf-surface));
+    color: var(--shelf-text);
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.shelf-drawer-summary::before {
+    position: absolute;
+    top: 50%;
+    left: 15px;
+    width: 10px;
+    height: 10px;
+    border: 3px solid color-mix(in srgb, var(--shelf-drawer-accent) 24%, var(--shelf-surface));
+    border-radius: 50%;
+    background: var(--shelf-drawer-accent);
+    content: "";
+    transform: translateY(-50%);
+}
+
+.shelf-drawer-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 24px 22px 12px;
+}
+
+.shelf-drawer-list-header h3 {
+    margin: 3px 0 0;
+    color: var(--shelf-text);
+    font-size: 1rem;
+    font-weight: 720;
+}
+
+.shelf-drawer-item-count {
+    padding: 6px 10px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 999px;
+    background: var(--shelf-surface-alt);
+    color: var(--shelf-muted);
+    font-size: 0.72rem;
+    font-weight: 650;
+}
+
+.shelf-product-list {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0 22px 22px;
+    list-style: none;
+}
+
+.shelf-product-row {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 13px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 14px;
+    background: var(--shelf-surface);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.045);
+    transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.shelf-product-row:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--shelf-drawer-accent) 36%, var(--shelf-border));
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.shelf-product-index {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border: 1px solid var(--shelf-border);
+    border-radius: 11px;
+    background: var(--shelf-surface-alt);
+    color: var(--shelf-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.shelf-product-info {
+    display: grid;
+    min-width: 0;
+    gap: 5px;
+}
+
+.shelf-product-info strong {
+    overflow-wrap: anywhere;
+    color: var(--shelf-text);
+    font-size: 0.88rem;
+    font-weight: 700;
+}
+
+.shelf-product-info small {
+    overflow-wrap: anywhere;
+    color: var(--shelf-muted);
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.shelf-product-quantity {
+    min-width: 58px;
+    padding: 7px 9px;
+    border: 1px solid color-mix(in srgb, #16a34a 18%, var(--shelf-border));
+    border-radius: 10px;
+    background: color-mix(in srgb, #16a34a 7%, var(--shelf-surface));
+    color: #15803d;
+    text-align: center;
+    white-space: nowrap;
+    font-size: 0.78rem;
+    font-weight: 750;
+}
+
+.shelf-product-quantity small {
+    display: block;
+    margin-top: 1px;
+    color: var(--shelf-muted);
+    font-size: 0.62rem;
+    font-weight: 400;
+}
+
+[data-theme="dark"] .shelf-product-quantity {
+    color: #86efac;
+}
+
+.shelf-product-actions {
+    display: grid;
+    justify-items: end;
+    gap: 7px;
+}
+
+.shelf-product-move {
+    padding: 6px 9px;
+    border: 1px solid color-mix(in srgb, var(--shelf-drawer-accent) 28%, var(--shelf-border));
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--shelf-drawer-accent) 7%, var(--shelf-surface));
+    color: var(--shelf-drawer-accent);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.68rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.shelf-product-move:hover {
+    background: color-mix(in srgb, var(--shelf-drawer-accent) 14%, var(--shelf-surface));
+}
+
+.shelf-dialog-overlay {
+    --shelf-surface: var(--color-surface, #fff);
+    --shelf-surface-alt: var(--color-surface-alt, #f8fafc);
+    --shelf-border: var(--color-border, #e2e8f0);
+    --shelf-text: var(--color-text, #1e293b);
+    --shelf-muted: var(--color-text-muted, #64748b);
+    --shelf-drawer-accent: var(--color-primary, #2563eb);
+    position: fixed;
+    z-index: 14000;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: rgba(8, 15, 30, 0.7);
+    backdrop-filter: blur(7px);
+    -webkit-backdrop-filter: blur(7px);
+    animation: shelfDialogFadeIn 140ms ease-out;
+}
+
+.shelf-dialog {
+    width: min(430px, 100%);
+    max-height: calc(100vh - 36px);
+    padding: 22px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 20px;
+    background:
+        radial-gradient(ellipse at 100% 0, color-mix(in srgb, var(--shelf-drawer-accent) 12%, transparent), transparent 44%),
+        var(--shelf-surface);
+    color: var(--shelf-text);
+    box-shadow: 0 28px 80px rgba(2, 8, 23, 0.42);
+    overflow-y: auto;
+    animation: shelfDialogRise 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* v3.3 Aşama 6: Sync sonucu diyaloğu (showSyncResultDialog) — uzun olabilecek uyarı listeleri için. */
+.shelf-sync-warning {
+    color: #92400e;
+    font-weight: 700;
+}
+
+[data-theme="dark"] .shelf-sync-warning {
+    color: #fbbf24;
+}
+
+.shelf-sync-list {
+    max-height: 160px;
+    margin: 0 0 4px;
+    padding: 0 0 0 18px;
+    overflow-y: auto;
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
+
+.shelf-dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.shelf-dialog-eyebrow {
+    color: var(--shelf-drawer-accent);
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.13em;
+}
+
+.shelf-dialog-close {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border: 1px solid var(--shelf-border);
+    border-radius: 10px;
+    background: var(--shelf-surface);
+    color: var(--shelf-muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+}
+
+.shelf-dialog > h2 {
+    margin: 8px 0 4px;
+    color: var(--shelf-text);
+    font-size: 1.2rem;
+}
+
+.shelf-dialog-description {
+    margin: 0 0 18px;
+    color: var(--shelf-muted);
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
+
+.shelf-dialog-form {
+    display: grid;
+    gap: 12px;
+}
+
+.shelf-dialog-fields {
+    display: grid;
+    gap: 8px;
+}
+
+.shelf-dialog-label {
+    color: var(--shelf-text);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.shelf-dialog-fields input,
+.shelf-dialog-fields select {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 10px;
+    outline: none;
+    background: var(--shelf-surface-alt);
+    color: var(--shelf-text);
+    font: inherit;
+    font-size: 0.88rem;
+}
+
+.shelf-dialog-fields input:focus,
+.shelf-dialog-fields select:focus {
+    border-color: var(--shelf-drawer-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--shelf-drawer-accent) 16%, transparent);
+}
+
+.shelf-dialog-fields option:disabled {
+    color: var(--shelf-muted);
+}
+
+.shelf-dialog-error {
+    margin: 0;
+    color: #dc2626;
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.shelf-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.shelf-dialog-cancel,
+.shelf-dialog-submit {
+    min-height: 40px;
+    padding: 9px 13px;
+    border-radius: 10px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.shelf-dialog-cancel {
+    border: 1px solid var(--shelf-border);
+    background: var(--shelf-surface);
+    color: var(--shelf-muted);
+}
+
+.shelf-dialog-submit {
+    border: 1px solid var(--shelf-drawer-accent);
+    background: var(--shelf-drawer-accent);
+    color: #fff;
+}
+
+.shelf-dialog-submit:hover {
+    filter: brightness(1.06);
+}
+
+[data-theme="dark"] .shelf-product-move {
+    color: #93c5fd;
+}
+
+[data-theme="dark"] .shelf-dialog-error {
+    color: #fca5a5;
+}
+
+body.shelf-drawer-open {
+    overflow: hidden;
+}
+
+body.shelf-dialog-open {
+    overflow: hidden;
+}
+
+@keyframes shelfDialogFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes shelfDialogRise {
+    from { opacity: 0; transform: translateY(8px) scale(0.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 900px) {
+    .shelf-matrix-toolbar {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .shelf-matrix-depots {
+        grid-column: 1 / -1;
+    }
+
+    .shelf-depot-btn {
+        flex: 1;
+    }
+}
+
+@media (max-width: 560px) {
+    .shelf-matrix {
+        padding: 16px 12px;
+    }
+
+    .shelf-matrix-toolbar {
+        grid-template-columns: 1fr;
+    }
+
+    .shelf-matrix-depots,
+    .shelf-search,
+    .shelf-sort {
+        grid-column: 1;
+    }
+
+    .shelf-depot-btn {
+        padding: 8px 7px;
+        font-size: 0.75rem;
+    }
+
+    .shelf-drawer-overlay {
+        align-items: flex-end;
+        justify-content: stretch;
+    }
+
+    .shelf-drawer {
+        width: 100%;
+        height: min(82vh, 720px);
+        margin: 0;
+        border: 1px solid var(--shelf-border);
+        border-bottom: 0;
+        border-radius: 22px 22px 0 0;
+        transform: translateY(100%);
+    }
+
+    .shelf-drawer-overlay.is-open .shelf-drawer {
+        transform: translateY(0);
+    }
+
+    .shelf-drawer-header {
+        padding: 18px 16px 16px;
+        border-radius: 21px 21px 0 0;
+    }
+
+    .shelf-drawer-mark {
+        width: 44px;
+        height: 44px;
+        border-radius: 14px;
+        font-size: 1.7rem;
+    }
+
+    .shelf-drawer-summary,
+    .shelf-drawer-list-header {
+        margin-right: 16px;
+        margin-left: 16px;
+    }
+
+    .shelf-product-list {
+        padding-right: 16px;
+        padding-left: 16px;
+    }
+}

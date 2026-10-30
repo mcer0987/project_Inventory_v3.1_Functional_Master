@@ -1,7 +1,8 @@
 /**
  * utils/schema.js — Veri şeması yardımcıları (klasik script, iki sayfada <head>'de html.js'ten hemen sonra)
  * Faz 3.3: makeId. Faz 3.6: şema sözleşmesi — normName, isDemirbas, normalizeStock, normalizeB3 / buildB3Entry /
- * validateB3 / toCanonicalB3, normalizeRequest. Fonksiyonlar window.data'yı çağrı anında okur (yükleme sırası önemsiz).
+ * validateB3 / toCanonicalB3, normalizeRequest. v3.3 Aşama 1: raf/slot sözleşmesi (normShelfCode, isSlotOccupying,
+ * computeUsedSlots, shelfDocId, validateShelfDoc). Fonksiyonlar window.data'yı çağrı anında okur (yükleme sırası önemsiz).
  */
 // [WHY]: Kayıt id'leri Date.now(), Date.now()+Math.random() (ondalıklı id) ve 'temp_…' ile üretiliyordu; aynı milisaniyede
 //        oluşan iki kayıt aynı dokümana düşüp merge ile birleşebiliyordu (DATA-12).
@@ -240,8 +241,8 @@
     //        kayıtlar İngilizce takma adlarla (name/type/shelf/qty) gelmiş, hiçbir yazma yolu doğrulanmıyordu. Sevk/transfer
     //        ve hurda akışları (K2) yeni kod yazdıkça aynı dağınıklık büyüyecekti.
     // [HOW]: B3'teki sözleşme modeliyle aynı desen: *_KEYS kanonik alan listesi, *_LEGACY_KEYS eski takma adlar,
-    //        validateB1/validateB2 'set' (tam kayıt, hepsi zorunlu) ve 'update' (yalnız bilinen alan adı, firebase-handler'da
-    //        kullanılır) ayrımıyla. B3'ten farklı olarak 'sema' alanı yok (b1/b2 hiç taşımadı, şimdi eklemek gereksiz kayma
+    //        validateB1/validateB2 'set' (tam kayıt, hepsi zorunlu) ve 'update' ({partial:true}; aynı alan/tip kuralları)
+    //        ayrımıyla. B3'ten farklı olarak 'sema' alanı yok (b1/b2 hiç taşımadı, şimdi eklemek gereksiz kayma
     //        yaratır); içerik denetimi de B3 kadar katı değil — yalnız tip/şekil denetlenir, iş kuralı (ad boş olamaz, adet
     //        negatif olamaz vb.) dışında alanların boş olması geçerlidir (ör. marka, durumu boş string olabilir — mevcut
     //        davranış, bkz. computeStockPatch'in STOCK_AUTO_READY listesindeki '').
@@ -250,27 +251,94 @@
     // B2 hem 'durumu' hem 'status' yazar (saveProduct her ikisini de set eder); bu yüzden B2_KEYS'te ikisi de zorunlu.
     const B2_KEYS = Object.freeze(['id', 'sütun', 'raf', 'tür', 'ürün', 'marka', 'adet', 'durumu', 'status', 'açıklama', 'isDemirbas', 'lastUpdate']);
     const B2_LEGACY_KEYS = Object.freeze(['name', 'type', 'shelf', 'qty']);
+    // v3.3 P1 (Astra · Katı Şema): TAM KAPALI sözleşme — zorunlu (*_KEYS) + isteğe bağlı (*_OPTIONAL_KEYS) dışında hiçbir alan
+    //        yazılamaz. İsteğe bağlı küme, canlı yazıcıların envanteridir (yeni alan "uydurulmadı"):
+    //          isWatched       — FAB "takip" (toggleWatch → updateItem)
+    //          limit           — kritik stok eşiği (Excel içe aktarma; panel ve Excel raporu okur). null = tanımsız.
+    //          stokOncekiDurum — stok 0'a düşerken saklanan önceki durum (computeStockPatch); tam kayıt yazan yollar
+    //                            (saveData / upsertItem / geri yükleme) kaydı bu alanla birlikte yeniden yazar.
+    //          envanterNo      — YALNIZ B2 (demirbaş kimliği). B1 sözleşmesi bu alanı REDDEDER; B1 Excel içe aktarması
+    //                            sütunu tanır ama değeri hiç yazmaz (stock-import.js).
+    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum']);
+    const B2_OPTIONAL_KEYS = Object.freeze([...B1_OPTIONAL_KEYS, 'envanterNo']);
+    const STOCK_STRING_KEYS = Object.freeze(['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status', 'envanterNo', 'stokOncekiDurum']);
 
-    function _validateStock(e, KEYS, LEGACY_KEYS, opts) {
+    const B1_SPEC = Object.freeze({ required: B1_KEYS, optional: B1_OPTIONAL_KEYS, legacy: B1_LEGACY_KEYS, label: 'B1' });
+    const B2_SPEC = Object.freeze({ required: B2_KEYS, optional: B2_OPTIONAL_KEYS, legacy: B2_LEGACY_KEYS, label: 'B2' });
+    const B2_ONLY_KEYS = Object.freeze(B2_SPEC.required.concat(B2_SPEC.optional).filter(k => !B1_KEYS.includes(k) && !B1_OPTIONAL_KEYS.includes(k)));
+
+    /**
+     * 'set' (tam kayıt) ve 'update' ({partial:true} — kısmi alan kümesi) AYNI alan ve tip kurallarını kullanır; update YALNIZ
+     * "eksik zorunlu alan" denetiminden muaftır. Bilinmeyen alan, eski takma ad ve yanlış tip her iki yolda da reddedilir.
+     */
+    function _validateStock(e, spec, opts) {
+        if (!e || typeof e !== 'object' || Array.isArray(e)) return ['kayıt yok'];
         const errors = [];
-        if (!e || typeof e !== 'object') return ['kayıt yok'];
-        if (opts.legacy !== true) {
-            KEYS.forEach(k => { if (!Object.prototype.hasOwnProperty.call(e, k) || e[k] === undefined) errors.push(`eksik alan: ${k}`); });
+        const has = k => Object.prototype.hasOwnProperty.call(e, k);
+        if (opts.partial !== true) {
+            spec.required.forEach(k => { if (!has(k) || e[k] === undefined) errors.push(`eksik alan: ${k}`); });
         }
-        LEGACY_KEYS.forEach(k => { if (Object.prototype.hasOwnProperty.call(e, k)) errors.push(`eski alan: ${k}`); });
-        if ('ürün' in e && isBlank(e.ürün)) errors.push('ürün adı boş olamaz');
-        if ('adet' in e && (!Number.isInteger(e.adet) || e.adet < 0)) errors.push(`geçersiz adet: ${e.adet}`);
-        if ('isDemirbas' in e && typeof e.isDemirbas !== 'boolean') errors.push('isDemirbas boolean değil');
-        if ('lastUpdate' in e && typeof e.lastUpdate !== 'number') errors.push('lastUpdate sayı değil');
-        ['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status'].forEach(k => {
-            if (k in e && typeof e[k] !== 'string') errors.push(`${k} string değil`);
+        Object.keys(e).forEach(k => {
+            if (spec.legacy.includes(k)) errors.push(`eski alan: ${k}`);
+            else if (spec === B1_SPEC && B2_ONLY_KEYS.includes(k)) errors.push(`${k} yalnız B2 (demirbaş) kaydında olabilir`);
+            else if (!spec.required.includes(k) && !spec.optional.includes(k)) errors.push(`bilinmeyen alan: ${k}`);
         });
+        if (has('id') && !((typeof e.id === 'string' && e.id.trim() !== '') || (typeof e.id === 'number' && Number.isFinite(e.id)))) {
+            errors.push('id boş olmayan metin ya da sayı değil');
+        }
+        if (has('ürün')) {
+            if (typeof e.ürün !== 'string') errors.push('ürün string değil');
+            else if (isBlank(e.ürün)) errors.push('ürün adı boş olamaz');
+        }
+        if (has('adet') && (!Number.isInteger(e.adet) || e.adet < 0)) errors.push(`geçersiz adet: ${e.adet}`);
+        if (has('limit') && e.limit !== null && (!Number.isInteger(e.limit) || e.limit < 0)) errors.push(`geçersiz limit: ${e.limit}`);
+        if (has('isDemirbas') && typeof e.isDemirbas !== 'boolean') errors.push('isDemirbas boolean değil');
+        if (has('isWatched') && typeof e.isWatched !== 'boolean') errors.push('isWatched boolean değil');
+        if (has('lastUpdate') && typeof e.lastUpdate !== 'number') errors.push('lastUpdate sayı değil');
+        STOCK_STRING_KEYS.forEach(k => { if (has(k) && typeof e[k] !== 'string') errors.push(`${k} string değil`); });
         return errors;
     }
-    // set (tam kayıt) → KEYS'in tamamı zorunlu; update çağıranları (firebase-handler) ayrıca "yalnız bilinen alan adı"
-    // denetimini kendisi yapar (B3 guard'ıyla aynı iki aşamalı desen, bkz. _b3Violation / applyItemOps).
-    function validateB1(e, opts = {}) { return _validateStock(e, B1_KEYS, B1_LEGACY_KEYS, opts); }
-    function validateB2(e, opts = {}) { return _validateStock(e, B2_KEYS, B2_LEGACY_KEYS, opts); }
+    function validateB1(e, opts = {}) { return _validateStock(e, B1_SPEC, opts); }
+    function validateB2(e, opts = {}) { return _validateStock(e, B2_SPEC, opts); }
+    // Bir koleksiyonun sözleşmede yeri olan TÜM alan adları (zorunlu + isteğe bağlı) — saveData'nın eski biçimli kayıt yolu.
+    function stockKnownKeys(col) {
+        const spec = col === 'b2' ? B2_SPEC : B1_SPEC;
+        return spec.required.concat(spec.optional);
+    }
+
+    // Değer eşitliği: undefined → "" (saveData'nın _clean'i ile aynı), nesne anahtar sırası önemsiz.
+    function _sameValue(a, b) {
+        const norm = v => JSON.stringify(v === undefined ? '' : v, (k, x) => {
+            if (x === undefined) return '';
+            if (x && typeof x === 'object' && !Array.isArray(x)) return Object.keys(x).sort().reduce((o, key) => { o[key] = x[key]; return o; }, {});
+            return x;
+        });
+        return norm(a) === norm(b);
+    }
+
+    /**
+     * Sözleşmeye henüz uymayan (eski biçimli) bir b1/b2 kaydının tam yeniden yazımı (saveData) için muhafız planı.
+     * [WHY]: v3.3 P1 (Astra) — eski yol, kayıtta zaten bulunan sözleşme dışı alanları denetimden tümüyle çıkarıyordu; "eski
+     *        alan korunabilir" kuralı farkında olmadan "eski alan doğrulanmadan DEĞİŞTİRİLEBİLİR" oluyordu (qty: 5 → -10
+     *        hiçbir denetime girmeden Firestore'a yazılıyordu).
+     * [HOW]: Sözleşme dışı (eski/bilinmeyen) bir alan YALNIZ değeri aynen kalıyorsa korunur; değeri değişmişse 'frozen'
+     *        listesine girer ve çağıran işlemi REDDETMELİDİR (silme, eski değere döndürme ya da dönüştürme yapılmaz).
+     *        Yeni eklenen alanlar ve değeri değişen sözleşme alanları 'checked'e girer ve validateB1/B2({partial:true})
+     *        ile denetlenir. Saf fonksiyon: yazma yapmaz.
+     * @returns {{checked:object, frozen:{key:string, before:*, after:*}[]}}
+     */
+    function legacyStockPatch(col, prev, next) {
+        const known = stockKnownKeys(col);
+        const checked = {}, frozen = [];
+        Object.entries(next || {}).forEach(([k, v]) => {
+            const existed = prev && Object.prototype.hasOwnProperty.call(prev, k);
+            if (!existed) { checked[k] = v; return; }
+            if (_sameValue(prev[k], v)) return;
+            if (known.includes(k)) checked[k] = v;
+            else frozen.push({ key: k, before: prev[k], after: v });
+        });
+        return { checked, frozen };
+    }
 
     // [WHY]: Faz 5 denetimi (P1) — b1/b2 tam 'set' sözleşmesi saveData'da esnetilmişti, çünkü CSV/Excel içe aktarma
     //        "rafNo" (b1/b2'de alanın adı 'raf'), "limit" gibi alanlarla ve isDemirbas'sız kayıt üretiyordu; eski yedeklerde de
@@ -317,6 +385,154 @@
         const lu = Number(p.lastUpdate);
         out.lastUpdate = typeof p.lastUpdate === 'number' ? p.lastUpdate : (Number.isFinite(lu) && lu > 0 ? lu : (opts.now ?? Date.now()));
         return out;
+    }
+
+    // ─── v3.3 · Aşama 1 · Raf / slot sözleşmesi (Denetim P1-02 temeli, P2-05) ─────────────────────────────────────
+    // [WHY]: Raf kodu iki modülde iki farklı kuralla okunuyordu (shelf-capacity: yalnız trim, '-' bir raf adı; WMS: '-' ve
+    //        boş atlanır, durumu boşsa status'a düşer) ve hiçbiri büyük/küçük harf ya da iç boşluk farkını sıfırlamıyordu:
+    //        "A-12", "a-12", " A-12 " üç ayrı raf sayılıyor, kapasite anahtarı da raf adının ham yazımına bağlı kalıyordu.
+    //        Kapasite tarayıcıya özel localStorage'da tutuluyordu; ortak bir raf belgesi sözleşmesi yoktu.
+    // [HOW]: Tek normalizasyon (normShelfCode), tek kayıt→raf okuyucusu (itemShelfCode), tek slot işgal tanımı
+    //        (isSlotOccupying: pozitif adetli ve aktif durumlu her kayıt 1 slot; adet slotu artırmaz) ve
+    //        ${ROOT}/shelves/items/{shelfId} belgesinin sözleşmesi (SHELF_KEYS, buildShelfDoc, validateShelfDoc).
+    //        shelfId deterministiktir: `${depot}_${code}`; code karakter kümesi '/' içermediği ve '_' ile başlamadığı için
+    //        Firestore belge kimliği kurallarına uyar ve firestore.rules tarafında aynı birleştirmeyle doğrulanabilir.
+    //        Saf fonksiyonlardır: SDK, DOM ve localStorage kullanmazlar (sayaçları transaction'da Aşama 2 yazar).
+    const SHELF_COLLECTION = 'shelves';
+    const SHELF_DEPOTS = Object.freeze(['b1', 'b2']);
+    const SHELF_DEFAULT_CAPACITY = 5;
+    const SHELF_MIN_CAPACITY = 1;
+    const SHELF_MAX_CAPACITY = 200;
+    const SHELF_CODE_MAX_LENGTH = 40;
+    // Kanonik kod: büyük harf (Türkçe harfler dahil, İ → I katlanır), rakam; ilk karakterden sonra boşluk . - _ olabilir.
+    const SHELF_CODE_RE = /^[A-Z0-9ÇĞÖŞÜ][A-Z0-9ÇĞÖŞÜ .\-_]*$/;
+    const SHELF_KEYS = Object.freeze(['code', 'depot', 'capacity', 'usedSlots', 'active', 'updatedAt', 'updatedBy']);
+    // Slot işgal etmeyen durumlar (normName ile karşılaştırılır: büyük/küçük harf, ı/i ve fazla boşluk farkı yok sayılır).
+    // 'pasif' ayrıca alt dize olarak aranır (filter-module isPassiveStatus ile aynı: "Tükendi / Pasif", "Pasif (Arızalı)").
+    const SHELF_INACTIVE_STATUSES = Object.freeze(['stok dışı', 'stok disi', 'tükendi', 'tukendi'].map(normName));
+
+    /**
+     * Raf kodunun tekil kanonik biçimi. "A-12", "a-12", " A-12 ", "a - 12", "Ａ－１２" → "A-12". Boş, null ve '-' → ''
+     * (rafsız). Sıfır dolgusu anlamlıdır: "A-1" ile "A-01" ayrı raflardır (sessiz birleştirme yok).
+     */
+    function normShelfCode(value) {
+        if (value === undefined || value === null) return '';
+        const code = String(value)
+            .normalize('NFKC')                                   // tam genişlik → ASCII, birleşik karakterler
+            .replace(/[​-‍⁠﻿]/g, '')         // sıfır genişlikli karakterler
+            .replace(/[‐-―−]/g, '-')              // tire varyantları → '-'
+            .toUpperCase()
+            .replace(/̇/g, '').replace(/İ/g, 'I')            // "i" / "ı" / "İ" hepsi "I" (normName ile aynı katlama)
+            .replace(/\s+/g, ' ')
+            .replace(/\s*-\s*/g, '-')
+            .trim();
+        return code === '-' ? '' : code;
+    }
+
+    // Kanonik raf kodu sözleşmeye uygun mu (belge kimliği yapılabilir mi)? Normalize edilmemiş girdi geçersizdir.
+    function isValidShelfCode(code) {
+        return typeof code === 'string' && code !== '' && code.length <= SHELF_CODE_MAX_LENGTH
+            && SHELF_CODE_RE.test(code) && normShelfCode(code) === code;
+    }
+
+    // Stok kaydının kanonik raf kodu: raf → shelf → rafNo; boş ve '-' atlanır. Rafsız kayıt → ''.
+    function itemShelfCode(item) {
+        if (!item || typeof item !== 'object') return '';
+        for (const v of [item.raf, item.shelf, item.rafNo]) {
+            const code = normShelfCode(v);
+            if (code) return code;
+        }
+        return '';
+    }
+
+    /**
+     * Slot işgali: kaydın adedi > 0 VE durumu (durumu ya da status — hangisi doluysa, ikisi de doluysa ikisi de) slot dışı
+     * değilse 1 slot. 'Hurda', 'Servis Sürecinde' vb. pozitif adetle rafta durduğu için slot işgal eder.
+     */
+    function isSlotOccupying(item) {
+        if (!item || typeof item !== 'object') return false;
+        const qty = Number.parseFloat(item.adet ?? item.qty ?? item.quantity ?? 0);
+        if (!Number.isFinite(qty) || qty <= 0) return false;
+        return ![item.durumu, item.status].some(s => {
+            const n = normName(s);
+            return n !== '' && (SHELF_INACTIVE_STATUSES.includes(n) || n.includes('pasif'));
+        });
+    }
+
+    const _stockValues = items => (Array.isArray(items) ? items : (items && typeof items === 'object' ? Object.values(items) : []));
+
+    // Verilen depodaki kayıtlardan bir rafın işgal edilen slot sayısı (raf kodu normalize edilerek karşılaştırılır).
+    function computeUsedSlots(items, code) {
+        const target = normShelfCode(code);
+        if (!target) return 0;
+        return _stockValues(items).filter(item => isSlotOccupying(item) && itemShelfCode(item) === target).length;
+    }
+
+    // Bütün raflar için { kanonikKod: slot } (Aşama 6 uzlaştırma raporu ve WMS için). Rafsız işgaller '' anahtarında.
+    function slotUsageByShelf(items) {
+        const usage = {};
+        _stockValues(items).forEach(item => {
+            if (!isSlotOccupying(item)) return;
+            const code = itemShelfCode(item);
+            usage[code] = (usage[code] || 0) + 1;
+        });
+        return usage;
+    }
+
+    // Deterministik raf belge kimliği. Geçersiz depo/kod → RangeError (sessiz uydurma kimlik yok).
+    function shelfDocId(depot, code) {
+        const c = normShelfCode(code);
+        if (!SHELF_DEPOTS.includes(depot)) throw new RangeError(`Geçersiz depo: ${depot}`);
+        if (!isValidShelfCode(c)) throw new RangeError(`Geçersiz raf kodu: "${code}"`);
+        return `${depot}_${c}`;
+    }
+
+    /**
+     * Kanonik raf belgesi kurar (kod normalize edilir; capacity varsayılanı 5, usedSlots 0, active true). updatedAt
+     * Firestore'a yazılırken sunucu zamanıyla (serverTimestamp) değiştirilir; burada verilmezse Date.now().
+     */
+    function buildShelfDoc(o = {}) {
+        return {
+            code: normShelfCode(o.code),
+            depot: o.depot,
+            capacity: o.capacity ?? SHELF_DEFAULT_CAPACITY,
+            usedSlots: o.usedSlots ?? 0,
+            active: o.active ?? true,
+            updatedAt: o.updatedAt ?? Date.now(),
+            updatedBy: o.updatedBy,
+        };
+    }
+
+    /**
+     * Raf belgesi sözleşmesi → hata listesi (boş = geçerli). Fazla alan reddedilir. opts.id verilirse belge kimliği
+     * shelfDocId(depot, code) ile aynı olmalıdır. usedSlots > capacity bilinçli olarak belge hatası DEĞİLDİR: geçiş sonrası
+     * kapasite aşımı "düzeltme bekleyen raf" durumudur (Aşama 6); slot artıran işlemi Aşama 2 transaction'ı reddeder.
+     * updatedAt: ms sayısı ya da Firestore zaman nesnesi/sentinel'i (sunucu zamanı kuralı firestore.rules'ta denetlenir).
+     */
+    function validateShelfDoc(d, opts = {}) {
+        const errors = [];
+        if (!d || typeof d !== 'object' || Array.isArray(d)) return ['kayıt yok'];
+        SHELF_KEYS.forEach(k => { if (!Object.prototype.hasOwnProperty.call(d, k) || d[k] === undefined) errors.push(`eksik alan: ${k}`); });
+        Object.keys(d).forEach(k => { if (!SHELF_KEYS.includes(k)) errors.push(`bilinmeyen alan: ${k}`); });
+        if ('depot' in d && !SHELF_DEPOTS.includes(d.depot)) errors.push(`geçersiz depo: ${d.depot}`);
+        if ('code' in d && !isValidShelfCode(d.code)) errors.push(`geçersiz raf kodu: ${d.code}`);
+        if ('capacity' in d && (!Number.isInteger(d.capacity) || d.capacity < SHELF_MIN_CAPACITY || d.capacity > SHELF_MAX_CAPACITY)) {
+            errors.push(`geçersiz kapasite: ${d.capacity} (${SHELF_MIN_CAPACITY}–${SHELF_MAX_CAPACITY} tam sayı)`);
+        }
+        if ('usedSlots' in d && (!Number.isInteger(d.usedSlots) || d.usedSlots < 0)) errors.push(`geçersiz usedSlots: ${d.usedSlots}`);
+        if ('active' in d && typeof d.active !== 'boolean') errors.push('active boolean değil');
+        if ('updatedAt' in d && d.updatedAt !== undefined) {
+            const t = d.updatedAt;
+            const ok = (typeof t === 'number' && Number.isFinite(t) && t > 0) || (t !== null && typeof t === 'object');
+            if (!ok) errors.push('updatedAt zaman değeri değil');
+        }
+        if ('updatedBy' in d && d.updatedBy !== undefined && (typeof d.updatedBy !== 'string' || isBlank(d.updatedBy) || d.updatedBy.length > 128)) {
+            errors.push('updatedBy (admin UID) geçersiz');
+        }
+        if (opts.id !== undefined && SHELF_DEPOTS.includes(d.depot) && isValidShelfCode(d.code) && opts.id !== `${d.depot}_${d.code}`) {
+            errors.push(`belge kimliği uyumsuz: ${opts.id} ≠ ${d.depot}_${d.code}`);
+        }
+        return errors;
     }
 
     // ─── 3.9a · Cihaz kimliği (Seri No / Envanter No) ───
@@ -426,7 +642,11 @@
         makeId, normName, idToTs, isDemirbas, normalizeStock, findStock, isSelfApproval,
         B3_SCHEMA_VERSION, B3_KEYS, B3_LEGACY_KEYS, B3_TIP, STOK_DISI,
         buildB3Entry, normalizeB3, toCanonicalB3, validateB3,
-        B1_KEYS, B1_LEGACY_KEYS, B2_KEYS, B2_LEGACY_KEYS, validateB1, validateB2, toCanonicalStock,
+        B1_KEYS, B1_LEGACY_KEYS, B2_KEYS, B2_LEGACY_KEYS, B1_OPTIONAL_KEYS, B2_OPTIONAL_KEYS, stockKnownKeys, legacyStockPatch,
+        validateB1, validateB2, toCanonicalStock,
+        SHELF_COLLECTION, SHELF_DEPOTS, SHELF_DEFAULT_CAPACITY, SHELF_MIN_CAPACITY, SHELF_MAX_CAPACITY, SHELF_CODE_MAX_LENGTH,
+        SHELF_KEYS, normShelfCode, isValidShelfCode, itemShelfCode, isSlotOccupying, computeUsedSlots, slotUsageByShelf,
+        shelfDocId, buildShelfDoc, validateShelfDoc,
         requestStatus, normalizeRequest,
         normDeviceId, deviceKeys, validateDeviceIds,
     };

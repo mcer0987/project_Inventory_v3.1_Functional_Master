@@ -14,6 +14,13 @@ priority: 1
 
 ---
 
+## 0. The 4 Sovereign Pillars (Egemenlik İlkeleri)
+All code must align with our future decentralized/sovereign vision:
+1. **Asset Identity:** Hardware is not a row; it is a living entity with strict lifecycle tracking (SN/ID mandatory).
+2. **Code is Law:** Business rules belong in strict contracts (`schema.js` and rules), never in loose UI clicks.
+3. **Immutable Audit:** History cannot be rewritten. Audit logs are strictly append-only.
+4. **Vendor Agnostic:** UI must never bind directly to proprietary database SDKs. All data flows through `/services/` abstractions.
+
 ## 1. Technology Stack
 
 - **Language:** Pure Vanilla JavaScript (ES6+). No TypeScript compilation required.

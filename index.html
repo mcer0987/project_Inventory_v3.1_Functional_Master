@@ -3,7 +3,11 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1e293b">
+    <link rel="manifest" href="manifest.json">
     <title>Envanter Takip Sistemi</title>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -23,16 +27,20 @@
     </script>
 
     <!-- FontAwesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha384-PPIZEGYM1v8zp5Py7UjFb79S58UeqCL9pYVnVPURKEqvioPROaVAJKKLzvH2rDnI" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="dark-theme.css">
+    <link rel="stylesheet" href="mobile-responsive.css">
+    <link rel="stylesheet" href="login-redesign.css">
     <script src="dark-mode-toggle.js"></script>
+    <script src="src/ui/mobile-nav-enhancements.js" defer></script>
     <script src="src/utils/session-store.js"></script>
     <script src="src/utils/html.js"></script>
     <script src="src/utils/schema.js"></script>
     <script src="src/utils/stock-import.js"></script>
     <script src="src/services/atomic-writer.js"></script>
+    <script src="src/services/stock-ledger.js"></script>
     <script src="src/utils/staff-code-registry.js"></script>
     <script src="src/services/staff-provisioning.js"></script>
     <script src="src/utils/ownership.js"></script>
@@ -210,7 +218,7 @@
     <div id="customAlertOverlay" class="custom-alert-overlay" style="display: none;">
         <div class="custom-alert-box">
             <h3 id="alertTitle">Emin misiniz?</h3>
-            <p id="alertMessage">Bu işlemi gerçekleştirmek istediğinize emin misiniz?</p>
+            <div id="alertMessage">Bu işlemi gerçekleştirmek istediğinize emin misiniz?</div>
             <div class="alert-buttons">
                 <button id="alertConfirmBtn" class="btn-confirm">Evet</button>
                 <button id="alertCancelBtn" class="btn-cancel">Hayır</button>
@@ -398,10 +406,10 @@
                     <path d="M7 12H17" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                     <path d="M12 7V17" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
-                <div style="font-weight:800; font-size:1.2rem; color:var(--color-primary); letter-spacing:-0.5px;">
-                    ENVANTER<span style="font-weight:400; color:var(--color-text-muted);">TAKİP SİSTEMİ</span></div>
+                <div class="brand-wordmark" style="font-weight:800; font-size:1.2rem; color:var(--color-primary); letter-spacing:-0.5px;">
+                    ENVANTER<span class="brand-wordmark-secondary" style="font-weight:400; color:var(--color-text-muted);">TAKİP SİSTEMİ</span></div>
             </div>
-            <button class="theme-toggle-btn" onclick="toggleTheme()" title="Koyu Temaya Geç" id="themeToggleMain">
+            <button class="theme-toggle-btn" onclick="toggleTheme()" title="Koyu Temaya Geç" aria-label="Koyu temaya geç" aria-pressed="false" id="themeToggleMain">
                 <i class="fas fa-moon"></i>
             </button>
             <!-- [DECOMMISSIONED] Launchpad Button Removed -->
@@ -412,7 +420,8 @@
             ⚠️ Oturumunuz 1 dakika içinde kapatılacak! Devam etmek için sayfaya tıklayın.
         </div>
 
-        <div class="tabs">
+        <nav class="tabs-scroll-shell" aria-label="Ana bölümler" aria-describedby="mainTabsHelp">
+        <div class="tabs" id="mainTabs">
             <button class="tab-button active" onclick="switchTab.call(this, 'b1')">B1 Depo</button>
             <button class="tab-button" data-tab="b1" onclick="switchTab.call(this, 'b2')">B2 Depo</button>
             <button class="tab-button" data-tab="b2" onclick="switchTab.call(this, 'b3')">Envanter Çıkış Yap</button>
@@ -426,6 +435,8 @@
             <button class="tab-button" onclick="switchTab.call(this, 'myApprovals')">Bana Gelen Onaylar</button>
             <button class="tab-button" onclick="switchTab.call(this, 'myTasksTab')">Görevlerim</button>
         </div>
+        <span class="mobile-nav-help" id="mainTabsHelp">Yatay kaydırarak diğer bölümlere ulaşabilirsiniz.</span>
+        </nav>
 
         <div id="b1" class="tab-content active">
             <div class="search-bar">
@@ -476,6 +487,9 @@
                     onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
                     <i class="fas fa-file-excel"></i> Import
                 </label>
+                <button type="button" class="uab-btn uab-btn-icon import-help-trigger" title="Excel sütun formatı" aria-label="Excel sütun formatı"
+                    onclick="showImportFormatHelp('b1')"><svg class="import-help-symbol" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.5 4.8 6.4 4.2 3 5v14c3.4-.8 6.5-.2 9 1.5C14.5 18.8 17.6 18.2 21 19V5c-3.4-.8-6.5-.2-9 1.5Z"/><path d="M12 6.5v14M6.5 9l2 .4M6.5 12l2 .4M15.5 9.4l2-.4M15.5 12.4l2-.4"/></svg>
+                </button>
 
                 <button class="uab-btn uab-btn-success" onclick="exportToExcel('b1')">
                     <i class="fas fa-chart-bar"></i> Excel Rapor
@@ -557,6 +571,14 @@
                     onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
                     <i class="fas fa-file-excel"></i> Import
                 </label>
+                <button type="button" class="uab-btn uab-btn-icon import-help-trigger" title="Excel sütun formatı" aria-label="Excel sütun formatı"
+                    onclick="showImportFormatHelp('b2')"><svg class="import-help-symbol" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.5 4.8 6.4 4.2 3 5v14c3.4-.8 6.5-.2 9 1.5C14.5 18.8 17.6 18.2 21 19V5c-3.4-.8-6.5-.2-9 1.5Z"/><path d="M12 6.5v14M6.5 9l2 .4M6.5 12l2 .4M15.5 9.4l2-.4M15.5 12.4l2-.4"/></svg>
+                </button>
+
+                <!-- v3.3 Saha Hotfix'i: B1'deki "Excel Rapor" B2'ye de eklendi (envanterNo dahil — bkz. script.js exportToExcel). -->
+                <button class="uab-btn uab-btn-success" onclick="exportToExcel('b2')">
+                    <i class="fas fa-chart-bar"></i> Excel Rapor
+                </button>
             </div>
             <div class="table-responsive-wrapper">
                 <table id="tableB2">
@@ -1215,23 +1237,29 @@
         </div>
 
         <!-- Giriş Modal -->
-        <div id="loginModal" class="modal" style="display: flex !important; align-items: center !important; justify-content: center !important;">
-            <div class="modal-content login-special-style">
+        <div id="loginModal" class="modal login-modal-v3" role="dialog" aria-modal="true"
+            aria-labelledby="loginModalTitle" aria-describedby="loginModalDescription"
+            style="display: flex !important; align-items: center !important; justify-content: center !important;">
+            <div class="modal-content login-special-style login-card-v3">
                 <div class="login-header-bar"></div>
                 <div class="login-inner-body">
-                    <div class="login-icon-box">📦</div>
+                    <div class="login-eyebrow">KURUMSAL ENVANTER PLATFORMU</div>
+                    <div class="login-icon-box" aria-hidden="true">📦</div>
                     <h2 id="loginModalTitle">Envanter Yönetimi</h2>
-                    <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Kurumsal kimliğiniz (ad.soyad) ve giriş kodunuzla girin.
-                        Yönetici: yalnız parolayı girip "Yönetici Paneli"ne basın.</p>
+                    <p class="login-description" id="loginModalDescription">
+                        Envanterinize güvenli şekilde erişmek için kurumsal kimliğinizle oturum açın.
+                        Yöneticiyseniz yönetici parolanızı kullanın.
+                    </p>
 
-<form id="loginForm" onsubmit="event.preventDefault(); handleLogin(event);" autocomplete="off">
+                    <form id="loginForm" onsubmit="event.preventDefault(); handleLogin(event);" autocomplete="off">
                             <!-- Faz 4B · J10 PRI: iki kutu; giriş veritabanını okumadan <pri>@staff.medipol.local hesabına gider -->
                             <div class="modern-input-group">
+                                <label class="login-field-label" for="login-pri">Kurumsal kimlik (PRI)</label>
                                 <input type="text" id="login-pri" placeholder="ad.soyad" aria-label="Kurumsal kimlik (PRI)"
-                                    autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"
-                                    style="width:100%; box-sizing:border-box; height:55px; font-size:18px; text-align:center; border:2px solid var(--color-border-light); border-radius:var(--radius-lg); background:var(--color-surface-alt);">
+                                    autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
                             </div>
                             <div class="modern-input-group">
+                                <label class="login-field-label" for="access-val-node">Giriş kodu veya yönetici parolası</label>
                                 <input type="password" id="access-val-node" placeholder="Giriş kodu / yönetici parolası"
                                     aria-label="Giriş kodu ya da yönetici parolası" autocomplete="off">
                                 <script>
@@ -1250,19 +1278,21 @@
                             <div id="loginStatus"></div>
 
                             <button type="submit" id="login-submit-btn" class="btn-login-new">
-                                Sisteme Giriş Yap
+                                <span>Sisteme Giriş Yap</span>
+                                <i class="fas fa-arrow-right" aria-hidden="true"></i>
                             </button>
 
                             <div class="login-divider"><span>VEYA</span></div>
 
-                            <button type="button" class="btn-admin-panel" onclick="checkAdminAndGo()">
-                                🛡️ Yönetici Paneli
+                            <button type="button" class="btn-admin-panel login-admin-button" aria-label="Yönetici paneline güvenli giriş yap" onclick="checkAdminAndGo()">
+                                <i class="fas fa-shield-halved" aria-hidden="true"></i>
+                                <span>Yönetici Paneli</span>
                             </button>
 
                             <!-- [DECOMMISSIONED] Return to Launchpad Button Removed -->
                         </form>
                 </div>
-                <div class="login-mini-footer">CR Envanter v2.0</div>
+                <div class="login-mini-footer">ENVANTER TAKİP SİSTEMİ <span aria-hidden="true">·</span> V3.3</div>
             </div>
         </div>
 
@@ -1424,14 +1454,17 @@
 
     <!-- [WHY]: Aynı modül farklı URL ile (?v= ile/siz) yüklenince tarayıcı onu iki kez çalıştırıyordu (ARC-01).
          [HOW]: Her modül tek URL; utils/security-biometrics/auth-engine/table/inventory/ui/self-approval yalnız main.js import'uyla yüklenir. -->
+    <script src="src/utils/dialog-stack.js"></script>
     <script src="security.js"></script>
     <script src="src/utils/alert.js"></script>
     <script src="src/utils/timer.js"></script>
+    <script src="src/utils/shelf-capacity.js"></script>
     <script src="personel.js"></script>
     <script src="pdf-generator.js"></script>
     <script type="module" src="src/services/firebase-handler.js"></script>
     <script type="module" src="src/services/purchase-servises.js"></script>
     <script type="module" src="src/modules/edm-workflow.js"></script>
+    <script src="src/utils/admin-quick-unlock.js"></script>
     <script type="module" src="src/modules/main.js"></script>
     <script src="script.js"></script>
 

@@ -1333,7 +1333,6 @@ window.renderMyApprovals = function () {
     }
 
     const rawUser = window.currentUser;
-    console.log("👤 Aktif Kullanıcı (Raw):", rawUser);
 
     const me = (rawUser?.name || "").trim().toLocaleLowerCase('tr-TR');
     console.log("👤 Aktif Kullanıcı (Normalize):", me);
@@ -2704,4 +2703,3 @@ window.AppModules.Workflow = window.AppModules.Workflow || {
     withdrawWorkflow: typeof withdrawWorkflow === 'function' ? withdrawWorkflow : null,
     stopWorkflow: typeof stopWorkflow === 'function' ? stopWorkflow : null
 };
-

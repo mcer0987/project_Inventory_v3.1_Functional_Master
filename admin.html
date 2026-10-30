@@ -3,7 +3,11 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1e293b">
+    <link rel="manifest" href="manifest.json">
     <title>Admin Dashboard | Envanter Yönetimi</title>
     <link rel="icon" href="data:,">
 
@@ -23,9 +27,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"
         integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"
         referrerpolicy="no-referrer"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
-        integrity="sha384-PPIZEGYM1v8zp5Py7UjFb79S58UeqCL9pYVnVPURKEqvioPROaVAJKKLzvH2rDnI" crossorigin="anonymous"
-        referrerpolicy="no-referrer">
+    <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="admin-add-style.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="dark-theme.css">
@@ -33,9 +35,11 @@
     <script src="dark-mode-toggle.js"></script>
     <script src="src/utils/session-store.js"></script>
     <script src="src/utils/html.js"></script>
+    <script src="src/utils/shelf-capacity.js"></script>
     <script src="src/utils/schema.js"></script>
     <script src="src/utils/stock-import.js"></script>
     <script src="src/services/atomic-writer.js"></script>
+    <script src="src/services/stock-ledger.js"></script>
     <script src="src/utils/staff-code-registry.js"></script>
     <script src="src/services/staff-provisioning.js"></script>
     <script src="src/utils/ownership.js"></script>
@@ -46,6 +50,7 @@
 
     <!-- VIP System Control & SortableJS -->
     <link rel="stylesheet" href="admin-system-control.css">
+    <link rel="stylesheet" href="src/modules/admin/shelf-matrix.css">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js"
         integrity="sha384-DgmC6Xe2bSN2WjTDXzWYbUbxyhNP+NNkGDR/g78pCXV7E7rcVTGxVg0uIVCUUcBc" crossorigin="anonymous"
         referrerpolicy="no-referrer"></script>
@@ -269,6 +274,9 @@
         <div class="nav-item" id="nav-inventoryManagement" onclick="showAdminTab('inventoryManagementTab')">
             <i class="fas fa-boxes" style="color: var(--color-success);"></i>
             <span>Envanter Yönetimi</span>
+        </div>
+        <div class="nav-item" id="nav-shelfMatrix" onclick="showAdminTab('shelfMatrixTab')">
+            <span>🧱 Depo Raf Haritası (WMS)</span>
         </div>
         <div class="nav-item vip-nav-item" id="nav-systemControl" onclick="showAdminTab('systemControlTab')">
             <i class="fas fa-shield-alt"></i>
@@ -1335,6 +1343,73 @@
         <!-- 📦 Envanter Yönetimi Sekmesi (inventory-management.js tarafından doldurulacak) -->
         <div id="inventoryManagementTab" class="admin-tab-content" style="display: none;">
             <!-- İçerik inventory-management.js tarafından dinamik olarak çizilecektir -->
+        </div>
+
+        <div id="shelfMatrixTab" class="admin-tab-content" style="display: none;">
+            <section id="shelfMatrixApp" class="shelf-matrix" aria-label="Depo raf haritası">
+                <header class="shelf-matrix-header">
+                    <div>
+                        <h2>🧱 Depo Raf Haritası</h2>
+                        <p>B1 ve B2 stoklarını fiziksel raf konumlarına göre bulun.</p>
+                    </div>
+                    <!-- v3.3 Aşama 6 (Veri Geçişi): geçici/tek seferlik uzlaştırma aracı — raf sayaçlarını (usedSlots)
+                         gerçek stokla eşitler. Kalıcı bir günlük işlem değildir; bkz. shelf-matrix.js syncShelfCountersAction. -->
+                    <button type="button" id="shelfMatrixSyncBtn" class="shelf-sync-btn"
+                        title="Göç aracı: tüm B1/B2 stoğunu tarar, raf doluluk sayaçlarını gerçek verilerle eşitler.">
+                        🔄 Sistem Raf Sayaçlarını Eşitle (Sync)
+                    </button>
+                </header>
+                <!-- v3.3 P1 ek (proje sahibinin talebi): "index.html'e dönmeden" B1/B2 Excel import/export erişimi. WMS zaten
+                     her iki deponun raf durumunu gösteriyordu; içe/dışa aktarma yalnız index.html'deki B1/B2 sekmelerinde vardı. -->
+                <div class="shelf-matrix-actions" role="group" aria-label="Depo aksiyonları">
+                    <span class="shelf-matrix-actions-label">Depo Aksiyonları</span>
+                    <div class="shelf-matrix-actions-group">
+                        <span class="shelf-matrix-actions-depot">B1</span>
+                        <label for="fileInput" class="uab-btn uab-btn-purple uab-btn-sm"
+                            onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
+                            <i class="fas fa-file-excel"></i> Import
+                        </label>
+                        <button type="button" class="uab-btn uab-btn-success uab-btn-sm" onclick="exportToExcel('b1')">
+                            <i class="fas fa-chart-bar"></i> Excel Rapor
+                        </button>
+                    </div>
+                    <div class="shelf-matrix-actions-group">
+                        <span class="shelf-matrix-actions-depot">B2</span>
+                        <label for="fileInput" class="uab-btn uab-btn-purple uab-btn-sm"
+                            onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
+                            <i class="fas fa-file-excel"></i> Import
+                        </label>
+                        <button type="button" class="uab-btn uab-btn-success uab-btn-sm" onclick="exportToExcel('b2')">
+                            <i class="fas fa-chart-bar"></i> Excel Rapor
+                        </button>
+                    </div>
+                    <button type="button" class="uab-btn uab-btn-sm import-help-trigger import-help-shared" aria-label="B1 ve B2 içe aktarma rehberi" onclick="showImportFormatHelp('all')"><svg class="import-help-symbol" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.5 4.8 6.4 4.2 3 5v14c3.4-.8 6.5-.2 9 1.5C14.5 18.8 17.6 18.2 21 19V5c-3.4-.8-6.5-.2-9 1.5Z"/><path d="M12 6.5v14M6.5 9l2 .4M6.5 12l2 .4M15.5 9.4l2-.4M15.5 12.4l2-.4"/></svg><span>İçe aktarma rehberi</span></button>
+                    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="importExcel(event)" style="display:none">
+                </div>
+                <div class="shelf-matrix-toolbar">
+                    <div class="shelf-matrix-depots" role="group" aria-label="Depo seçimi">
+                        <button type="button" class="shelf-depot-btn active" data-depot="b1">📦 B1 Sarf Deposu</button>
+                        <button type="button" class="shelf-depot-btn" data-depot="b2">🛡️ B2 Demirbaş Deposu</button>
+                        <button type="button" class="shelf-depot-btn shelf-depot-btn-pool" data-depot="havuz"
+                            title="Havuz: her iki depodaki rafsız/stok dışı ürünleri tek ekranda listeler">🗂️ Havuz</button>
+                    </div>
+                    <label class="shelf-search">
+                        <span class="sr-only">Raf veya ürün ara</span>
+                        <i class="fas fa-search" aria-hidden="true"></i>
+                        <input id="shelfMatrixSearch" type="search" placeholder="Raf, ürün, marka, tür veya seri no ara…" autocomplete="off">
+                    </label>
+                    <label class="shelf-sort">
+                        <span>Sırala</span>
+                        <select id="shelfMatrixSort">
+                            <option value="occupancy">Doluluk oranı (çoktan aza)</option>
+                            <option value="code">Raf kodu (A-Z)</option>
+                            <option value="variety">Ürün çeşidi</option>
+                        </select>
+                    </label>
+                </div>
+                <div id="shelfMatrixMetrics" class="shelf-matrix-metrics" aria-live="polite"></div>
+                <div id="shelfMatrixGrid" class="shelf-matrix-grid" aria-live="polite"></div>
+            </section>
         </div>
 
         <!-- ═══════════════════════════════════════════════════════════ -->
@@ -2457,7 +2532,7 @@
         <div
             style="background: white; padding: 25px; border-radius: 15px; width: 350px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
             <h4 id="alertTitle" class="text-primary mb-3" style="font-weight: 700;"></h4>
-            <p id="alertMessage" class="text-muted mb-4"></p>
+            <div id="alertMessage" class="text-muted mb-4"></div>
             <div class="d-flex gap-2 justify-content-center">
                 <button id="alertCancelBtn" class="btn btn-light px-4" style="border-radius: 8px;">Vazgeç</button>
                 <button id="alertConfirmBtn" class="btn btn-primary px-4" style="border-radius: 8px;">Onayla</button>
@@ -2466,12 +2541,15 @@
     </div>
 
 
+    <script src="src/utils/dialog-stack.js"></script>
     <script src="src/utils/alert.js"></script>
     <script src="src/modules/admin/system-tips.js"></script>
     <script src="src/utils/timer.js"></script>
     <script src="security.js"></script>
     <script type="module" src="src/modules/admin/admin-main.js"></script>
     <script src="script.js"></script>
+    <script src="src/utils/admin-quick-unlock.js"></script>
+    <script src="src/modules/admin/shelf-matrix.js"></script>
     <script src="personel.js"></script>
     <script src="pdf-generator.js"></script>
     <script src="src/modules/admin/admin-system-control.js"></script>

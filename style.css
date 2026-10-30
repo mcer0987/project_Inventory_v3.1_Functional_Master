@@ -1836,6 +1836,158 @@ button {
     background-color: var(--color-primary);
 }
 
+/* Import yardım tetikleyicisi: hover yerine sakin, sürekli bir ışık halkası. */
+.import-help-trigger.uab-btn {
+    position: relative;
+    isolation: isolate;
+    color: #087f8c;
+    background: rgba(8, 127, 140, .09);
+    border: 1px solid rgba(8, 127, 140, .24);
+    border-radius: 12px;
+    overflow: visible;
+    transition: none;
+    animation: import-help-glow 3.6s ease-in-out infinite;
+}
+.import-help-trigger.uab-btn::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border: 1px solid rgba(8, 127, 140, .32);
+    border-radius: 15px;
+    pointer-events: none;
+    animation: import-help-ring 3.6s ease-out infinite;
+}
+.import-help-trigger.uab-btn:hover {
+    transform: none;
+    color: #087f8c;
+    background: rgba(8, 127, 140, .09);
+    border-color: rgba(8, 127, 140, .24);
+}
+.import-help-symbol {
+    display: block;
+    flex: none;
+    width: 20px;
+    height: 20px;
+}
+.import-help-trigger:focus-visible { outline: 3px solid #67c5cd; outline-offset: 5px; }
+@keyframes import-help-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(8, 127, 140, 0); }
+    50% { box-shadow: 0 0 18px 2px rgba(8, 127, 140, .16); }
+}
+@keyframes import-help-ring {
+    0%, 15% { opacity: 0; transform: scale(.92); }
+    30% { opacity: .65; }
+    85%, 100% { opacity: 0; transform: scale(1.15); }
+}
+
+.import-help-shared { margin-left: auto; gap: 8px; white-space: nowrap; }
+
+/* Yalnız import rehberi: ortak onay diyaloğunda sabit başlık/altlık, kaydırılabilir içerik. */
+#customAlertOverlay.import-guide-overlay {
+    padding: 24px;
+    box-sizing: border-box;
+    background: rgba(15, 23, 42, .62);
+    backdrop-filter: blur(10px);
+}
+#customAlertOverlay.import-guide-overlay > div {
+    --guide-accent: #087f8c;
+    display: flex;
+    flex-direction: column;
+    width: min(760px, 100%) !important;
+    max-width: 760px;
+    max-height: min(880px, calc(100dvh - 48px));
+    padding: 0 !important;
+    overflow: hidden;
+    text-align: left !important;
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 24px !important;
+    background: var(--color-surface, #fff) !important;
+    color: var(--color-text, #1e293b);
+    box-shadow: 0 28px 90px rgba(2, 6, 23, .3);
+    transform: none;
+    animation: none;
+}
+.import-guide-overlay #alertTitle {
+    flex: none;
+    margin: 0 !important;
+    padding: 28px 32px 24px;
+    border-bottom: 1px solid var(--color-border, #e2e8f0);
+    background: linear-gradient(120deg, rgba(8, 127, 140, .08), rgba(14, 165, 233, .025));
+    color: var(--color-text, #1e293b) !important;
+    font-size: 23px;
+    font-weight: 750;
+    letter-spacing: -.6px;
+    line-height: 1.3;
+}
+.import-guide-overlay #alertTitle::before {
+    content: 'İÇE AKTARMA · HIZLI BAŞLANGIÇ';
+    display: block;
+    margin-bottom: 9px;
+    color: var(--guide-accent);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.6px;
+}
+.import-guide-overlay #alertMessage {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #67c5cd transparent;
+    margin: 0 !important;
+    padding: 24px 32px;
+    white-space: normal !important;
+    color: var(--color-text, #1e293b) !important;
+    font-size: 13px;
+    line-height: 1.65;
+}
+.import-guide-overlay #alertMessage:focus-visible { outline: 2px solid rgba(8, 127, 140, .22); outline-offset: -3px; }
+.import-guide-intro { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.import-guide-intro p { margin: 0; color: var(--color-text-muted, #64748b); font-size: 13px; }
+.import-guide-depot { flex: none; padding: 5px 9px; border-radius: 7px; background: rgba(8, 127, 140, .1); color: var(--guide-accent); font-size: 10px; font-weight: 800; letter-spacing: .6px; }
+.import-guide-facts { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 10px; margin-bottom: 26px; }
+.import-guide-fact { padding: 13px 14px; border: 1px solid var(--color-border, #e2e8f0); border-radius: 12px; background: var(--color-surface-alt, #f8fafc); }
+.import-guide-fact span { display: block; margin-bottom: 3px; color: var(--color-text-muted, #64748b); font-size: 10px; }
+.import-guide-fact strong { font-size: 13px; font-weight: 700; }
+.import-guide h4 { margin: 0 0 4px; color: var(--color-text, #1e293b); font-size: 15px; font-weight: 750; }
+.import-guide-caption { margin: 0 0 14px; color: var(--color-text-muted, #64748b); font-size: 12px; }
+.import-guide-columns { counter-reset: guide-column; margin: 0; padding: 0; list-style: none; }
+.import-guide-column { counter-increment: guide-column; display: grid; grid-template-columns: 25px 1fr 145px; align-items: center; gap: 12px; padding: 13px 10px; border-bottom: 1px solid var(--color-border, #e2e8f0); }
+.import-guide-column::before { content: counter(guide-column, decimal-leading-zero); align-self: start; padding-top: 1px; color: var(--color-text-muted, #64748b); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.import-guide-column.is-required { margin: 3px 0; border: 1px solid rgba(8, 127, 140, .22); border-radius: 10px; background: rgba(8, 127, 140, .045); }
+.import-guide-column-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.import-guide-column-heading strong { font-size: 13px; }
+.import-guide-column-detail p { margin: 3px 0 0; color: var(--color-text-muted, #64748b); font-size: 12px; line-height: 1.55; }
+.import-guide-required { color: var(--guide-accent); background: rgba(8, 127, 140, .1); border-radius: 4px; padding: 1px 5px; font-size: 9px; font-weight: 750; }
+.import-guide-optional { color: var(--color-text-muted, #64748b); font-size: 10px; }
+.import-guide-example { justify-self: end; max-width: 100%; overflow-wrap: anywhere; padding: 4px 7px; border-radius: 5px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 10px; line-height: 1.5; }
+.import-guide-notes { margin-top: 22px; padding: 17px 18px; border-left: 3px solid #38a8b3; border-radius: 0 10px 10px 0; background: rgba(8, 127, 140, .055); }
+.import-guide-notes h4 { font-size: 12px; }
+.import-guide-notes p { margin: 7px 0 0; color: var(--color-text-muted, #64748b); font-size: 12px; }
+.import-guide-overlay #alertMessage + div { flex: none; display: flex; justify-content: flex-end !important; margin: 0; padding: 16px 32px; border-top: 1px solid var(--color-border, #e2e8f0); background: var(--color-surface, #fff); }
+.import-guide-overlay #alertConfirmBtn { flex: none; min-height: 42px; padding: 10px 22px; border: 0; border-radius: 10px !important; background: #087f8c; color: #fff; font-size: 13px; font-weight: 650; box-shadow: 0 4px 12px rgba(8, 127, 140, .18); transition: none; }
+.import-guide-overlay #alertConfirmBtn:hover { transform: none; background: #087f8c; }
+.import-guide-overlay #alertConfirmBtn:focus-visible { outline: 3px solid #67c5cd; outline-offset: 3px; }
+.import-guide-overlay #alertCancelBtn[hidden] { display: none; }
+@media (max-width: 600px) {
+    #customAlertOverlay.import-guide-overlay { padding: 12px; }
+    #customAlertOverlay.import-guide-overlay > div { max-height: calc(100dvh - 24px); border-radius: 18px; }
+    .import-guide-overlay #alertTitle { padding: 22px 20px 18px; font-size: 20px; }
+    .import-guide-overlay #alertMessage { padding: 20px; }
+    .import-guide-intro { align-items: flex-start; flex-direction: column; gap: 9px; }
+    .import-guide-facts { grid-template-columns: 1fr; gap: 6px; margin-bottom: 22px; }
+    .import-guide-fact { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; }
+    .import-guide-fact span { margin: 0; }
+    .import-guide-column { grid-template-columns: 22px 1fr; gap: 6px 9px; padding: 13px 7px; }
+    .import-guide-example { grid-column: 2; justify-self: start; }
+    .import-guide-overlay #alertMessage + div { padding: 14px 20px; }
+    .import-guide-overlay #alertConfirmBtn { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .import-help-trigger.uab-btn, .import-help-trigger.uab-btn::after { animation: none; }
+}
+
 /* Onay overlay'i */
 #customAlertOverlay {
     position: fixed;
@@ -3636,6 +3788,11 @@ body:not(.logged-in) .main-container {
     color: #c084fc;
 }
 
+.fab-btn-clone {
+    background: rgba(45, 212, 191, 0.22);
+    color: #2dd4bf;
+}
+
 .fab-btn-watch {
     background: rgba(251, 191, 36, 0.22);
     color: #fbbf24;
@@ -3816,6 +3973,11 @@ tr.selectable-row:active>td {
 .bs-btn-transfer {
     background: #f3e8ff;
     color: #9333ea;
+}
+
+.bs-btn-clone {
+    background: #ccfbf1;
+    color: #0d9488;
 }
 
 .bs-btn-watch {
@@ -4436,6 +4598,38 @@ tr.selectable-row:active>td {
 
 .uab-btn-outline:hover {
     background: var(--color-surface-alt);
+}
+
+/* v3.3 P1 ek: Excel sütun formatı yardım ikonu — B1/B2 Import düğmesinin yanında (index.html) ve WMS "Depo Aksiyonları"
+   panelinde (admin.html) aynı küçük, kare-olmayan (yuvarlak) bilgi düğmesi; .uab-btn'nin sabit yükseklik/geçişini miras
+   alır, yalnız dar ve yuvarlak olacak şekilde ezilir — metin yerine tek ikon taşır. */
+.uab-btn-icon {
+    width: 38px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--color-surface-alt, #f1f5f9);
+    color: var(--color-text-muted, #64748b);
+    border: 1.5px solid var(--color-border-light, #e2e8f0);
+    font-size: 15px;
+}
+
+.uab-btn-icon:hover {
+    background: var(--color-primary, #3b82f6);
+    color: #fff;
+    border-color: transparent;
+}
+
+/* v3.3 P1 ek: WMS "Depo Aksiyonları" panelindeki kompakt düğmeler (admin.html) — aynı renk varyantları, daha dar/kısa. */
+.uab-btn-sm {
+    height: 30px;
+    padding: 0 11px;
+    font-size: 12px;
+    border-radius: 8px;
+}
+
+.uab-btn-sm.uab-btn-icon {
+    width: 30px;
+    font-size: 13px;
 }
 
 /* Toplu İşlem Butonları: Varsayılan gizli, seçim varsa belir */

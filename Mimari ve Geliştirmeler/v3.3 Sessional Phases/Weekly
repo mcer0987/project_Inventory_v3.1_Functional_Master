@@ -1,0 +1,57 @@
+
+### 📊 HAFTALIK İLERLEME TABLOSU
+
+| Gün / Aşama | Hedeflenen İşler | Durum |
+|---|---|:---:|
+| **SALI (Tamamlandı)** | **Ölü Kod & Dosya Kazıma:** `db.js`, `data-loader.js` silindi; `script.js` ölü fonksiyonları temizlendi; 122 Unit / 213 Rules testiyle doğrulandı ve `master`'a merge edildi. | ✅ **TAMAMLANDI** |
+| **SALI EKSTRA (Şu An)** | **Pratik Saha İnovasyonları:**<br>1. FAB boşluğa tıklayınca kapanma<br>2. Admin Hızlı PIN Kasası (`admin-quick-unlock.js`)<br>3. 🧱 WMS Görsel Raf Matrisi (B1/B2 5 Slotluk Harita)<br>4. 📱 PWA (Standalone tam ekran) & Mobil/Tablet Responsive | ⏳ **ŞU AN COPILOT YAPIYOR** |
+| **ÇARŞAMBA (Sırada)** | **Konsol & Bilgi Sızıntısı Temizliği (SEC-07):** `purchase-servises.js` ve `edm-workflow.js` içindeki kullanıcı/talep log sızıntılarının ve TODO log gürültüsünün ayıklanması. | 🔜 **BEKLEMEDE** |
+| **PERŞEMBE** | **Büyük CSP Sıkılaştırması (KJ-6):** Copilot'un bulduğu 403 satır içi (`onclick`) handler'ın `data-action` delegation yapısına çekilmesi ve CSP'den `'unsafe-inline'` izninin kaldırılması. | 🔜 **BEKLEMEDE** |
+| **CUMA** | **Büyük Final & v3.2 Resmi Mühürleme:** Tüm testlerin tek komuta toplanması (`npm run test:all`), Git Tag (`v3.2-stable`) vurulması ve haftanın zaferle kapatılması. | 🏁 **HAFTALIK HEDEF** |
+
+---
+
+KALAN HAFTALIK İŞLER (Faz 7'nin Final Adımları)
+1. ÇARŞAMBA (YARIN VEYA BUGÜNÜN DEVAMI): Konsol & Log Kirliliği (SEC-07)
+
+Astra'nın (ve Copilot'un) daha önce tespit ettiği konsol sızıntılarını temizleyeceğiz.
+
+    Ne Yapılacak?
+
+        purchase-servises.js içindeki tüm talep objesini konsola basan satır silinecek (Kimlik sızıntısı).
+
+        edm-workflow.js içindeki window.currentUser objesini (içinde gizli bilgiler olabilir) loglayan satırlar temizlenecek.
+
+        todo-module.js içindeki gereksiz ID ve bildirim debug logları kapatılacak.
+
+    Kim Yapacak? Copilot veya Sonnet (Sadece silme işlemi yapacaklar, kod mimarisini ellemeyecekler).
+
+2. PERŞEMBE: Büyük CSP Sıkılaştırması (KJ-6 - Inline Handler Refactor)
+
+İşte projenin en zorlu ve en değerli refactor'ü!
+
+    Ne Yapılacak?
+
+        Copilot'un tespit ettiği 403 adet satır içi onclick="...", onchange="..." komutu tek tek bulunup, modern data-action="..." (Event Delegation) yapısına taşınacak.
+
+        Bu sayede HTML'in içine gizlenmiş JavaScript kalmayacak.
+
+        En sonunda firebase.json içinden script-src 'unsafe-inline' izni tamamen SİLİNECEK! Tarayıcıda bir hacker dışarıdan JS çalıştırmayı denese bile, tarayıcının kendi zırhı (CSP) bunu anında bloke edecek.
+
+    Kim Yapacak? Claude Opus (Çünkü bu 403 değişikliği yaparken hiçbir fonksiyonu kırmaması için çok yüksek bir mimari zekaya ve Extra High efora ihtiyacı var).
+
+3. CUMA: Büyük Final, Test Otomasyonu ve Mühürleme
+
+Haftanın ve v3.2 sürümünün kapanış günü.
+
+    Ne Yapılacak?
+
+        Tüm unit, rules ve xss testlerini tek bir komutta (npm run test:all) toplayacağız.
+
+        Eğer GitHub kullanıyorsan, küçük bir CI/CD (GitHub Actions) dosyası ekleyeceğiz ki her push yaptığında testler bulutta otomatik çalışsın.
+
+        master dalına resmi sürüm etiketi vuracağız: git tag -a v3.2-stable -m "Medipol Antigravity ERP v3.2 Production Release"
+
+        Projeyi tekrar canlıya (Firebase) deploy edip kutlama yapacağız!
+
+    Kim Yapacak? Biz ve Opus.

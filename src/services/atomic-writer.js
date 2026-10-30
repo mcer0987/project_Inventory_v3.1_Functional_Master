@@ -36,6 +36,9 @@
     const LIMITS = Object.freeze({ maxOps: 450, maxBytes: 8 * 1024 * 1024, partChars: 300 * 1024 });
     const STALE_MS = 2 * 60 * 1000;      // başlık bu kadar süredir güncellenmediyse sahibi ölmüş sayılır (recover)
     const ROLLBACK_RETRIES = 4;
+    // next içinde üst düzey alan değeri olarak: Firestore bağdaştırıcısı commit anında serverTimestamp()'e çevirir
+    // (raf belgesi kuralı updatedAt == request.time ister). Günlüğe yalnız prev yazıldığı için JSON'da hiç görünmez.
+    const SERVER_TIME = '__atomicWriterServerTime__';
 
     class AtomicWriteError extends Error {
         constructor(code, message, details) {
@@ -146,6 +149,13 @@
     const defaultSleep = ms => new Promise(r => setTimeout(r, ms));
     const journalRef = data => ({ kind: 'merge', col: SYS, id: JOURNAL_ID, data });
 
+    // cas:true girdisi: plan okunduğundan beri sunucudaki belge değişmemiş olmalı (prev null → belge hâlâ yok).
+    const sameDoc = (store, a, b) => (a == null || b == null)
+        ? (a == null && b == null)
+        : stableStringify(store.encode(a)) === stableStringify(store.encode(b));
+    const conflictError = e => new AtomicWriteError('conflict',
+        `${e.col}/${e.id} plan hazırlandıktan sonra değişti (eşzamanlı işlem); hiçbir kayıt yazılmadı.`, { col: e.col, id: e.id });
+
     async function readCollections(store, cols) {
         const out = {};
         for (const col of cols) out[col] = await store.readCollection(col);
@@ -193,10 +203,13 @@
      * @param {Function} [o.guard]        (entries) => Error|null — şema muhafızı; hata varsa HİÇBİR ŞEY yazılmaz
      * @param {string} o.kind             'restore' | 'import' (günlükte ve kullanıcı mesajında)
      * @param {string[]} o.collections    kilitlenecek koleksiyonlar
+     * Girdi {cas:true}: yazmadan hemen önce sunucudaki belgenin hâlâ prev olduğu doğrulanır — tek batch'lik işte AYNI
+     *       transaction içinde (store.commitIfUnchanged), çok parçalı işte kilit alındıktan sonra ve ilk veri parçasından önce.
      * @returns {Promise<{status:'committed'|'noop', journaled:boolean, written:number, deleted:number, chunks:number}>}
      * Hata: AtomicWriteError — 'pending-journal' (önce recover), 'rolled-back' (yazılanlar geri alındı, veritabanı ilk
      *       hâlinde), 'rollback-pending' (geri alma tamamlanamadı; kilit + günlük sunucuda, recover tamamlayacak),
-     *       'prepare-failed' (hiçbir veri yazılmadı), guard'ın kendi hatası.
+     *       'prepare-failed' (hiçbir veri yazılmadı), 'conflict' (cas girdisi değişmiş; hiçbir veri yazılmadı),
+     *       guard'ın kendi hatası.
      */
     async function run(o) {
         const { store, kind = 'bulk', collections = [], uid = null } = o;
@@ -217,10 +230,19 @@
         const deleted = entries.length - written;
         if (!entries.length) return { status: 'noop', journaled: false, written: 0, deleted: 0, chunks: 0 };
 
+        const casEntries = entries.filter(e => e.cas);
+        if (casEntries.length && typeof store.commitIfUnchanged !== 'function') {
+            throw new AtomicWriteError('prepare-failed', 'Depo koşullu yazmayı (commitIfUnchanged) desteklemiyor; hiçbir kayıt yazılmadı.');
+        }
         const ends = chunkEnds(entries, { ...opts.limits, reserve: 1 });
         // Tek batch'e sığan iş: Firestore batch'i zaten atomik — günlük gerekmez.
         if (ends.length === 1) {
-            await store.commit(entries.map(forwardOp));
+            if (casEntries.length) {
+                await store.commitIfUnchanged(entries.map(forwardOp),
+                    casEntries.map(e => ({ col: e.col, id: e.id, matches: cur => sameDoc(store, cur, e.prev), conflict: () => conflictError(e) })));
+            } else {
+                await store.commit(entries.map(forwardOp));
+            }
             return { status: 'committed', journaled: false, written, deleted, chunks: 1 };
         }
 
@@ -261,6 +283,20 @@
             // Veri yazılmadı; günlük ve kilit kaldırılır (kaldırılamazsa recover 'preparing' durumunu temizler).
             try { await finalize(store, parts.length, jobId, opts); } catch (_) { /* recover temizler */ }
             throw new AtomicWriteError('prepare-failed', `Geri alma günlüğü yazılamadı; hiçbir kayıt yazılmadı. ${e.message || ''}`, { cause: e });
+        }
+
+        // Kilit artık sunucuda: cas girdileri planla aynı mı? (Değişmişse veri yazılmadan çıkılır.)
+        let conflict = null;
+        try {
+            for (const e of casEntries) {
+                if (!sameDoc(store, await store.readDoc(e.col, e.id), e.prev)) { conflict = conflictError(e); break; }
+            }
+        } catch (e) {
+            conflict = new AtomicWriteError('prepare-failed', `Ön koşul okunamadı; hiçbir kayıt yazılmadı. ${e.message || ''}`, { cause: e });
+        }
+        if (conflict) {
+            try { await finalize(store, parts.length, jobId, opts); } catch (_) { /* recover temizler */ }
+            throw conflict;
         }
 
         // ── 2. UYGULAMA ──
@@ -343,9 +379,24 @@
     }
 
     // ─── Firestore bağdaştırıcısı ────────────────────────────────────────────────────────────────────
-    // fns: { doc, collection, getDoc, getDocs, writeBatch, Timestamp } — tarayıcıda CDN modülü, testte npm 'firebase'.
+    // fns: { doc, collection, getDoc, getDocs, writeBatch, Timestamp, runTransaction?, serverTimestamp? } — tarayıcıda CDN
+    // modülü, testte npm 'firebase'. runTransaction yalnız cas girdisi olan tek batch'lik işte, serverTimestamp yalnız
+    // SERVER_TIME taşıyan girdide gerekir.
     function createFirestoreStore({ db, root, fns }) {
         const ref = (col, id) => fns.doc(db, root, col, 'items', docIdOf(id));
+        const materialize = data => {
+            if (!data || !Object.values(data).includes(SERVER_TIME)) return data;
+            if (typeof fns.serverTimestamp !== 'function') throw new Error('serverTimestamp verilmedi');
+            const out = {};
+            Object.keys(data).forEach(k => { out[k] = data[k] === SERVER_TIME ? fns.serverTimestamp() : data[k]; });
+            return out;
+        };
+        const apply = (w, target) => {
+            const r = ref(w.col, w.id);
+            if (w.kind === 'delete') target.delete(r);
+            else if (w.kind === 'merge') target.set(r, materialize(w.data), { merge: true });
+            else target.set(r, materialize(w.data));
+        };
         // Düz nesne: prototipi yok ya da (herhangi bir realm'in) Object.prototype'u
         const isPlain = v => { const p = Object.getPrototypeOf(v); return p === null || Object.getPrototypeOf(p) === null; };
         function encode(v) {
@@ -376,20 +427,27 @@
             },
             async commit(writes) {
                 const batch = fns.writeBatch(db);
-                writes.forEach(w => {
-                    const r = ref(w.col, w.id);
-                    if (w.kind === 'delete') batch.delete(r);
-                    else if (w.kind === 'merge') batch.set(r, w.data, { merge: true });
-                    else batch.set(r, w.data);
-                });
+                writes.forEach(w => apply(w, batch));
                 await batch.commit();
+            },
+            // Koşulların okunması ve yazmalar TEK transaction'da: eşzamanlı bir değişiklik ya çakışma hatası verir ya da
+            // Firestore transaction'ı yeniden dener (taze okumayla koşul yeniden değerlendirilir).
+            async commitIfUnchanged(writes, checks) {
+                if (typeof fns.runTransaction !== 'function') throw new Error('runTransaction verilmedi');
+                await fns.runTransaction(db, async tx => {
+                    for (const c of checks) {
+                        const s = await tx.get(ref(c.col, c.id));
+                        if (!c.matches(s.exists() ? s.data() : null)) throw c.conflict();
+                    }
+                    writes.forEach(w => apply(w, tx));
+                });
             },
             encode, decode,
         };
     }
 
     const AtomicWriter = {
-        LIMITS, STALE_MS, JOURNAL_ID, PART_PREFIX, SETTINGS_ID, SYS, AtomicWriteError,
+        LIMITS, STALE_MS, JOURNAL_ID, PART_PREFIX, SETTINGS_ID, SYS, SERVER_TIME, AtomicWriteError,
         stableStringify, planRestore, chunkEnds, splitText, readCollections, run, recover, createFirestoreStore,
     };
     window.AppModules = window.AppModules || {};

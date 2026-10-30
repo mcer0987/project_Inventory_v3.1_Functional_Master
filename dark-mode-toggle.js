@@ -38,6 +38,8 @@ function toggleTheme() {
             ? '<i class="fas fa-sun"></i>'
             : '<i class="fas fa-moon"></i>';
         btn.title = next === 'dark' ? 'Açık Temaya Geç' : 'Koyu Temaya Geç';
+        btn.setAttribute('aria-label', btn.title);
+        btn.setAttribute('aria-pressed', String(next === 'dark'));
     });
 
     // Chart.js grafikleri tema geçişine duyarlı değil — transition bitmeden
@@ -63,5 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? '<i class="fas fa-sun"></i>'
             : '<i class="fas fa-moon"></i>';
         btn.title = isDark ? 'Açık Temaya Geç' : 'Koyu Temaya Geç';
+        btn.setAttribute('aria-label', btn.title);
+        btn.setAttribute('aria-pressed', String(isDark));
     });
 });

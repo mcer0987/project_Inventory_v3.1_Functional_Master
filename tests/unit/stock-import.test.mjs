@@ -19,9 +19,9 @@ function load(productTypes = [{ name: 'Laptop', isDemirbas: true }, { name: 'Kab
     let n = 0;
     return { S: ctx.window.Schema, I: ctx.window.StockImport, makeId: () => 1000 + (n++) };
 }
-const build = (rows, col = 'b1') => {
+const build = (rows, col = 'b1', extra = {}) => {
     const { S, I, makeId } = load();
-    return plain(I.buildStockRecords(rows, col, { schema: S, makeId, now: 1760000000000 }));
+    return plain(I.buildStockRecords(rows, col, { schema: S, makeId, now: 1760000000000, ...extra }));
 };
 
 // ─── Schema.toCanonicalStock ─────────────────────────────────────────────────────────────────────────
@@ -133,4 +133,153 @@ test('içe aktarma: ürün sütunu yoksa durur; tanınmayan sütun uyarıdır', 
 
 test('içe aktarma: geçersiz depo reddedilir', () => {
     assert.match(build([{ Ürün: 'A' }], 'b3').errors[0], /Geçersiz depo/);
+});
+
+// ─── v3.3 Saha Hotfix'i — raf "Auto-Create & Overflow" (Aşama 6'nın "her zaman Havuz" kuralının YERİNİ alır) ────────────
+const shelfInfo = (entries) => new Map(entries.map(([code, capacity, usedSlots]) => [code, { capacity, usedSlots }]));
+
+test('shelfCapacityInfo verilmediyse (eski çağıran/test) ham raf metni aynen yazılır, hata/uyarı yok, shelvesToCreate boş', () => {
+    const r = build([{ Ürün: 'A', Raf: 'raf-x 9' }]);
+    assert.deepEqual(r.errors, []);
+    assert.deepEqual(r.warnings, []);
+    assert.equal(r.records[0].raf, 'raf-x 9', 'katalog bilgisi yoksa eski davranış: ham metin');
+    assert.deepEqual(r.shelvesToCreate, []);
+    assert.equal(r.poolOverflowCount, 0);
+});
+
+test('raf katalogda VARSA ve müsaitse eşleşir, kanonik koda normalize edilir; otomatik yaratma GEREKMEZ', () => {
+    const r = build([{ Ürün: 'A', Raf: ' raf-a 1 ' }], 'b1', { shelfCapacityInfo: shelfInfo([['RAF-A 1', 5, 2], ['RAF-B 2', 5, 0]]) });
+    assert.deepEqual(r.errors, []);
+    assert.deepEqual(r.warnings, []);
+    assert.equal(r.records[0].raf, 'RAF-A 1', 'ham yazım katalogdaki kanonik koda indirgenir');
+    assert.deepEqual(r.shelvesToCreate, []);
+});
+
+test('raf katalogda YOKSA satır REDDEDİLMEZ — yeni raf OTOMATİK YARATILACAK şekilde işaretlenir, Havuz\'a DÜŞMEZ', () => {
+    const r = build([
+        { Ürün: 'A', Adet: '1', Raf: 'Olmayan Raf 7' },
+        { Ürün: 'B', Adet: '1', Raf: 'RAF-A 1' },   // bu katalogda var
+    ], 'b1', { shelfCapacityInfo: shelfInfo([['RAF-A 1', 5, 0]]) });
+    assert.deepEqual(r.errors, [], 'katalog dışı raf HATA değildir; dosya yine de içe aktarılır');
+    assert.equal(r.records.length, 2);
+    assert.equal(r.records[0].raf, 'OLMAYAN RAF 7', 'Havuz değil — kanonik koduyla yazılır, raf arka planda yaratılacak');
+    assert.equal(r.records[1].raf, 'RAF-A 1');
+    assert.deepEqual(r.warnings, [], 'başarılı otomatik-yaratma uyarı ÜRETMEZ');
+    assert.deepEqual(r.shelvesToCreate, ['OLMAYAN RAF 7']);
+    assert.equal(r.poolOverflowCount, 0);
+});
+
+test('aynı YENİ rafa giden satırlar varsayılan kapasiteyi (5) aşınca FAZLASI Havuz\'a alınır; ilk 5\'i korunur', () => {
+    const rows = Array.from({ length: 7 }, (_, i) => ({ Ürün: `Ürün ${i}`, Adet: '1', Raf: 'Yeni Raf 1' }));
+    const r = build(rows, 'b1', { shelfCapacityInfo: shelfInfo([]) });
+    assert.deepEqual(r.errors, []);
+    const placed = r.records.filter(x => x.raf === 'YENI RAF 1');   // normShelfCode: i/ı/İ hepsi I olur
+    const pooled = r.records.filter(x => x.raf === '');
+    assert.equal(placed.length, 5, 'varsayılan kapasite 5');
+    assert.equal(pooled.length, 2);
+    assert.equal(r.poolOverflowCount, 2);
+    assert.deepEqual(r.shelvesToCreate, ['YENI RAF 1'], 'en az bir ürün yerleşti → yaratılacak');
+    assert.equal(r.warnings.filter(w => /dolu/.test(w)).length, 2);
+});
+
+test('VAR OLAN rafın KALAN boşluğu dolunca fazlası Havuz\'a alınır; raf zaten katalogda olduğu için shelvesToCreate\'e girmez', () => {
+    // RAF-A 1: kapasite 3, zaten 2 dolu → yalnız 1 boş yer var.
+    const rows = [{ Ürün: 'A', Adet: '1', Raf: 'RAF-A 1' }, { Ürün: 'B', Adet: '1', Raf: 'RAF-A 1' }, { Ürün: 'C', Adet: '1', Raf: 'RAF-A 1' }];
+    const r = build(rows, 'b1', { shelfCapacityInfo: shelfInfo([['RAF-A 1', 3, 2]]) });
+    assert.equal(r.records.filter(x => x.raf === 'RAF-A 1').length, 1);
+    assert.equal(r.records.filter(x => x.raf === '').length, 2);
+    assert.equal(r.poolOverflowCount, 2);
+    assert.deepEqual(r.shelvesToCreate, [], 'var olan raf yeniden yaratılmaz');
+    assert.match(r.warnings[0], /Satır 3.*"RAF-A 1".*dolu.*Havuz/);
+});
+
+test('stok dışı/pasif (slot işgal etmeyen) satır: kapasite denetimi ve otomatik yaratma MUAF — bilinmeyen raf Havuz, bilinen raf kanonik', () => {
+    const r = build([
+        { Ürün: 'A', Adet: '0', Raf: 'Bilinmeyen Raf' },
+        { Ürün: 'B', Durum: 'Pasif', Adet: '5', Raf: 'Bilinmeyen Raf 2' },
+        { Ürün: 'C', Adet: '0', Raf: 'RAF-A 1' },
+    ], 'b1', { shelfCapacityInfo: shelfInfo([['RAF-A 1', 1, 1]]) });   // RAF-A 1 zaten dolu — ama C slot işgal etmiyor
+    assert.deepEqual(r.errors, []);
+    assert.equal(r.records[0].raf, '', 'bilinmeyen raf + slot işgal yok → Havuz, yeni raf YARATILMAZ');
+    assert.equal(r.records[1].raf, '', 'pasif + bilinmeyen raf → Havuz');
+    assert.equal(r.records[2].raf, 'RAF-A 1', 'dolu olsa da slot işgal etmediği için reddedilmez');
+    assert.deepEqual(r.shelvesToCreate, []);
+    assert.deepEqual(r.warnings, [], 'slot işgal etmeyen satırlar için "dolu/tanımsız" uyarısı basılmaz');
+});
+
+test('dosyada raf hiç yoksa (boş hücre) zaten rafsızdır — uyarı gerekmez, yeni raf yaratılmaz', () => {
+    const r = build([{ Ürün: 'A', Raf: '' }], 'b1', { shelfCapacityInfo: shelfInfo([['RAF-A 1', 5, 0]]) });
+    assert.deepEqual(r.warnings, []);
+    assert.equal(r.records[0].raf, '');
+    assert.deepEqual(r.shelvesToCreate, []);
+});
+
+test('her iki depoda da aynı kuralla çalışır (b2); hatalı dosyada (errors doluyken) shelvesToCreate/poolOverflowCount sıfırlanır', () => {
+    const r = build([{ Ürün: 'Demirbaş X', Tür: 'Laptop', Adet: '1', Raf: 'Yeni Raf' }], 'b2', { shelfCapacityInfo: shelfInfo([]) });
+    assert.deepEqual(r.errors, []);
+    assert.equal(r.records[0].raf, 'YENI RAF');
+    assert.deepEqual(r.shelvesToCreate, ['YENI RAF']);
+    assert.deepEqual(plain(load().S.validateB2(r.records[0])), []);
+
+    const bad = build([{ Ürün: 'İyi', Adet: '1', Raf: 'Yeni Raf' }, { Ürün: '', Adet: '1' }], 'b1', { shelfCapacityInfo: shelfInfo([]) });
+    assert.ok(bad.errors.length > 0);
+    assert.deepEqual(bad.shelvesToCreate, []);
+    assert.equal(bad.poolOverflowCount, 0);
+});
+
+// ─── v3.3 Saha Hotfix'i — Envanter No (yalnız B2) ────────────────────────────────────────────────────────────────────
+test('Envanter No: B2 kaydına doğrudan eşlenir, tam B2 sözleşmesinden geçer', () => {
+    const r = build([{ Ürün: 'Laptop X', Tür: 'Laptop', 'Envanter No': ' ENV-2026-001 ' }], 'b2');
+    assert.deepEqual(r.errors, []);
+    assert.equal(r.records[0].envanterNo, 'ENV-2026-001');
+    assert.deepEqual(plain(load().S.validateB2(r.records[0])), []);
+});
+
+test('Envanter No: B1 için sütun TANINIR (uyarı basılmaz) ama değer göz ardı edilir (kayıtta hiç yer almaz)', () => {
+    const r = build([{ Ürün: 'Kablo', 'Envanter No': 'ENV-999' }], 'b1');
+    assert.deepEqual(r.errors, []);
+    assert.ok(!r.warnings.some(w => /tanınmadı/.test(w)), '"Envanter No" sütunu tanınmayan sütun uyarısı almamalı');
+    assert.ok(!('envanterNo' in r.records[0]), 'B1 kaydı envanterNo taşımaz');
+});
+
+test('Envanter No: boşsa alan hiç eklenmez (limit ile aynı "yalnız değer varsa" deseni); yine de geçerli kayıt', () => {
+    const r = build([{ Ürün: 'Monitör', Tür: 'Monitör' }], 'b2');
+    assert.ok(!('envanterNo' in r.records[0]));
+    assert.deepEqual(plain(load().S.validateB2(r.records[0])), []);
+});
+
+// ─── v3.3 P1 ek (proje sahibinin talebi) — MAX_IMPORT_ROWS: sabit üst sınır, admin dahil aşılamaz ──────────────────────
+test('MAX_IMPORT_ROWS tam olarak 200; sınırda (200 satır) kabul edilir', () => {
+    const { I } = load();
+    assert.equal(I.MAX_IMPORT_ROWS, 200);
+    const rows = Array.from({ length: 200 }, (_, i) => ({ Ürün: `Ürün ${i}` }));
+    const r = build(rows);
+    assert.deepEqual(r.errors, []);
+    assert.equal(r.records.length, 200);
+});
+
+test('201 satır (sınırın 1 fazlası) TAMAMEN reddedilir; şema geçerli olsa bile hiç kayıt dönmez', () => {
+    const rows = Array.from({ length: 201 }, (_, i) => ({ Ürün: `Ürün ${i}` }));
+    const r = build(rows);
+    assert.deepEqual(r.records, []);
+    assert.equal(r.errors.length, 1);
+    assert.match(r.errors[0], /201 satır.*en fazla 200 satır.*yönetici dahil/);
+    assert.deepEqual(r.warnings, []);
+    assert.deepEqual(r.shelvesToCreate, []);
+    assert.equal(r.poolOverflowCount, 0);
+});
+
+test('sınır ham satır sayısına bakar (boş satırlar ve hatalı satırlar dahil) — satır içeriği değil, dosya boyutu sınırlanır', () => {
+    const rows = Array.from({ length: 150 }, () => ({ Ürün: '' })).concat(Array.from({ length: 60 }, (_, i) => ({ Ürün: `Ürün ${i}` })));
+    assert.equal(rows.length, 210);
+    const r = build(rows);
+    assert.deepEqual(r.records, []);
+    assert.match(r.errors[0], /210 satır/);
+});
+
+test('sınır hem b1 hem b2 için aynı şekilde uygulanır', () => {
+    const rows = Array.from({ length: 205 }, (_, i) => ({ Ürün: `Demirbaş ${i}`, Tür: 'Laptop' }));
+    const r = build(rows, 'b2');
+    assert.deepEqual(r.records, []);
+    assert.match(r.errors[0], /205 satır/);
 });

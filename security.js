@@ -123,11 +123,14 @@ const SecurityConfig = {
             overlay.querySelector('#adminReauthTitle').textContent = title;
             overlay.querySelector('#adminReauthMessage').textContent = message;
             document.body.appendChild(overlay);
+            const box = overlay.firstElementChild;
             const input = overlay.querySelector('#adminReauthInput');
             const errorEl = overlay.querySelector('#adminReauthError');
             const okBtn = overlay.querySelector('#adminReauthOk');
             let attempts = 0, busy = false;
-            const close = result => { overlay.remove(); resolve(result); };
+            // v3.3 Aşama 5 (P2-08): Escape artık DialogStack'e devredilir — bu pencere WMS gibi başka bir diyaloğun
+            // ÜSTÜNDE açılırsa Escape yalnız BUNU kapatır; DialogStack yoksa eski yerel Escape dinleyicisine düşülür.
+            const close = result => { if (window.DialogStack) window.DialogStack.close(box); overlay.remove(); resolve(result); };
             const submit = async () => {
                 if (busy) return;
                 busy = true; okBtn.disabled = true;
@@ -145,9 +148,10 @@ const SecurityConfig = {
             overlay.querySelector('#adminReauthCancel').onclick = () => close('cancelled');
             input.addEventListener('keydown', e => {
                 if (e.key === 'Enter') submit();
-                if (e.key === 'Escape') close('cancelled');
+                if (e.key === 'Escape' && !window.DialogStack) close('cancelled');
             });
-            setTimeout(() => input.focus(), 0);
+            if (window.DialogStack) window.DialogStack.open(box, { onEscape: () => close('cancelled'), initialFocus: input });
+            else setTimeout(() => input.focus(), 0);
         });
     },
 

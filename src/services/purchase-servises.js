@@ -1,6 +1,3 @@
-import { getStorage, ref, uploadBytes, getDownloadURL }
-    from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
-
 const PAGE_SIZE = 8;
 let currentPurchasePage = 1;
 
@@ -24,7 +21,6 @@ const _findService = id => (window.data.serviceRecords || []).find(r => r && Str
 const _deviceIdOf = r => [r.sn, r.envanterNo].find(v => v && v !== '-' && !String(v).includes(',')) || '';
 
 
-console.log("🚀");
 // -----------------------------
 // DOSYA SEÇİMİ İŞLEYİCİSİ
 // -----------------------------
@@ -42,7 +38,6 @@ window.handlePurchaseFileChange = function (input) {
         });
     }
 };
-console.log("🚀 purchase-services.js yüklendi");
 // -----------------------------
 // DATA INIT
 // -----------------------------
@@ -266,8 +261,6 @@ window.savePurchaseRequest = async function (e) {
             workflow: { started: false, currentStep: 0, steps: [] }
         };
 
-        console.log("📦 Yeni talep nesnesi oluşturuldu:", newRequest);
-
         console.log("💾 Veritabanına kaydediliyor...");
         // Tek doküman eklenir (H2); başarısızsa "oluşturuldu" denmez.
         if (!(await window.writeOk(window.appendItem('purchaseOrders', newRequest)))) {
@@ -401,8 +394,6 @@ window.renderPurchaseModule = function (options = {}) {
         const currentMe = (window.currentUser?.name || "").trim().toLocaleLowerCase('tr-TR');
         // Faz 4B · J8: oturum kodu taşımaz — kendi talebi: createdBy = personel id (yeni) ya da talep eden adı (kodla açılmış eski talepler)
         const currentId = String(window.currentUser?.id || "");
-
-        console.log(`🔍 EBYS Filtreleme Başladı. Aktif: ${currentMe}`);
 
         data = data.filter(item => {
             const itemCreatedBy = String(item.createdBy || "");
@@ -1071,14 +1062,29 @@ window.viewRequest = function (id) {
 // [HOW]: Her dosya ayrı yüklenir; yalnız gerçekten yüklenenler döner. En az biri başarısızsa UploadError fırlatılır
 //        (err.uploaded = başarılı olanlar, err.failed = başarısız dosya adları); çağıran kullanıcıya sorar.
 window.uploadFiles = async function (files) {
-    const storage = getStorage();
+    const filesToUpload = Array.from(files || []);
+    if (!filesToUpload.length) return [];
+
+    let storageApi, storage;
+    try {
+        storageApi = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js");
+        storage = storageApi.getStorage();
+    } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const uploadError = new Error(`Dosya depolama başlatılamadı: ${detail}`);
+        uploadError.name = 'UploadError';
+        uploadError.uploaded = [];
+        uploadError.failed = filesToUpload.map(file => file.name);
+        throw uploadError;
+    }
+
     const uploaded = [], failed = [];
     let lastError = null;
-    for (const file of files) {
+    for (const file of filesToUpload) {
         try {
-            const fileRef = ref(storage, "purchaseFiles/" + Date.now() + "_" + file.name);
-            await uploadBytes(fileRef, file);
-            uploaded.push({ name: file.name, url: await getDownloadURL(fileRef) });
+            const fileRef = storageApi.ref(storage, "purchaseFiles/" + Date.now() + "_" + file.name);
+            await storageApi.uploadBytes(fileRef, file);
+            uploaded.push({ name: file.name, url: await storageApi.getDownloadURL(fileRef) });
         } catch (error) {
             console.error('❌ Dosya yüklenemedi:', file.name, error);
             failed.push(file.name);

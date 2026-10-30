@@ -649,14 +649,20 @@ window.saveProductTypeUpdate = async function () {
     const newIsDemirbas = checkInput.checked;
     if (!newName) { showAppAlert("Tür adı boş olamaz!", "error"); return; }
 
+    let definitionSaved = false;
     try {
+        const oldName = window.cachedEditingTypeName;
+        // İki depo da tanım yazılmadan önce doğrulanır; eski alias alanları salt-okunur kalır.
+        const plan = oldName && oldName !== newName ? _planProductTypeRename(oldName, newName) : [];
         const { updateDoc } = window.FirebaseModules;
         await updateDoc(_productTypeDoc(docId), { name: newName, isDemirbas: newIsDemirbas });
+        definitionSaved = true;
 
-        const oldName = window.cachedEditingTypeName;
-        if (oldName && oldName !== newName) {
-            const synced = await window.syncProductTypesToProducts(oldName, newName);
-            if (synced === false) showAppAlert("Tür güncellendi ancak ürünlerdeki tür adı kaydedilemedi.", "warning");
+        const synced = await window.syncProductTypesToProducts(oldName, newName, plan);
+        if (!synced.ok) {
+            showAppAlert(`Tür tanımı kaydedildi. Tamamlanan depolar: ${synced.saved.join(', ') || 'yok'}. ` +
+                `Tamamlanamayan depolar: ${synced.failed.join(', ')}. Bu depolarda kısmi yazma olabilir; ürünleri kontrol edin.`, 'warning');
+            return;
         }
 
         window.forceProductTypeSync();
@@ -664,7 +670,9 @@ window.saveProductTypeUpdate = async function () {
         showAppAlert("Ürün türü güncellendi.", "success");
     } catch (error) {
         console.error("❌ Kayıt hatası:", error);
-        showAppAlert("Güncelleme başarısız.", "error");
+        showAppAlert(definitionSaved
+            ? 'Tür tanımı kaydedildi ancak işlem tamamlanamadı. Ürünlerdeki tür adlarını kontrol edin.'
+            : `Tür tanımı kaydedilemedi; ürün güncellemesi başlatılmadı. ${error.message || ''}`, "error");
     }
 };
 
@@ -1467,23 +1475,42 @@ window.updateProductTypeDropdowns = function () {
 };
 
 // [WHY]: Ad değişikliği b1/b2 ürünlerinde yalnız bellekte yapılıyordu; kaydedilmediği için snapshot ile geri geliyordu (ADM-02).
-window.syncProductTypesToProducts = async function (oldName, newName) {
-    let ok = true;
+function _planProductTypeRename(oldName, newName) {
+    const S = window.Schema;
+    const plan = [];
     for (const depo of ['b1', 'b2']) {
+        const validate = depo === 'b1' ? S.validateB1 : S.validateB2;
         let changed = false;
         const items = (window.data?.[depo] || []).map(item => {
-            if (item.tür !== oldName && item.type !== oldName && item.prodType !== oldName) return item;
+            if ((item.tür || item.type || item.prodType || '') !== oldName) return item;
             changed = true;
-            const next = { ...item };
-            if (next.tür === oldName) next.tür = newName;
-            if (next.type === oldName) next.type = newName;
-            if (next.prodType === oldName) next.prodType = newName;
+            const next = { ...item, tür: newName };
+            const { checked, frozen } = S.legacyStockPatch(depo, item, next);
+            const errors = validate(item).length ? validate(checked, { partial: true }) : validate(next);
+            if (frozen.length || errors.length) {
+                const error = new Error(`${depo}/${item.id}: ${errors.concat(frozen.map(f => `eski alan değiştirilemez: ${f.key}`)).join('; ')}`);
+                error.code = 'schema-violation';
+                throw error;
+            }
             return next;
         });
-        if (changed && !(await window.writeOk(window.saveData(depo, items)))) ok = false;
+        if (changed) plan.push({ depo, items });
     }
-    console.log(`✔ Tür güncellendi: ${oldName} → ${newName}`);
-    return ok;
+    return plan;
+}
+
+window.syncProductTypesToProducts = async function (oldName, newName, plan = _planProductTypeRename(oldName, newName)) {
+    const saved = [], failed = [];
+    for (const { depo, items } of plan) {
+        try {
+            const result = await window.saveData(depo, items);
+            (result === false ? failed : saved).push(depo);
+        } catch (error) {
+            failed.push(depo);
+            console.error(`Tür adı ${depo} deposunda kaydedilemedi:`, error);
+        }
+    }
+    return { ok: failed.length === 0, saved, failed };
 };
 
 // "Özel Takip" Dashboard'u

@@ -145,7 +145,7 @@ export const UIComponents = {
         const rawData = window.data[activeTab];
         let item;
 
-        if (mode === 'edit') {
+        if (mode === 'edit' || mode === 'clone') {
             item = (rawData || []).find(x => x && String(x.id) === String(indexOrId));
             if (!item) {
                 if (typeof showAppAlert === 'function') showAppAlert('Ürün bulunamadı; liste güncellenmiş olabilir.', 'error');
@@ -188,8 +188,10 @@ export const UIComponents = {
         const title = document.getElementById('modalTitle');
         const form  = document.getElementById('productForm');
 
-        if (mode === 'edit' && item) {
-            if (title) title.innerText = 'Ürün Düzenle';
+        if ((mode === 'edit' || mode === 'clone') && item) {
+            if (title) title.innerText = mode === 'clone'
+                ? `📋 Ürün Kopyala: ${item.ürün || item.name || ''}`
+                : 'Ürün Düzenle';
             window.cachedEditingTypeName = item.tür || item.type || '';
 
             const setVal = (id, val) => {
@@ -245,15 +247,34 @@ export const UIComponents = {
 
             delete form.dataset.editIndex;
             form.dataset.editRepo  = activeTab;
-            form.dataset.editId    = item.id ?? '';
+            if (mode === 'clone') {
+                // [WHY]: Kopyalama, orijinal kaydın id'sine KESİNLİKLE bağlanmaz — Kaydet makeId() ile yepyeni bir ürün oluşturmalı.
+                delete form.dataset.editId;
+                form.dataset.isCloning = 'true';
+            } else {
+                form.dataset.editId = item.id ?? '';
+                delete form.dataset.isCloning;
+            }
 
         } else {
             if (title) title.innerText = 'Yeni Ürün Ekle';
             if (form)  form.reset();
-            if (form)  { delete form.dataset.editIndex; delete form.dataset.editRepo; delete form.dataset.editId; }
+            if (form)  { delete form.dataset.editIndex; delete form.dataset.editRepo; delete form.dataset.editId; delete form.dataset.isCloning; }
         }
 
         modal.style.display = 'block';
+    },
+
+    // =========================================================================
+    // MODAL: cloneProduct
+    // [WHY]: B1/B2'de aynı özelliklere sahip yeni bir ürün girerken tüm alanları
+    //        elle yeniden yazmak operasyonel hız kaybı yaratıyordu.
+    // [HOW]: openProductModal'ı 'clone' modunda açar — form orijinal ürünün
+    //        alanlarıyla doldurulur ama editId BAĞLANMAZ; Kaydet'te saveProduct
+    //        isEdit=false yolunu izler ve makeId() ile yepyeni bir kayıt açar.
+    // =========================================================================
+    cloneProduct(depo, id) {
+        UIComponents.openProductModal('clone', id, depo);
     },
 
     // =========================================================================
@@ -298,6 +319,9 @@ export const UIComponents = {
         if (locEl)   locEl.innerText      = `${repoName.toUpperCase()} / ${item.raf || item.shelf}`;
         if (idxEl)   idxEl.value          = item.id; // #transIndex artık ürün id'sini taşır
         if (srcEl)   srcEl.value          = repoName;
+        // v3.3 Aşama 2 (P1-01): her açılış yeni bir transfer niyetidir → yeni işlem kimliği confirmTransfer'da üretilir;
+        //                      aynı pencereden yeniden gönderim (ör. yanıtı kaybolan istek) AYNI kimliği kullanır.
+        UIComponents._transferOpId = null;
         if (noteEl)  noteEl.value         = '';
         if (intelEl) intelEl.style.display = 'none';
 
@@ -381,7 +405,8 @@ export const UIComponents = {
     // [WHY]: Sevk, ürünü dizi indeksiyle buluyor (DATA-06), hedefe ekleme + kaynaktan silmeyi bellekte yapıp tüm
     //        veritabanını yazıyordu (DATA-01) ve başarı mesajını yazmadan önce gösteriyordu; yazma yarım kalırsa ürün
     //        ya iki yerde ya da hiçbir yerde kalabilirdi.
-    // [HOW]: Ürün id ile çözülür; "hedefe ekle + kaynaktan sil" tek atomik batch (applyItemOps). Mesaj yazmadan sonra.
+    // [HOW]: Ürün id ile çözülür; iç transfer runStockTransferTransaction (v3.3 P1-01/P1-02: taze stok, raf kapasitesi,
+    //        operationId), sevk/hurda runStockOps transaction'ı. Mesaj yalnız sunucu commit'inden sonra.
     async confirmTransfer() {
         const sourceRepo = document.getElementById('transSourceRepo')?.value;
         const productId  = document.getElementById('transIndex')?.value;
@@ -403,7 +428,6 @@ export const UIComponents = {
             return;
         }
 
-        let ops, message, messageType;
         if (targetData.type === 'internal') {
             // [WHY] (Faz 5 · K2 · 5.8 · INV-06): Kalemin TAMAMI taşınmak zorundaydı (37 adetlik satırdan 1 tanesi B2'ye
             //        gidecekse bile 37'si gidiyordu); id de aynen kopyalandığı için her alan (ör. stokOncekiDurum gibi
@@ -417,31 +441,54 @@ export const UIComponents = {
             const stockQty = parseInt(originalItem.adet ?? originalItem.qty ?? 0, 10) || 0;
             if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Taşınacak adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
             if (qty > stockQty) { showAppAlert(`Stokta ${stockQty} adet var; ${qty} adet taşınamaz.`, 'warning'); return; }
-            const now = Date.now();
-            const statusVal = String(originalItem.durumu ?? originalItem.status ?? '');
-            const fullMove = qty === stockQty;
-            const targetItem = {
-                id: fullMove ? originalItem.id : `${targetData.key}_${window.makeId()}`,
-                sütun: document.getElementById('transNewCol')?.value || '',
-                raf: document.getElementById('transNewShelf')?.value || '',
-                tür: originalItem.tür || originalItem.type || '',
-                ürün: originalItem.ürün || originalItem.name || '',
-                marka: originalItem.marka || '',
-                adet: qty,
-                durumu: statusVal,
-                açıklama: sevkNotu || originalItem.açıklama || '',
-                isDemirbas: window.Schema.isDemirbas(originalItem),
-                lastUpdate: now,
-            };
-            if (targetData.key === 'b2') targetItem.status = statusVal;
-            ops = fullMove
-                ? [ { op: 'set', col: targetData.key, item: targetItem }, { op: 'delete', col: sourceRepo, id: originalItem.id } ]
-                : [ { op: 'set', col: targetData.key, item: targetItem },
-                    { op: 'update', col: sourceRepo, id: originalItem.id, fields: { adet: stockQty - qty, lastUpdate: now } } ];
-            message = fullMove
-                ? 'Ürün Sevk/Transfer talebi sağlandı'
-                : `${qty} adet ${targetData.name} birimine taşındı; ${stockQty - qty} adet kaynakta bırakıldı.`;
-            messageType = 'success';
+            const targetShelf = document.getElementById('transNewShelf')?.value || '';
+            if (!targetShelf) { showAppAlert('Hedef raf seçiniz.', 'warning'); return; }
+            // [WHY] (v3.3 · P1-01/P1-02): Kaynak adedi window.data'dan hesaplanıp kör batch'le yazılıyordu; kapasite yalnız bu
+            //        tarayıcının localStorage ayarıyla istemcide denetleniyordu; yanıtı kaybolan istek tekrar gönderilince
+            //        stok ikinci kez düşebiliyordu.
+            // [HOW]: Tek transaction (runStockTransferTransaction): kaynak stok ve raf belgeleri sunucudan taze okunur, hedef raf
+            //        dolu/pasif/katalog dışıysa hiçbir şey yazılmaz. Yukarıdaki adet denetimi yalnız kullanıcı kolaylığıdır;
+            //        son karar transaction'da. İşlem kimliği bu pencere açıkken sabittir (tekrar gönderim = aynı işlem).
+            if (typeof window.runStockTransferTransaction !== 'function' || !window.StockLedger) {
+                showAppAlert('Stok defteri servisi yüklenemedi; transfer güvenle sürdürülemedi.', 'error');
+                return;
+            }
+            if (UIComponents._transferBusy) return;   // çift tıklama / Enter: istek sürerken ikinci gönderim yok
+            UIComponents._transferOpId = UIComponents._transferOpId || window.StockLedger.newOperationId();
+            UIComponents._transferBusy = true;
+            let res;
+            try {
+                res = await window.runStockTransferTransaction({
+                    operationId:  UIComponents._transferOpId,
+                    sourceCol:    sourceRepo,
+                    sourceId:     originalItem.id,
+                    targetCol:    targetData.key,
+                    qty,
+                    targetShelf,
+                    targetColumn: document.getElementById('transNewCol')?.value || '',
+                    note:         sevkNotu,
+                });
+            } catch (e) {
+                if (typeof showAppAlert === 'function') showAppAlert(`Transfer kaydedilemedi; ürün yerinde bırakıldı. ${e.message || ''}`, 'error');
+                return;
+            } finally {
+                UIComponents._transferBusy = false;
+            }
+            UIComponents._transferOpId = null;
+            if (typeof showAppAlert === 'function') {
+                const text = res.duplicate
+                    ? 'Bu transfer daha önce tamamlanmıştı; stok ikinci kez değiştirilmedi.'
+                    : (res.fullMove
+                        ? `Ürün ${targetData.name} birimine taşındı (${res.qty} adet).`
+                        : `${res.qty} adet ${targetData.name} birimine taşındı; ${res.stockAfter} adet kaynakta bırakıldı.`);
+                showAppAlert(text, res.duplicate ? 'info' : 'success');
+            }
+            UIComponents.closeTransferModal();
+            if (typeof window.renderTable === 'function') {
+                window.renderTable(sourceRepo);
+                if (targetData.key !== sourceRepo) window.renderTable(targetData.key);
+            }
+            return;
         } else if (targetData.type === 'external' || targetData.type === 'service') {
             // [WHY] (3.9): Sevk satırın TAMAMINI depodan siliyordu (37 adetlik satırdan 1 cihaz sevk edilince 37'si gidiyordu),
             //        seri no sorulmuyordu ve servis kaydı dönüşte silindiği için cihazın servis geçmişi kalmıyordu.
@@ -539,22 +586,6 @@ export const UIComponents = {
         } else {
             if (typeof showAppAlert === 'function') showAppAlert('Geçersiz hedef.', 'error');
             return;
-        }
-
-        if (!(await window.writeOk(window.applyItemOps(ops)))) {
-            if (typeof showAppAlert === 'function') showAppAlert('Sevk kaydedilemedi; ürün yerinde bırakıldı.', 'error');
-            return;
-        }
-        if (typeof showAppAlert === 'function') showAppAlert(message, messageType);
-
-        UIComponents.closeTransferModal();
-        if (typeof window.renderTable === 'function') window.renderTable(sourceRepo);
-
-        if (targetData.type === 'external' || targetData.type === 'service') {
-            if (typeof window.renderPurchaseModule === 'function') window.renderPurchaseModule();
-        }
-        if (targetData.type === 'internal') {
-            if (typeof window.renderTable === 'function') window.renderTable(targetData.key);
         }
     },
 
@@ -823,6 +854,9 @@ export const UIComponents = {
                 <button class="fab-btn fab-btn-edit" onclick="openProductModal('edit', ${i}, ${d}); window.clearRowSelection();">
                     <i class="fas fa-pen"></i> Düzenle
                 </button>
+                <button class="fab-btn fab-btn-clone" onclick="cloneProduct(${d}, ${i}); window.clearRowSelection();">
+                    <i class="fas fa-copy"></i> Kopyala
+                </button>
                 <button class="fab-btn fab-btn-transfer" onclick="openTransferModal(${d}, ${i}); window.clearRowSelection();">
                     <i class="fas fa-shipping-fast"></i> Sevk
                 </button>
@@ -874,6 +908,9 @@ export const UIComponents = {
             </button>
             <button class="bs-action-btn bs-btn-edit" onclick="openProductModal('edit', ${i}, ${d}); window.closeMobileBottomSheet();">
                 <i class="fas fa-pen"></i> Düzenle
+            </button>
+            <button class="bs-action-btn bs-btn-clone" onclick="cloneProduct(${d}, ${i}); window.closeMobileBottomSheet();">
+                <i class="fas fa-copy"></i> Kopyala
             </button>
             <button class="bs-action-btn bs-btn-transfer" onclick="openTransferModal(${d}, ${i}); window.closeMobileBottomSheet();">
                 <i class="fas fa-shipping-fast"></i> Sevk
@@ -954,6 +991,7 @@ window.AppModules.UI = UIComponents;
 //        atanır. bind ile 'this' context'i korunur.
 // ─────────────────────────────────────────────────────────────────────────────
 window.openProductModal         = UIComponents.openProductModal.bind(UIComponents);
+window.cloneProduct             = UIComponents.cloneProduct.bind(UIComponents);
 window.openTransferModal        = UIComponents.openTransferModal.bind(UIComponents);
 window.handleTransferTargetChange = UIComponents.handleTransferTargetChange.bind(UIComponents);
 window.confirmTransfer          = UIComponents.confirmTransfer.bind(UIComponents);

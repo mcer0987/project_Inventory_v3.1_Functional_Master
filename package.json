@@ -12,7 +12,8 @@
     "test:atomic:emu": "firebase emulators:exec --config tests/rules/firebase.rules-test.json --only firestore --project demo-atomic-writer \"node --test --test-reporter=spec tests/integration/atomic-writer.emu.test.mjs\"",
     "test:staff:emu": "firebase emulators:exec --config tests/integration/firebase.staff-test.json --only firestore,auth --project demo-staff-provisioning \"node --test --test-reporter=spec tests/integration/staff-provisioning.emu.test.mjs\"",
     "serve": "node scratch/dev-server.js",
-    "test:ownership:emu": "firebase emulators:exec --config tests/rules/firebase.rules-test.json --only firestore --project demo-ownership \"node --test --test-reporter=spec tests/integration/ownership.emu.test.mjs\""
+    "test:ownership:emu": "firebase emulators:exec --config tests/rules/firebase.rules-test.json --only firestore --project demo-ownership \"node --test --test-reporter=spec tests/integration/ownership.emu.test.mjs\"",
+    "test:ledger:emu": "firebase emulators:exec --config tests/rules/firebase.rules-test.json --only firestore --project demo-stock-ledger \"node --test --test-reporter=spec tests/integration/stock-ledger.emu.test.mjs\""
   },
   "dependencies": {
     "puppeteer": "^25.2.1"

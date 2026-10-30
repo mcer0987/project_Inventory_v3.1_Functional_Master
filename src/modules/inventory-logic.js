@@ -163,7 +163,10 @@ export const bulkDelete = async function (depo) {
     const changed = targets.length > 0;
 
     if (changed) {
-        if (!(await window.writeOk(window.updateItems(depo, targets.map(t => ({ id: t.id, fields: { durumu: 'Pasif', status: 'Pasif' } })))))) {
+        // v3.3 (envanter yan hatası): b1'de 'status' eski alandır (B1_LEGACY_KEYS) — şema muhafızı her b1 toplu pasife almayı
+        //       reddediyordu. Durum yalnız deponun kanonik alan(lar)ına yazılır: b1 'durumu', b2 'durumu' + 'status'.
+        const passive = depo === 'b2' ? { durumu: 'Pasif', status: 'Pasif' } : { durumu: 'Pasif' };
+        if (!(await window.writeOk(window.updateItems(depo, targets.map(t => ({ id: t.id, fields: { ...passive } })))))) {
             _alert('Pasife alma kaydedilemedi.', 'error');
             return;
         }
@@ -203,7 +206,9 @@ export const saveProduct = async function (e) {
 
     // Düzenleme: yalnız formun alanları o dokümana yazılır (limit/takip gibi diğer alanlar ve eşzamanlı değişiklikler korunur).
     // Yeni kayıt: tek doküman eklenir. (H2: koleksiyonun tamamı gönderilmez.)
-    let ok;
+    // v3.3 Aşama 4 (Denetim P1-02 devamı): runProductSave tek transaction'da yazar — kaynak TAZE okunur (window.data'nın
+    // bayat kopyası değil) ve raf sayacı (usedSlots) aynı commit'te güncellenir (bkz. stock-ledger.js). Hata mesajı
+    // doğrudan gösterilir (ör. "… rafı dolu…") — writeOk'un genel "kaydedilemedi"sine düşürülmez (confirmTransfer ile aynı desen).
     if (isEdit) {
         const existing = _find(editRepo, editId);
         if (!existing) {
@@ -215,16 +220,22 @@ export const saveProduct = async function (e) {
             fields.status = formFields.durumu;
             if (existing.durumu === undefined) delete fields.durumu;
         }
-        ok = await window.writeOk(window.updateItem(editRepo, existing.id, fields));
+        try {
+            await window.runProductSave({ col: editRepo, id: existing.id, isNew: false, fields });
+        } catch (saveError) {
+            if (typeof window.showAppAlert === 'function') window.showAppAlert(saveError.message || 'Kayıt başarısız oldu. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
+            return;
+        }
     } else {
-        const created = { id: `${editRepo}_${window.makeId()}`, ...formFields };
-        if (editRepo === 'b2') created.status = formFields.durumu;
-        ok = await window.writeOk(window.appendItem(editRepo, created));
-    }
-
-    if (ok === false) {
-        if (typeof window.showAppAlert === 'function') window.showAppAlert('Kayıt başarısız oldu. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
-        return;
+        const newId = `${editRepo}_${window.makeId()}`;
+        const fields = { ...formFields };
+        if (editRepo === 'b2') fields.status = formFields.durumu;
+        try {
+            await window.runProductSave({ col: editRepo, id: newId, isNew: true, fields });
+        } catch (saveError) {
+            if (typeof window.showAppAlert === 'function') window.showAppAlert(saveError.message || 'Kayıt başarısız oldu. Yetkinizi ve bağlantınızı kontrol edin.', 'error');
+            return;
+        }
     }
 
     if (typeof window.renderTable === 'function') {
@@ -233,6 +244,8 @@ export const saveProduct = async function (e) {
     }
 
     if (typeof window.showAppAlert === 'function') window.showAppAlert('İşlem Başarılı!', 'success');
+    // Kaydet başarılıysa (kopyalama dahil) Vazgeç/İptal onayı sorulmadan kapanır (3. madde: "Kaydet'e basılırsa onay sormadan").
+    delete form.dataset.isCloning;
     if (typeof window.closeProductModal === 'function') window.closeProductModal();
 };
 
