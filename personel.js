@@ -17,25 +17,26 @@ window.renderPersonelTable = function () {
     tbody.innerHTML = (window.data.personel || []).map(item => `
         <tr>
             <td><input type="checkbox" class="row-select" data-id="${escapeHtml(item.id ?? '')}"></td>
-            <td>${escapeHtml(item.name || '-')}</td>
-            <td>${escapeHtml(item.birim || '-')}</td>
+            <td>${escapeHtml(item.name || '-')}<br><small>ID: ${escapeHtml(item.id)} · UID: ${escapeHtml(item.uid || 'yok')} · ${item.active === false ? 'Pasif' : 'Aktif'}</small></td>
+            <td>${escapeHtml(item.birim || '-')}<br><small>Birim ID: ${escapeHtml(item.unitId || 'eski ad kaydı')} · ${escapeHtml(item.jobTitle || '')}</small></td>
             <td>${account(item) /* xss-ok: account() kendi şablonlarında escapeHtml / jsArg kullanır (linter ayrıca denetler) */}</td>
             <td>
                 <button class="edit-btn" onclick="if(validateAdminAction()) openPersonelModal('edit', ${jsArg(item.id)})">Düzenle</button>
-                <button class="delete-btn" onclick="if(validateAdminAction()) deletePersonel(${jsArg(item.id)})">Sil</button>
+                <button class="delete-btn" onclick="if(validateAdminAction()) deletePersonel(${jsArg(item.id)})">Pasifleştir</button>
             </td>
         </tr>`).join('');
 };
 
 window.deletePersonel = async function (id) {
-    if (!window.requireDbAdmin('Personel silme')) return;   // Faz 4 · J1: personel yalnız admin
+    if (!window.requireDbAdmin('Personel pasifleştirme')) return;
     const person =(window.data.personel || []).find(p => String(p.id) === String(id));
     if (!person) { showAppAlert('Personel bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-    const ok = await showCustomConfirm('Personeli Sil', `"${person.name || '-'}" silinecek; bu kişi artık oturum kodu ile giriş yapamaz. Onaylıyor musunuz?`);
+    const ok = await showCustomConfirm('Personeli Pasifleştir', `"${person.name || '-'}" kaydı ve geçmişi korunacak; uygulama verilerine erişimi kapatılacak. Onaylıyor musunuz?`);
     if (ok !== true) return;
-    if (!(await window.writeOk(window.removeItem('personel', person.id)))) { showAppAlert('Personel silinemedi.', 'error'); return; }
+    try { await window.AppModules.EBYSDefinitions.setActive('personel', person.id, false); }
+    catch (error) { showAppAlert(error.message, 'error'); return; }
     renderPersonelTable();
-    showAppAlert('Personel silindi.', 'info');
+    showAppAlert('Personel pasifleştirildi. Yeniden etkinleştirmek için Düzenle kullanın.', 'info');
 };
 
 window.getRandomCode = function () {

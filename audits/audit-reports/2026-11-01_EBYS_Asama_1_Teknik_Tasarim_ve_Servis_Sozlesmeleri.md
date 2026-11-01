@@ -3,7 +3,7 @@
 **Tarih:** 1 Kasım 2026 — Revizyon 2  
 **Dal:** `feat/v3.4-ebys`  
 **Kod referansı:** `767fed2b71c4f26106fe382f284f09ff04ca4f5d`; uygulama kodunda bu tur değişiklik yok.  
-**Durum:** Proje sahibinin üç mimari revizyon talebi işlendi; tasarım mutabakatı bekleniyor. Üretim uygulaması, Rules kanıtı veya canlı uygunluk beyanı değildir.  
+**Durum:** Revizyon 2 proje sahibinin plan commit'i ve Aşama 2 başlangıç talimatıyla kabul edildi; plan `299e2fc` commit'inde. Bu belge üretim uygulaması, Rules kanıtı veya canlı uygunluk beyanı değildir.
 **Önkoşul:** Aşama 0 kabulü ve Aşama 1 başlangıcı proje sahibinin “Uygundur başla” talimatıyla verildi. Commit için ayrıca açık talimat bekleniyor.  
 **Sınır:** Vanilla JavaScript, tarayıcıda çalışma, derleme/framework eklememe, Spark'ı koruma. Dış entegrasyon ve güvenilir sunucu işleri sonraki fazda.
 

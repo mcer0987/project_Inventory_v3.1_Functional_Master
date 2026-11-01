@@ -186,7 +186,7 @@ function _fillNamedSelect(select, items, placeholder, emptyText) {
 }
 
 function fillPurchaseSelects() {
-    _fillNamedSelect(document.getElementById('purUnit'), window.data.units || [],
+    _fillNamedSelect(document.getElementById('purUnit'), (window.data.units || []).filter(u => u?.active !== false),
         'Birim Seçiniz', 'Tanımlı birim yok — Tanımlar › Birimler');
     _fillNamedSelect(document.getElementById('purType'), window.data.productTypes || [],
         'Tür Seçiniz', 'Tanımlı ürün türü yok — Tanımlar › Ürün Türleri');

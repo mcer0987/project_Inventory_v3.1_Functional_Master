@@ -1,0 +1,62 @@
+{
+  "date": "2026-11-01",
+  "branch": "feat/v3.4-ebys",
+  "baseCommit": "299e2fc",
+  "workingTree": "uncommitted; includes concurrent changes in shared script.js",
+  "results": {
+    "unit": {
+      "passed": 271,
+      "failed": 0
+    },
+    "targetedUnit": {
+      "passed": 5,
+      "failed": 0
+    },
+    "rules": {
+      "passed": 223,
+      "failed": 0
+    },
+    "xss": {
+      "unauthorized": 0
+    },
+    "ui": {
+      "checks": 6,
+      "pageerrors": 0,
+      "scope": "isolated actual modal handlers and DOM, service capture; real transactions separately tested under Rules emulator"
+    },
+    "hosting": {
+      "status": "blocked",
+      "expected": 71,
+      "actual": 74,
+      "unexpected": [
+        "release-journal/index.html",
+        "release-journal/journal.js",
+        "release-journal/style.css"
+      ]
+    }
+  },
+  "sourceSha256": {
+    "admin.html": "4132e1c97892212f384e91bd0899bdd6968209c67e8e07f7536a84bb18108009",
+    "index.html": "c21cda32213c16712a2baf8b8dcfc9119a7b8b06a02efb5f750849ce3de79c23",
+    "personel.js": "dc5a529adfbe3f8611e265027fe9f6fb5b84fad5d89ecd3b4b70655d218d8612",
+    "script.js": "83ab8bbd45f8073c508bb696646b329e5e5ab59088b2eb3bf4ee3d32df979ef7",
+    "firestore.rules": "21d550cecf925207a4c110426bc07192001d6756a1b2f4464784701b77728efc",
+    "src/modules/edm-workflow.js": "6b041336e8931bde12bf50d67c3bde80201528fe67e3069bf8d7312624c89243",
+    "src/services/purchase-servises.js": "eb7720fb65d07a9a6baa262c7e3300597dd3b075bb65b48817e874f5f6ff4b56",
+    "src/services/ebys-definitions.js": "49a3aca0fe456b349f64c986ad9aaf7d41e38ac8ba005fe71a6123d80c83e737",
+    "src/utils/ebys-definitions-schema.js": "3e4a1116a124bea0631387646fef519ffc5a55048a64dc77c089b211333ca7c8",
+    "src/ui/ebys-definitions-ui.js": "aee42553df3f495a219ae523b86e79f115f9ab39225a23a607f899cf20848c96",
+    "tests/unit/ebys-definitions.test.mjs": "1f3d1e8293c352f2a451b1166c0d8d1746a4b07655f4853ef67e383a7090676e",
+    "tests/rules/ebys-definitions.test.mjs": "c35899257f7d9d525a1af42c1f4772d86aba7057a4b0f3f0d072ba45c89c027e",
+    "scratch/ebys-stage2-ui.cjs": "d5c5bbbd0f722a66414a3cbaf7ad867a352bddb2db39a87e0a3210d5e6fb7a3c",
+    "scratch/hosting-files.js": "fe3f7a3a204f7cc1b3aeef9b93933920cc119fc1c41b9be83e892eb93a048b44"
+  },
+  "evidenceSha256": {
+    "scratch/ebys-stage2-unit.log": "92d1ff753029aff7fb2820ad28bce1b7a69331f0491cf645fd002354b9ce5afc",
+    "scratch/ebys-stage2-unit-targeted.log": "9ddf7a09c0a1b7442e6ed8e828af4b132f64752db34d4e24a98b48b25f827d58",
+    "scratch/ebys-stage2-rules.log": "33c84679739148ee042705aba8af0c7f3f1aaee400d7ba6a4ed8da28b4c862ce",
+    "scratch/ebys-stage2-xss.log": "eb5c2cf9c1db29a69cc0e58df13ffbd33adf6abda49ae2c803b2f6f63f8f8c82",
+    "scratch/ebys-stage2-ui-approved.log": "78fcaaaeb49477b6128fc0ade5bdbe0e3c18df37a5e4b1a462a8fee54553dfcc",
+    "scratch/ebys-stage2-hosting.log": "7df99b828def19500c104deb2d62993b6f00d0ae801dc95d156cb30dab77ddf3"
+  }
+}

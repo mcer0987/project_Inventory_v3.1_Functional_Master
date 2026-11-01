@@ -1,3 +1,4 @@
+import '../services/ebys-definitions.js';
 import { doc, setDoc, getDocs, collection, getDoc, onSnapshot, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // [WHY]: getFirestore() cagrisi uygulama yuklenme asamasinda (henuz initializeApp tamamlanmadan) 'No Firebase App' hatasi firlatiyordu.
@@ -88,12 +89,12 @@ function _ensureUnitModal() {
             <hr>
             <label for="unitNameInput">Birim Adı:</label>
             <input type="text" id="unitNameInput" class="um-input" placeholder="Örn: Bilgi İşlem" autocomplete="off" style="margin:4px 0 15px;">
-            <label for="unitPersonnelSearch">Personel Ekle (Ara/Seç):</label>
+            <label for="unitPersonnelSearch">Ek Katılımcı Ekle (Kalıcı ID ile):</label>
             <input type="text" id="unitPersonnelSearch" class="um-input" placeholder="Personel adı yazın (en az 2 harf)..." autocomplete="off"
                 oninput="window.searchPersonnelForUnit(this.value)" style="margin-top:4px;">
             <div id="unitPersonnelResults" class="um-results"></div>
             <div style="margin-top:20px;">
-                <label><b>Atanan Personeller:</b></label>
+                <label><b>Ek katılımcılar / eski ad listesi:</b></label>
                 <ul id="unitSelectedPersonnel" class="um-list"></ul>
             </div>
             <div style="margin-top:20px; text-align:right;">
@@ -112,6 +113,7 @@ window.openUnitModal = function (unitId = null) {
 
     unitEditor.id = unit ? String(unit.id) : null;
     unitEditor.personnel = unit ? [...(unit.personnel || [])] : [];
+    window.AppModules.EBYSDefinitionsUI.openUnit(unit, unitEditor);
     document.getElementById('unitModalTitle').innerText = unit ? 'Birimi Düzenle' : 'Yeni Birim Tanımla';
     document.getElementById('unitNameInput').value = unit ? _unitName(unit) : '';
     document.getElementById('unitPersonnelSearch').value = '';
@@ -127,100 +129,28 @@ window.closeUnitModal = function () {
 };
 
 // --- PERSONEL ARAMA VE SEÇME ---
-window.searchPersonnelForUnit = function (query) {
-    const resultArea = document.getElementById('unitPersonnelResults');
-    if (!resultArea) return;
-    const term = String(query || '').toLocaleLowerCase('tr-TR').trim();
-    if (term.length < 2) { resultArea.style.display = 'none'; resultArea.innerHTML = ''; return; }
-
-    const chosen = new Set(unitEditor.personnel.map(n => n.toLocaleLowerCase('tr-TR')));
-    const names = [...new Set([...(window.data?.personel || []), ...(window.data?.staff || [])].map(_personName).filter(Boolean))];
-    const matches = names.filter(n => n.toLocaleLowerCase('tr-TR').includes(term)).slice(0, 10);
-
-    resultArea.innerHTML = matches.length
-        ? matches.map(n => {
-            const already = chosen.has(n.toLocaleLowerCase('tr-TR'));
-            return `<div class="unit-personnel-option${already ? ' is-added' : ''}" ${already ? '' : `onclick="window.addPersonnelToTempList(${jsArg(n)})"`}>
-                ${escapeHtml(n)}${already ? ' (eklendi)' : ''}</div>`;
-        }).join('')
-        : '<div class="um-muted" style="padding:8px 10px;">Eşleşen personel bulunamadı.</div>';
-    resultArea.style.display = 'block';
-};
-
-window.addPersonnelToTempList = function (name) {
-    const n = String(name || '').trim();
-    if (n && !unitEditor.personnel.some(x => x.toLocaleLowerCase('tr-TR') === n.toLocaleLowerCase('tr-TR'))) {
-        unitEditor.personnel.push(n);
-        window.renderSelectedPersonnel();
-    }
-    const search = document.getElementById('unitPersonnelSearch');
-    if (search) { search.value = ''; search.focus(); }
-    const results = document.getElementById('unitPersonnelResults');
-    if (results) results.style.display = 'none';
-};
-
-window.removePersonnelFromTempList = function (index) {
-    unitEditor.personnel.splice(index, 1);
-    window.renderSelectedPersonnel();
-};
-
-window.renderSelectedPersonnel = function () {
-    const list = document.getElementById('unitSelectedPersonnel');
-    if (!list) return;
-    list.innerHTML = unitEditor.personnel.map((name, index) => `
-        <li class="um-chip">
-            ${escapeHtml(name)}
-            <button type="button" class="um-remove" onclick="window.removePersonnelFromTempList(${index})" title="Çıkar">&times;</button>
-        </li>`).join('') || '<li><small class="um-muted">Henüz personel atanmadı.</small></li>';
-};
+window.searchPersonnelForUnit = query => window.AppModules.EBYSDefinitionsUI.searchPeople(query, unitEditor);
+window.renderSelectedPersonnel = () => window.AppModules.EBYSDefinitionsUI.renderPeople(unitEditor);
 
 // --- VERİ KAYDETME ---
+// [WHY]: Tek kayıt servisi legacy alanları korur; silme yerine pasifleştirme uygulanır.
+// [HOW]: UI yalnız servis sözleşmesini çağırır; hiyerarşi ve kimlikler veri katmanında doğrulanır.
 window.saveUnitData = async function () {
-    if (!window.requireDbAdmin('Birim kaydı')) return;   // Faz 4 · J1: units yalnız admin
     if (unitEditor.saving) return;
-    const name = (document.getElementById('unitNameInput')?.value || '').trim();
-    if (!name) { _unitAlert('Birim adı boş olamaz!', 'warning'); return; }
-
-    const units = (window.data.units || []).filter(u => u && typeof u === 'object');
-    const lower = name.toLocaleLowerCase('tr-TR');
-    if (units.some(u => String(u.id) !== unitEditor.id && _unitName(u).trim().toLocaleLowerCase('tr-TR') === lower)) {
-        _unitAlert(`"${name}" adında bir birim zaten var.`, 'warning');
-        return;
-    }
-
-    const stamp = new Date().toLocaleString('tr-TR');
-    let next;
-    if (unitEditor.id) {
-        if (!units.some(u => String(u.id) === unitEditor.id)) { _unitAlert('Düzenlenen birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-        next = units.map(u => String(u.id) === unitEditor.id ? { ...u, name, personnel: [...unitEditor.personnel], updatedAt: stamp } : u);
-    } else {
-        next = [...units, { id: Date.now().toString(), name, personnel: [...unitEditor.personnel], updatedAt: stamp }];
-    }
-
     unitEditor.saving = true;
     try {
-        if (!(await window.writeOk(window.saveData('units', next)))) { _unitAlert('Birim kaydedilemedi. Yetkinizi ve bağlantınızı kontrol edin.', 'error'); return; }
-        const wasEdit = !!unitEditor.id;
-        window.closeUnitModal();
-        window.renderUnitManagement();
-        _unitAlert(wasEdit ? 'Birim güncellendi.' : 'Birim eklendi.', 'success');
-    } finally {
-        unitEditor.saving = false;
-    }
+        await window.AppModules.EBYSDefinitions.saveUnit(window.AppModules.EBYSDefinitionsUI.readUnit(unitEditor));
+        window.closeUnitModal(); window.renderUnitManagement();
+        _unitAlert('Birim kaydedildi.', 'success');
+    } catch (error) { _unitAlert(error.message, 'error'); }
+    finally { unitEditor.saving = false; }
 };
-
 window.deleteUnit = async function (unitId) {
-    if (!window.requireDbAdmin('Birim silme')) return;
-    const unit = (window.data.units || []).find(u => u && typeof u === 'object' && String(u.id) === String(unitId));
-    if (!unit) { _unitAlert('Birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-    const ok = typeof showCustomConfirm === 'function'
-        ? await showCustomConfirm('Birimi Sil', `"${_unitName(unit)}" birimi silinecek. Emin misiniz?`)
-        : window.confirm('Bu birimi silmek istediğinize emin misiniz?');
+    if (!window.requireDbAdmin('Birim pasifleştirme')) return;
+    const ok = await showCustomConfirm('Birimi Pasifleştir', 'Kayıt ve geçmiş bağlantıları korunacak. Devam edilsin mi?');
     if (ok !== true) return;
-    const next = (window.data.units || []).filter(u => !(u && typeof u === 'object' && String(u.id) === String(unitId)));
-    if (!(await window.writeOk(window.saveData('units', next)))) { _unitAlert('Birim silinemedi.', 'error'); return; }
-    window.renderUnitManagement();
-    _unitAlert('Birim silindi.', 'info');
+    try { await window.AppModules.EBYSDefinitions.setActive('units', unitId, false); window.renderUnitManagement(); }
+    catch (error) { _unitAlert(error.message, 'error'); }
 };
 
 // --- TABLO RENDER ---
@@ -234,14 +164,14 @@ window.renderUnitManagement = function () {
     if (container) {
         container.innerHTML = units.map(u => `
             <tr>
-                <td><strong>${escapeHtml(u.name)}</strong></td>
-                <td><small>${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}</small></td>
+                <td><strong>${escapeHtml(u.name)}</strong><small> · ID: ${escapeHtml(u.id)} · ${escapeHtml(u.code || "")} · ${u.active === false ? "Pasif" : "Aktif"}</small></td>
+                <td><small>${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}<br>ID: ${escapeHtml((u.personnelIds || []).join(', '))}<br>Bağlı personel: ${escapeHtml((window.data.personel || []).filter(p => String(p.unitId || '') === String(u.id)).map(p => `${p.name} (${p.id})`).join(', '))}</small></td>
                 <td style="text-align:right;">
                     <button onclick="window.openUnitModal(${jsArg(String(u.id))})" class="btn-edit" style="color:#2980b9; background:none; border:none; cursor:pointer; margin-right:10px;">
                         <i class="fas fa-edit"></i> Düzenle
                     </button>
                     <button onclick="window.deleteUnit(${jsArg(String(u.id))})" class="btn-delete" style="color:#c0392b; background:none; border:none; cursor:pointer;">
-                        <i class="fas fa-trash"></i> Sil
+                        <i class="fas fa-pause"></i> Pasifleştir
                     </button>
                 </td>
             </tr>
@@ -251,15 +181,15 @@ window.renderUnitManagement = function () {
     if (defListContainer) {
         defListContainer.innerHTML = units.map(u => `
             <tr>
-                <td><strong>${escapeHtml(u.name)}</strong></td>
-                <td><span class="badge bg-light text-dark border">-</span></td>
-                <td><small class="text-muted">${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}</small></td>
+                <td><strong>${escapeHtml(u.name)}</strong><small> · ID: ${escapeHtml(u.id)} · ${escapeHtml(u.code || "")} · ${u.active === false ? "Pasif" : "Aktif"}</small></td>
+                <td><span class="badge bg-light text-dark border">${escapeHtml(u.organizationId || "—")} / ${escapeHtml(u.parentUnitId || "Üst birim yok")}</span></td>
+                <td><small class="text-muted">${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}<br>ID: ${escapeHtml((u.personnelIds || []).join(', '))}<br>Bağlı personel: ${escapeHtml((window.data.personel || []).filter(p => String(p.unitId || '') === String(u.id)).map(p => `${p.name} (${p.id})`).join(', '))}</small></td>
                 <td class="text-end pe-3">
                     <div class="action-buttons justify-content-end">
                         <button onclick="window.openUnitModal(${jsArg(String(u.id))})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                             <i class="fa-solid fa-arrows-rotate"></i>
                         </button>
-                        <button onclick="window.deleteUnit(${jsArg(String(u.id))})" class="btn-action btn-passive shadow-sm" title="Sil">
+                        <button onclick="window.deleteUnit(${jsArg(String(u.id))})" class="btn-action btn-passive shadow-sm" title="Pasifleştir">
                             <i class="fas fa-trash fa-xs"></i>
                         </button>
                     </div>

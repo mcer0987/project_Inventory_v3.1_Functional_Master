@@ -35,8 +35,10 @@ service cloud.firestore {
     }
     function staffAccount(root) { return /databases/$(database)/documents/$(root)/staffAccounts/items/$(request.auth.uid); }
     function staffPersonOk(root, pid) {
-      let p = /databases/$(database)/documents/$(root)/personel/items/$(pid);
-      return pid is string && pid != '' && get(p).data.get('uid', '') == request.auth.uid && get(p).data.get('pri', '') == staffPri();
+      // Eksik/geçersiz pid yolu veya eksik kimlik alanı fail-closed olur; tekrar get/replace maliyeti yok.
+      let person = get(/databases/$(database)/documents/$(root)/personel/items/$(pid)).data;
+      return person.uid == request.auth.uid && request.auth.token.email.lower() == person.pri + '@staff.medipol.local'
+        && person.get('active', true) == true;
     }
     // Kimlik (kilitten bağımsız): yalnız kilit dokümanının kendisini okumak için kullanılır (istemci "neden reddedildim" sorusunu
     // yanıtlayabilsin). Veri erişimi için HER ZAMAN isStaff.
@@ -408,6 +410,52 @@ service cloud.firestore {
         || restoreLockOn(r);
     }
 
+    // [WHY]: Tanımlarda ID ve hiyerarşi istemci dışından da korunur; silme yerine pasifleştirme.
+    // [HOW]: En fazla dört üst birim getAfter ile doğrulanır; aynı batch'teki döngüler de reddedilir.
+    function definitionKey(v) { return v is string && v.size() <= 120 && !v.matches('.*[<>/].*'); }
+    function unitPath(r, id) { return /databases/$(database)/documents/$(r)/units/items/$(id); }
+    function ancestorOk(d, id, org) {
+      return string(d.get('id', '')) != id && d.get('organizationId', '') == org;
+    }
+    function parent4(r, id, p, org) {
+      let d = getAfter(unitPath(r, p)).data;
+      return ancestorOk(d, id, org) && d.get('parentUnitId', '') == '';
+    }
+    function parent3(r, id, p, org) {
+      let d = getAfter(unitPath(r, p)).data;
+      return ancestorOk(d, id, org) && (d.get('parentUnitId', '') == '' || parent4(r, id, d.parentUnitId, org));
+    }
+    function parent2(r, id, p, org) {
+      let d = getAfter(unitPath(r, p)).data;
+      return ancestorOk(d, id, org) && (d.get('parentUnitId', '') == '' || parent3(r, id, d.parentUnitId, org));
+    }
+    function parent1(r, id, p, org) {
+      let d = getAfter(unitPath(r, p)).data;
+      return ancestorOk(d, id, org) && (d.get('parentUnitId', '') == '' || parent2(r, id, d.parentUnitId, org));
+    }
+    function unitDefinitionOk(r, id, d) {
+      return string(d.get('id', id)) == id && d.get('active', true) is bool
+        && definitionKey(d.get('parentUnitId', '')) && definitionKey(d.get('organizationId', ''))
+        && definitionKey(d.get('code', '')) && noTag(d.get('name', ''))
+        && d.get('personnelIds', []) is list && d.get('personnel', []) is list
+        && (d.get('parentUnitId', '') == '' || parent1(r, id, d.parentUnitId, d.get('organizationId', '')));
+    }
+    function personDefinitionOk(r, id, d) {
+      return string(d.get('id', id)) == id && d.get('active', true) is bool
+        && definitionKey(d.get('unitId', '')) && d.get('jobTitle', '') is string
+        && d.get('jobTitle', '').size() <= 160 && noTag(d.get('jobTitle', ''))
+        && (d.get('unitId', '') == '' || existsAfter(unitPath(r, d.unitId)));
+    }
+    function definitionOk(r, c, id, d) {
+      return c == 'units' ? unitDefinitionOk(r, id, d) : (c == 'personel' ? personDefinitionOk(r, id, d) : true);
+    }
+    function definitionLinkOk(r, c, d, old) {
+      return c == 'units' ? (d.get('parentUnitId', '') == ''
+          || d.get('parentUnitId', '') == old.get('parentUnitId', '')
+          || getAfter(unitPath(r, d.parentUnitId)).data.get('active', true) == true)
+        : (c != 'personel' || d.get('unitId', '') == '' || d.get('unitId', '') == old.get('unitId', '')
+          || getAfter(unitPath(r, d.unitId)).data.get('active', true) == true);
+    }
     match /{root}/{col}/items/{docId} {
       // Ek D "Ziyaretçi ✗": oturumsuz / anonim / personele bağlı olmayan hesap hiçbir şey okuyamaz.
       allow read: if validRoot(root) && knownCol(col) && member(root);
@@ -415,12 +463,21 @@ service cloud.firestore {
       // Admin: tüm bilinen koleksiyonlar; bakım modundan etkilenmez. Personel kaydına düz metin kod yeniden giremez.
       // v3.3: b1/b2 içerik sözleşmesi (stockCreateOk / stockUpdateOk).
       allow create: if validRoot(root) && knownCol(col) && isAdmin()
+        && definitionOk(root, col, docId, request.resource.data)
+        && definitionLinkOk(root, col, request.resource.data, {})
         && (col != 'personel' || personelCodeOk(request.resource.data))
         && (!(col in ['b1', 'b2']) || stockCreateOk(root, col, request.resource.data));
       allow update: if validRoot(root) && knownCol(col) && isAdmin()
+        && definitionOk(root, col, docId, request.resource.data)
+        && definitionLinkOk(root, col, request.resource.data, resource.data)
+        && (!(col in ['units', 'personel']) || request.resource.data.get('id', null) == resource.data.get('id', null))
+        && (col != 'personel' || resource.data.get('uid', '') == ''
+            || request.resource.data.get('uid', '') == resource.data.uid)
+        && (col != 'units' || resource.data.get('organizationId', '') == ''
+            || request.resource.data.get('organizationId', '') == resource.data.organizationId)
         && (col != 'personel' || personelCodeOk(request.resource.data))
         && (!(col in ['b1', 'b2']) || stockUpdateOk(root, col, request.resource.data, resource.data));
-      allow delete: if validRoot(root) && knownCol(col) && isAdmin();
+      allow delete: if validRoot(root) && knownCol(col) && isAdmin() && !(col in ['units', 'personel']);
 
       // Personel: yalnız iş akışı koleksiyonları, bakım kapalıyken, etiketsiz metinle; sahiplik zorunlu ve değişmez.
       allow create: if validRoot(root) && !isAdmin() && isStaff(root)
