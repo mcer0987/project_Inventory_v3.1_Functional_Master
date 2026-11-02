@@ -1,0 +1,85 @@
+{
+  "date": "2026-11-02",
+  "timezone": "Europe/Istanbul",
+  "branch": "feat/v3.4-ebys-asama-4",
+  "head": "d2b117a18b91b99f2f6077de0dd57fc05a14e616",
+  "stageAcceptance": "GO",
+  "nextStageDevelopment": "GO",
+  "liveDeployment": "NO-GO",
+  "score": 92,
+  "findings": {
+    "P0": [],
+    "P1": [],
+    "P2": [
+      "A4-01: cross-author reservation collision does not retry",
+      "A4-02: hosting gate 86 vs 81"
+    ]
+  },
+  "tests": {
+    "unit": {
+      "pass": 286,
+      "fail": 0
+    },
+    "rules": {
+      "pass": 237,
+      "fail": 0,
+      "suites": 24
+    },
+    "extraRules": {
+      "pass": 12,
+      "fail": 0,
+      "note": "7 existing + 5 additional; last probe reproduces P2"
+    },
+    "xssUnauthorized": 0,
+    "browser": {
+      "pageErrors": 0,
+      "injectedCodeExecution": 0
+    },
+    "layout": {
+      "tabs": 9,
+      "transitions": 6,
+      "pageErrors": 0
+    },
+    "hosting": {
+      "pass": false,
+      "observed": 86,
+      "expected": 81
+    }
+  },
+  "productionFilesModifiedByAudit": false,
+  "commit": false,
+  "deploy": false,
+  "liveDataAccess": false,
+  "limitations": [
+    "shared working tree",
+    "browser uses real HTML/CSS and UI with mocked service; not real Auth UAT",
+    "source hashes captured at report time"
+  ],
+  "sourceSha256": {
+    "firestore.rules": "8754d5edd8821f81484ce63d781741504b38574dfc5ff89cbbcb55c85992f34b",
+    "firestore.indexes.json": "9f6b154fbe4c0a5eea3e2edec30205f079e2ad786776ab38a273fa65e85e7f83",
+    "firebase.json": "6e558c525c17c93b6ca8e979f729ade63e58aa870cfe4345e092ebeb741d98a3",
+    "admin.html": "80bfdb95b6c3dc28bca9f75f22b48f08f6a79bbd020c0d1d002add5af921af40",
+    "src/utils/ebys-document-schema.js": "b48b33626782642ef83ef9629cafa17fd93cc1f1b49a7db0fcda652dba632758",
+    "src/services/ebys-document-service.js": "e35f85afefd52d289e6b60782bb6aa0f4d50e14d479a3614b1d00b55451a1c7f",
+    "src/ui/ebys-documents-ui.js": "f8ffdd1bd79f3b23d303eed33c9d18f5e0a20fc2bb4d4ce9b631ed0abd14832d",
+    "src/ui/ebys-documents.css": "19c61e1d37e0336c4da601c178681650a0b82038d0fc6341aa43b7d8c9fe7b7d",
+    "src/utils/alert.js": "963072b44946d97b6eedfb8000269076cbab66dfd6b7fe55f5283a4032ba54cf",
+    "src/modules/admin/admin-main.js": "a79920850e508c46368ac9cb7cd0fa657314ebe56778bbb2a71a38ef7a4dc1c9",
+    "tests/rules/ebys-documents.test.mjs": "b6087850d3d36cd7f6e0f29eb34c14f3cf0fed88d07adf811b50d10c01f40fd8",
+    "scratch/hosting-files.js": "2bcb0cc3c048cb05a2e0f7c70403cafe401a94c4fa689c0332db45ddf08d961c"
+  },
+  "evidenceSha256": {
+    "audits/audit-reports/2026-11-02_EBYS_Asama_4_Bagimsiz_Denetim_Raporu.md": "6519398120f732d4456e43579e8e1e63b5279c1fbe6140e3ee06ae26b31655b3",
+    "scratch/ebys-stage4-audit-probes.test.mjs": "4e27c708f605927e14d6518263934e76fd4a2382245077a1b9aca48b27a5e3fd",
+    "scratch/ebys-stage4-audit-ui.cjs": "09db976caae7edd583d4710e0425221de1907ad77e2a04b6e200ff04ed415b24",
+    "scratch/ebys-stage4-audit-unit.log": "6294decdb5426459c44ab58c93597bd9b15e903eb3fd214dfe9e0f084d71a32f",
+    "scratch/ebys-stage4-audit-rules.log": "ae8e670dd9a75e65b0260741f9fc0c40e9c4bd959d491771b60997040e0beafb",
+    "scratch/ebys-stage4-audit-xss.log": "251cfab70f23217eb82a6baab4368a97ec01a875cd4931469885afc8727b3dc9",
+    "scratch/ebys-stage4-audit-probes.log": "443b1ad56e9d28e091f6d01b23845fd7e360ab430c66d4762eaf9975cf7e7c7e",
+    "scratch/ebys-stage4-audit-ui.log": "2db38d40163b2d720920504a4a4c96e3be62977057f864774e6e7668587b61a4",
+    "scratch/ebys-stage4-audit-layout.log": "0c43a7ad22b6485d1de97101e8c8d84e6aa7244cafdc6a9462ffefd064673065",
+    "scratch/ebys-stage4-audit-hosting.log": "f6252eebe549e9b9b60e5e37316174d37405209c2a195979452ed3fd5bed475c",
+    "scratch/ebys-stage4-audit-form.png": "780ceda6e38d343ab52777bfc2cb18567f873667c46e9d8abad5fdaa55f71f77"
+  }
+}

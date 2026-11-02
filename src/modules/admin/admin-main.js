@@ -5,6 +5,7 @@
 // [HOW]: Tüm admin modülleri tek URL ile, eski tag sırasıyla buradan import edilir. Son ikisi yalnız yan-etki import'udur.
 import '../../services/firebase-handler.js';
 import '../../services/ebys-rates.js';
+import '../../ui/ebys-documents-ui.js';
 import './admin-dashboard.js';
 import '../../services/purchase-servises.js';
 import '../edm-workflow.js';

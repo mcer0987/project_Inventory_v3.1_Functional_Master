@@ -3,7 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#1e293b">
@@ -31,6 +32,7 @@
     <link rel="stylesheet" href="admin-add-style.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="src/ui/purchase-print.css">
+    <link rel="stylesheet" href="src/ui/ebys-documents.css">
     <link rel="stylesheet" href="dark-theme.css">
     <link rel="stylesheet" href="admin-dark-fix.css">
     <script src="dark-mode-toggle.js"></script>
@@ -616,35 +618,64 @@
                 <h2 class="fw-bold">🎛️ Operasyon Merkezi</h2>
             </div>
 
-            <div class="row" style="display: flex; gap: 20px; align-items: flex-start;">
-                <div style="flex: 2; display: flex; flex-direction: column; gap: 20px;">
+            <div class="row g-4" style="display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap;">
+                <!-- Sol Sütun: Hızlı Envanter Çıkış Masası & Tahmini Döviz Kurları (50%) -->
+                <div
+                    style="flex: 1 1 calc(50% - 12px); min-width: 340px; display: flex; flex-direction: column; gap: 24px;">
 
-                    <!-- Faz 6 · UI-01: "Dinamik Ürün Türü Yönetimi" buradan kaldırıldı (Tanımlar > Ürün Türleri'nde
-                         zaten birebir yönetiliyor — bkz. #defTab-products / window.defAddNewProductType). "Bekleyen
-                         Envanter Talepleri" ait olduğu yere, Talep Ve Süreçler sekmesine taşındı. Açılan alana,
-                         onun kapladığı kadar yer tutan bir Hızlı Envanter Çıkış Masası eklendi. -->
-                    <div class="card shadow-sm border-0">
-                        <div class="card-header bg-white py-3">
-                            <h3 class="m-0 font-weight-bold text-primary">📤 Hızlı Envanter Çıkış Masası</h3>
+                    <!-- 1. Hızlı Envanter Çıkış Masası -->
+                    <div class="modern-card"
+                        style="background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow-sm, 0 4px 12px rgba(0,0,0,0.05));">
+                        <div class="p-3 px-4 border-bottom d-flex align-items-center justify-content-between"
+                            style="background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border-light) !important;">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="header-icon-mini shadow-sm"
+                                    style="width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, var(--color-primary, #3b82f6) 0%, var(--color-primary-dark, #1d4ed8) 100%); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px;">
+                                    <i class="fas fa-right-from-bracket"></i>
+                                </div>
+                                <div>
+                                    <h3 class="m-0 fw-bold" style="font-size: 1rem; color: var(--color-text);">📤 Hızlı
+                                        Envanter Çıkış Masası</h3>
+                                    <span class="small text-muted" style="font-size: 12px;">Son çıkış hareketleri ve
+                                        anlık envanter transferi</span>
+                                </div>
+                            </div>
+                            <span class="badge rounded-pill"
+                                style="background: var(--color-surface); border: 1px solid var(--color-border-light); color: var(--color-text-muted); font-size: 11px; padding: 5px 12px; font-weight: 600;">
+                                <i class="fas fa-bolt text-warning me-1"></i>Hızlı İşlem
+                            </span>
                         </div>
                         <div class="p-3">
-                            <div class="d-flex gap-2 mb-3">
-                                <button onclick="window.quickExitToIndex()" class="btn btn-dark fw-bold" style="flex: 1;">
-                                    <i class="fas fa-right-from-bracket me-2"></i>Envanter Çıkışı Yap
+                            <div class="d-flex gap-3 mb-3">
+                                <button onclick="window.quickExitToIndex()" class="btn"
+                                    style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, var(--color-primary, #3b82f6) 0%, var(--color-primary-dark, #1d4ed8) 100%); color: #ffffff; border: none; border-radius: 10px; padding: 11px 18px; font-weight: 600; font-size: 0.88rem; cursor: pointer; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25); transition: all 0.2s ease;">
+                                    <i class="fas fa-right-from-bracket"></i>
+                                    <span>Envanter Çıkışı Yap</span>
                                 </button>
-                                <button onclick="window.openBulkExitComingSoon()" class="btn btn-outline-dark fw-bold" style="flex: 1;">
-                                    <i class="fas fa-layer-group me-2"></i>Toplu Çıkış / Sepet
+                                <button onclick="window.openBulkExitComingSoon()" class="btn"
+                                    style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--color-surface-alt, #f8fafc); color: var(--color-text, #1e293b); border: 1px solid var(--color-border, #cbd5e1); border-radius: 10px; padding: 11px 18px; font-weight: 600; font-size: 0.88rem; cursor: pointer; transition: all 0.2s ease;">
+                                    <i class="fas fa-layer-group text-primary"></i>
+                                    <span>Toplu Çıkış / Sepet</span>
                                 </button>
                             </div>
 
-                            <div class="table-responsive">
-                                <table class="table table-hover align-middle mb-0" style="table-layout: auto; font-size: 0.8rem;">
-                                    <thead class="bg-light">
+                            <div class="premium-table-wrapper"
+                                style="border: 1px solid var(--color-border-light); border-radius: 12px; overflow: hidden;">
+                                <table class="premium-table mb-0" style="width: 100%; border-collapse: collapse;">
+                                    <thead>
                                         <tr>
-                                            <th class="ps-3">Tarih</th>
-                                            <th>Personel</th>
-                                            <th>Ürün</th>
-                                            <th class="text-end pe-3">Adet</th>
+                                            <th
+                                                style="padding: 12px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); background: var(--color-surface-alt); border-bottom: 2px solid var(--color-border-light);">
+                                                Tarih</th>
+                                            <th
+                                                style="padding: 12px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); background: var(--color-surface-alt); border-bottom: 2px solid var(--color-border-light);">
+                                                Personel</th>
+                                            <th
+                                                style="padding: 12px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); background: var(--color-surface-alt); border-bottom: 2px solid var(--color-border-light);">
+                                                Ürün</th>
+                                            <th class="text-end"
+                                                style="padding: 12px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); background: var(--color-surface-alt); border-bottom: 2px solid var(--color-border-light);">
+                                                Adet</th>
                                         </tr>
                                     </thead>
                                     <tbody id="quickExitDeskBody">
@@ -653,94 +684,147 @@
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <div style="flex: 1; display: flex; flex-direction: column; gap: 20px;">
-                    <div class="card shadow-sm border-0">
-                        <div class="card-header bg-white py-3">
-                            <h3 class="m-0 font-weight-bold text-secondary">🛡️ Demirbaş Çıkış Analizi</h3>
+                    <!-- 2. Satın Alma Tahmini Döviz Kurları Widget'ı -->
+                    <div id="ebysRatesWidgetCard" class="modern-card"
+                        style="background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow-sm, 0 4px 12px rgba(0,0,0,0.05));">
+                        <div class="p-3 px-4 border-bottom d-flex align-items-center justify-content-between"
+                            style="background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border-light) !important;">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="header-icon-mini shadow-sm"
+                                    style="width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px;">
+                                    <i class="fas fa-coins"></i>
+                                </div>
+                                <div>
+                                    <h3 class="m-0 fw-bold" style="font-size: 1rem; color: var(--color-text);">💱 Satın
+                                        Alma Tahmini Döviz Kurları</h3>
+                                    <span class="small text-muted" style="font-size: 12px;">Talep formu TRY ödeneği
+                                        hesabı için referans kurlar</span>
+                                </div>
+                            </div>
+                            <span class="badge rounded-pill"
+                                style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 11px; padding: 5px 12px; font-weight: 700;">
+                                <i class="fas fa-check-circle me-1"></i>Aktif
+                            </span>
                         </div>
-                        <div class="p-3 text-center">
-                            <canvas id="exitDemirbasChart" style="max-height: 220px;"></canvas>
+                        <div class="p-4">
+                            <form id="ebysRatesForm" class="row g-3" style="font-size: 0.85rem;">
+                                <div class="col-6">
+                                    <label for="ebysRateUsd" class="form-label mb-1 fw-bold"
+                                        style="font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px;">1
+                                        USD = TRY</label>
+                                    <input id="ebysRateUsd" name="USD" class="form-control" inputmode="decimal"
+                                        placeholder="0.0000" required
+                                        style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); padding: 8px 12px; font-size: 13px;">
+                                </div>
+                                <div class="col-6">
+                                    <label for="ebysRateEur" class="form-label mb-1 fw-bold"
+                                        style="font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px;">1
+                                        EUR = TRY</label>
+                                    <input id="ebysRateEur" name="EUR" class="form-control" inputmode="decimal"
+                                        placeholder="0.0000" required
+                                        style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); padding: 8px 12px; font-size: 13px;">
+                                </div>
+                                <div class="col-6">
+                                    <label for="ebysRateDate" class="form-label mb-1 fw-bold"
+                                        style="font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Kur
+                                        Tarihi</label>
+                                    <input id="ebysRateDate" name="date" type="date" class="form-control" required
+                                        style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); padding: 8px 12px; font-size: 13px;">
+                                </div>
+                                <div class="col-6">
+                                    <label for="ebysRateSource" class="form-label mb-1 fw-bold"
+                                        style="font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Kaynak
+                                        / Referans</label>
+                                    <input id="ebysRateSource" name="source" class="form-control" maxlength="120"
+                                        placeholder="TCMB vb." required
+                                        style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); padding: 8px 12px; font-size: 13px;">
+                                </div>
+                                <div class="col-12 d-flex flex-wrap align-items-center justify-content-between gap-2 pt-2 mt-1"
+                                    style="border-top: 1px dashed var(--color-border-light);">
+                                    <button type="submit" class="btn btn-sm btn-primary fw-bold"
+                                        style="border-radius: 8px; padding: 8px 20px; background: linear-gradient(135deg, var(--color-primary, #3b82f6) 0%, var(--color-primary-dark, #1d4ed8) 100%); border: none; box-shadow: 0 2px 6px rgba(59,130,246,0.3);">
+                                        <i class="fas fa-save me-1"></i>Kurları Kaydet
+                                    </button>
+                                    <span id="ebysRatesStatus" class="small text-muted" role="status"
+                                        style="font-size: 11.5px;">Kurlar yükleniyor…</span>
+                                </div>
+                                <div class="col-12 mt-1">
+                                    <p class="small text-muted mb-0" style="font-size: 11px; line-height: 1.4;">
+                                        <i class="fas fa-info-circle me-1 text-primary"></i>Bu kurlar talep formundaki
+                                        planlanan TRY ödeneğinin tahmini hesabı içindir. İlk onayda belgeye sabitlenir.
+                                    </p>
+                                </div>
+                            </form>
                         </div>
                     </div>
 
-                    <div class="card shadow-sm border-0">
-                        <div class="card-header bg-white py-3">
-                            <h3 class="m-0 font-weight-bold text-secondary">📦 Sarf Çevre Çıkış Analizi</h3>
+                </div>
+
+                <!-- Sağ Sütun: Çıkış Analiz Grafikleri (50%) -->
+                <div
+                    style="flex: 1 1 calc(50% - 12px); min-width: 340px; display: flex; flex-direction: column; gap: 24px;">
+                    <div class="modern-card"
+                        style="background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow-sm, 0 4px 12px rgba(0,0,0,0.05));">
+                        <div class="p-3 px-4 border-bottom d-flex align-items-center justify-content-between"
+                            style="background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border-light) !important;">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="header-icon-mini shadow-sm"
+                                    style="width: 34px; height: 34px; border-radius: 8px; background: rgba(59, 130, 246, 0.1); color: var(--color-primary, #3b82f6); display: flex; align-items: center; justify-content: center; font-size: 14px;">
+                                    <i class="fas fa-shield-alt"></i>
+                                </div>
+                                <h3 class="m-0 fw-bold" style="font-size: 0.95rem; color: var(--color-text);">🛡️
+                                    Demirbaş Çıkış Analizi</h3>
+                            </div>
                         </div>
-                        <div class="p-3 text-center">
-                            <canvas id="exitSarfChart" style="max-height: 220px;"></canvas>
+                        <div class="p-4 text-center"
+                            style="position: relative; min-height: 250px; display: flex; align-items: center; justify-content: center;">
+                            <canvas id="exitDemirbasChart" style="max-height: 230px; max-width: 100%;"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="modern-card"
+                        style="background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow-sm, 0 4px 12px rgba(0,0,0,0.05));">
+                        <div class="p-3 px-4 border-bottom d-flex align-items-center justify-content-between"
+                            style="background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border-light) !important;">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="header-icon-mini shadow-sm"
+                                    style="width: 34px; height: 34px; border-radius: 8px; background: rgba(16, 185, 129, 0.1); color: #10b981; display: flex; align-items: center; justify-content: center; font-size: 14px;">
+                                    <i class="fas fa-boxes-stacked"></i>
+                                </div>
+                                <h3 class="m-0 fw-bold" style="font-size: 0.95rem; color: var(--color-text);">📦 Sarf
+                                    Çevre Çıkış Analizi</h3>
+                            </div>
+                        </div>
+                        <div class="p-4 text-center"
+                            style="position: relative; min-height: 250px; display: flex; align-items: center; justify-content: center;">
+                            <canvas id="exitSarfChart" style="max-height: 230px; max-width: 100%;"></canvas>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Faz 5 · K3.5: Gelecek analitik paneller için yer tutucu kartlar ve aktif widget'lar -->
+            <!-- Faz 5 · K3.5: Gelecek analitik paneller için yer tutucu kartlar -->
             <div class="row mt-4" style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <!-- Aktif Widget: Satın Alma Tahmini Döviz Kurları -->
-                <div id="ebysRatesWidgetCard" class="future-widget-card active-rates-widget" style="flex: 1 1 100%; text-align: left; padding: 20px 24px; cursor: default; border: 1px solid var(--color-border, #cbd5e1); border-radius: 16px; position: relative;">
-                    <div class="d-flex align-items-center justify-content-between mb-3">
-                        <div class="d-flex align-items-center gap-2">
-                            <div class="future-widget-icon" style="width: 38px; height: 38px; font-size: 16px; margin: 0; display: inline-flex; background: rgba(59, 130, 246, 0.12); color: var(--color-primary, #3b82f6);">
-                                <i class="fas fa-coins"></i>
-                            </div>
-                            <div>
-                                <h4 class="m-0 fw-bold" style="font-size: 0.95rem; color: var(--color-text, #1e293b);">Satın Alma Tahmini Döviz Kurları</h4>
-                                <span class="small text-muted" style="font-size: 11px;">Talep ödeneği tahmini hesabı içindir · İlk onayda belgeye sabitlenir</span>
-                            </div>
-                        </div>
-                        <div class="future-widget-label" style="background: rgba(16, 185, 129, 0.15); color: #10b981; font-weight: 700; font-size: 10px; padding: 3px 10px; border-radius: 20px; text-transform: uppercase;">Aktif Araç</div>
-                    </div>
-
-                    <form id="ebysRatesForm" class="row g-2 align-items-end" style="font-size: 0.82rem;">
-                        <div class="col-6 col-sm-3 col-md-2">
-                            <label for="ebysRateUsd" class="form-label mb-1 fw-bold" style="font-size: 11px; color: var(--color-text-muted);">1 USD = TRY</label>
-                            <input id="ebysRateUsd" name="USD" class="form-control form-control-sm" inputmode="decimal" placeholder="0.0000" required style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);">
-                        </div>
-                        <div class="col-6 col-sm-3 col-md-2">
-                            <label for="ebysRateEur" class="form-label mb-1 fw-bold" style="font-size: 11px; color: var(--color-text-muted);">1 EUR = TRY</label>
-                            <input id="ebysRateEur" name="EUR" class="form-control form-control-sm" inputmode="decimal" placeholder="0.0000" required style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);">
-                        </div>
-                        <div class="col-6 col-sm-3 col-md-2">
-                            <label for="ebysRateDate" class="form-label mb-1 fw-bold" style="font-size: 11px; color: var(--color-text-muted);">Kur Tarihi</label>
-                            <input id="ebysRateDate" name="date" type="date" class="form-control form-control-sm" required style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);">
-                        </div>
-                        <div class="col-6 col-sm-3 col-md-3">
-                            <label for="ebysRateSource" class="form-label mb-1 fw-bold" style="font-size: 11px; color: var(--color-text-muted);">Kaynak / Referans</label>
-                            <input id="ebysRateSource" name="source" class="form-control form-control-sm" maxlength="120" placeholder="TCMB vb." required style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);">
-                        </div>
-                        <div class="col-12 col-md-3 d-flex align-items-center gap-2">
-                            <button type="submit" class="btn btn-sm btn-primary fw-bold w-100" style="border-radius: 8px; padding: 7px 14px; background: linear-gradient(135deg, var(--color-primary, #3b82f6) 0%, var(--color-primary-dark, #1d4ed8) 100%); border: none; box-shadow: 0 2px 6px rgba(59,130,246,0.3); white-space: nowrap;">
-                                <i class="fas fa-save me-1"></i>Kurları Kaydet
-                            </button>
-                        </div>
-                        <div class="col-12 mt-2 pt-2 d-flex align-items-center justify-content-between" style="border-top: 1px dashed var(--color-border-light);">
-                            <span id="ebysRatesStatus" class="small text-muted" role="status" style="font-size: 11.5px;">Kurlar yükleniyor…</span>
-                            <span class="small text-muted" style="font-size: 10.5px;"><i class="fas fa-info-circle me-1 text-primary"></i>İlk onayda belgeye dondurulur</span>
-                        </div>
-                    </form>
-                </div>
-
-                <div class="future-widget-card" style="flex: 1; min-width: 260px; cursor: pointer;"
+                <div class="future-widget-card" style="flex: 1; min-width: 240px; cursor: pointer;"
                     onclick="window.openFutureFeatureModal('active_assignment')">
                     <div class="future-widget-icon"><i class="fas fa-right-left"></i></div>
                     <div class="future-widget-label">Yakında</div>
                     <div class="future-widget-title">Aktif Zimmet & İade Takibi</div>
                 </div>
-                <div class="future-widget-card" style="flex: 1; min-width: 260px; cursor: pointer;"
+                <div class="future-widget-card" style="flex: 1; min-width: 240px; cursor: pointer;"
                     onclick="window.openFutureFeatureModal('scrap_service')">
                     <div class="future-widget-icon"><i class="fas fa-satellite-dish"></i></div>
                     <div class="future-widget-label">Yakında</div>
                     <div class="future-widget-title">Hurda & Servis Radarı</div>
                 </div>
-                <div class="future-widget-card" style="flex: 1; min-width: 260px; cursor: pointer;"
+                <div class="future-widget-card" style="flex: 1; min-width: 240px; cursor: pointer;"
                     onclick="window.openFutureFeatureModal('critical_stock')">
                     <div class="future-widget-icon"><i class="fas fa-triangle-exclamation"></i></div>
                     <div class="future-widget-label">Yakında</div>
                     <div class="future-widget-title">Kritik Sipariş İhtiyacı</div>
                 </div>
-                <div class="future-widget-card" style="flex: 1; min-width: 260px; cursor: pointer;"
+                <div class="future-widget-card" style="flex: 1; min-width: 240px; cursor: pointer;"
                     onclick="window.openFutureFeatureModal('ai_burn_rate')">
                     <div class="future-widget-icon"><i class="fas fa-brain"></i></div>
                     <div class="future-widget-label">Yakında</div>
@@ -748,1118 +832,1200 @@
                 </div>
             </div>
 
-            <!-- 🔭 Özellik Vizyonu (Blueprint) Modalı — future-widget kartlarına tıklanınca açılır -->
-            <div id="futureFeatureModal" class="ff-modal" onclick="if(event.target===this) window.closeFutureFeatureModal()">
-                <div class="ff-modal-content">
-                    <button type="button" class="ff-modal-close" onclick="window.closeFutureFeatureModal()">
-                        <i class="fas fa-times"></i>
-                    </button>
-                    <div class="ff-modal-icon"><i id="ffModalIcon" class="fas fa-circle-info"></i></div>
-                    <div class="ff-modal-badge">ÖZELLİK VİZYONU · YAKINDA</div>
-                    <h4 id="ffModalTitle" class="ff-modal-title"></h4>
-                    <p id="ffModalDetail" class="ff-modal-detail"></p>
-                </div>
+        <!-- 🔭 Özellik Vizyonu (Blueprint) Modalı — future-widget kartlarına tıklanınca açılır -->
+        <div id="futureFeatureModal" class="ff-modal"
+            onclick="if(event.target===this) window.closeFutureFeatureModal()">
+            <div class="ff-modal-content">
+                <button type="button" class="ff-modal-close" onclick="window.closeFutureFeatureModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="ff-modal-icon"><i id="ffModalIcon" class="fas fa-circle-info"></i></div>
+                <div class="ff-modal-badge">ÖZELLİK VİZYONU · YAKINDA</div>
+                <h4 id="ffModalTitle" class="ff-modal-title"></h4>
+                <p id="ffModalDetail" class="ff-modal-detail"></p>
             </div>
-
-            <style>
-                /* 🔭 Özellik Vizyonu (Blueprint) modalı — koyu temalı, animasyonlu bilgilendirme kartı. */
-                .ff-modal {
-                    display: none;
-                    position: fixed;
-                    inset: 0;
-                    z-index: 10500;
-                    background: rgba(2, 6, 23, 0.75);
-                    backdrop-filter: blur(6px);
-                    align-items: center;
-                    justify-content: center;
-                    animation: ff-modal-fade 0.2s ease;
-                }
-                .ff-modal.show {
-                    display: flex;
-                }
-                .ff-modal-content {
-                    position: relative;
-                    width: 92%;
-                    max-width: 460px;
-                    background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 100%);
-                    border: 1px solid rgba(99, 102, 241, 0.35);
-                    border-radius: 18px;
-                    padding: 32px 28px 28px;
-                    text-align: center;
-                    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.1);
-                    animation: ff-modal-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-                }
-                .ff-modal-close {
-                    position: absolute;
-                    top: 14px;
-                    right: 14px;
-                    width: 30px;
-                    height: 30px;
-                    border: none;
-                    border-radius: 50%;
-                    background: rgba(255, 255, 255, 0.08);
-                    color: #cbd5e1;
-                    cursor: pointer;
-                    transition: background 0.15s, transform 0.15s;
-                }
-                .ff-modal-close:hover {
-                    background: rgba(239, 68, 68, 0.25);
-                    color: #fecaca;
-                    transform: rotate(90deg);
-                }
-                .ff-modal-icon {
-                    width: 64px;
-                    height: 64px;
-                    margin: 0 auto 16px;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    background: rgba(99, 102, 241, 0.15);
-                    color: #818cf8;
-                    font-size: 26px;
-                    animation: future-widget-pulse 2.4s ease-in-out infinite;
-                }
-                .ff-modal-badge {
-                    display: inline-block;
-                    font-size: 10.5px;
-                    font-weight: 800;
-                    letter-spacing: 1px;
-                    text-transform: uppercase;
-                    color: #a5b4fc;
-                    background: rgba(99, 102, 241, 0.15);
-                    padding: 4px 12px;
-                    border-radius: 999px;
-                    margin-bottom: 14px;
-                }
-                .ff-modal-title {
-                    font-size: 1.1rem;
-                    font-weight: 700;
-                    color: #f1f5f9;
-                    margin: 0 0 12px;
-                    line-height: 1.4;
-                }
-                .ff-modal-detail {
-                    font-size: 0.85rem;
-                    line-height: 1.6;
-                    color: #94a3b8;
-                    margin: 0;
-                }
-                @keyframes ff-modal-fade {
-                    from { opacity: 0; }
-                    to { opacity: 1; }
-                }
-                @keyframes ff-modal-pop {
-                    from { opacity: 0; transform: scale(0.92) translateY(10px); }
-                    to { opacity: 1; transform: scale(1) translateY(0); }
-                }
-            </style>
-
-            <style>
-                /* Faz 5 · K3.5: Operasyon Merkezi — gelecek widget yer tutucuları (pulse/glow efektli). */
-                .future-widget-card {
-                    position: relative;
-                    background: linear-gradient(135deg, var(--color-surface, #fff) 0%, var(--color-surface-alt, #f8fafc) 100%);
-                    border: 1px dashed var(--color-border, #cbd5e1);
-                    border-radius: 16px;
-                    padding: 28px 20px;
-                    text-align: center;
-                    overflow: hidden;
-                    transition: transform 0.25s ease, box-shadow 0.25s ease;
-                }
-                .future-widget-card::before {
-                    content: '';
-                    position: absolute;
-                    inset: 0;
-                    background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.10), transparent 70%);
-                    animation: future-widget-glow 3s ease-in-out infinite;
-                    pointer-events: none;
-                }
-                .future-widget-card:hover {
-                    transform: translateY(-4px);
-                    box-shadow: 0 10px 24px rgba(99, 102, 241, 0.12);
-                }
-                .future-widget-icon {
-                    position: relative;
-                    width: 56px;
-                    height: 56px;
-                    margin: 0 auto 14px;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    background: rgba(99, 102, 241, 0.12);
-                    color: #6366f1;
-                    font-size: 22px;
-                    animation: future-widget-pulse 2.4s ease-in-out infinite;
-                }
-                .future-widget-label {
-                    position: relative;
-                    display: inline-block;
-                    font-size: 11px;
-                    font-weight: 800;
-                    letter-spacing: 1px;
-                    text-transform: uppercase;
-                    color: #6366f1;
-                    background: rgba(99, 102, 241, 0.1);
-                    padding: 3px 10px;
-                    border-radius: 999px;
-                    margin-bottom: 10px;
-                }
-                .future-widget-title {
-                    position: relative;
-                    font-size: 14px;
-                    font-weight: 700;
-                    color: var(--color-text, #334155);
-                }
-                @keyframes future-widget-pulse {
-                    0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.35); }
-                    50% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0); }
-                }
-                @keyframes future-widget-glow {
-                    0%, 100% { opacity: 0.55; }
-                    50% { opacity: 1; }
-                }
-                [data-theme="dark"] .future-widget-card {
-                    background: linear-gradient(135deg, var(--color-surface, #1e293b) 0%, var(--color-surface-alt, #0f172a) 100%);
-                    border-color: var(--color-border, #334155);
-                }
-                .future-widget-card.active-rates-widget {
-                    border-style: solid;
-                }
-                .future-widget-card.active-rates-widget:hover {
-                    transform: none;
-                    box-shadow: var(--shadow-sm, 0 4px 12px rgba(0,0,0,0.06));
-                }
-            </style>
-
-            <script>
-                // 🔭 Özellik Vizyonu (Blueprint) modalı — "Yakında" kartlarına tıklanınca içerik basılır.
-                // [WHY]: Kartlar şu an statik yer tutucu; adminin ne geleceğini merak etmesine karşılık
-                //        verip beklenti yönetmek için her kartın vizyon metnini gösteren hafif bir modal.
-                window.openFutureFeatureModal = function (key) {
-                    let icon = 'fa-circle-info', title = '', detail = '';
-                    switch (key) {
-                        case 'active_assignment':
-                            icon = 'fa-right-left';
-                            title = 'Canlı Zimmet Radarı & Anlık İade Masası';
-                            detail = 'Kurum genelinde personellerin üzerinde bulunan tüm aktif zimmetleri ve yaklaşan iade tarihlerini tek bir kontrol merkezinden izlemek; süresi dolan cihazlar için otomatik uyarılar üretmek ve tek tıkla depoya iade kabulü sağlamak üzere tasarlanmaktadır.';
-                            break;
-                        case 'scrap_service':
-                            icon = 'fa-satellite-dish';
-                            title = 'Donanım Sağlığı & Yaşam Döngüsü İzleme (Lifecycle)';
-                            detail = 'Servisteki cihazların canlı onarım durumlarını izlemek, mükerrer arıza kaydı açılan kronik sorunlu cihazları (SN) otomatik tespit etmek ve hurdaya ayrılan donanımların sicil/maliyet dökümünü raporlamak üzere tasarlanmaktadır.';
-                            break;
-                        case 'critical_stock':
-                            icon = 'fa-triangle-exclamation';
-                            title = 'Kritik Stok Emniyet Kilidi & Otomatik Talep Tetikleyici';
-                            detail = 'Depolardaki minimum stok limitlerini sürekli tarayarak tükenme eşiğindeki sarf malzemeleri için kırmızı alarm üretmek ve tek tıkla EBYS satın alma talebi başlatmak üzere tasarlanmaktadır.';
-                            break;
-                        case 'ai_burn_rate':
-                            icon = 'fa-brain';
-                            title = "Akıllı Tüketim Analitiği & Öngörücü Tedarik Pipeline'ı";
-                            detail = "B3 hareket defteri loglarını analiz ederek aylık sarf tüketim hızını (Burn Rate) hesaplayan, 'A4 Kağıdı 18 gün sonra tükenecektir' şeklinde öngörücü uyarılar üreten yapay zeka destekli bir tahminleme motorudur.";
-                            break;
-                        default:
-                            return;
-                    }
-
-                    const modal = document.getElementById('futureFeatureModal');
-                    if (!modal) return;
-                    const iconEl = document.getElementById('ffModalIcon');
-                    if (iconEl) iconEl.className = 'fas ' + icon;
-                    const titleEl = document.getElementById('ffModalTitle');
-                    if (titleEl) titleEl.textContent = title;
-                    const detailEl = document.getElementById('ffModalDetail');
-                    if (detailEl) detailEl.textContent = detail;
-                    modal.classList.add('show');
-                };
-
-                window.closeFutureFeatureModal = function () {
-                    const modal = document.getElementById('futureFeatureModal');
-                    if (modal) modal.classList.remove('show');
-                };
-            </script>
         </div>
 
-        <!-- 📦 Satın Alma Yönetimi -->
-        <div id="purchaseTab" class="admin-tab-content">
-            <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
-                <div>
-                    <h2 class="fw-bold mb-0">📦 Satın Alma & Servis</h2>
-                    <small class="text-muted">Operasyonel Takip Paneli</small>
-                </div>
-                <button onclick="window.openNewPurchaseModal()"
-                    class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
-                    <i class="fas fa-plus me-2"></i>Yeni Talep
-                </button>
+        <style>
+            /* 🔭 Özellik Vizyonu (Blueprint) modalı — koyu temalı, animasyonlu bilgilendirme kartı. */
+            .ff-modal {
+                display: none;
+                position: fixed;
+                inset: 0;
+                z-index: 10500;
+                background: rgba(2, 6, 23, 0.75);
+                backdrop-filter: blur(6px);
+                align-items: center;
+                justify-content: center;
+                animation: ff-modal-fade 0.2s ease;
+            }
+
+            .ff-modal.show {
+                display: flex;
+            }
+
+            .ff-modal-content {
+                position: relative;
+                width: 92%;
+                max-width: 460px;
+                background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 100%);
+                border: 1px solid rgba(99, 102, 241, 0.35);
+                border-radius: 18px;
+                padding: 32px 28px 28px;
+                text-align: center;
+                box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.1);
+                animation: ff-modal-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+            }
+
+            .ff-modal-close {
+                position: absolute;
+                top: 14px;
+                right: 14px;
+                width: 30px;
+                height: 30px;
+                border: none;
+                border-radius: 50%;
+                background: rgba(255, 255, 255, 0.08);
+                color: #cbd5e1;
+                cursor: pointer;
+                transition: background 0.15s, transform 0.15s;
+            }
+
+            .ff-modal-close:hover {
+                background: rgba(239, 68, 68, 0.25);
+                color: #fecaca;
+                transform: rotate(90deg);
+            }
+
+            .ff-modal-icon {
+                width: 64px;
+                height: 64px;
+                margin: 0 auto 16px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(99, 102, 241, 0.15);
+                color: #818cf8;
+                font-size: 26px;
+                animation: future-widget-pulse 2.4s ease-in-out infinite;
+            }
+
+            .ff-modal-badge {
+                display: inline-block;
+                font-size: 10.5px;
+                font-weight: 800;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                color: #a5b4fc;
+                background: rgba(99, 102, 241, 0.15);
+                padding: 4px 12px;
+                border-radius: 999px;
+                margin-bottom: 14px;
+            }
+
+            .ff-modal-title {
+                font-size: 1.1rem;
+                font-weight: 700;
+                color: #f1f5f9;
+                margin: 0 0 12px;
+                line-height: 1.4;
+            }
+
+            .ff-modal-detail {
+                font-size: 0.85rem;
+                line-height: 1.6;
+                color: #94a3b8;
+                margin: 0;
+            }
+
+            @keyframes ff-modal-fade {
+                from {
+                    opacity: 0;
+                }
+
+                to {
+                    opacity: 1;
+                }
+            }
+
+            @keyframes ff-modal-pop {
+                from {
+                    opacity: 0;
+                    transform: scale(0.92) translateY(10px);
+                }
+
+                to {
+                    opacity: 1;
+                    transform: scale(1) translateY(0);
+                }
+            }
+        </style>
+
+        <style>
+            /* Faz 5 · K3.5: Operasyon Merkezi — gelecek widget yer tutucuları (pulse/glow efektli). */
+            .future-widget-card {
+                position: relative;
+                background: linear-gradient(135deg, var(--color-surface, #fff) 0%, var(--color-surface-alt, #f8fafc) 100%);
+                border: 1px dashed var(--color-border, #cbd5e1);
+                border-radius: 16px;
+                padding: 28px 20px;
+                text-align: center;
+                overflow: hidden;
+                transition: transform 0.25s ease, box-shadow 0.25s ease;
+            }
+
+            .future-widget-card::before {
+                content: '';
+                position: absolute;
+                inset: 0;
+                background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.10), transparent 70%);
+                animation: future-widget-glow 3s ease-in-out infinite;
+                pointer-events: none;
+            }
+
+            .future-widget-card:hover {
+                transform: translateY(-4px);
+                box-shadow: 0 10px 24px rgba(99, 102, 241, 0.12);
+            }
+
+            .future-widget-icon {
+                position: relative;
+                width: 56px;
+                height: 56px;
+                margin: 0 auto 14px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(99, 102, 241, 0.12);
+                color: #6366f1;
+                font-size: 22px;
+                animation: future-widget-pulse 2.4s ease-in-out infinite;
+            }
+
+            .future-widget-label {
+                position: relative;
+                display: inline-block;
+                font-size: 11px;
+                font-weight: 800;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                color: #6366f1;
+                background: rgba(99, 102, 241, 0.1);
+                padding: 3px 10px;
+                border-radius: 999px;
+                margin-bottom: 10px;
+            }
+
+            .future-widget-title {
+                position: relative;
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--color-text, #334155);
+            }
+
+            @keyframes future-widget-pulse {
+
+                0%,
+                100% {
+                    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.35);
+                }
+
+                50% {
+                    box-shadow: 0 0 0 10px rgba(99, 102, 241, 0);
+                }
+            }
+
+            @keyframes future-widget-glow {
+
+                0%,
+                100% {
+                    opacity: 0.55;
+                }
+
+                50% {
+                    opacity: 1;
+                }
+            }
+
+            [data-theme="dark"] .future-widget-card {
+                background: linear-gradient(135deg, var(--color-surface, #1e293b) 0%, var(--color-surface-alt, #0f172a) 100%);
+                border-color: var(--color-border, #334155);
+            }
+
+            .future-widget-card.active-rates-widget {
+                border-style: solid;
+            }
+
+            .future-widget-card.active-rates-widget:hover {
+                transform: none;
+                box-shadow: var(--shadow-sm, 0 4px 12px rgba(0, 0, 0, 0.06));
+            }
+        </style>
+
+        <script>
+            // 🔭 Özellik Vizyonu (Blueprint) modalı — "Yakında" kartlarına tıklanınca içerik basılır.
+            // [WHY]: Kartlar şu an statik yer tutucu; adminin ne geleceğini merak etmesine karşılık
+            //        verip beklenti yönetmek için her kartın vizyon metnini gösteren hafif bir modal.
+            window.openFutureFeatureModal = function (key) {
+                let icon = 'fa-circle-info', title = '', detail = '';
+                switch (key) {
+                    case 'active_assignment':
+                        icon = 'fa-right-left';
+                        title = 'Canlı Zimmet Radarı & Anlık İade Masası';
+                        detail = 'Kurum genelinde personellerin üzerinde bulunan tüm aktif zimmetleri ve yaklaşan iade tarihlerini tek bir kontrol merkezinden izlemek; süresi dolan cihazlar için otomatik uyarılar üretmek ve tek tıkla depoya iade kabulü sağlamak üzere tasarlanmaktadır.';
+                        break;
+                    case 'scrap_service':
+                        icon = 'fa-satellite-dish';
+                        title = 'Donanım Sağlığı & Yaşam Döngüsü İzleme (Lifecycle)';
+                        detail = 'Servisteki cihazların canlı onarım durumlarını izlemek, mükerrer arıza kaydı açılan kronik sorunlu cihazları (SN) otomatik tespit etmek ve hurdaya ayrılan donanımların sicil/maliyet dökümünü raporlamak üzere tasarlanmaktadır.';
+                        break;
+                    case 'critical_stock':
+                        icon = 'fa-triangle-exclamation';
+                        title = 'Kritik Stok Emniyet Kilidi & Otomatik Talep Tetikleyici';
+                        detail = 'Depolardaki minimum stok limitlerini sürekli tarayarak tükenme eşiğindeki sarf malzemeleri için kırmızı alarm üretmek ve tek tıkla EBYS satın alma talebi başlatmak üzere tasarlanmaktadır.';
+                        break;
+                    case 'ai_burn_rate':
+                        icon = 'fa-brain';
+                        title = "Akıllı Tüketim Analitiği & Öngörücü Tedarik Pipeline'ı";
+                        detail = "B3 hareket defteri loglarını analiz ederek aylık sarf tüketim hızını (Burn Rate) hesaplayan, 'A4 Kağıdı 18 gün sonra tükenecektir' şeklinde öngörücü uyarılar üreten yapay zeka destekli bir tahminleme motorudur.";
+                        break;
+                    default:
+                        return;
+                }
+
+                const modal = document.getElementById('futureFeatureModal');
+                if (!modal) return;
+                const iconEl = document.getElementById('ffModalIcon');
+                if (iconEl) iconEl.className = 'fas ' + icon;
+                const titleEl = document.getElementById('ffModalTitle');
+                if (titleEl) titleEl.textContent = title;
+                const detailEl = document.getElementById('ffModalDetail');
+                if (detailEl) detailEl.textContent = detail;
+                modal.classList.add('show');
+            };
+
+            window.closeFutureFeatureModal = function () {
+                const modal = document.getElementById('futureFeatureModal');
+                if (modal) modal.classList.remove('show');
+            };
+        </script>
+    </div>
+
+    <!-- 📦 Satın Alma Yönetimi -->
+    <div id="purchaseTab" class="admin-tab-content">
+
+        <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+            <div>
+                <h2 class="fw-bold mb-0">📦 Satın Alma & Servis</h2>
+                <small class="text-muted">Operasyonel Takip Paneli</small>
+            </div>
+            <button onclick="window.openNewPurchaseModal()"
+                class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                <i class="fas fa-plus me-2"></i>Yeni Talep
+            </button>
+        </div>
+
+        <section id="ebysDocumentRegistry" class="modern-card mb-4" aria-label="Evrak kayıt defteri">
+            <div class="kpi-container" aria-label="Tüm evrakların göstergeleri">
+                <div class="dashboard-card card-blue"><i class="fas fa-file-alt" aria-hidden="true"></i><div class="dashboard-info"><span class="dashboard-title">Toplam Evrak</span><span id="ebysCount-total" class="dashboard-value" data-ebys-count>—</span></div></div>
+                <div class="dashboard-card card-yellow"><i class="fas fa-pen" aria-hidden="true"></i><div class="dashboard-info"><span class="dashboard-title">📝 Taslaklar</span><span id="ebysCount-draft" class="dashboard-value" data-ebys-count>—</span></div></div>
+                <div class="dashboard-card card-green"><i class="fas fa-clipboard-check" aria-hidden="true"></i><div class="dashboard-info"><span class="dashboard-title">📋 Kayıtlı Evraklar</span><span id="ebysCount-registered" class="dashboard-value" data-ebys-count>—</span></div></div>
+                <div class="dashboard-card card-blue"><i class="fas fa-lock" aria-hidden="true"></i><div class="dashboard-info"><span class="dashboard-title">🔒 Dondurulan / İncelemede</span><span id="ebysCount-in_review" class="dashboard-value" data-ebys-count>—</span></div></div>
             </div>
 
-            <!-- MİNİMAL KPI BAR -->
-            <div class="kpi-container">
-                <div class="dashboard-card card-blue">
-                    <i class="fas fa-clock"></i>
-                    <div class="dashboard-info">
-                        <span class="dashboard-title">BEKLEYEN</span>
-                        <span id="totalPendingPurchase" class="dashboard-value">4</span>
-                    </div>
-                </div>
-                <div class="dashboard-card card-yellow">
-                    <i class="fas fa-tools"></i>
-                    <div class="dashboard-info">
-                        <span class="dashboard-title">SERVİSTE</span>
-                        <span id="totalInService" class="dashboard-value">0</span>
-                    </div>
-                </div>
-                <div class="dashboard-card card-green">
-                    <i class="fas fa-check-circle"></i>
-                    <div class="dashboard-info">
-                        <span class="dashboard-title">TAMAMLANAN</span>
-                        <span id="totalCompletedAction" class="dashboard-value">12</span>
-                    </div>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <h3 class="m-0">Evrak Kayıt Defteri</h3>
+                <div class="d-flex gap-2"><button id="ebysDocumentNew" type="button" class="btn btn-primary">Yeni evrak</button><button id="ebysDocumentExport" type="button" class="btn btn-outline-secondary">Evraklarımı yedekle</button></div>
+            </div>
+            <div id="ebysDocumentKinds" class="d-flex flex-wrap gap-2 mb-3"></div>
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <select id="ebysStateFilter" class="form-select" aria-label="Evrak durumu" style="width:auto"><option value="">Tüm durumlar</option></select>
+                <input id="ebysDocumentSearch" class="form-control" aria-label="Bu sayfada evrak numarası ara" placeholder="Bu sayfada evrak numarası ara" style="width:auto">
+            </div>
+            <div class="table-responsive"><table class="modern-table"><thead><tr><th>Kayıt / Taslak No</th><th>Birim</th><th>Durum</th><th>Güncelleme</th><th>İşlem</th></tr></thead><tbody id="ebysDocumentRows"></tbody></table></div>
+            <div class="d-flex flex-wrap gap-2 align-items-center mt-3"><button id="ebysDocumentFirst" type="button" class="btn btn-sm btn-outline-secondary">Başa dön</button><button id="ebysDocumentNext" type="button" class="btn btn-sm btn-outline-secondary">Sonraki 50</button><span id="ebysDocumentStatus" role="status" class="small text-muted"></span></div>
+        </section>
+
+        <!-- MİNİMAL KPI BAR -->
+        <div class="kpi-container">
+            <div class="dashboard-card card-blue">
+                <i class="fas fa-clock"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">BEKLEYEN</span>
+                    <span id="totalPendingPurchase" class="dashboard-value">4</span>
                 </div>
             </div>
-
-            <!-- Faz 6 · UI-01: Operasyon Merkezi'nden buraya taşındı — ait olduğu doğal yer burası. -->
-            <div class="card shadow-sm border-0 mb-4">
-                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-                    <h3 class="m-0 font-weight-bold text-danger">📨 Bekleyen Envanter Talepleri</h3>
-                    <span class="badge rounded-pill bg-danger shadow-sm" id="pendingRequestCount">0</span>
+            <div class="dashboard-card card-yellow">
+                <i class="fas fa-tools"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">SERVİSTE</span>
+                    <span id="totalInService" class="dashboard-value">0</span>
                 </div>
-                <div class="card-body p-0">
-                    <!-- Faz 5 · K3.5: table-layout:fixed (global table kuralı) dar ekranda İşlem sütunundaki
+            </div>
+            <div class="dashboard-card card-green">
+                <i class="fas fa-check-circle"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">TAMAMLANAN</span>
+                    <span id="totalCompletedAction" class="dashboard-value">12</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Faz 6 · UI-01: Operasyon Merkezi'nden buraya taşındı — ait olduğu doğal yer burası. -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h3 class="m-0 font-weight-bold text-danger">📨 Bekleyen Envanter Talepleri</h3>
+                <span class="badge rounded-pill bg-danger shadow-sm" id="pendingRequestCount">0</span>
+            </div>
+            <div class="card-body p-0">
+                <!-- Faz 5 · K3.5: table-layout:fixed (global table kuralı) dar ekranda İşlem sütunundaki
                          iki sabit genişlikli ikon butonunu sıkıştırıp taşırıyordu. Bu tabloya özel table-layout:
                          auto (sütunlar içeriğe göre genişler) + İşlem başlığına min-width; table-responsive
                          sarmalayıcı hâlâ çok dar ekranlarda yatay kaydırma sağlar. -->
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0 align-middle" style="table-layout: auto;">
-                            <thead class="bg-light">
-                                <tr>
-                                    <th class="ps-3">Tarih</th>
-                                    <th>Personel</th>
-                                    <th>Ürün</th>
-                                    <th class="text-center">Durum</th>
-                                    <th class="text-end pe-3" style="min-width: 92px;">İşlem</th>
-                                </tr>
-                            </thead>
-                            <tbody id="adminPendingRequestsBody">
-                            </tbody>
-                        </table>
-                    </div>
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle" style="table-layout: auto;">
+                        <thead class="bg-light">
+                            <tr>
+                                <th class="ps-3">Tarih</th>
+                                <th>Personel</th>
+                                <th>Ürün</th>
+                                <th class="text-center">Durum</th>
+                                <th class="text-end pe-3" style="min-width: 92px;">İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminPendingRequestsBody">
+                        </tbody>
+                    </table>
                 </div>
-            </div>
-
-            <!-- TABLOLAR YAN YANA (Modern Yapı) -->
-            <div class="row g-4 mt-2">
-
-                <!-- SOL TABLO: TALEPLER -->
-                <div class="col-xl-8 col-lg-12">
-                    <div class="modern-card">
-                        <h6 class="modern-card-title">
-                            <i class="fas fa-list-ul me-2 text-primary"></i> Satın Alma Talepleri
-                        </h6>
-                        <div class="table-responsive" style="min-height: 350px;">
-                            <table class="modern-table" id="purchaseRequestTable">
-                                <thead>
-                                    <tr>
-                                        <!-- JS tarafından gelecek 6 adet veri hücresine (td) karşılık gelen 6 başlık -->
-                                        <th>Evrak No</th>
-                                        <th>Tarih</th>
-                                        <th>Talep Eden</th>
-                                        <th>Ürün / Birim</th>
-                                        <th>Durum</th>
-                                        <th class="text-end">İşlem</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="purchaseTableBody">
-                                    <!-- JS ile kayıtlar basılacak -->
-                                </tbody>
-                            </table>
-                        </div>
-                        <div id="purchasePagination" class="pagination-container mt-auto"></div>
-                    </div>
-                </div>
-
-                <!-- SAĞ TABLO: SERVİS TAKİP -->
-                <div class="col-xl-4 col-lg-12">
-                    <div class="modern-card">
-                        <h6 class="modern-card-title">
-                            <i class="fas fa-truck-fast me-2 text-warning"></i> Servis Takip
-                        </h6>
-                        <div class="table-responsive" style="min-height: 350px;">
-                            <table class="modern-table">
-                                <thead>
-                                    <tr>
-                                        <th>Cihaz</th>
-                                        <th>Durum</th>
-                                        <th class="text-end">İşlem</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="serviceTableBody">
-                                    <!-- Dinamik İçerik -->
-                                </tbody>
-                            </table>
-                        </div>
-                        <div id="servicePagination" class="pagination-container mt-auto"></div>
-                    </div>
-                </div>
-
             </div>
         </div>
 
-        <!-- 📄 İş Akışı Şablonları -->
-        <div id="workflowTemplatesTab" class="admin-tab-content" style="display: none;">
+        <!-- TABLOLAR YAN YANA (Modern Yapı) -->
+        <div class="row g-4 mt-2">
+
+            <!-- SOL TABLO: TALEPLER -->
+            <div class="col-xl-8 col-lg-12">
+                <div class="modern-card">
+                    <h6 class="modern-card-title">
+                        <i class="fas fa-list-ul me-2 text-primary"></i> Satın Alma Talepleri
+                    </h6>
+                    <div class="table-responsive" style="min-height: 350px;">
+                        <table class="modern-table" id="purchaseRequestTable">
+                            <thead>
+                                <tr>
+                                    <!-- JS tarafından gelecek 6 adet veri hücresine (td) karşılık gelen 6 başlık -->
+                                    <th>Evrak No</th>
+                                    <th>Tarih</th>
+                                    <th>Talep Eden</th>
+                                    <th>Ürün / Birim</th>
+                                    <th>Durum</th>
+                                    <th class="text-end">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="purchaseTableBody">
+                                <!-- JS ile kayıtlar basılacak -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="purchasePagination" class="pagination-container mt-auto"></div>
+                </div>
+            </div>
+
+            <!-- SAĞ TABLO: SERVİS TAKİP -->
+            <div class="col-xl-4 col-lg-12">
+                <div class="modern-card">
+                    <h6 class="modern-card-title">
+                        <i class="fas fa-truck-fast me-2 text-warning"></i> Servis Takip
+                    </h6>
+                    <div class="table-responsive" style="min-height: 350px;">
+                        <table class="modern-table">
+                            <thead>
+                                <tr>
+                                    <th>Cihaz</th>
+                                    <th>Durum</th>
+                                    <th class="text-end">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="serviceTableBody">
+                                <!-- Dinamik İçerik -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="servicePagination" class="pagination-container mt-auto"></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 📄 İş Akışı Şablonları -->
+    <div id="workflowTemplatesTab" class="admin-tab-content" style="display: none;">
+        <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+            <div>
+                <h2 class="fw-bold mb-0">📄 İş Akışı Şablonları</h2>
+                <small class="text-muted">Hazır Onay Süreçleri Yönetimi</small>
+            </div>
+            <button onclick="window.openTemplateModal()"
+                class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                <i class="fas fa-plus me-2"></i>Yeni Şablon
+            </button>
+        </div>
+
+        <div class="modern-card">
+            <div class="table-responsive" style="min-height: 400px;">
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Şablon Adı</th>
+                            <th>Adım Sayısı</th>
+                            <th>Yetkili Kullanıcılar</th>
+                            <th class="text-end">İşlem</th>
+                        </tr>
+                    </thead>
+                    <!-- Burası renderTemplateList fonksiyonu tarafından doldurulacak -->
+                    <tbody id="templateTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⚙️ Tanımlar Sekmesi -->
+    <div id="definitionsTab" class="admin-tab-content" style="display: none;">
+
+        <!-- Sekme Navigasyonu -->
+        <div class="mb-4 d-flex gap-2 p-1"
+            style="background: var(--color-surface, #fff); border-radius: 12px; border: 1px solid var(--color-border); width: fit-content;">
+            <button class="btn def-nav-btn active" onclick="switchDefTab('mahal')"
+                style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Mahaller</button>
+            <button class="btn def-nav-btn" onclick="switchDefTab('products')"
+                style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Ürün
+                Türleri</button>
+            <button class="btn def-nav-btn" onclick="switchDefTab('documentTypes')"
+                style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Belge
+                Türleri</button>
+            <button class="btn def-nav-btn" onclick="switchDefTab('units')"
+                style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Birimler</button>
+            <button class="btn def-nav-btn" onclick="switchDefTab('workflows')"
+                style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">İş
+                Akışları</button>
+            <button class="btn def-nav-btn" onclick="switchDefTab('personnel')"
+                style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">👥
+                Personel Tanımları</button>
+        </div>
+
+        <!-- 1. MAHAL SEKMESİ -->
+        <div id="defTab-mahal" class="def-tab-content active">
+            <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                <div>
+                    <h2 class="fw-bold mb-0">🏢 Mahal Yönetimi</h2>
+                    <small class="text-muted">Yerleşke ve Bölüm Tanımlamaları</small>
+                </div>
+                <button onclick="window.openLocationModal()"
+                    class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                    <i class="fas fa-plus me-2"></i>Yeni Mahal Ekle
+                </button>
+            </div>
+            <div class="modern-card">
+                <div class="table-responsive" style="min-height: 400px;">
+                    <table class="modern-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 20%;">Mahal Kodu</th>
+                                <th style="width: 25%;">Birim / Bölüm</th>
+                                <th style="width: 20%;">Kampüs / Koridor</th>
+                                <th style="width: 25%;">Tanımlı Kişiler</th>
+                                <th style="width: 10%;" class="text-end">İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody id="locationTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. ÜRÜN TÜRLERİ SEKMESİ -->
+        <div id="defTab-products" class="def-tab-content" style="display: none;">
+            <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                <div>
+                    <h2 class="fw-bold mb-0">📦 Ürün Türleri</h2>
+                    <small class="text-muted">Dinamik Ürün Türü ve Demirbaş Ayarları</small>
+                </div>
+            </div>
+
+            <!-- 🚀 Yeni Şık Ekleme Alanı -->
+            <div class="modern-card p-4 mb-4"
+                style="background: rgba(255,255,255,0.05); border: 1px dashed var(--color-border);">
+                <div class="row align-items-center g-3">
+                    <div class="col-lg-5">
+                        <label class="small fw-bold text-muted mb-2 text-uppercase" style="letter-spacing: 1px;">Ürün
+                            Türü Adı</label>
+                        <input type="text" id="defNewProductType" class="form-control modern-input-slim"
+                            placeholder="Örn: Monitör, Yazıcı, Klavye..."
+                            style="border-radius: 12px; padding: 12px 15px;">
+                    </div>
+                    <div class="col-lg-4 d-flex align-items-center" style="padding-top: 28px;">
+                        <div class="d-flex align-items-center bg-glass p-2 px-3 rounded-pill border shadow-sm">
+                            <div class="form-check m-0 d-flex align-items-center">
+                                <input class="form-check-input me-2" type="checkbox" id="defIsDemirbasCheck"
+                                    style="width: 18px; height: 18px; cursor: pointer;">
+                                <label class="form-check-label fw-bold small text-dark" for="defIsDemirbasCheck"
+                                    style="cursor: pointer; user-select: none;">
+                                    🛡️ DEMİRBAŞ OLARAK TANIMLA
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 text-end" style="padding-top: 28px;">
+                        <button onclick="window.defAddNewProductType()"
+                            class="btn btn-info text-white fw-bold rounded-pill px-5 py-2 shadow-lg w-100">
+                            <i class="fas fa-plus-circle me-2"></i> LİSTEYE EKLE
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modern-card">
+                <div class="table-responsive" style="min-height: 300px;">
+                    <table class="modern-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 35%;">Tür Adı</th>
+                                <th style="width: 20%;">Kategori</th>
+                                <th style="width: 35%;">Durum</th>
+                                <th style="width: 10%;" class="text-end">İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminDefProductTypeTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. BİRİMLER SEKMESİ -->
+        <div id="defTab-units" class="def-tab-content" style="display: none;">
+            <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+                <div>
+                    <h2 class="fw-bold mb-0">👥 Birim Yönetimi</h2>
+                    <small class="text-muted">Departman ve Organizasyon Yapısı</small>
+                </div>
+                <button onclick="window.openUnitModal()"
+                    class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                    <i class="fas fa-plus me-2"></i>Yeni Birim Ekle
+                </button>
+            </div>
+            <div class="modern-card">
+                <div class="table-responsive" style="min-height: 400px;">
+                    <table class="modern-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 30%;">Birim Adı</th>
+                                <th style="width: 20%;">Bağlı Bölüm</th>
+                                <th style="width: 40%;">Atanan Personeller</th>
+                                <th style="width: 10%;" class="text-end">İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminDefUnitTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. İŞ AKIŞLARI SEKMESİ -->
+        <div id="defTab-workflows" class="def-tab-content" style="display: none;">
             <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
                 <div>
                     <h2 class="fw-bold mb-0">📄 İş Akışı Şablonları</h2>
-                    <small class="text-muted">Hazır Onay Süreçleri Yönetimi</small>
+                    <small class="text-muted">Hazır Onay Süreçleri ve Şablonlar</small>
                 </div>
                 <button onclick="window.openTemplateModal()"
                     class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
                     <i class="fas fa-plus me-2"></i>Yeni Şablon
                 </button>
             </div>
-
             <div class="modern-card">
                 <div class="table-responsive" style="min-height: 400px;">
                     <table class="modern-table">
                         <thead>
                             <tr>
-                                <th>Şablon Adı</th>
-                                <th>Adım Sayısı</th>
-                                <th>Yetkili Kullanıcılar</th>
-                                <th class="text-end">İşlem</th>
+                                <th style="width: 30%;">Şablon Adı</th>
+                                <th style="width: 20%;">Adım Sayısı</th>
+                                <th style="width: 40%;">Yetkili Kullanıcılar</th>
+                                <th style="width: 10%;" class="text-end">İşlem</th>
                             </tr>
                         </thead>
-                        <!-- Burası renderTemplateList fonksiyonu tarafından doldurulacak -->
-                        <tbody id="templateTableBody"></tbody>
+                        <tbody id="adminDefTemplateTableBody"></tbody>
                     </table>
                 </div>
             </div>
         </div>
 
-        <!-- ⚙️ Tanımlar Sekmesi -->
-        <div id="definitionsTab" class="admin-tab-content" style="display: none;">
-
-            <!-- Sekme Navigasyonu -->
-            <div class="mb-4 d-flex gap-2 p-1"
-                style="background: var(--color-surface, #fff); border-radius: 12px; border: 1px solid var(--color-border); width: fit-content;">
-                <button class="btn def-nav-btn active" onclick="switchDefTab('mahal')"
-                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Mahaller</button>
-                <button class="btn def-nav-btn" onclick="switchDefTab('products')"
-                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Ürün
-                    Türleri</button>
-                <button class="btn def-nav-btn" onclick="switchDefTab('documentTypes')"
-                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Belge Türleri</button>
-                <button class="btn def-nav-btn" onclick="switchDefTab('units')"
-                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Birimler</button>
-                <button class="btn def-nav-btn" onclick="switchDefTab('workflows')"
-                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">İş
-                    Akışları</button>
-                <button class="btn def-nav-btn" onclick="switchDefTab('personnel')"
-                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">👥
-                    Personel Tanımları</button>
+        <!-- Belge türleri süreç sınıflarıdır; ürün türü ve dosya kodu değildir. -->
+        <div id="defTab-documentTypes" class="def-tab-content" style="display: none;">
+            <div class="admin-section-header mb-4">
+                <h2 class="fw-bold mb-0">Belge Türleri ve Süreçleri</h2>
+                <small class="text-muted">Pilot kapsamda yalnız satın alma talebi başlatılır. Diğer türlerin kayıt, imza
+                    ve dağıtım akışları sonraki aşamadadır; dosya planı kodu ayrıca tanımlanacaktır.</small>
             </div>
-
-            <!-- 1. MAHAL SEKMESİ -->
-            <div id="defTab-mahal" class="def-tab-content active">
-                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
-                    <div>
-                        <h2 class="fw-bold mb-0">🏢 Mahal Yönetimi</h2>
-                        <small class="text-muted">Yerleşke ve Bölüm Tanımlamaları</small>
-                    </div>
-                    <button onclick="window.openLocationModal()"
-                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
-                        <i class="fas fa-plus me-2"></i>Yeni Mahal Ekle
-                    </button>
-                </div>
-                <div class="modern-card">
-                    <div class="table-responsive" style="min-height: 400px;">
-                        <table class="modern-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 20%;">Mahal Kodu</th>
-                                    <th style="width: 25%;">Birim / Bölüm</th>
-                                    <th style="width: 20%;">Kampüs / Koridor</th>
-                                    <th style="width: 25%;">Tanımlı Kişiler</th>
-                                    <th style="width: 10%;" class="text-end">İşlem</th>
-                                </tr>
-                            </thead>
-                            <tbody id="locationTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 2. ÜRÜN TÜRLERİ SEKMESİ -->
-            <div id="defTab-products" class="def-tab-content" style="display: none;">
-                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
-                    <div>
-                        <h2 class="fw-bold mb-0">📦 Ürün Türleri</h2>
-                        <small class="text-muted">Dinamik Ürün Türü ve Demirbaş Ayarları</small>
-                    </div>
-                </div>
-
-                <!-- 🚀 Yeni Şık Ekleme Alanı -->
-                <div class="modern-card p-4 mb-4"
-                    style="background: rgba(255,255,255,0.05); border: 1px dashed var(--color-border);">
-                    <div class="row align-items-center g-3">
-                        <div class="col-lg-5">
-                            <label class="small fw-bold text-muted mb-2 text-uppercase"
-                                style="letter-spacing: 1px;">Ürün Türü Adı</label>
-                            <input type="text" id="defNewProductType" class="form-control modern-input-slim"
-                                placeholder="Örn: Monitör, Yazıcı, Klavye..."
-                                style="border-radius: 12px; padding: 12px 15px;">
-                        </div>
-                        <div class="col-lg-4 d-flex align-items-center" style="padding-top: 28px;">
-                            <div class="d-flex align-items-center bg-glass p-2 px-3 rounded-pill border shadow-sm">
-                                <div class="form-check m-0 d-flex align-items-center">
-                                    <input class="form-check-input me-2" type="checkbox" id="defIsDemirbasCheck"
-                                        style="width: 18px; height: 18px; cursor: pointer;">
-                                    <label class="form-check-label fw-bold small text-dark" for="defIsDemirbasCheck"
-                                        style="cursor: pointer; user-select: none;">
-                                        🛡️ DEMİRBAŞ OLARAK TANIMLA
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-3 text-end" style="padding-top: 28px;">
-                            <button onclick="window.defAddNewProductType()"
-                                class="btn btn-info text-white fw-bold rounded-pill px-5 py-2 shadow-lg w-100">
-                                <i class="fas fa-plus-circle me-2"></i> LİSTEYE EKLE
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="modern-card">
-                    <div class="table-responsive" style="min-height: 300px;">
-                        <table class="modern-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 35%;">Tür Adı</th>
-                                    <th style="width: 20%;">Kategori</th>
-                                    <th style="width: 35%;">Durum</th>
-                                    <th style="width: 10%;" class="text-end">İşlem</th>
-                                </tr>
-                            </thead>
-                            <tbody id="adminDefProductTypeTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 3. BİRİMLER SEKMESİ -->
-            <div id="defTab-units" class="def-tab-content" style="display: none;">
-                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
-                    <div>
-                        <h2 class="fw-bold mb-0">👥 Birim Yönetimi</h2>
-                        <small class="text-muted">Departman ve Organizasyon Yapısı</small>
-                    </div>
-                    <button onclick="window.openUnitModal()"
-                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
-                        <i class="fas fa-plus me-2"></i>Yeni Birim Ekle
-                    </button>
-                </div>
-                <div class="modern-card">
-                    <div class="table-responsive" style="min-height: 400px;">
-                        <table class="modern-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 30%;">Birim Adı</th>
-                                    <th style="width: 20%;">Bağlı Bölüm</th>
-                                    <th style="width: 40%;">Atanan Personeller</th>
-                                    <th style="width: 10%;" class="text-end">İşlem</th>
-                                </tr>
-                            </thead>
-                            <tbody id="adminDefUnitTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 4. İŞ AKIŞLARI SEKMESİ -->
-            <div id="defTab-workflows" class="def-tab-content" style="display: none;">
-                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
-                    <div>
-                        <h2 class="fw-bold mb-0">📄 İş Akışı Şablonları</h2>
-                        <small class="text-muted">Hazır Onay Süreçleri ve Şablonlar</small>
-                    </div>
-                    <button onclick="window.openTemplateModal()"
-                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
-                        <i class="fas fa-plus me-2"></i>Yeni Şablon
-                    </button>
-                </div>
-                <div class="modern-card">
-                    <div class="table-responsive" style="min-height: 400px;">
-                        <table class="modern-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 30%;">Şablon Adı</th>
-                                    <th style="width: 20%;">Adım Sayısı</th>
-                                    <th style="width: 40%;">Yetkili Kullanıcılar</th>
-                                    <th style="width: 10%;" class="text-end">İşlem</th>
-                                </tr>
-                            </thead>
-                            <tbody id="adminDefTemplateTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Belge türleri süreç sınıflarıdır; ürün türü ve dosya kodu değildir. -->
-            <div id="defTab-documentTypes" class="def-tab-content" style="display: none;">
-                <div class="admin-section-header mb-4">
-                    <h2 class="fw-bold mb-0">Belge Türleri ve Süreçleri</h2>
-                    <small class="text-muted">Pilot kapsamda yalnız satın alma talebi başlatılır. Diğer türlerin kayıt, imza ve dağıtım akışları sonraki aşamadadır; dosya planı kodu ayrıca tanımlanacaktır.</small>
-                </div>
-                <div class="modern-card table-responsive">
-                    <table class="modern-table">
-                        <thead><tr><th>Kod</th><th>Belge türü</th><th>Yön</th><th>Süreç yolu</th><th>Durum</th></tr></thead>
-                        <tbody id="ebysDocumentTypesBody"></tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- 5. PERSONEL TANIMLARI SEKMESİ -->
-            <div id="defTab-personnel" class="def-tab-content" style="display: none;">
-                <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
-                    <div>
-                        <h2 class="fw-bold mb-0">👥 Personel Tanımları</h2>
-                        <small class="text-muted">Personel Kayıtları ve Kurumsal Kimlik (PRI) Yönetimi</small>
-                    </div>
-                    <button onclick="window.openPersonelModal('add')"
-                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
-                        <i class="fas fa-plus me-2"></i>Personel Ekle
-                    </button>
-                </div>
-                <div class="modern-card">
-                    <div class="table-responsive" style="min-height: 400px;">
-                        <table class="modern-table" id="tablePersonel">
-                            <thead>
-                                <tr>
-                                    <th style="width: 5%;">Seç</th>
-                                    <th style="width: 25%;">Ad Soyad</th>
-                                    <th style="width: 20%;">Birim</th>
-                                    <th style="width: 30%;">Kurumsal Kimlik / Hesap</th>
-                                    <th style="width: 20%;" class="text-end">İşlemler</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <style>
-                .def-nav-btn.active {
-                    background: var(--color-info) !important;
-                    color: white !important;
-                    box-shadow: 0 4px 10px rgba(52, 152, 219, 0.3);
-                }
-            </style>
-
-            <script>
-                function switchDefTab(tabId) {
-                    document.querySelectorAll('.def-tab-content').forEach(el => el.style.display = 'none');
-                    document.getElementById('defTab-' + tabId).style.display = 'block';
-
-                    document.querySelectorAll('.def-nav-btn').forEach(btn => btn.classList.remove('active'));
-                    event.target.classList.add('active');
-
-                    // [FIX-BUG5]: Alt sekme geçişlerinde ilgili render fonksiyonlarını tetikle
-                    if (tabId === 'workflows' && typeof window.renderTemplateList === 'function') {
-                        window.renderTemplateList();
-                    } else if (tabId === 'units' && typeof window.renderUnitManagement === 'function') {
-                        window.renderUnitManagement();
-                    } else if (tabId === 'products' && typeof window.renderProductTypesTable === 'function') {
-                        window.renderProductTypesTable();
-                    } else if (tabId === 'documentTypes' && typeof window.renderEBYSDocumentTypes === 'function') {
-                        window.renderEBYSDocumentTypes();
-                    } else if (tabId === 'mahal' && typeof window.renderLocationsTable === 'function') {
-                        window.renderLocationsTable();
-                    } else if (tabId === 'personnel' && typeof window.renderPersonelTable === 'function') {
-                        window.renderPersonelTable();
-                    }
-
-                    // 💡 Contextual tip for definitions sub-tabs
-                    if (typeof window.TipManager === 'object' && typeof window.TipManager.showTipForTab === 'function') {
-                        window.TipManager.showTipForTab(tabId);
-                    }
-                }
-            </script>
-        </div>
-
-        <!-- ✅ TODO PANELI SEKMESİ (Burası Ana İçerik Alanı) -->
-        <div id="todoTab" class="admin-tab-content" style="display: none;">
-            <div class="todo-container p-4">
-                <div
-                    class="todo-header bg-white shadow-sm p-3 rounded-3 mb-4 d-flex justify-content-between align-items-center">
-                    <div>
-                        <h2 class="fw-bold mb-0">📝 TODO Paneli</h2>
-                        <small class="text-muted">Görevler yükleniyor veya henüz veri girişi yapılmadı...</small>
-                    </div>
-                    <button onclick="todoModule.openNewTaskModal('admin')" class="todo-btn-premium">
-                        <i class="fas fa-plus"></i> Yeni Görev Ata
-                    </button>
-                </div>
-                <div class="task-grid text-center p-5 text-muted">
-                    <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
-                    <p>Görevler listeleniyor...</p>
-                </div>
+            <div class="modern-card table-responsive">
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Kod</th>
+                            <th>Belge türü</th>
+                            <th>Yön</th>
+                            <th>Süreç yolu</th>
+                            <th>Durum</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ebysDocumentTypesBody"></tbody>
+                </table>
             </div>
         </div>
 
-        <!-- 📦 Envanter Yönetimi Sekmesi (inventory-management.js tarafından doldurulacak) -->
-        <div id="inventoryManagementTab" class="admin-tab-content" style="display: none;">
-            <!-- İçerik inventory-management.js tarafından dinamik olarak çizilecektir -->
-        </div>
-
-        <div id="shelfMatrixTab" class="admin-tab-content" style="display: none;">
-            <section id="shelfMatrixApp" class="shelf-matrix" aria-label="Depo raf haritası">
-                <header class="shelf-matrix-header">
-                    <div>
-                        <h2>🧱 Depo Raf Haritası</h2>
-                        <p>B1 ve B2 stoklarını fiziksel raf konumlarına göre bulun.</p>
-                    </div>
-                    <!-- v3.3 Aşama 6 (Veri Geçişi): geçici/tek seferlik uzlaştırma aracı — raf sayaçlarını (usedSlots)
-                         gerçek stokla eşitler. Kalıcı bir günlük işlem değildir; bkz. shelf-matrix.js syncShelfCountersAction. -->
-                    <button type="button" id="shelfMatrixSyncBtn" class="shelf-sync-btn"
-                        title="Göç aracı: tüm B1/B2 stoğunu tarar, raf doluluk sayaçlarını gerçek verilerle eşitler.">
-                        🔄 Sistem Raf Sayaçlarını Eşitle (Sync)
-                    </button>
-                </header>
-                <!-- v3.3 P1 ek (proje sahibinin talebi): "index.html'e dönmeden" B1/B2 Excel import/export erişimi. WMS zaten
-                     her iki deponun raf durumunu gösteriyordu; içe/dışa aktarma yalnız index.html'deki B1/B2 sekmelerinde vardı. -->
-                <div class="shelf-matrix-actions" role="group" aria-label="Depo aksiyonları">
-                    <div class="shelf-matrix-actions-group">
-                        <span class="shelf-matrix-actions-depot">B1</span>
-                        <label for="fileInput" class="uab-btn uab-btn-purple uab-btn-sm"
-                            onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
-                            <i class="fas fa-file-excel"></i> Import
-                        </label>
-                        <button type="button" class="uab-btn uab-btn-success uab-btn-sm" onclick="exportToExcel('b1')">
-                            <i class="fas fa-chart-bar"></i> Excel Rapor
-                        </button>
-                    </div>
-                    <div class="shelf-matrix-actions-group">
-                        <span class="shelf-matrix-actions-depot">B2</span>
-                        <label for="fileInput" class="uab-btn uab-btn-purple uab-btn-sm"
-                            onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
-                            <i class="fas fa-file-excel"></i> Import
-                        </label>
-                        <button type="button" class="uab-btn uab-btn-success uab-btn-sm" onclick="exportToExcel('b2')">
-                            <i class="fas fa-chart-bar"></i> Excel Rapor
-                        </button>
-                    </div>
-                    <button type="button" class="uab-btn uab-btn-sm import-help-trigger import-help-shared" aria-label="B1 ve B2 içe aktarma rehberi" onclick="showImportFormatHelp('all')"><svg class="import-help-symbol" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.5 4.8 6.4 4.2 3 5v14c3.4-.8 6.5-.2 9 1.5C14.5 18.8 17.6 18.2 21 19V5c-3.4-.8-6.5-.2-9 1.5Z"/><path d="M12 6.5v14M6.5 9l2 .4M6.5 12l2 .4M15.5 9.4l2-.4M15.5 12.4l2-.4"/></svg><span>İçe aktarma rehberi</span></button>
-                    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="importExcel(event)" style="display:none">
-                </div>
-                <div class="shelf-matrix-toolbar">
-                    <div class="shelf-matrix-depots" role="group" aria-label="Depo seçimi">
-                        <button type="button" class="shelf-depot-btn active" data-depot="b1">📦 B1 Sarf Deposu</button>
-                        <button type="button" class="shelf-depot-btn" data-depot="b2">🛡️ B2 Demirbaş Deposu</button>
-                        <button type="button" class="shelf-depot-btn shelf-depot-btn-pool" data-depot="havuz"
-                            title="Havuz: her iki depodaki rafsız/stok dışı ürünleri tek ekranda listeler">🗂️ Havuz</button>
-                    </div>
-                    <label class="shelf-search">
-                        <span class="sr-only">Raf veya ürün ara</span>
-                        <i class="fas fa-search" aria-hidden="true"></i>
-                        <input id="shelfMatrixSearch" type="search" placeholder="Raf, ürün, marka, tür veya seri no ara…" autocomplete="off">
-                    </label>
-                    <label class="shelf-sort">
-                        <span>Sırala</span>
-                        <select id="shelfMatrixSort">
-                            <option value="occupancy">Doluluk oranı (çoktan aza)</option>
-                            <option value="code">Raf kodu (A-Z)</option>
-                            <option value="variety">Ürün çeşidi</option>
-                        </select>
-                    </label>
-                </div>
-                <div id="shelfMatrixMetrics" class="shelf-matrix-metrics" aria-live="polite"></div>
-                <div id="shelfMatrixGrid" class="shelf-matrix-grid" aria-live="polite"></div>
-            </section>
-        </div>
-
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- 🌌 SİSTEM KONTROL MERKEZİ (VIP) — Premium Exclusive Tab  -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <div id="systemControlTab" class="admin-tab-content" style="display: none;">
-
-            <!-- VIP Başlık -->
-            <div class="vip-header">
+        <!-- 5. PERSONEL TANIMLARI SEKMESİ -->
+        <div id="defTab-personnel" class="def-tab-content" style="display: none;">
+            <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
                 <div>
-                    <h2><i class="fas fa-satellite-dish me-2"></i>Sistem Kontrol Merkezi</h2>
-                    <small>▸ VIP Sürükle-Bırak Yönetim Paneli — v2.0</small>
+                    <h2 class="fw-bold mb-0">👥 Personel Tanımları</h2>
+                    <small class="text-muted">Personel Kayıtları ve Kurumsal Kimlik (PRI) Yönetimi</small>
                 </div>
-                <div class="vip-header-actions">
-                    <button class="vip-btn-reset" onclick="resetVipLayout()">
-                        <i class="fas fa-sync-alt me-1"></i>Dizilimi Sıfırla
+                <button onclick="window.openPersonelModal('add')"
+                    class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                    <i class="fas fa-plus me-2"></i>Personel Ekle
+                </button>
+            </div>
+            <div class="modern-card">
+                <div class="table-responsive" style="min-height: 400px;">
+                    <table class="modern-table" id="tablePersonel">
+                        <thead>
+                            <tr>
+                                <th style="width: 5%;">Seç</th>
+                                <th style="width: 25%;">Ad Soyad</th>
+                                <th style="width: 20%;">Birim</th>
+                                <th style="width: 30%;">Kurumsal Kimlik / Hesap</th>
+                                <th style="width: 20%;" class="text-end">İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <style>
+            .def-nav-btn.active {
+                background: var(--color-info) !important;
+                color: white !important;
+                box-shadow: 0 4px 10px rgba(52, 152, 219, 0.3);
+            }
+        </style>
+
+        <script>
+            function switchDefTab(tabId) {
+                document.querySelectorAll('.def-tab-content').forEach(el => el.style.display = 'none');
+                document.getElementById('defTab-' + tabId).style.display = 'block';
+
+                document.querySelectorAll('.def-nav-btn').forEach(btn => btn.classList.remove('active'));
+                event.target.classList.add('active');
+
+                // [FIX-BUG5]: Alt sekme geçişlerinde ilgili render fonksiyonlarını tetikle
+                if (tabId === 'workflows' && typeof window.renderTemplateList === 'function') {
+                    window.renderTemplateList();
+                } else if (tabId === 'units' && typeof window.renderUnitManagement === 'function') {
+                    window.renderUnitManagement();
+                } else if (tabId === 'products' && typeof window.renderProductTypesTable === 'function') {
+                    window.renderProductTypesTable();
+                } else if (tabId === 'documentTypes' && typeof window.renderEBYSDocumentTypes === 'function') {
+                    window.renderEBYSDocumentTypes();
+                } else if (tabId === 'mahal' && typeof window.renderLocationsTable === 'function') {
+                    window.renderLocationsTable();
+                } else if (tabId === 'personnel' && typeof window.renderPersonelTable === 'function') {
+                    window.renderPersonelTable();
+                }
+
+                // 💡 Contextual tip for definitions sub-tabs
+                if (typeof window.TipManager === 'object' && typeof window.TipManager.showTipForTab === 'function') {
+                    window.TipManager.showTipForTab(tabId);
+                }
+            }
+        </script>
+    </div>
+
+    <!-- ✅ TODO PANELI SEKMESİ (Burası Ana İçerik Alanı) -->
+    <div id="todoTab" class="admin-tab-content" style="display: none;">
+        <div class="todo-container p-4">
+            <div
+                class="todo-header bg-white shadow-sm p-3 rounded-3 mb-4 d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="fw-bold mb-0">📝 TODO Paneli</h2>
+                    <small class="text-muted">Görevler yükleniyor veya henüz veri girişi yapılmadı...</small>
+                </div>
+                <button onclick="todoModule.openNewTaskModal('admin')" class="todo-btn-premium">
+                    <i class="fas fa-plus"></i> Yeni Görev Ata
+                </button>
+            </div>
+            <div class="task-grid text-center p-5 text-muted">
+                <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+                <p>Görevler listeleniyor...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 📦 Envanter Yönetimi Sekmesi (inventory-management.js tarafından doldurulacak) -->
+    <div id="inventoryManagementTab" class="admin-tab-content" style="display: none;">
+        <!-- İçerik inventory-management.js tarafından dinamik olarak çizilecektir -->
+    </div>
+
+    <div id="shelfMatrixTab" class="admin-tab-content" style="display: none;">
+        <section id="shelfMatrixApp" class="shelf-matrix" aria-label="Depo raf haritası">
+            <header class="shelf-matrix-header">
+                <div>
+                    <h2>🧱 Depo Raf Haritası</h2>
+                    <p>B1 ve B2 stoklarını fiziksel raf konumlarına göre bulun.</p>
+                </div>
+                <!-- v3.3 Aşama 6 (Veri Geçişi): geçici/tek seferlik uzlaştırma aracı — raf sayaçlarını (usedSlots)
+                         gerçek stokla eşitler. Kalıcı bir günlük işlem değildir; bkz. shelf-matrix.js syncShelfCountersAction. -->
+                <button type="button" id="shelfMatrixSyncBtn" class="shelf-sync-btn"
+                    title="Göç aracı: tüm B1/B2 stoğunu tarar, raf doluluk sayaçlarını gerçek verilerle eşitler.">
+                    🔄 Sistem Raf Sayaçlarını Eşitle (Sync)
+                </button>
+            </header>
+            <!-- v3.3 P1 ek (proje sahibinin talebi): "index.html'e dönmeden" B1/B2 Excel import/export erişimi. WMS zaten
+                     her iki deponun raf durumunu gösteriyordu; içe/dışa aktarma yalnız index.html'deki B1/B2 sekmelerinde vardı. -->
+            <div class="shelf-matrix-actions" role="group" aria-label="Depo aksiyonları">
+                <div class="shelf-matrix-actions-group">
+                    <span class="shelf-matrix-actions-depot">B1</span>
+                    <label for="fileInput" class="uab-btn uab-btn-purple uab-btn-sm"
+                        onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
+                        <i class="fas fa-file-excel"></i> Import
+                    </label>
+                    <button type="button" class="uab-btn uab-btn-success uab-btn-sm" onclick="exportToExcel('b1')">
+                        <i class="fas fa-chart-bar"></i> Excel Rapor
+                    </button>
+                </div>
+                <div class="shelf-matrix-actions-group">
+                    <span class="shelf-matrix-actions-depot">B2</span>
+                    <label for="fileInput" class="uab-btn uab-btn-purple uab-btn-sm"
+                        onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
+                        <i class="fas fa-file-excel"></i> Import
+                    </label>
+                    <button type="button" class="uab-btn uab-btn-success uab-btn-sm" onclick="exportToExcel('b2')">
+                        <i class="fas fa-chart-bar"></i> Excel Rapor
+                    </button>
+                </div>
+                <button type="button" class="uab-btn uab-btn-sm import-help-trigger import-help-shared"
+                    aria-label="B1 ve B2 içe aktarma rehberi" onclick="showImportFormatHelp('all')"><svg
+                        class="import-help-symbol" aria-hidden="true" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M12 6.5C9.5 4.8 6.4 4.2 3 5v14c3.4-.8 6.5-.2 9 1.5C14.5 18.8 17.6 18.2 21 19V5c-3.4-.8-6.5-.2-9 1.5Z" />
+                        <path d="M12 6.5v14M6.5 9l2 .4M6.5 12l2 .4M15.5 9.4l2-.4M15.5 12.4l2-.4" />
+                    </svg><span>İçe aktarma rehberi</span></button>
+                <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="importExcel(event)"
+                    style="display:none">
+            </div>
+            <div class="shelf-matrix-toolbar">
+                <div class="shelf-matrix-depots" role="group" aria-label="Depo seçimi">
+                    <button type="button" class="shelf-depot-btn active" data-depot="b1">📦 B1 Sarf Deposu</button>
+                    <button type="button" class="shelf-depot-btn" data-depot="b2">🛡️ B2 Demirbaş Deposu</button>
+                    <button type="button" class="shelf-depot-btn shelf-depot-btn-pool" data-depot="havuz"
+                        title="Havuz: her iki depodaki rafsız/stok dışı ürünleri tek ekranda listeler">🗂️
+                        Havuz</button>
+                </div>
+                <label class="shelf-search">
+                    <span class="sr-only">Raf veya ürün ara</span>
+                    <i class="fas fa-search" aria-hidden="true"></i>
+                    <input id="shelfMatrixSearch" type="search" placeholder="Raf, ürün, marka, tür veya seri no ara…"
+                        autocomplete="off">
+                </label>
+                <label class="shelf-sort">
+                    <span>Sırala</span>
+                    <select id="shelfMatrixSort">
+                        <option value="occupancy">Doluluk oranı (çoktan aza)</option>
+                        <option value="code">Raf kodu (A-Z)</option>
+                        <option value="variety">Ürün çeşidi</option>
+                    </select>
+                </label>
+            </div>
+            <div id="shelfMatrixMetrics" class="shelf-matrix-metrics" aria-live="polite"></div>
+            <div id="shelfMatrixGrid" class="shelf-matrix-grid" aria-live="polite"></div>
+        </section>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 🌌 SİSTEM KONTROL MERKEZİ (VIP) — Premium Exclusive Tab  -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div id="systemControlTab" class="admin-tab-content" style="display: none;">
+
+        <!-- VIP Başlık -->
+        <div class="vip-header">
+            <div>
+                <h2><i class="fas fa-satellite-dish me-2"></i>Sistem Kontrol Merkezi</h2>
+                <small>▸ VIP Sürükle-Bırak Yönetim Paneli — v2.0</small>
+            </div>
+            <div class="vip-header-actions">
+                <button class="vip-btn-reset" onclick="resetVipLayout()">
+                    <i class="fas fa-sync-alt me-1"></i>Dizilimi Sıfırla
+                </button>
+            </div>
+        </div>
+
+        <!-- VIP Widget Grid (Sürüklenebilir) -->
+        <div class="vip-grid" id="vipGrid">
+
+            <!-- ═══ WIDGET 1: Canlı Sistem Terminali ═══ -->
+            <div class="vip-card" data-id="widget-terminal">
+                <div class="vip-card-header">
+                    <div class="header-left">
+                        <i class="fas fa-terminal" style="color: var(--vip-matrix);"></i>
+                        <span>Canlı Sistem Terminali</span>
+                    </div>
+                    <div class="header-right">
+                        <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                        <i class="fas fa-grip-vertical grip-icon"></i>
+                    </div>
+                </div>
+                <div class="vip-card-body" style="padding: 0;">
+                    <div class="vip-terminal" id="vipLogTerminal">
+                        <div class="vip-terminal-bar">
+                            <span class="vip-terminal-dot red"></span>
+                            <span class="vip-terminal-dot yellow"></span>
+                            <span class="vip-terminal-dot green"></span>
+                            <span class="vip-terminal-title">system.log — live</span>
+                            <div class="vip-terminal-filters">
+                                <button class="vip-filter-btn active" onclick="vipFilterLogs('all', this)">Tümü</button>
+                                <button class="vip-filter-btn filter-info" onclick="vipFilterLogs('info', this)">Info
+                                    <span id="vipLogCountInfo">0</span></button>
+                                <button class="vip-filter-btn filter-warn" onclick="vipFilterLogs('warn', this)">Warn
+                                    <span id="vipLogCountWarn">0</span></button>
+                                <button class="vip-filter-btn filter-error" onclick="vipFilterLogs('error', this)">Error
+                                    <span id="vipLogCountError">0</span></button>
+                                <button class="vip-terminal-clear" onclick="vipClearTerminal()"><i
+                                        class="fas fa-broom"></i></button>
+                            </div>
+                        </div>
+                        <!-- Log girdileri JS tarafından eklenir -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ WIDGET 2: Sistem Sağlık Monitörü ═══ -->
+            <div class="vip-card" data-id="widget-health">
+                <div class="vip-card-header">
+                    <div class="header-left">
+                        <i class="fas fa-heartbeat" style="color: var(--vip-danger);"></i>
+                        <span>Sistem Sağlık Monitörü</span>
+                    </div>
+                    <div class="header-right">
+                        <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                        <i class="fas fa-grip-vertical grip-icon"></i>
+                    </div>
+                </div>
+                <div class="vip-card-body">
+                    <div class="health-metric">
+                        <span class="health-metric-label"><i class="fas fa-clock"></i> Uptime</span>
+                        <span class="health-metric-value" id="vipUptime"
+                            style="color: var(--vip-matrix);">00:00:00</span>
+                    </div>
+                    <div class="health-metric">
+                        <span class="health-metric-label"><i class="fas fa-memory"></i> Bellek (Heap)</span>
+                        <span class="health-metric-value" id="vipMemoryText"
+                            style="color: var(--vip-neon-blue);">--</span>
+                    </div>
+                    <div class="health-bar">
+                        <div class="health-bar-fill good" id="vipMemoryBar" style="width: 0%;"></div>
+                    </div>
+                    <div class="health-metric">
+                        <span class="health-metric-label"><i class="fas fa-wifi"></i> Ağ Durumu</span>
+                        <span class="health-metric-value" id="vipNetwork" style="color: var(--vip-warning);">--</span>
+                    </div>
+                    <div class="health-metric">
+                        <span class="health-metric-label"><i class="fas fa-fire"></i> Firebase</span>
+                        <span class="health-metric-value">
+                            <span class="heartbeat-dot online" id="vipFirebaseDot"></span>
+                            <span id="vipFirebaseText" style="margin-left: 8px; color: var(--vip-matrix);">Bağlı</span>
+                        </span>
+                    </div>
+                    <div class="health-metric">
+                        <span class="health-metric-label"><i class="fas fa-database"></i> Veri Boyutu</span>
+                        <span class="health-metric-value" id="vipDataSize"
+                            style="color: var(--vip-neon-purple);">--</span>
+                    </div>
+                    <div class="health-metric">
+                        <span class="health-metric-label"><i class="fas fa-code"></i> DOM Düğümleri</span>
+                        <span class="health-metric-value" id="vipDomNodes"
+                            style="color: var(--vip-text-muted);">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ WIDGET 3: Operasyon Raporu ═══ -->
+            <div class="vip-card" data-id="widget-ops">
+                <div class="vip-card-header">
+                    <div class="header-left">
+                        <i class="fas fa-chart-bar" style="color: var(--vip-neon-blue);"></i>
+                        <span>Operasyon Raporu</span>
+                    </div>
+                    <div class="header-right">
+                        <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                        <i class="fas fa-grip-vertical grip-icon"></i>
+                    </div>
+                </div>
+                <div class="vip-card-body">
+                    <div class="ops-grid">
+                        <div class="ops-card blue">
+                            <div class="ops-icon">📦</div>
+                            <div class="ops-value" id="opsProducts">0</div>
+                            <div class="ops-label">Toplam Ürün</div>
+                        </div>
+                        <div class="ops-card green">
+                            <div class="ops-icon">🏗️</div>
+                            <div class="ops-value" id="opsStock">0</div>
+                            <div class="ops-label">Toplam Stok</div>
+                        </div>
+                        <div class="ops-card purple">
+                            <div class="ops-icon">📤</div>
+                            <div class="ops-value" id="opsExits">0</div>
+                            <div class="ops-label">Çıkış İşlemi</div>
+                        </div>
+                        <div class="ops-card red">
+                            <div class="ops-icon">⏳</div>
+                            <div class="ops-value" id="opsPending">0</div>
+                            <div class="ops-label">Bekleyen Talep</div>
+                        </div>
+                        <div class="ops-card red">
+                            <div class="ops-icon">🚨</div>
+                            <div class="ops-value" id="opsCritical">0</div>
+                            <div class="ops-label">Kritik Stok</div>
+                        </div>
+                        <div class="ops-card purple">
+                            <div class="ops-icon">🏷️</div>
+                            <div class="ops-value" id="opsTypes">0</div>
+                            <div class="ops-label">Ürün Türü</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ WIDGET 4: Debug & Hata Takip Paneli ═══ -->
+            <div class="vip-card" data-id="widget-debug">
+                <div class="vip-card-header">
+                    <div class="header-left">
+                        <i class="fas fa-bug" style="color: var(--vip-warning);"></i>
+                        <span>Debug & Hata Takip</span>
+                    </div>
+                    <div class="header-right">
+                        <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                        <i class="fas fa-grip-vertical grip-icon"></i>
+                    </div>
+                </div>
+                <div class="vip-card-body">
+                    <ul class="debug-list" id="vipDebugList">
+                        <!-- JS tarafından doldurulur -->
+                    </ul>
+                </div>
+            </div>
+
+            <!-- ═══ WIDGET 5: Platform & Donanım Analizi ═══ -->
+            <div class="vip-card" data-id="widget-platform">
+                <div class="vip-card-header">
+                    <div class="header-left">
+                        <i class="fas fa-microchip" style="color: var(--vip-neon-purple);"></i>
+                        <span>Platform & Donanım</span>
+                    </div>
+                    <div class="header-right">
+                        <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                        <i class="fas fa-grip-vertical grip-icon"></i>
+                    </div>
+                </div>
+                <div class="vip-card-body">
+                    <div class="platform-info-grid">
+                        <div class="platform-chip">
+                            <div class="platform-chip-label">Tarayıcı Motor</div>
+                            <div class="platform-chip-value" id="vipBrowserEngine">--</div>
+                        </div>
+                        <div class="platform-chip">
+                            <div class="platform-chip-label">İşletim Sistemi</div>
+                            <div class="platform-chip-value" id="vipOS">--</div>
+                        </div>
+                        <div class="platform-chip">
+                            <div class="platform-chip-label">Ekran Çözünürlüğü</div>
+                            <div class="platform-chip-value" id="vipScreenRes">--</div>
+                        </div>
+                        <div class="platform-chip">
+                            <div class="platform-chip-label">Viewport</div>
+                            <div class="platform-chip-value" id="vipViewport">--</div>
+                        </div>
+                        <div class="platform-chip">
+                            <div class="platform-chip-label">Dil</div>
+                            <div class="platform-chip-value" id="vipLanguage">--</div>
+                        </div>
+                        <div class="platform-chip">
+                            <div class="platform-chip-label">CPU Çekirdek</div>
+                            <div class="platform-chip-value" id="vipCores">--</div>
+                        </div>
+                        <div class="platform-chip">
+                            <div class="platform-chip-label">LocalStorage</div>
+                            <div class="platform-chip-value" id="vipLocalStorage">--</div>
+                        </div>
+                        <div class="platform-chip">
+                            <div class="platform-chip-label">Çerezler</div>
+                            <div class="platform-chip-value" id="vipCookies">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ WIDGET 6: Oturum & Güvenlik ═══ -->
+            <div class="vip-card" data-id="widget-session">
+                <div class="vip-card-header">
+                    <div class="header-left">
+                        <i class="fas fa-shield-halved" style="color: var(--vip-matrix);"></i>
+                        <span>Oturum & Güvenlik</span>
+                    </div>
+                    <div class="header-right">
+                        <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                        <i class="fas fa-grip-vertical grip-icon"></i>
+                    </div>
+                </div>
+                <div class="vip-card-body">
+                    <div class="session-countdown">
+                        <div class="session-time" id="vipSessionTime">--:--</div>
+                        <div class="session-label">Kalan Oturum Süresi</div>
+                    </div>
+                    <div class="session-detail">
+                        <span class="session-detail-label">Aktif Kullanıcı</span>
+                        <span class="session-detail-value" id="vipActiveUser">Admin</span>
+                    </div>
+                    <div class="session-detail">
+                        <span class="session-detail-label">Son Giriş</span>
+                        <span class="session-detail-value" id="vipLastLogin">--</span>
+                    </div>
+                    <div class="session-detail">
+                        <span class="session-detail-label">Güvenlik Seviyesi</span>
+                        <div class="security-level" id="vipSecurityLevel">
+                            <div class="security-bar"></div>
+                            <div class="security-bar"></div>
+                            <div class="security-bar"></div>
+                            <div class="security-bar"></div>
+                            <div class="security-bar"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ WIDGET 7: Sistem Aksiyonları (Acil Durum) ═══ -->
+            <div class="vip-card" data-id="widget-actions">
+                <div class="vip-card-header">
+                    <div class="header-left">
+                        <i class="fas fa-bolt" style="color: var(--vip-warning);"></i>
+                        <span>Sistem Aksiyonları</span>
+                    </div>
+                    <div class="header-right">
+                        <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                        <i class="fas fa-grip-vertical grip-icon"></i>
+                    </div>
+                </div>
+                <div class="vip-card-body"
+                    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
+                    <button class="btn w-100 fw-bold" onclick="window.vipBackupDatabase()"
+                        style="background: rgba(0,255,136,0.1); color: var(--vip-matrix); border: 1px solid var(--vip-matrix); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-database me-2"></i>1-Tık DB Snapshot
+                    </button>
+                    <button class="btn w-100 fw-bold" onclick="window.toggleSystemTips()" id="vipToggleTipsBtn"
+                        style="background: rgba(14,165,233,0.1); color: var(--color-info); border: 1px solid var(--color-info); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-comment-dots me-2"></i>İpuçları: Açık
+                    </button>
+                    <button class="btn w-100 fw-bold" onclick="window.vipToggleKillSwitch()" id="vipKillSwitchBtn"
+                        style="background: rgba(255,45,85,0.1); color: var(--vip-danger); border: 1px solid var(--vip-danger); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-power-off me-2"></i>GLOBAL KILL SWITCH
+                    </button>
+                    <button class="btn w-100 fw-bold" onclick="window.vipCleanDuplicates(this)"
+                        style="background: rgba(168,85,247,0.1); color: #c084fc; border: 1px solid #c084fc; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-magic me-2"></i>Tekerrürleri Temizle
+                    </button>
+                    <button class="btn w-100 fw-bold" onclick="window.vipMigrateB3Schema(this)"
+                        title="B3 kayıtlarını önizleme + yedekle yeni şemaya taşır (Faz 3.6)"
+                        style="background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid #f59e0b; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-dna me-2"></i>Şema Göçü (B3)
+                    </button>
+                    <button class="btn w-100 fw-bold" onclick="window.vipMigrateStaffAuth(this)"
+                        title="Personele kurumsal kimlik (PRI) atar; <pri>@ giriş hesabını açar ya da J7 hesabını uid korunarak taşır; önizleme + onay (Faz 4B · J10)"
+                        style="background: rgba(56,189,248,0.1); color: #38bdf8; border: 1px solid #38bdf8; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-user-shield me-2"></i>PRI / Hesap Göç Aracı
+                    </button>
+                    <button class="btn w-100 fw-bold" onclick="window.vipOwnershipMigration(this)"
+                        title="Talep, satın alma, görev ve şablonlara sahiplik uid'lerini önizlemeyle ekler (Faz 4B · J9)"
+                        style="background: rgba(244,114,182,0.1); color: #f472b6; border: 1px solid #f472b6; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-fingerprint me-2"></i>Sahiplik Göç Aracı
+                    </button>
+                    <button class="btn w-100 fw-bold" onclick="window.vipCodeCleanse(this)"
+                        title="Düz metin giriş kodlarını veritabanından siler; önkoşullar sağlanmadan çalışmaz (Faz 4B · J10)"
+                        style="background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid #ef4444; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-eraser me-2"></i>Kod Temizliği
+                    </button>
+                    <button class="btn w-100 fw-bold" id="vipStaffGateBtn" onclick="window.vipStaffAccessGate(this)"
+                        title="Personel erişim kilidi: göç kapanışı sunucudan doğrulanmadan personel veri okuyamaz (Faz 4B · J11)"
+                        style="background: rgba(34,197,94,0.1); color: #22c55e; border: 1px solid #22c55e; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-shield-halved me-2"></i>Personel Erişim Kilidi<span
+                            data-role="gate-state"></span>
                     </button>
                 </div>
             </div>
 
-            <!-- VIP Widget Grid (Sürüklenebilir) -->
-            <div class="vip-grid" id="vipGrid">
-
-                <!-- ═══ WIDGET 1: Canlı Sistem Terminali ═══ -->
-                <div class="vip-card" data-id="widget-terminal">
-                    <div class="vip-card-header">
-                        <div class="header-left">
-                            <i class="fas fa-terminal" style="color: var(--vip-matrix);"></i>
-                            <span>Canlı Sistem Terminali</span>
-                        </div>
-                        <div class="header-right">
-                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
-                            <i class="fas fa-grip-vertical grip-icon"></i>
-                        </div>
+            <!-- * WIDGET 8: God-Eye Radari v2 * -->
+            <div class="vip-card" data-id="widget-godeye">
+                <div class="vip-card-header">
+                    <div class="header-left">
+                        <i class="fas fa-eye" style="color: var(--vip-neon-blue);"></i>
+                        <span>God-Eye (Canli Radar)</span> <span class="badge"
+                            title="Örnek veri: gerçek oturum/presence izlenmiyor (Karar K8-b)"
+                            style="background: var(--vip-warning, #f59e0b); color: #111; font-size: 0.6rem; margin-left: 6px;">DEMO</span>
                     </div>
-                    <div class="vip-card-body" style="padding: 0;">
-                        <div class="vip-terminal" id="vipLogTerminal">
-                            <div class="vip-terminal-bar">
-                                <span class="vip-terminal-dot red"></span>
-                                <span class="vip-terminal-dot yellow"></span>
-                                <span class="vip-terminal-dot green"></span>
-                                <span class="vip-terminal-title">system.log — live</span>
-                                <div class="vip-terminal-filters">
-                                    <button class="vip-filter-btn active"
-                                        onclick="vipFilterLogs('all', this)">Tümü</button>
-                                    <button class="vip-filter-btn filter-info"
-                                        onclick="vipFilterLogs('info', this)">Info <span
-                                            id="vipLogCountInfo">0</span></button>
-                                    <button class="vip-filter-btn filter-warn"
-                                        onclick="vipFilterLogs('warn', this)">Warn <span
-                                            id="vipLogCountWarn">0</span></button>
-                                    <button class="vip-filter-btn filter-error"
-                                        onclick="vipFilterLogs('error', this)">Error <span
-                                            id="vipLogCountError">0</span></button>
-                                    <button class="vip-terminal-clear" onclick="vipClearTerminal()"><i
-                                            class="fas fa-broom"></i></button>
-                                </div>
-                            </div>
-                            <!-- Log girdileri JS tarafından eklenir -->
-                        </div>
+                    <div class="header-right">
+                        <button id="godEyeHeatmapToggle" onclick="window.vipToggleHeatmap(this)"
+                            title="Heatmap Moduna Gec">
+                            <i class="fas fa-fire-flame-curved"></i> HEATMAP
+                        </button>
+                        <button class="vip-collapse-btn" title="Kucult"><i class="fas fa-chevron-up"></i></button>
+                        <i class="fas fa-grip-vertical grip-icon"></i>
                     </div>
                 </div>
-
-                <!-- ═══ WIDGET 2: Sistem Sağlık Monitörü ═══ -->
-                <div class="vip-card" data-id="widget-health">
-                    <div class="vip-card-header">
-                        <div class="header-left">
-                            <i class="fas fa-heartbeat" style="color: var(--vip-danger);"></i>
-                            <span>Sistem Sağlık Monitörü</span>
+                <div class="vip-card-body"
+                    style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding-bottom: 16px;">
+                    <!-- Radar Gorunumu -->
+                    <div id="godEyeRadarContainer">
+                        <div class="god-eye-radar" id="godEyeRadarInner">
+                            <div class="radar-scanner"></div>
+                            <div class="radar-dot" data-demo="true" data-user-id="user-1" data-user-name="Ahmet Yilmaz"
+                                data-user-module="B1 Depo" style="top: 30%; left: 40%;"></div>
+                            <div class="radar-dot" data-demo="true" data-user-id="user-2" data-user-name="Ayse Kaya"
+                                data-user-module="Satin Alma" style="top: 70%; left: 60%; animation-delay: 1s;">
+                            </div>
+                            <div class="radar-dot" data-demo="true" data-user-id="user-3" data-user-name="Mehmet Demir"
+                                data-user-module="Personel" style="top: 50%; left: 20%; animation-delay: 2.5s;"></div>
                         </div>
-                        <div class="header-right">
-                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
-                            <i class="fas fa-grip-vertical grip-icon"></i>
-                        </div>
+                        <!-- Heatmap SVG (baslangicta gizli, JS ile doldurulur) -->
+                        <svg id="godEyeHeatmapSVG" viewBox="-110 -110 220 220" xmlns="http://www.w3.org/2000/svg">
+                        </svg>
                     </div>
-                    <div class="vip-card-body">
-                        <div class="health-metric">
-                            <span class="health-metric-label"><i class="fas fa-clock"></i> Uptime</span>
-                            <span class="health-metric-value" id="vipUptime"
-                                style="color: var(--vip-matrix);">00:00:00</span>
-                        </div>
-                        <div class="health-metric">
-                            <span class="health-metric-label"><i class="fas fa-memory"></i> Bellek (Heap)</span>
-                            <span class="health-metric-value" id="vipMemoryText"
-                                style="color: var(--vip-neon-blue);">--</span>
-                        </div>
-                        <div class="health-bar">
-                            <div class="health-bar-fill good" id="vipMemoryBar" style="width: 0%;"></div>
-                        </div>
-                        <div class="health-metric">
-                            <span class="health-metric-label"><i class="fas fa-wifi"></i> Ağ Durumu</span>
-                            <span class="health-metric-value" id="vipNetwork"
-                                style="color: var(--vip-warning);">--</span>
-                        </div>
-                        <div class="health-metric">
-                            <span class="health-metric-label"><i class="fas fa-fire"></i> Firebase</span>
-                            <span class="health-metric-value">
-                                <span class="heartbeat-dot online" id="vipFirebaseDot"></span>
-                                <span id="vipFirebaseText"
-                                    style="margin-left: 8px; color: var(--vip-matrix);">Bağlı</span>
-                            </span>
-                        </div>
-                        <div class="health-metric">
-                            <span class="health-metric-label"><i class="fas fa-database"></i> Veri Boyutu</span>
-                            <span class="health-metric-value" id="vipDataSize"
-                                style="color: var(--vip-neon-purple);">--</span>
-                        </div>
-                        <div class="health-metric">
-                            <span class="health-metric-label"><i class="fas fa-code"></i> DOM Düğümleri</span>
-                            <span class="health-metric-value" id="vipDomNodes"
-                                style="color: var(--vip-text-muted);">--</span>
-                        </div>
+                    <!-- Durum Bilgisi -->
+                    <div
+                        style="font-size: 0.7rem; color: var(--vip-text-muted); text-align: center; letter-spacing: 0.5px;">
+                        <span id="godEyeStatusText"><i class="fas fa-circle"
+                                style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>DEMO —
+                            örnek oturumlar (gerçek presence yok)</span>
                     </div>
                 </div>
+            </div>
 
-                <!-- ═══ WIDGET 3: Operasyon Raporu ═══ -->
-                <div class="vip-card" data-id="widget-ops">
-                    <div class="vip-card-header">
-                        <div class="header-left">
-                            <i class="fas fa-chart-bar" style="color: var(--vip-neon-blue);"></i>
-                            <span>Operasyon Raporu</span>
-                        </div>
-                        <div class="header-right">
-                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
-                            <i class="fas fa-grip-vertical grip-icon"></i>
-                        </div>
-                    </div>
-                    <div class="vip-card-body">
-                        <div class="ops-grid">
-                            <div class="ops-card blue">
-                                <div class="ops-icon">📦</div>
-                                <div class="ops-value" id="opsProducts">0</div>
-                                <div class="ops-label">Toplam Ürün</div>
-                            </div>
-                            <div class="ops-card green">
-                                <div class="ops-icon">🏗️</div>
-                                <div class="ops-value" id="opsStock">0</div>
-                                <div class="ops-label">Toplam Stok</div>
-                            </div>
-                            <div class="ops-card purple">
-                                <div class="ops-icon">📤</div>
-                                <div class="ops-value" id="opsExits">0</div>
-                                <div class="ops-label">Çıkış İşlemi</div>
-                            </div>
-                            <div class="ops-card red">
-                                <div class="ops-icon">⏳</div>
-                                <div class="ops-value" id="opsPending">0</div>
-                                <div class="ops-label">Bekleyen Talep</div>
-                            </div>
-                            <div class="ops-card red">
-                                <div class="ops-icon">🚨</div>
-                                <div class="ops-value" id="opsCritical">0</div>
-                                <div class="ops-label">Kritik Stok</div>
-                            </div>
-                            <div class="ops-card purple">
-                                <div class="ops-icon">🏷️</div>
-                                <div class="ops-value" id="opsTypes">0</div>
-                                <div class="ops-label">Ürün Türü</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <!-- Kullanici Aktivite Paneli Overlay -->
+            <div id="userActivityOverlay" onclick="window.vipCloseUserPanel()"></div>
 
-                <!-- ═══ WIDGET 4: Debug & Hata Takip Paneli ═══ -->
-                <div class="vip-card" data-id="widget-debug">
-                    <div class="vip-card-header">
-                        <div class="header-left">
-                            <i class="fas fa-bug" style="color: var(--vip-warning);"></i>
-                            <span>Debug & Hata Takip</span>
-                        </div>
-                        <div class="header-right">
-                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
-                            <i class="fas fa-grip-vertical grip-icon"></i>
-                        </div>
-                    </div>
-                    <div class="vip-card-body">
-                        <ul class="debug-list" id="vipDebugList">
-                            <!-- JS tarafından doldurulur -->
-                        </ul>
-                    </div>
-                </div>
-
-                <!-- ═══ WIDGET 5: Platform & Donanım Analizi ═══ -->
-                <div class="vip-card" data-id="widget-platform">
-                    <div class="vip-card-header">
-                        <div class="header-left">
-                            <i class="fas fa-microchip" style="color: var(--vip-neon-purple);"></i>
-                            <span>Platform & Donanım</span>
-                        </div>
-                        <div class="header-right">
-                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
-                            <i class="fas fa-grip-vertical grip-icon"></i>
-                        </div>
-                    </div>
-                    <div class="vip-card-body">
-                        <div class="platform-info-grid">
-                            <div class="platform-chip">
-                                <div class="platform-chip-label">Tarayıcı Motor</div>
-                                <div class="platform-chip-value" id="vipBrowserEngine">--</div>
-                            </div>
-                            <div class="platform-chip">
-                                <div class="platform-chip-label">İşletim Sistemi</div>
-                                <div class="platform-chip-value" id="vipOS">--</div>
-                            </div>
-                            <div class="platform-chip">
-                                <div class="platform-chip-label">Ekran Çözünürlüğü</div>
-                                <div class="platform-chip-value" id="vipScreenRes">--</div>
-                            </div>
-                            <div class="platform-chip">
-                                <div class="platform-chip-label">Viewport</div>
-                                <div class="platform-chip-value" id="vipViewport">--</div>
-                            </div>
-                            <div class="platform-chip">
-                                <div class="platform-chip-label">Dil</div>
-                                <div class="platform-chip-value" id="vipLanguage">--</div>
-                            </div>
-                            <div class="platform-chip">
-                                <div class="platform-chip-label">CPU Çekirdek</div>
-                                <div class="platform-chip-value" id="vipCores">--</div>
-                            </div>
-                            <div class="platform-chip">
-                                <div class="platform-chip-label">LocalStorage</div>
-                                <div class="platform-chip-value" id="vipLocalStorage">--</div>
-                            </div>
-                            <div class="platform-chip">
-                                <div class="platform-chip-label">Çerezler</div>
-                                <div class="platform-chip-value" id="vipCookies">--</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ═══ WIDGET 6: Oturum & Güvenlik ═══ -->
-                <div class="vip-card" data-id="widget-session">
-                    <div class="vip-card-header">
-                        <div class="header-left">
-                            <i class="fas fa-shield-halved" style="color: var(--vip-matrix);"></i>
-                            <span>Oturum & Güvenlik</span>
-                        </div>
-                        <div class="header-right">
-                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
-                            <i class="fas fa-grip-vertical grip-icon"></i>
-                        </div>
-                    </div>
-                    <div class="vip-card-body">
-                        <div class="session-countdown">
-                            <div class="session-time" id="vipSessionTime">--:--</div>
-                            <div class="session-label">Kalan Oturum Süresi</div>
-                        </div>
-                        <div class="session-detail">
-                            <span class="session-detail-label">Aktif Kullanıcı</span>
-                            <span class="session-detail-value" id="vipActiveUser">Admin</span>
-                        </div>
-                        <div class="session-detail">
-                            <span class="session-detail-label">Son Giriş</span>
-                            <span class="session-detail-value" id="vipLastLogin">--</span>
-                        </div>
-                        <div class="session-detail">
-                            <span class="session-detail-label">Güvenlik Seviyesi</span>
-                            <div class="security-level" id="vipSecurityLevel">
-                                <div class="security-bar"></div>
-                                <div class="security-bar"></div>
-                                <div class="security-bar"></div>
-                                <div class="security-bar"></div>
-                                <div class="security-bar"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ═══ WIDGET 7: Sistem Aksiyonları (Acil Durum) ═══ -->
-                <div class="vip-card" data-id="widget-actions">
-                    <div class="vip-card-header">
-                        <div class="header-left">
-                            <i class="fas fa-bolt" style="color: var(--vip-warning);"></i>
-                            <span>Sistem Aksiyonları</span>
-                        </div>
-                        <div class="header-right">
-                            <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
-                            <i class="fas fa-grip-vertical grip-icon"></i>
-                        </div>
-                    </div>
-                    <div class="vip-card-body"
-                        style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
-                        <button class="btn w-100 fw-bold" onclick="window.vipBackupDatabase()"
-                            style="background: rgba(0,255,136,0.1); color: var(--vip-matrix); border: 1px solid var(--vip-matrix); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-database me-2"></i>1-Tık DB Snapshot
-                        </button>
-                        <button class="btn w-100 fw-bold" onclick="window.toggleSystemTips()" id="vipToggleTipsBtn"
-                            style="background: rgba(14,165,233,0.1); color: var(--color-info); border: 1px solid var(--color-info); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-comment-dots me-2"></i>İpuçları: Açık
-                        </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipToggleKillSwitch()" id="vipKillSwitchBtn"
-                            style="background: rgba(255,45,85,0.1); color: var(--vip-danger); border: 1px solid var(--vip-danger); padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-power-off me-2"></i>GLOBAL KILL SWITCH
-                        </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipCleanDuplicates(this)"
-                            style="background: rgba(168,85,247,0.1); color: #c084fc; border: 1px solid #c084fc; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-magic me-2"></i>Tekerrürleri Temizle
-                        </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipMigrateB3Schema(this)"
-                            title="B3 kayıtlarını önizleme + yedekle yeni şemaya taşır (Faz 3.6)"
-                            style="background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid #f59e0b; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-dna me-2"></i>Şema Göçü (B3)
-                        </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipMigrateStaffAuth(this)"
-                            title="Personele kurumsal kimlik (PRI) atar; <pri>@ giriş hesabını açar ya da J7 hesabını uid korunarak taşır; önizleme + onay (Faz 4B · J10)"
-                            style="background: rgba(56,189,248,0.1); color: #38bdf8; border: 1px solid #38bdf8; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-user-shield me-2"></i>PRI / Hesap Göç Aracı
-                        </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipOwnershipMigration(this)"
-                            title="Talep, satın alma, görev ve şablonlara sahiplik uid'lerini önizlemeyle ekler (Faz 4B · J9)"
-                            style="background: rgba(244,114,182,0.1); color: #f472b6; border: 1px solid #f472b6; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-fingerprint me-2"></i>Sahiplik Göç Aracı
-                        </button>
-                        <button class="btn w-100 fw-bold" onclick="window.vipCodeCleanse(this)"
-                            title="Düz metin giriş kodlarını veritabanından siler; önkoşullar sağlanmadan çalışmaz (Faz 4B · J10)"
-                            style="background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid #ef4444; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-eraser me-2"></i>Kod Temizliği
-                        </button>
-                        <button class="btn w-100 fw-bold" id="vipStaffGateBtn" onclick="window.vipStaffAccessGate(this)"
-                            title="Personel erişim kilidi: göç kapanışı sunucudan doğrulanmadan personel veri okuyamaz (Faz 4B · J11)"
-                            style="background: rgba(34,197,94,0.1); color: #22c55e; border: 1px solid #22c55e; padding: 12px; border-radius: 8px; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-shield-halved me-2"></i>Personel Erişim Kilidi<span data-role="gate-state"></span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- * WIDGET 8: God-Eye Radari v2 * -->
-                <div class="vip-card" data-id="widget-godeye">
-                    <div class="vip-card-header">
-                        <div class="header-left">
-                            <i class="fas fa-eye" style="color: var(--vip-neon-blue);"></i>
-                            <span>God-Eye (Canli Radar)</span> <span class="badge"
-                                title="Örnek veri: gerçek oturum/presence izlenmiyor (Karar K8-b)"
-                                style="background: var(--vip-warning, #f59e0b); color: #111; font-size: 0.6rem; margin-left: 6px;">DEMO</span>
-                        </div>
-                        <div class="header-right">
-                            <button id="godEyeHeatmapToggle" onclick="window.vipToggleHeatmap(this)"
-                                title="Heatmap Moduna Gec">
-                                <i class="fas fa-fire-flame-curved"></i> HEATMAP
-                            </button>
-                            <button class="vip-collapse-btn" title="Kucult"><i class="fas fa-chevron-up"></i></button>
-                            <i class="fas fa-grip-vertical grip-icon"></i>
-                        </div>
-                    </div>
-                    <div class="vip-card-body"
-                        style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding-bottom: 16px;">
-                        <!-- Radar Gorunumu -->
-                        <div id="godEyeRadarContainer">
-                            <div class="god-eye-radar" id="godEyeRadarInner">
-                                <div class="radar-scanner"></div>
-                                <div class="radar-dot" data-demo="true" data-user-id="user-1"
-                                    data-user-name="Ahmet Yilmaz" data-user-module="B1 Depo"
-                                    style="top: 30%; left: 40%;"></div>
-                                <div class="radar-dot" data-demo="true" data-user-id="user-2" data-user-name="Ayse Kaya"
-                                    data-user-module="Satin Alma" style="top: 70%; left: 60%; animation-delay: 1s;">
-                                </div>
-                                <div class="radar-dot" data-demo="true" data-user-id="user-3"
-                                    data-user-name="Mehmet Demir" data-user-module="Personel"
-                                    style="top: 50%; left: 20%; animation-delay: 2.5s;"></div>
-                            </div>
-                            <!-- Heatmap SVG (baslangicta gizli, JS ile doldurulur) -->
-                            <svg id="godEyeHeatmapSVG" viewBox="-110 -110 220 220" xmlns="http://www.w3.org/2000/svg">
-                            </svg>
-                        </div>
-                        <!-- Durum Bilgisi -->
-                        <div
-                            style="font-size: 0.7rem; color: var(--vip-text-muted); text-align: center; letter-spacing: 0.5px;">
-                            <span id="godEyeStatusText"><i class="fas fa-circle"
-                                    style="color: var(--vip-matrix); font-size: 6px; margin-right: 5px;"></i>DEMO —
-                                örnek oturumlar (gerçek presence yok)</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Kullanici Aktivite Paneli Overlay -->
-                <div id="userActivityOverlay" onclick="window.vipCloseUserPanel()"></div>
-
-            </div><!-- /vipGrid -->
-        </div><!-- /systemControlTab -->
+        </div><!-- /vipGrid -->
+    </div><!-- /systemControlTab -->
     </div>
 
     <!-- Mahal Ekle/Düzenle Modal -->
@@ -2424,7 +2590,7 @@
             color: #64748b;
         }
 
-        #templateModal .wf-steps-list .wf-step-row + .wf-step-row {
+        #templateModal .wf-steps-list .wf-step-row+.wf-step-row {
             border-top: 1px solid #f1f5f9;
         }
 
@@ -2472,6 +2638,7 @@
         }
 
         @media (max-width: 600px) {
+
             #templateModal .wf-steps-colhead,
             #templateModal .wf-step-row {
                 grid-template-columns: 22px 1fr 120px 28px;
@@ -2502,7 +2669,7 @@
         }
 
         [data-theme="dark"] #templateModal .wf-steps-wrap,
-        [data-theme="dark"] #templateModal .wf-steps-list .wf-step-row + .wf-step-row {
+        [data-theme="dark"] #templateModal .wf-steps-list .wf-step-row+.wf-step-row {
             border-color: var(--color-border, #334155);
         }
 
@@ -2570,7 +2737,8 @@
             </div>
             <div class="sitemap-release-link-wrap">
                 <a class="sitemap-release-link" href="release-journal/index.html" target="_blank" rel="noopener">
-                    Ürünün gelişim günlüğünü görüntüle <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                    Ürünün gelişim günlüğünü görüntüle <i class="fas fa-arrow-up-right-from-square"
+                        aria-hidden="true"></i>
                 </a>
             </div>
         </div>
@@ -2588,9 +2756,10 @@
                         autocomplete="off" autocapitalize="none" spellcheck="false"></label>
                 <p id="personelPriHint" style="font-size:12px; color:#64748b; margin:4px 0 10px;">Personel bu
                     kimlikle girer.</p>
-                <label>Birim: <select id="personelUnit"><option value="">— Birim seçin —</option></select></label>
-                <label id="personelCodeRow">Giriş Kodu: <input type="text" id="personelCode"
-                        autocomplete="off"></label>
+                <label>Birim: <select id="personelUnit">
+                        <option value="">— Birim seçin —</option>
+                    </select></label>
+                <label id="personelCodeRow">Giriş Kodu: <input type="text" id="personelCode" autocomplete="off"></label>
                 <p id="personelCodeHint" style="font-size:12px; color:#64748b; margin:4px 0 10px;">Kod giriş
                     hesabının parolasıdır; sistemde saklanmaz. Kaydettikten sonra personele iletin.</p>
                 <button type="submit" class="save-btn">Kaydet</button>

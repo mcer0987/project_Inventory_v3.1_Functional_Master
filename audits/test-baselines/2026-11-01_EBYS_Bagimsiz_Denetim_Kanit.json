@@ -1,0 +1,115 @@
+{
+  "auditDate": "2026-11-01",
+  "timezone": "Europe/Istanbul",
+  "branch": "feat/v3.4-ebys",
+  "head": "5be0579366777c81a0aa179ce251af99bc7de2a0",
+  "scope": "Stage 0/1 design, Stage 2 commit plus working-tree integration, Stage 3 working tree",
+  "productionCodeModifiedByAudit": false,
+  "committedByAudit": false,
+  "deployed": false,
+  "liveDataAccess": false,
+  "verdict": "changes-required",
+  "findings": {
+    "P1": [
+      "B01",
+      "B02"
+    ],
+    "P2": [
+      "B03",
+      "B04",
+      "B05",
+      "B06"
+    ]
+  },
+  "acceptedPilotLimits": [
+    "3 items",
+    "no server-side monetary equality proof",
+    "manual exchange rates"
+  ],
+  "tests": {
+    "unit": {
+      "pass": 278,
+      "fail": 0
+    },
+    "rules": {
+      "pass": 228,
+      "fail": 0,
+      "suites": 24
+    },
+    "xss": {
+      "unauthorized": 0
+    },
+    "stage2Browser": {
+      "checks": 6,
+      "pageErrors": 0
+    },
+    "stage3Browser": {
+      "checks": 9,
+      "pageErrors": 0
+    },
+    "auditRules": {
+      "pass": 6,
+      "fail": 0,
+      "meaning": "C0 verifies protection; A1-A5 reproduce findings"
+    },
+    "auditBrowser": {
+      "probes": 2,
+      "pageErrors": 0,
+      "meaning": "U1-U2 reproduce findings"
+    },
+    "hosting": {
+      "pass": false,
+      "actual": 77,
+      "expected": 74,
+      "unexpected": [
+        "release-journal/index.html",
+        "release-journal/journal.js",
+        "release-journal/style.css"
+      ]
+    }
+  },
+  "stage2CommitIntegration": {
+    "file": "script.js",
+    "token": "EBYSDefinitions",
+    "commitOccurrences": 0,
+    "workingOccurrences": 5
+  },
+  "limitations": [
+    "shared dirty working tree",
+    "isolated browser fixtures, not full Auth/Storage UAT",
+    "no deployed-state or live-data verification"
+  ],
+  "sourceSha256": {
+    "firestore.rules": "af5329adb8878d9c4e2394063e67787760b3c1d8ebb7aabdc5dff0b5da271aa2",
+    "admin.html": "68392af0cf845fb9515e3e9f82fc80b000d0758109225cd930dfe2c5b17090c1",
+    "index.html": "5d1db082305cd2701173e0c868d938adfc1338b8b83d874f6e8e04ecbef1ade0",
+    "script.js": "0b2385074666e9aa8d9c01aa3d3e651ee699ca94c380ea53ffd0dd933bd52272",
+    "personel.js": "dc5a529adfbe3f8611e265027fe9f6fb5b84fad5d89ecd3b4b70655d218d8612",
+    "src/services/ebys-definitions.js": "49a3aca0fe456b349f64c986ad9aaf7d41e38ac8ba005fe71a6123d80c83e737",
+    "src/utils/ebys-definitions-schema.js": "3e4a1116a124bea0631387646fef519ffc5a55048a64dc77c089b211333ca7c8",
+    "src/ui/ebys-definitions-ui.js": "aee42553df3f495a219ae523b86e79f115f9ab39225a23a607f899cf20848c96",
+    "src/utils/ownership.js": "53012eada9254a4c8e7ead20d552c2f1019aa0977f3f0983b0625952c773325d",
+    "src/utils/schema.js": "04f3a6457aa070917ed9a13a2c782e158168215332b2348f7d497e25fcda927f",
+    "src/services/purchase-servises.js": "e88e2ea6cb076c9fcc1cb90133bc0ea1a8121d45787fd15683209eb058a2ed70",
+    "src/modules/edm-workflow.js": "2fd143874072eb2f64919f346a097127be9911a5475cf50effe173d30e7f45fe",
+    "src/utils/purchase-money.js": "3379e659e97b57251f98d91678bca36bb89758098ea3d3d59bfda6630dd54680",
+    "src/ui/purchase-items-ui.js": "11b611b272cd6cdb04daabd2c3bcbf1b5b95d1cbe62333b87d929f2c6c708265",
+    "src/ui/purchase-print.css": "410caf51476afd5c24540de25b484eb6f3e7cb2d25513ab2bc0d0fc6ed197d34",
+    "tests/rules/rules.test.mjs": "f3246c11ba380ae2e31fa12fce38291a1bf41ac8ec34937eb0487561b6ad1136",
+    "tests/rules/ebys-definitions.test.mjs": "c35899257f7d9d525a1af42c1f4772d86aba7057a4b0f3f0d072ba45c89c027e",
+    "tests/unit/purchase-money.test.mjs": "f8d96deb9b8b1d283dc46e536b018c238a022243028eabe26d793d1c8641d813"
+  },
+  "evidenceSha256": {
+    "audits/audit-reports/2026-11-01_EBYS_Bagimsiz_Mimari_ve_Regresyon_Denetimi.md": "28b6eba849cc39fb3850ae6a081a1e1638d1b45d596d13fb88410d5ece843eb1",
+    "scratch/ebys-audit-probes.test.mjs": "902a28aa0e7693e4b0cc572ff438b9533c20e57d7329676211409450324144b9",
+    "scratch/ebys-audit-ui.cjs": "951057f014202b6cc4d8af99eca2ba175dfd61dcea1b4ca2b61451e36a1ffc38",
+    "scratch/ebys-audit-unit.log": "8c4088ee0d94e08a202afd81ee198de8b2fea93d699f7438e4504b70fb8bd22b",
+    "scratch/ebys-audit-rules.log": "3b2c66e03886536f3d8b6120a86fd728b3d9508f440024ad8280d169f13f27e0",
+    "scratch/ebys-audit-xss.log": "953d84d83aa05e8f65856358733d22f5a3427ff67cd43b1b5f8bc5a0085430a1",
+    "scratch/ebys-audit-stage2-ui.log": "78fcaaaeb49477b6128fc0ade5bdbe0e3c18df37a5e4b1a462a8fee54553dfcc",
+    "scratch/ebys-audit-stage3-ui.log": "d594007ebbe059acdb1e69a1486114495493142b8e98c2642e4c57750ace8e9a",
+    "scratch/ebys-audit-probes.log": "8d4e9321270e48100789a0b7b3f88dee6fdcbd80d6e989898dc1300c28f46ea5",
+    "scratch/ebys-audit-ui.log": "5e63cac07bda386286ad1edde92ab3ed3f241fe4b18ef80e4ae3805b57878080",
+    "scratch/ebys-audit-hosting.log": "b9120c807ae0bc9bf302891a3fdfbd4137cd32e897015b1a71e00a7c9f697640"
+  }
+}
