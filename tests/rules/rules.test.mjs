@@ -297,7 +297,90 @@ function rejected(po, i, why = 'bütçe yok') {
 
 describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
     const draft = { urun: 'Kağıt', aciklama: 'A4', durum: 'Onay Bekliyor', ...OWNER, akis, workflow: { started: false, currentStep: 0, steps: [], history: [] } };
+    const line = { id: 'line-1', description: 'A4 kağıt', category: 'Mal', quantity: 2, unit: 'Kutu', unitPrice: 10.25, currency: 'TRY', taxRate: 20, totalPrice: 24.6 };
+    const totals = { TRY: { subtotal: 20.5, tax: 4.1, total: 24.6 }, USD: { subtotal: 0, tax: 0, total: 0 }, EUR: { subtotal: 0, tax: 0, total: 0 } };
     test('personel kendi uid\'siyle, başlamamış akışla oluşturur', () => assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { id: 'po2', ...draft })));
+    test('kalemli talep yazılır; bozuk para, metin, miktar ve kalem sınırı reddedilir', async () => {
+        const target = item(ctx.s1(), LIVE, 'purchaseOrders', 'po-lines');
+        const write = items => setDoc(target, { id: 'po-lines', ...draft, items, totals });
+        await assertSucceeds(write([line]));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po-budget'), {
+            id: 'po-budget', ...draft, items: [{ ...line, currency: 'USD' }], totals,
+            documentTypeCode: 'PURCHASE_REQUEST', butce: 800, budgetMode: 'manual', budgetEstimateRates: { USD: 32.5 }
+        }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po-wrong-type'), {
+            id: 'po-wrong-type', ...draft, items: [line], totals, documentTypeCode: 'INCOMING_DOCUMENT'
+        }));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po-many'), {
+            id: 'po-many', ...draft, items: Array.from({ length: 3 }, (_, i) => ({ ...line, id: `line-${i}` })), totals
+        }));
+        await assertSucceeds(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po-many'), {
+            items: Array.from({ length: 3 }, (_, i) => ({ ...line, id: `line-${i}`, description: `A4 kağıt ${i}` })), totals
+        }));
+        for (const invalid of [
+            [{ ...line, currency: 'GBP' }], [{ ...line, description: '<img src=x>' }],
+            [{ ...line, quantity: 0 }], [{ ...line, unitPrice: -1 }], [{ ...line, taxRate: 101 }],
+            [Object.fromEntries(Object.entries(line).filter(([key]) => key !== 'unit'))],
+            Array.from({ length: 4 }, (_, i) => ({ ...line, id: `line-${i}` }))
+        ]) await assertFails(write(invalid));
+        await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-admin-lines'), {
+            id: 'po-admin-lines', ...draft, items: Array.from({ length: 3 }, (_, i) => ({ ...line, id: `admin-${i}` })), totals
+        }));
+    });
+    test('başlamış akışın mali içeriği yönetici tarafından da sessizce değiştirilemez', async () => {
+        await put('purchaseOrders', 'po-lines', { ...running(), items: [line], totals });
+        await assertFails(updateDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-lines'), { items: [{ ...line, unitPrice: 1 }] }));
+    });
+    test('döviz kuru ilk onayla sabitlenir; sonraki değişiklik reddedilir', async () => {
+        const fxLine = { ...line, currency: 'USD' };
+        const fxTotals = { ...totals, TRY: { subtotal: 0, tax: 0, total: 0 }, USD: totals.TRY };
+        const base = { ...running(), items: [fxLine], totals: fxTotals };
+        const target = item(ctx.s2(), LIVE, 'purchaseOrders', 'po-fx');
+        await put('purchaseOrders', 'po-fx', base);
+        await assertFails(setDoc(target, { id: 'po-fx', ...approved(base, 0) }));
+        await assertFails(setDoc(target, { id: 'po-fx', ...approved(base, 0, {}, {
+            exchangeRate: { TRY: 1, EUR: 1 }, exchangeRateDate: '2026-11-01',
+            exchangeRateSource: 'Kaynak', reportingTotalTRY: 0
+        }) }));
+        await assertFails(setDoc(target, { id: 'po-fx', ...approved(base, 0, {}, {
+            exchangeRate: { TRY: 1, USD: 32.5, EUR: 38 }, exchangeRateDate: '2026-11-01', reportingTotalTRY: 799.5
+        }) }));
+        await assertFails(setDoc(target, { id: 'po-fx', ...approved(base, 0, {}, {
+            exchangeRate: { TRY: 1, USD: 32.5, EUR: 38 }, exchangeRateDate: '2026-11-01',
+            exchangeRateSource: '   ', reportingTotalTRY: 799.5
+        }) }));
+        const first = approved(base, 0, {}, {
+            exchangeRate: { TRY: 1, USD: 32.5, EUR: 38 }, exchangeRateDate: '2026-11-01',
+            exchangeRateSource: 'TCMB', reportingTotalTRY: 799.5
+        });
+        await assertSucceeds(setDoc(target, { id: 'po-fx', ...first }));
+        await assertFails(updateDoc(target, { 'exchangeRate.USD': 40 }));
+        await put('purchaseOrders', 'po-fx-admin', base);
+        await assertFails(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-fx-admin'), { id: 'po-fx-admin', ...approved(base, 0) }));
+        await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-fx-admin'), { id: 'po-fx-admin', ...first }));
+        await put('purchaseOrders', 'po-fx-admin-direct', { ...base, workflow: { started: false, currentStep: 0, steps: [] } });
+        await assertFails(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-fx-admin-direct'), { id: 'po-fx-admin-direct', ...approved(base, 0) }));
+    });
+    test('üç kalemli TRY talebinin ilk onayı da mali anlık görüntüyle geçer', async () => {
+        const base = { ...running(), items: Array.from({ length: 3 }, (_, i) => ({ ...line, id: `l-${i}` })), totals };
+        await put('purchaseOrders', 'po-try', base);
+        await assertSucceeds(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'po-try'), { id: 'po-try', ...approved(base, 0, {}, {
+            exchangeRate: { TRY: 1, USD: 32.5, EUR: 38 }, exchangeRateDate: '2026-11-01', exchangeRateSource: 'TCMB', reportingTotalTRY: 24.6
+        }) }));
+    });
+    test('ilk onaydan sonra geri çekilen belgenin mali içeriği ve aynı belgeyle yeniden başlatılması kilitli kalır', async () => {
+        const frozen = { ...running(), durum: 'Taslak', items: [line], totals,
+            exchangeRate: { TRY: 1 }, exchangeRateDate: '2026-11-01', exchangeRateSource: 'TRY', reportingTotalTRY: 24.6,
+            workflow: { ...running().workflow, started: false, finished: false, currentStep: 0, currentState: 'initiation', steps: [] } };
+        await put('purchaseOrders', 'po-frozen', frozen);
+        await assertFails(updateDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po-frozen'), {
+            items: [{ ...line, unitPrice: 11 }], akis: [...akis, ev('Talep güncellendi')]
+        }));
+        await assertFails(updateDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-frozen'), { items: [{ ...line, unitPrice: 11 }] }));
+        await assertFails(updateDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-frozen'), { evrakNo: 'YENİ' }));
+        await assertFails(updateDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-frozen'), { budgetEstimateRates: { USD: 40 } }));
+        await assertFails(updateDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-frozen'), { 'workflow.started': true }));
+    });
     test('başkası adına / uid\'siz oluşturamaz', async () => {
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { id: 'po2', ...draft, createdByUid: 'uid-s2' }));
         await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'po2'), { id: 'po2', ...draft, createdByUid: null }));
@@ -1071,7 +1154,8 @@ describe('Denetim günlüğü (4.7 · KJ-7)', () => {
     test('personel geçerli kayıt ekler', () => assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), valid())));
     test('anonim ekleyemez', () => assertFails(setDoc(item(ctx.anon(), LIVE, 'auditLogs', 'L1'), valid('anon-uid'))));
     test('fazladan alan reddedilir', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), extra: 1 })));
-    test('istemci saati reddedilir', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), ts: new Date() })));
+    // Farklı istemci saati: new Date() aynı milisaniyedeki request.time ile bazen eşleşip testi rastlantısal geçiriyordu.
+    test('farklı istemci saati reddedilir', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), ts: new Date('2020-01-01T00:00:00.000Z') })));
     test('başkası adına uid reddedilir', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), valid('someone-else'))));
     test('geçersiz sonuç reddedilir', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), result: 'hacked' })));
     test('etiketli metin reddedilir', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), item: XSS })));

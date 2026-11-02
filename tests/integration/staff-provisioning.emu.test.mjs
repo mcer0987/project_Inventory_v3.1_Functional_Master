@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import { fileURLToPath } from 'node:url';
 import { initializeApp, getApps, deleteApp } from 'firebase/app';
 import {
@@ -49,6 +50,12 @@ function session(name) {
 const ref = (db, id) => doc(db, ROOT, 'personel', 'items', String(id));
 const mapRef = (db, uid) => doc(db, ROOT, 'staffAccounts', 'items', String(uid));
 const code = e => e && e.code;
+// UID alanı Aşama 2 kurallarında değişmez. Yalnız eski/yarım bozuk kaydı canlandıran testler kural atlayarak tohumlar.
+async function seedUnlinkedPerson(id, patch) {
+    const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { host: FS_HOST, port: Number(FS_PORT) } });
+    try { await env.withSecurityRulesDisabled(ctx => updateDoc(ref(ctx.firestore(), id), patch)); }
+    finally { await env.cleanup(); }
+}
 
 let primary, provisioner, legacyUid;
 // J10 öncesi veri: kodlu personel, PRI yok. j7_legacy'nin J7 biçiminde (p<id>@) hesabı var ve bağlı.
@@ -213,7 +220,7 @@ test('idempotent: ikinci koşu hesap açmaz; yalnız kimlik eşlemeleri yenileni
 
 test('yarım bağlama onarılır: uid silinmiş kayıt → aynı hesap bulunup yeniden bağlanır (relinked, aynı uid)', async () => {
     const before = (await getDoc(ref(primary.db, 'user_manuel_001'))).data().uid;
-    await updateDoc(ref(primary.db, 'user_manuel_001'), { uid: deleteField(), authEmail: deleteField() });
+    await seedUnlinkedPerson('user_manuel_001', { uid: deleteField(), authEmail: deleteField() });
     const { res } = await migrate();
     assert.equal(res.counts.relinked, 1);
     assert.equal((await getDoc(ref(primary.db, 'user_manuel_001'))).data().uid, before);
@@ -271,7 +278,7 @@ test('bağ kaldırılınca (personel.uid silinir) eşleme kalsa da erişim biter
     const v = session('unlinked');
     await signInWithEmailAndPassword(v.auth, SP.staffEmail(p.pri), SP.staffPassword('kod77'));
     assert.ok((await getDoc(ref(v.db, p.id))).exists());
-    await updateDoc(ref(primary.db, p.id), { uid: deleteField() });
+    await seedUnlinkedPerson(p.id, { uid: deleteField() });
     assert.ok((await getDoc(mapRef(primary.db, p.uid))).exists(), 'eşleme duruyor');
     await assert.rejects(getDoc(ref(v.db, p.id)), e => code(e) === 'permission-denied');
     await signOut(v.auth);

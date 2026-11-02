@@ -1,0 +1,15 @@
+.purchase-items-table { min-width: 940px; }
+.purchase-items-table th, .purchase-items-table td { padding: 5px; vertical-align: middle; }
+.purchase-items-table td:first-child { min-width: 180px; }
+.purchase-items-table td:nth-child(2) { min-width: 105px; }
+.purchase-items-table input, .purchase-items-table select { min-width: 72px; }
+.purchase-print-pane { display: none; }
+@media print {
+  body.printing-purchase > :not(.purchase-print-pane) { display: none !important; }
+  body.printing-purchase .purchase-print-pane { display: block !important; color: #111; font: 12px Arial, sans-serif; }
+  .purchase-print-pane h2 { font-size: 20px; margin: 0 0 8px; }
+  .purchase-print-pane h3 { font-size: 15px; margin: 16px 0 8px; }
+  .purchase-print-pane table { width: 100%; border-collapse: collapse; }
+  .purchase-print-pane th, .purchase-print-pane td { border: 1px solid #bbb; padding: 6px; text-align: left; }
+  .purchase-print-pane th { background: #eee; }
+}

@@ -191,21 +191,69 @@ service cloud.firestore {
     }
 
     // ─── Satın alma (purchaseOrders) ──────────────────────────────────────────────────────────────────────
+    // [WHY]: Eski tek ürünlü kayıtlar kalemsiz okunur; yeni kalemlerin tip, sınır ve metin güvenliği sunucuda doğrulanır.
+    // [HOW]: Pilot sınırı üç konum; her biri sabit yol üzerinden denetlenir, kurallar dizi üzerinde döngü desteklemez.
+    function poLineOk(v) {
+      return v is map && v.keys().hasAll(['id', 'description', 'category', 'quantity', 'unit', 'unitPrice', 'currency', 'taxRate', 'totalPrice'])
+        && noTag(v.description)
+        && v.currency in ['TRY', 'USD', 'EUR']
+        && v.quantity > 0 && v.unitPrice >= 0 && v.taxRate >= 0 && v.taxRate <= 100 && v.totalPrice >= 0;
+    }
+    function poItemsOk(d) {
+      let a = d.get('items', []);
+      let totals = d.get('totals', {});
+      return (!d.keys().hasAny(['documentTypeCode']) || d.documentTypeCode == 'PURCHASE_REQUEST')
+        && (!d.keys().hasAny(['items', 'totals']) || (
+        a is list && a.size() >= 1 && a.size() <= 3
+        && totals is map && totals.keys().hasAll(['TRY', 'USD', 'EUR'])
+        && poLineOk(a[0])
+        && (a.size() == 1 || (poLineOk(a[1])
+            && (a.size() == 2 || poLineOk(a[2]))))));
+    }
+    function poFxFieldsOk(d) {
+      let rates = d.get('exchangeRate', {});
+      return rates is map && rates.keys().hasOnly(['TRY', 'USD', 'EUR']) && rates.get('TRY', 0) == 1
+        && rates.get('USD', 0) is number && rates.get('USD', 0) >= 0 && rates.get('USD', 0) <= 100000
+        && rates.get('EUR', 0) is number && rates.get('EUR', 0) >= 0 && rates.get('EUR', 0) <= 100000
+        && d.get('exchangeRateDate', '') is string && d.exchangeRateDate.matches('\\d{4}-\\d{2}-\\d{2}')
+        && d.get('exchangeRateSource', '') is string && d.exchangeRateSource.trim().size() > 0
+        && d.exchangeRateSource.size() <= 120 && noTag(d.exchangeRateSource)
+        && d.get('reportingTotalTRY', -1) is number && d.reportingTotalTRY >= 0 && d.reportingTotalTRY <= 1000000000;
+    }
+    function poFxDecisionOk(old, d, step, status) {
+      let fields = ['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'];
+      return status == 'approved' && step == 0
+        ? d.keys().hasAll(fields) && d.exchangeRate is map && d.exchangeRate.get('TRY', 0) == 1
+          && d.exchangeRate.get('USD', 0) > 0 && d.exchangeRate.get('EUR', 0) > 0
+          && d.exchangeRateDate.matches('\\d{4}-\\d{2}-\\d{2}')
+          && d.exchangeRateSource is string && d.exchangeRateSource.trim().size() > 0 && noTag(d.exchangeRateSource)
+          && d.reportingTotalTRY is number && d.reportingTotalTRY >= 0
+          && (!old.keys().hasAny(fields) || !d.diff(old).affectedKeys().hasAny(fields))
+        : !d.diff(old).affectedKeys().hasAny(fields);
+    }
+    function poInitialEventOk(d, me) {
+      let a = d.get('akis', []);
+      return a.size() == 0 || (a.size() == 1
+        && a[0].get('islem', '') == 'Talep Oluşturuldu'
+        && a[0].get('yapan', '') == me && a[0].get('uid', '') == request.auth.uid
+        && a[0].keys().hasOnly(['islem', 'yapan', 'uid', 'tarih']));
+    }
     // J11 · P1 #7: talebi açanın görünen kimliği (createdBy = personel id, createdByName, talepEden) oturumun GERÇEK kaydıyla aynı;
     // yeni talep geçmişsiz başlar (history yok) ve en fazla tek "Talep Oluşturuldu" akış kaydı taşır — o da sahibin adıyla
     // (savePurchaseRequest ile aynı). Önceden "onaylandı" yazan sahte geçmişle talep açılamaz.
     function poCreateOk(root, d) {
       let wf = d.get('workflow', {});
       let me = staffName(root);
-      return d.get('createdByUid', '') == request.auth.uid
+      return poItemsOk(d) && !d.keys().hasAny(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
+        && d.get('createdByUid', '') == request.auth.uid
         && d.get('durum', '') in ['Onay Bekliyor', 'Taslak']
         && wf.get('started', false) != true && wf.get('finished', false) != true
-        && freshSteps(wf.get('steps', []), request.auth.uid)
+        && wf.get('steps', []).size() == 0
         && d.get('createdByName', '') == me && d.get('talepEden', '') == me
         && string(d.get('createdBy', '')) == staffPid(root)
         && wf.get('history', []).size() == 0
         && wf.get('currentState', 'initiation') == 'initiation'
-        && ownerEventOk([], d.get('akis', []), me, 'islem', ['Talep Oluşturuldu'], false, false);
+        && poInitialEventOk(d, me);
     }
     // Sahibi, akış BAŞLAMAMIŞKEN: düzenler, akışı başlatır (adımlar kararsız, kendisi onaylayıcı değil), iptal eder.
     // J11.6 · P1 (bağımsız denetim): workflow.currentState sahibin yazmasında İSTEMCİNİN GERÇEK değerine bağlı (WorkflowEngine esas):
@@ -224,12 +272,19 @@ service cloud.firestore {
       let wf = old.get('workflow', {});
       let nwf = d.get('workflow', {});
       let me = old.get('createdByName', '');
-      return wf.get('started', false) != true
-        && d.get('createdBy', null) == old.get('createdBy', null) && d.get('createdByName', null) == old.get('createdByName', null)
-        && d.get('talepEden', null) == old.get('talepEden', null)
+      let changed = d.diff(old).affectedKeys();
+      return (!old.keys().hasAny(['exchangeRate'])
+            || (nwf.get('started', false) != true
+                && !changed.hasAny(['items', 'totals', 'urun', 'adet', 'butce', 'budgetMode', 'budgetEstimateRates', 'documentTypeCode', 'aciklama', 'birim', 'tur', 'evrakNo', 'files', 'oncelik'])))
+        && (!changed.hasAny(['items', 'totals', 'exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
+            || (poItemsOk(d) && !changed.hasAny(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])))
+        && wf.get('started', false) != true
+        && !changed.hasAny(['createdBy', 'createdByName', 'talepEden'])
         && old.get('durum', '') in ['Onay Bekliyor', 'Taslak', '']
         && d.get('durum', '') in ['Onay Bekliyor', 'Taslak', 'İptal Edildi']
-        && freshSteps(nwf.get('steps', []), request.auth.uid)
+        && (nwf.get('started', false) == true
+            ? freshSteps(nwf.get('steps', []), request.auth.uid)
+            : nwf.get('steps', []).size() == 0)
         && nwf.get('currentStep', 0) == 0
         && (nwf.get('finished', false) != true || d.get('durum', '') == 'İptal Edildi')
         && (nwf.get('started', false) != true || d.get('durum', '') == 'Onay Bekliyor')
@@ -306,7 +361,10 @@ service cloud.firestore {
         && wf.steps[cs].get('status', 'pending') == 'pending'
         && old.get('createdByUid', '') != uid
         && me != '' && (stepUser == me || stepUser.lower() == me.lower())
-        && d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis'])
+        && (old.keys().hasAny(['items'])
+            ? d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis', 'exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
+              && poFxDecisionOk(old, d, cs, st)
+            : d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis']))
         && nwf.diff(wf).affectedKeys().hasOnly(['steps', 'currentStep', 'finished', 'currentState', 'history', 'started'])
         && nwf.get('started', false) == true
         && nwf.steps.size() == n
@@ -464,11 +522,29 @@ service cloud.firestore {
       // v3.3: b1/b2 içerik sözleşmesi (stockCreateOk / stockUpdateOk).
       allow create: if validRoot(root) && knownCol(col) && isAdmin()
         && definitionOk(root, col, docId, request.resource.data)
+        && (col != 'purchaseOrders' || poItemsOk(request.resource.data))
+        && (col != 'purchaseOrders' || !request.resource.data.keys().hasAny(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY']))
         && definitionLinkOk(root, col, request.resource.data, {})
         && (col != 'personel' || personelCodeOk(request.resource.data))
         && (!(col in ['b1', 'b2']) || stockCreateOk(root, col, request.resource.data));
       allow update: if validRoot(root) && knownCol(col) && isAdmin()
         && definitionOk(root, col, docId, request.resource.data)
+        && (col != 'purchaseOrders' || !resource.data.keys().hasAny(['items'])
+            || request.resource.data.get('workflow', {}).get('steps', []).size() == 0
+            || request.resource.data.workflow.steps[0].get('status', '') != 'approved'
+            || poFxDecisionOk(resource.data, request.resource.data, 0, 'approved'))
+        && (col != 'purchaseOrders' || (poItemsOk(request.resource.data)
+          && (resource.data.get('workflow', {}).get('started', false) != true && !resource.data.keys().hasAny(['exchangeRate'])
+              || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['items', 'totals', 'urun', 'adet', 'butce', 'budgetMode', 'budgetEstimateRates', 'documentTypeCode', 'aciklama', 'birim', 'tur', 'evrakNo', 'files', 'oncelik']))
+          && (!resource.data.keys().hasAny(['exchangeRate']) || resource.data.get('workflow', {}).get('started', false) == true
+              || request.resource.data.get('workflow', {}).get('started', false) != true)
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
+              || (resource.data.get('workflow', {}).get('started', false) == true
+                  && resource.data.workflow.get('currentStep', -1) == 0
+                  && !resource.data.keys().hasAny(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
+                  && request.resource.data.get('workflow', {}).get('steps', []).size() > 0
+                  && request.resource.data.workflow.steps[0].get('status', '') == 'approved'
+                  && poFxFieldsOk(request.resource.data)))))
         && definitionLinkOk(root, col, request.resource.data, resource.data)
         && (!(col in ['units', 'personel']) || request.resource.data.get('id', null) == resource.data.get('id', null))
         && (col != 'personel' || resource.data.get('uid', '') == ''

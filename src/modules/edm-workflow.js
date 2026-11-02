@@ -223,6 +223,8 @@ const checkTemplateAuth = (tpl) => {
 window.startWorkflow = function (id) {
     const modal = document.getElementById('startWorkflowModal');
     if (!modal) return;
+    const request = (window.data.purchaseOrders || []).find(item => String(item.id) === String(id));
+    const documentTypeCode = request?.documentTypeCode || window.AppModules.EBYSDocumentTypes.purchaseCode;
 
     document.getElementById('startWorkflowReqId').value = id;
 
@@ -230,7 +232,8 @@ window.startWorkflow = function (id) {
     if (tplDropdown) {
         const templates = window.data.workflowTemplates || [];
 
-        const filtered = templates.filter(t => checkTemplateAuth(t));
+        const filtered = templates.filter(t => checkTemplateAuth(t) &&
+            (!t.documentTypeCode || t.documentTypeCode === documentTypeCode));
 
         tplDropdown.innerHTML =
             '<option value="manual">-- Yeni Özel İş Akışı (Manuel) --</option>' +
@@ -368,7 +371,7 @@ window.searchPersonnelForStart = function (query, index) {
     const filtered = allP.filter(p => {
         const name = (p.name || p.adSoyad || p.ad || "").toLocaleLowerCase('tr-TR');
         const searchQuery = query.toLocaleLowerCase('tr-TR');
-        return name.includes(searchQuery);
+        return p.active !== false && name.includes(searchQuery);
     });
 
     console.log('🔍 Filtrelenen personel sayısı:', filtered.length);
@@ -467,7 +470,9 @@ function _resolveWorkflowSteps(steps) {
     if (!Array.isArray(steps) || steps.length === 0) return { error: 'En az bir onay adımı ekleyin.' };
     if (steps.length > 10) return { error: 'Bir akışta en fazla 10 onay adımı olabilir.' };   // J10: kurallarla aynı sınır
     const norm = v => String(v || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
-    const known = new Map([...(window.data.personel || []), ...(window.data.staff || [])]
+    const people = window.data.personel?.length ? window.data.personel : (window.data.staff || []);
+    const known = new Map(people
+        .filter(p => p.active !== false)
         .map(p => String(p?.name || p?.adSoyad || '').trim()).filter(Boolean).map(n => [norm(n), n]));
     const resolved = [];
     for (let i = 0; i < steps.length; i++) {
@@ -485,6 +490,10 @@ window.confirmStartWorkflow = async function () {
     const id = document.getElementById('startWorkflowReqId').value;
     const req = window.data.purchaseOrders.find(x => String(x.id) === String(id));
     if (!req) return;
+    if (req.exchangeRate) {
+        if (typeof showAppAlert === 'function') showAppAlert('Bu talep daha önce mali onay aldı. Yeniden onay için yeni talep açın.', 'warning');
+        return;
+    }
 
     const checked = _resolveWorkflowSteps(WorkflowState.tempManualSteps);
     if (checked.error) {
@@ -516,7 +525,7 @@ window.confirmStartWorkflow = async function () {
             currentState: window.WorkflowEngine.states.INITIATION,
             steps: checked.steps.map(s => ({
                 user: s.user,
-                userUid: window.Ownership.uidForPersonName(s.user),   // J9: onaylayıcının Auth uid'si (yoksa null)
+                userUid: window.Ownership.uidForActivePersonName(s.user),   // J9: yeni atamada yalnız aktif kişi
                 tip: s.tip,
                 status: "pending",
                 note: "",
@@ -541,6 +550,10 @@ window.confirmStartWorkflow = async function () {
 
         if (!tpl) {
             alert("Şablon bulunamadı");
+            return;
+        }
+        if (tpl.documentTypeCode && tpl.documentTypeCode !== (req.documentTypeCode || window.AppModules.EBYSDocumentTypes.purchaseCode)) {
+            if (typeof showAppAlert === 'function') showAppAlert('Bu şablon talebin belge türüne ait değil.', 'warning');
             return;
         }
 
@@ -948,7 +961,18 @@ window.approveStep = async function (id) {
             type: 'Satın Alma Onayı', item: item.urun || item.ürünAdi || item.baslik || item.evrakNo, qty: Number(item.adet || item.miktar) || 1
         });
         if (!guard.allowed) return;
+        // [WHY]: Dövizli belgenin ilk gerçek onayında TRY karşılığı belgeye dondurulur; sonraki adımlar canlı kur görmez.
+        // [HOW]: Operasyon Merkezi'ndeki güncel kur/tarih/kaynak karar yazımıyla aynı purchaseOrders güncellemesine kopyalanır.
+        const firstApproval = (item.workflow.currentStep || 0) === 0;
+        const needsFinancialSnapshot = firstApproval && Array.isArray(item.items) && !item.exchangeRate;
+        const fxSnapshot = needsFinancialSnapshot ? await window.AppModules.PurchaseItemsUI.requestRates(item) : null;
+        if (needsFinancialSnapshot && !fxSnapshot) return;
+        if (firstApproval && Array.isArray(item.items) && !window.AppModules.PurchaseMoney.hasValidSnapshot({ ...item, ...fxSnapshot })) {
+            if (typeof showAppAlert === 'function') showAppAlert('Operasyon Merkezi döviz kurları, kur tarihi ve kaynağı eksik. Yönetici ayarlarını tamamlamalı.', 'warning');
+            return;
+        }
         _beginMutation(lockKey, item);
+        if (fxSnapshot) Object.assign(item, fxSnapshot);
 
         const actor = (window.Ownership && window.Ownership.selfName()) || window.currentUser?.name || "Bilinmeyen Kullanıcı";   // J11 · P1 #5: kurallar staffName ile karşılaştırır
 
@@ -1578,7 +1602,7 @@ window.searchPersonnelForTemplate = function (query, type, stepIndex = null) {
     const allP = window.data.personel || window.data.staff || [];
     const filtered = allP.filter(p => {
         const name = (p.adSoyad || p.ad || p.name || "").toLocaleLowerCase('tr-TR');
-        return name.includes(query.toLocaleLowerCase('tr-TR'));
+        return p.active !== false && name.includes(query.toLocaleLowerCase('tr-TR'));
     });
 
     if (filtered.length > 0) {
@@ -1690,7 +1714,7 @@ window.createWorkflowFromTemplate = function (tpl) {
             processedSteps.push({
                 id: 'step_' + stepIndex++,
                 user: s.user,
-                userUid: window.Ownership ? window.Ownership.uidForPersonName(s.user) : null,   // J9: akış başlarken güncel personelden
+                userUid: window.Ownership ? window.Ownership.uidForActivePersonName(s.user) : null,   // J9: yeni atamada yalnız aktif kişi
                 tip: s.tip,
                 order: s.order,
                 status: "pending",
@@ -2321,7 +2345,9 @@ window.saveTemplateData = async function () {
         const id = WorkflowState.currentEditingTemplateId || "tpl_" + Date.now();
 
         // Faz 4B · J9: adım onaylayıcısının Auth uid'si (adı TEK bir personeli işaret ediyorsa); belirsiz / hesapsız / sistem → null
-        const steps = WorkflowState.tempTplSteps.map(s => ({ ...s, userUid: window.Ownership.uidForPersonName(s.user) }));
+        const checked = _resolveWorkflowSteps(WorkflowState.tempTplSteps);
+        if (checked.error) { if (typeof showAppAlert === 'function') showAppAlert(checked.error, 'warning'); return; }
+        const steps = checked.steps.map(s => ({ ...s, userUid: window.Ownership.uidForActivePersonName(s.user) }));
         const unresolved = steps.filter(s => !s.userUid).length;
         if (unresolved && typeof showAppAlert === 'function') {
             showAppAlert(`Not: ${unresolved} adımın onaylayıcısı için giriş hesabı bulunamadı (hesap yok ya da ad birden fazla personelde). Şablon kaydedilir; bu adımlar hesapla eşleşmez.`, 'warning');
@@ -2329,6 +2355,8 @@ window.saveTemplateData = async function () {
         const templateData = {
             id: id,
             name: name,
+            documentTypeCode: (window.data.workflowTemplates || []).find(t => t.id === id)?.documentTypeCode
+                || window.AppModules.EBYSDocumentTypes.purchaseCode,
             steps,
             auth: WorkflowState.tempTplAuth || [],
             createdAt: Date.now()

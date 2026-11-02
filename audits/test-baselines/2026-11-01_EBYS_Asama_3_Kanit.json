@@ -1,0 +1,41 @@
+{
+  "branch": "feat/v3.4-ebys",
+  "baseCommit": "5be0579",
+  "stage": 3,
+  "unit": {
+    "pass": 278,
+    "fail": 0
+  },
+  "rules": {
+    "pass": 228,
+    "fail": 0,
+    "suites": 24
+  },
+  "browser": {
+    "checks": 9,
+    "pageErrors": 0
+  },
+  "xssUnauthorized": 0,
+  "hostingCheck": "blocked-by-existing-release-journal-three-files",
+  "sourceSha256": {
+    "admin.html": "68392af0cf845fb9515e3e9f82fc80b000d0758109225cd930dfe2c5b17090c1",
+    "index.html": "5d1db082305cd2701173e0c868d938adfc1338b8b83d874f6e8e04ecbef1ade0",
+    "firestore.rules": "af5329adb8878d9c4e2394063e67787760b3c1d8ebb7aabdc5dff0b5da271aa2",
+    "src/services/purchase-servises.js": "e88e2ea6cb076c9fcc1cb90133bc0ea1a8121d45787fd15683209eb058a2ed70",
+    "src/modules/edm-workflow.js": "2fd143874072eb2f64919f346a097127be9911a5475cf50effe173d30e7f45fe",
+    "src/utils/purchase-money.js": "3379e659e97b57251f98d91678bca36bb89758098ea3d3d59bfda6630dd54680",
+    "src/ui/purchase-items-ui.js": "11b611b272cd6cdb04daabd2c3bcbf1b5b95d1cbe62333b87d929f2c6c708265",
+    "src/ui/purchase-print.css": "410caf51476afd5c24540de25b484eb6f3e7cb2d25513ab2bc0d0fc6ed197d34",
+    "tests/unit/purchase-money.test.mjs": "f8d96deb9b8b1d283dc46e536b018c238a022243028eabe26d793d1c8641d813",
+    "tests/rules/rules.test.mjs": "f3246c11ba380ae2e31fa12fce38291a1bf41ac8ec34937eb0487561b6ad1136",
+    "scratch/ebys-stage3-ui.cjs": "1ac2fb76d7502ab1921afaca74478bb0b3202c8a91bd28990ec74c44297ee709",
+    "scratch/hosting-files.js": "76af948092c10841706e4df12a8dfedf4e3c7ceb3e2a000ee426451458030470",
+    "audits/audit-reports/2026-11-01_EBYS_Asama_3_Kalem_Doviz_Uygulama_Raporu.md": "f299c07e4401b186e45ad0cd358fee22ed09a4b927d0b514eda45e37b5ca1e0f"
+  },
+  "evidenceSha256": {
+    "scratch/ebys-stage3-unit.log": "5262ab259e15fcee1df682758e2c813b72049021fd34a037c695cf2637188664",
+    "scratch/ebys-stage3-rules.log": "fe9814453d406be62c60a5612885d711994e9acfe2ac1f458177933c205f78a4",
+    "scratch/ebys-stage3-xss.log": "953d84d83aa05e8f65856358733d22f5a3427ff67cd43b1b5f8bc5a0085430a1",
+    "scratch/ebys-stage3-ui.log": "d594007ebbe059acdb1e69a1486114495493142b8e98c2642e4c57750ace8e9a"
+  }
+}

@@ -381,6 +381,12 @@
         return buildPersonIndex((window.data && window.data.personel) || [], { accountEmail: SP ? SP.accountEmailOf : null });
     }
     const uidForPersonName = name => uidForName(currentIndex(), name);
+    // Yeni atamalarda pasif kişi ad eşleşmesine katılmaz; tarihsel sahiplik çözümü değişmez.
+    const uidForActivePersonName = name => {
+        const SP = window.StaffProvisioning;
+        const people = ((window.data && window.data.personel) || []).filter(p => p.active !== false);
+        return uidForName(buildPersonIndex(people, { accountEmail: SP ? SP.accountEmailOf : null }), name);
+    };
     // J11 · P1 #5/#7: oturum sahibinin GÖRÜNEN adı — firestore.rules staffName ile AYNI kaynak ve öncelik (personel kaydında
     // name → adSoyad → ad, kırpılmış). Talep sahibi / oluşturan / onaylayan alanları bununla yazılır; kurallar aynı değeri bekler.
     function selfName() {
@@ -575,7 +581,7 @@
         OWNER_FIELDS, MIGRATION_COLLECTIONS, CHUNK_SIZE, SYSTEM_ACTORS, CLOSURE_CHECKS,
         buildPersonIndex, accountOf, resolveOwner, uidForName, planDoc, planMigration, applyMigration, ownerGuard,
         personelFingerprint, isSystemActor, classifyOwnershipIssues, planCodeCleanse, codeCleanseSteps, deleteCodesForward, planStaffAccessClosure,
-        selfUid, actorUid, uidForPersonName, selfName,
+        selfUid, actorUid, uidForPersonName, uidForActivePersonName, selfName,
     };
     window.AppModules = window.AppModules || {};
     window.AppModules.Ownership = Ownership;

@@ -30,6 +30,7 @@
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="admin-add-style.css">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="src/ui/purchase-print.css">
     <link rel="stylesheet" href="dark-theme.css">
     <link rel="stylesheet" href="admin-dark-fix.css">
     <script src="dark-mode-toggle.js"></script>
@@ -675,10 +676,52 @@
                 </div>
             </div>
 
-            <!-- Faz 5 · K3.5: Gelecek analitik paneller için yer tutucu kartlar (henüz veri bağlanmadı; ileride her biri
-                 gerçek bir widget'a dönüşecek). Stil tamamen bu dosyaya gömülü (future-widget-*) — paylaşılan CSS
-                 dosyalarına (style.css/admin-add-style.css) dokunulmadı. -->
+            <!-- Faz 5 · K3.5: Gelecek analitik paneller için yer tutucu kartlar ve aktif widget'lar -->
             <div class="row mt-4" style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <!-- Aktif Widget: Satın Alma Tahmini Döviz Kurları -->
+                <div id="ebysRatesWidgetCard" class="future-widget-card active-rates-widget" style="flex: 1 1 100%; text-align: left; padding: 20px 24px; cursor: default; border: 1px solid var(--color-border, #cbd5e1); border-radius: 16px; position: relative;">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="future-widget-icon" style="width: 38px; height: 38px; font-size: 16px; margin: 0; display: inline-flex; background: rgba(59, 130, 246, 0.12); color: var(--color-primary, #3b82f6);">
+                                <i class="fas fa-coins"></i>
+                            </div>
+                            <div>
+                                <h4 class="m-0 fw-bold" style="font-size: 0.95rem; color: var(--color-text, #1e293b);">Satın Alma Tahmini Döviz Kurları</h4>
+                                <span class="small text-muted" style="font-size: 11px;">Talep ödeneği tahmini hesabı içindir · İlk onayda belgeye sabitlenir</span>
+                            </div>
+                        </div>
+                        <div class="future-widget-label" style="background: rgba(16, 185, 129, 0.15); color: #10b981; font-weight: 700; font-size: 10px; padding: 3px 10px; border-radius: 20px; text-transform: uppercase;">Aktif Araç</div>
+                    </div>
+
+                    <form id="ebysRatesForm" class="row g-2 align-items-end" style="font-size: 0.82rem;">
+                        <div class="col-6 col-sm-3 col-md-2">
+                            <label for="ebysRateUsd" class="form-label mb-1 fw-bold" style="font-size: 11px; color: var(--color-text-muted);">1 USD = TRY</label>
+                            <input id="ebysRateUsd" name="USD" class="form-control form-control-sm" inputmode="decimal" placeholder="0.0000" required style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);">
+                        </div>
+                        <div class="col-6 col-sm-3 col-md-2">
+                            <label for="ebysRateEur" class="form-label mb-1 fw-bold" style="font-size: 11px; color: var(--color-text-muted);">1 EUR = TRY</label>
+                            <input id="ebysRateEur" name="EUR" class="form-control form-control-sm" inputmode="decimal" placeholder="0.0000" required style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);">
+                        </div>
+                        <div class="col-6 col-sm-3 col-md-2">
+                            <label for="ebysRateDate" class="form-label mb-1 fw-bold" style="font-size: 11px; color: var(--color-text-muted);">Kur Tarihi</label>
+                            <input id="ebysRateDate" name="date" type="date" class="form-control form-control-sm" required style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);">
+                        </div>
+                        <div class="col-6 col-sm-3 col-md-3">
+                            <label for="ebysRateSource" class="form-label mb-1 fw-bold" style="font-size: 11px; color: var(--color-text-muted);">Kaynak / Referans</label>
+                            <input id="ebysRateSource" name="source" class="form-control form-control-sm" maxlength="120" placeholder="TCMB vb." required style="border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);">
+                        </div>
+                        <div class="col-12 col-md-3 d-flex align-items-center gap-2">
+                            <button type="submit" class="btn btn-sm btn-primary fw-bold w-100" style="border-radius: 8px; padding: 7px 14px; background: linear-gradient(135deg, var(--color-primary, #3b82f6) 0%, var(--color-primary-dark, #1d4ed8) 100%); border: none; box-shadow: 0 2px 6px rgba(59,130,246,0.3); white-space: nowrap;">
+                                <i class="fas fa-save me-1"></i>Kurları Kaydet
+                            </button>
+                        </div>
+                        <div class="col-12 mt-2 pt-2 d-flex align-items-center justify-content-between" style="border-top: 1px dashed var(--color-border-light);">
+                            <span id="ebysRatesStatus" class="small text-muted" role="status" style="font-size: 11.5px;">Kurlar yükleniyor…</span>
+                            <span class="small text-muted" style="font-size: 10.5px;"><i class="fas fa-info-circle me-1 text-primary"></i>İlk onayda belgeye dondurulur</span>
+                        </div>
+                    </form>
+                </div>
+
                 <div class="future-widget-card" style="flex: 1; min-width: 260px; cursor: pointer;"
                     onclick="window.openFutureFeatureModal('active_assignment')">
                     <div class="future-widget-icon"><i class="fas fa-right-left"></i></div>
@@ -880,6 +923,13 @@
                 [data-theme="dark"] .future-widget-card {
                     background: linear-gradient(135deg, var(--color-surface, #1e293b) 0%, var(--color-surface-alt, #0f172a) 100%);
                     border-color: var(--color-border, #334155);
+                }
+                .future-widget-card.active-rates-widget {
+                    border-style: solid;
+                }
+                .future-widget-card.active-rates-widget:hover {
+                    transform: none;
+                    box-shadow: var(--shadow-sm, 0 4px 12px rgba(0,0,0,0.06));
                 }
             </style>
 
@@ -1099,6 +1149,8 @@
                 <button class="btn def-nav-btn" onclick="switchDefTab('products')"
                     style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Ürün
                     Türleri</button>
+                <button class="btn def-nav-btn" onclick="switchDefTab('documentTypes')"
+                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Belge Türleri</button>
                 <button class="btn def-nav-btn" onclick="switchDefTab('units')"
                     style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Birimler</button>
                 <button class="btn def-nav-btn" onclick="switchDefTab('workflows')"
@@ -1255,6 +1307,20 @@
                 </div>
             </div>
 
+            <!-- Belge türleri süreç sınıflarıdır; ürün türü ve dosya kodu değildir. -->
+            <div id="defTab-documentTypes" class="def-tab-content" style="display: none;">
+                <div class="admin-section-header mb-4">
+                    <h2 class="fw-bold mb-0">Belge Türleri ve Süreçleri</h2>
+                    <small class="text-muted">Pilot kapsamda yalnız satın alma talebi başlatılır. Diğer türlerin kayıt, imza ve dağıtım akışları sonraki aşamadadır; dosya planı kodu ayrıca tanımlanacaktır.</small>
+                </div>
+                <div class="modern-card table-responsive">
+                    <table class="modern-table">
+                        <thead><tr><th>Kod</th><th>Belge türü</th><th>Yön</th><th>Süreç yolu</th><th>Durum</th></tr></thead>
+                        <tbody id="ebysDocumentTypesBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- 5. PERSONEL TANIMLARI SEKMESİ -->
             <div id="defTab-personnel" class="def-tab-content" style="display: none;">
                 <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
@@ -1308,6 +1374,8 @@
                         window.renderUnitManagement();
                     } else if (tabId === 'products' && typeof window.renderProductTypesTable === 'function') {
                         window.renderProductTypesTable();
+                    } else if (tabId === 'documentTypes' && typeof window.renderEBYSDocumentTypes === 'function') {
+                        window.renderEBYSDocumentTypes();
                     } else if (tabId === 'mahal' && typeof window.renderLocationsTable === 'function') {
                         window.renderLocationsTable();
                     } else if (tabId === 'personnel' && typeof window.renderPersonelTable === 'function') {
@@ -1911,15 +1979,10 @@
 
                     <!-- Ana Alanlar -->
                     <div class="row g-3 mb-3">
-                        <div class="col-md-9">
+                        <div class="col-md-12">
                             <label class="modern-label">ÜRÜN ADI / MODEL (KONU)</label>
                             <input type="text" id="purName" class="form-control modern-input"
                                 placeholder="Örn: Dell XPS 15 Laptop" required>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="modern-label">ADET / MİKTAR</label>
-                            <input type="number" id="purQty" class="form-control modern-input" value="1" min="1"
-                                required>
                         </div>
                     </div>
 
@@ -1929,14 +1992,14 @@
                             <select id="purUnit" class="form-select modern-input" required></select>
                         </div>
                         <div class="col-md-6">
-                            <label class="modern-label">BELGE / ÜRÜN TÜRÜ</label>
+                            <label class="modern-label">BELGE TÜRÜ</label>
                             <select id="purType" class="form-select modern-input" required></select>
                         </div>
                     </div>
 
                     <div class="row g-3 mb-3">
                         <div class="col-md-6">
-                            <label class="modern-label text-primary">ÖDENEK TUTARI (₺)</label>
+                            <label class="modern-label text-primary">PLANLANAN ÖDENEK TUTARI (₺)</label>
                             <input type="number" id="purBudget" class="form-control modern-input border-primary-subtle"
                                 placeholder="0.00" step="0.01">
                         </div>
@@ -1949,6 +2012,8 @@
                             </select>
                         </div>
                     </div>
+
+                    <div id="purItemsEditor" class="mb-3" aria-label="Satın alma kalemleri"></div>
 
                     <div class="mb-3">
                         <label class="modern-label">AÇIKLAMA / GEREKÇE</label>
@@ -2558,6 +2623,10 @@
     <script src="src/modules/admin/shelf-matrix.js"></script>
     <script src="personel.js"></script>
     <script src="pdf-generator.js"></script>
+    <script src="src/utils/ebys-document-types.js"></script>
+    <script src="src/ui/ebys-document-types-ui.js"></script>
+    <script src="src/utils/purchase-money.js"></script>
+    <script src="src/ui/purchase-items-ui.js"></script>
     <script src="src/modules/admin/admin-system-control.js"></script>
     <script src="src/modules/admin/admin-sitemap.js"></script>
 

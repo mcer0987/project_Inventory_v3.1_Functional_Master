@@ -116,6 +116,7 @@ window.openNewPurchaseModal = function () {
         form.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = false; });
         form.reset();
         delete form.dataset.editId;
+        delete form.dataset.purchaseRecordId;
         form.onsubmit = (e) => window.savePurchaseRequest(e);
     }
 
@@ -137,6 +138,8 @@ window.openNewPurchaseModal = function () {
     if (wfDiv) { wfDiv.style.display = 'none'; wfDiv.innerHTML = ''; }
     if (fileArea) fileArea.style.display = 'block';
     if (rejectBtn) { rejectBtn.style.display = 'none'; rejectBtn.onclick = null; }
+    const printBtn = document.getElementById('purPrintBtn');
+    if (printBtn) printBtn.style.display = 'none';
     _resetPurchaseFileInputs();
 
     // 5. Populate fresh auto-generated values
@@ -152,6 +155,7 @@ window.openNewPurchaseModal = function () {
     if (elUser) elUser.value = _purchaseRequester().name || "Bilinmeyen Kullanıcı";
 
     fillPurchaseSelects();
+    window.AppModules.PurchaseItemsUI.open();
 
     modal.style.display = "block";
 };
@@ -188,8 +192,17 @@ function _fillNamedSelect(select, items, placeholder, emptyText) {
 function fillPurchaseSelects() {
     _fillNamedSelect(document.getElementById('purUnit'), (window.data.units || []).filter(u => u?.active !== false),
         'Birim Seçiniz', 'Tanımlı birim yok — Tanımlar › Birimler');
-    _fillNamedSelect(document.getElementById('purType'), window.data.productTypes || [],
-        'Tür Seçiniz', 'Tanımlı ürün türü yok — Tanımlar › Ürün Türleri');
+    const select = document.getElementById('purType');
+    if (!select) return;
+    const recordId = document.getElementById('purchaseForm')?.dataset.purchaseRecordId;
+    const opened = recordId ? _findPurchase(recordId) : null;
+    if (opened && !opened.documentTypeCode) {
+        select.replaceChildren(new Option('Eski kayıt — belge türü belirtilmemiş', 'LEGACY_UNCLASSIFIED'));
+        return;
+    }
+    const code = window.AppModules.EBYSDocumentTypes.purchaseCode;
+    select.replaceChildren(new Option(window.AppModules.EBYSDocumentTypes.byCode(code).name, code));
+    select.value = code;
 }
 
 // -----------------------------
@@ -208,6 +221,12 @@ window.savePurchaseRequest = async function (e) {
         e.stopPropagation();
     }
     if (_purchaseTextBlocked()) return false;
+    let purchaseLines;
+    try { purchaseLines = window.AppModules.PurchaseItemsUI.read(); }
+    catch (error) { if (typeof showAppAlert === 'function') showAppAlert(error.message, 'warning'); return false; }
+    let budget;
+    try { budget = window.AppModules.PurchaseItemsUI.readBudget(); }
+    catch (error) { if (typeof showAppAlert === 'function') showAppAlert(error.message, 'warning'); return false; }
     console.log("🚀 savePurchaseRequest tetiklendi...");
 
     const fileInput = document.getElementById("purchaseFile");
@@ -232,10 +251,16 @@ window.savePurchaseRequest = async function (e) {
             tarih: document.getElementById('purDate')?.value || "",
             talepEden: requester.name,
             urun: document.getElementById('purName')?.value || "",
-            adet: parseFloat(document.getElementById('purQty')?.value) || 1,
-            butce: parseFloat(document.getElementById('purBudget')?.value) || 0,
+            // Legacy özet alanı ilk kalemi temsil eder; yeni parasal kaynak items/totals'tır.
+            adet: purchaseLines.items[0].quantity,
+            butce: budget.amount,
+            budgetMode: budget.mode,
+            budgetEstimateRates: budget.estimateRates,
+            items: purchaseLines.items,
+            totals: purchaseLines.totals,
+            documentTypeCode: document.getElementById('purType')?.value || window.AppModules.EBYSDocumentTypes.purchaseCode,
             birim: document.getElementById('purUnit')?.value || "",
-            tur: document.getElementById('purType')?.value || "",
+            tur: purchaseLines.items[0].category,
             oncelik: document.getElementById('purPriority')?.value || "Normal",
             aciklama: document.getElementById('purDesc')?.value || "",
             createdBy: requester.id || "unknown",
@@ -1038,6 +1063,7 @@ window.viewRequest = function (id) {
     document.getElementById("purUser").value = item.personel || "-";
     document.getElementById("purName").value = item.urun || "";
     document.getElementById("purBudget").value = item.butce || "0";
+    window.AppModules.PurchaseItemsUI.open(item, true);
     document.getElementById("purPriority").value = item.oncelik || "Normal";
     document.getElementById("purDesc").value = item.aciklama || "";
 
@@ -1046,7 +1072,8 @@ window.viewRequest = function (id) {
     unitSelect.innerHTML = `<option>${escapeHtml(item.birim)}</option>`;
 
     const typeSelect = document.getElementById("purType");
-    typeSelect.innerHTML = `<option>${escapeHtml(item.kategori || "Genel")}</option>`;
+    const documentType = window.AppModules.EBYSDocumentTypes.byCode(item.documentTypeCode);
+    typeSelect.replaceChildren(new Option(documentType?.name || 'Eski kayıt — belge türü belirtilmemiş', item.documentTypeCode || 'LEGACY_UNCLASSIFIED'));
 
     // Görüntüleme modunda inputları kilitle
     const inputs = document.querySelectorAll("#purchaseForm .modern-input");
@@ -1111,12 +1138,17 @@ window.uploadFiles = async function (files) {
 window.openPurchaseDetail = function (id, mode) {
     const item = _findPurchase(id);
     if (!item) return;
+    if (mode === 'edit' && (item.workflow?.started === true || item.exchangeRate)) {
+        if (typeof showAppAlert === 'function') showAppAlert('Mali anlık görüntüsü olan talep düzenlenemez. Değişiklik için yeni talep açın.', 'warning');
+        mode = 'view';
+    }
 
     const modal = document.getElementById('purchaseModal');
     const form = document.getElementById('purchaseForm');
     const saveBtn = document.getElementById('purSaveBtn');
     const title = document.getElementById('purModalTitle');
     if (!modal) return;
+    if (form) form.dataset.purchaseRecordId = String(id);
 
     // Başlık
     if (title) {
@@ -1131,9 +1163,18 @@ window.openPurchaseDetail = function (id, mode) {
     set('purDate', item.tarih);
     set('purUser', item.talepEden || item.createdByName);
     set('purName', item.urun);
-    set('purQty', item.adet || 1);
     set('purBudget', item.butce);
     set('purDesc', item.aciklama);
+    window.AppModules.PurchaseItemsUI.open(item, mode === 'view');
+    let printBtn = document.getElementById('purPrintBtn');
+    const footer = modal.querySelector('.modal-footer-compact, .modern-modal-footer, .modal-footer');
+    if (!printBtn && footer) {
+        printBtn = document.createElement('button');
+        printBtn.id = 'purPrintBtn'; printBtn.type = 'button';
+        printBtn.className = 'btn btn-outline-secondary';
+        printBtn.textContent = 'Yazdır'; footer.prepend(printBtn);
+    }
+    if (printBtn) { printBtn.style.display = ''; printBtn.onclick = () => window.AppModules.PurchaseItemsUI.print(item); }
 
     // Select'leri doldur sonra seç
     fillPurchaseSelects();
@@ -1146,7 +1187,10 @@ window.openPurchaseDetail = function (id, mode) {
             [...el.options].forEach(o => { o.selected = o.value === val; });
         };
         sel('purUnit', item.birim);
-        sel('purType', item.tur);
+        if (!item.documentTypeCode) {
+            const type = document.getElementById('purType');
+            if (type) type.replaceChildren(new Option('Eski kayıt — belge türü belirtilmemiş', 'LEGACY_UNCLASSIFIED'));
+        } else sel('purType', item.documentTypeCode);
         sel('purPriority', item.oncelik || 'Normal');
     }, 60);
 
@@ -1217,6 +1261,8 @@ window.openPurchaseDetail = function (id, mode) {
     } else { // edit
         form.querySelectorAll('input:not([readonly]):not([type="file"]), select, textarea')
             .forEach(el => { el.disabled = false; });
+        if (!Array.isArray(item.items)) document.getElementById('purItemsEditor')?.querySelectorAll('input, select, button')
+            .forEach(el => { el.disabled = true; });
         if (fileArea) fileArea.style.display = 'block';
         if (fileInput) fileInput.value = '';
         if (saveBtn) {
@@ -1414,11 +1460,19 @@ window.updatePurchaseRequest = async function (e, id) {
     if (!item) { if (typeof showAppAlert === 'function') showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
     if (!_canManagePurchase(item)) { _denyManage(); return; }
     // Faz 4B · J10: akış başladıktan sonra talebin içeriği değiştirilemez (kurallar reddeder; onaylanan içerik sabit kalmalı)
-    if (item.workflow?.started === true && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
-        if (typeof showAppAlert === 'function') showAppAlert('Onay akışı başlamış bir talep düzenlenemez. Önce talebi geri çekin.', 'warning');
+    if (item.workflow?.started === true || item.exchangeRate) {
+        if (typeof showAppAlert === 'function') showAppAlert('Mali anlık görüntüsü olan veya akışı süren talep düzenlenemez. Değişiklik için yeni talep açın.', 'warning');
         return;
     }
     const undo = _snapshotPurchase(item);
+    let purchaseLines;
+    try { purchaseLines = Array.isArray(item.items) ? window.AppModules.PurchaseItemsUI.read() : null; }
+    catch (error) { if (typeof showAppAlert === 'function') showAppAlert(error.message, 'warning'); return; }
+    let budget = null;
+    if (purchaseLines) {
+        try { budget = window.AppModules.PurchaseItemsUI.readBudget(); }
+        catch (error) { if (typeof showAppAlert === 'function') showAppAlert(error.message, 'warning'); return; }
+    }
 
     // Yeni dosya yükleme
     const fileInput = document.getElementById('purchaseFile');
@@ -1438,10 +1492,12 @@ window.updatePurchaseRequest = async function (e, id) {
 
     // Alanları güncelle
     item.urun = document.getElementById('purName')?.value || item.urun;
-    item.adet = parseFloat(document.getElementById('purQty')?.value) || item.adet || 1;
+    item.adet = purchaseLines ? purchaseLines.items[0].quantity : item.adet;
     item.birim = document.getElementById('purUnit')?.value || item.birim;
-    item.tur = document.getElementById('purType')?.value || item.tur;
-    item.butce = parseFloat(document.getElementById('purBudget')?.value) || item.butce;
+    if (purchaseLines) item.tur = purchaseLines.items[0].category;
+    item.butce = budget ? budget.amount : (Number(document.getElementById('purBudget')?.value) || item.butce);
+    if (budget) { item.budgetMode = budget.mode; item.budgetEstimateRates = budget.estimateRates; }
+    if (purchaseLines) { item.items = purchaseLines.items; item.totals = purchaseLines.totals; }
     item.oncelik = document.getElementById('purPriority')?.value || item.oncelik;
     item.aciklama = document.getElementById('purDesc')?.value || item.aciklama;
 
@@ -1650,6 +1706,8 @@ window.closePurchaseModal = function () {
     const fileArea = document.getElementById('purFileInputArea');
 
     if (modal) modal.style.display = 'none';
+    const printBtn = document.getElementById('purPrintBtn');
+    if (printBtn) printBtn.style.display = 'none';
 
     // Alanları sıfırla
     if (form) {
@@ -1657,6 +1715,7 @@ window.closePurchaseModal = function () {
         form.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = false; });
         form.onsubmit = (e) => window.savePurchaseRequest(e);
         delete form.dataset.editId;
+        delete form.dataset.purchaseRecordId;
     }
 
     // Dinamik bölümleri gizle

@@ -77,6 +77,8 @@ test('gerçek servis transactionları legacy alanları, UID ve satın alma kayd�
     await assert.rejects(api.saveUnit({ id: 'a', name: 'Bayat', expectedRevision: 0 }), /değişmiş/);
     await api.savePersonnel({ id: 'p', name: 'Aynı Ad' }, { unitId: 'a', jobTitle: 'Mühendis', active: true });
     await api.setActive('personel', 'p', false);
+    await assert.rejects(api.saveUnit({ id: 'a', name: 'Yeni birim', organizationId: 'org', personnelIds: ['p2', 'p'], expectedRevision: 1 }), /Pasif personel/);
+    assert.deepEqual((await getDoc(ref(db, 'units', 'a'))).data().personnelIds, ['p2']);
     const person = (await getDoc(ref(db, 'personel', 'p'))).data();
     assert.equal(person.uid, 'uid-p'); assert.equal(person.id, 'p'); assert.equal(person.jobTitle, 'Mühendis');
     assert.deepEqual((await getDoc(ref(db, 'purchaseOrders', 'po'))).data(), purchase);

@@ -20,6 +20,8 @@ async function saveUnit(input) {
         const personnelIds = [...new Set((input.personnelIds || []).map(String))];
         const people = await Promise.all(personnelIds.map(pid => tx.get(ref('personel', pid))));
         if (people.some(p => !p.exists())) throw new Error('Seçili personel bulunamadı.');
+        if (people.some(p => p.data().active === false && !(old.personnelIds || []).map(String).includes(String(p.id))))
+            throw new Error('Pasif personel yeni birime atanamaz.');
         const next = { ...old, id, name: String(input.name || '').trim(),
             parentUnitId: String(input.parentUnitId || ''), organizationId: String(input.organizationId || '').trim(),
             code: String(input.code || '').trim(), active: input.active !== false, personnelIds,

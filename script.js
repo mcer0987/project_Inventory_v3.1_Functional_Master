@@ -62,14 +62,23 @@ window.AppModules = window.AppModules || {};
 window.currentUser = window.getActiveUser();
 
 // [R-SYS] - Internal Data Input Mask Manager
-// opts.allowPaste: yönetici parola alanlarında yapıştırmaya izin (parola yöneticisi · Faz 4 J3, SEC-02); personel kodunda kapalı.
+// Native password alanları tarayıcının kendi maskelemesini kullanır. Özel madde işareti tamponu
+// seçip üzerine yazma sırasında eski parolanın ilk karakterini koruyabiliyordu.
 window._dx = {
     _b: {},
+    _native: new Set(),
     _s: (id, opts = {}) => {
         const el = document.getElementById(id);
         if (!el) return;
         window._dx._b[id] = "";
         el.value = "";
+        if (el.type === 'password') {
+            window._dx._native.add(id);
+            el.setAttribute('autocomplete', 'off');
+            el.setAttribute('autocorrect', 'off');
+            el.setAttribute('spellcheck', 'false');
+            return;
+        }
         const _handler = (e) => {
             const v = el.value;
             const l = v.length;
@@ -88,7 +97,7 @@ window._dx = {
         el.setAttribute('autocorrect', 'off');
         el.setAttribute('spellcheck', 'false');
     },
-    _g: (id) => window._dx._b[id] || "",
+    _g: (id) => window._dx._native.has(id) ? (document.getElementById(id)?.value || "") : (window._dx._b[id] || ""),
     _r: (id) => {
         window._dx._b[id] = "";
         const el = document.getElementById(id);
@@ -547,6 +556,8 @@ window.openPersonelModal = function (mode, id = null) {
             addPersonel();
         };
     }
+    window.AppModules.EBYSDefinitionsUI.openPersonnel(mode === 'edit'
+        ? (window.data.personel || []).find(p => String(p.id) === String(id)) : null);
     modal.style.display = 'block';
 };
 
@@ -564,7 +575,8 @@ async function addPersonel() {
     const check = window.StaffCodeRegistry.validateCode(code, []);
     if (!check.ok) { showAppAlert(check.message, 'warning'); return; }
     const person = { id: window.makeId(), name, pri: pri.value, ...(birim ? { birim } : {}) };
-    if (!(await window.writeOk(window.appendItem('personel', person)))) { showAppAlert('Personel eklenemedi.', 'error'); return; }
+    try { Object.assign(person, await window.AppModules.EBYSDefinitions.savePersonnel(person, window.AppModules.EBYSDefinitionsUI.readPersonnel(), true)); }
+    catch (error) { showAppAlert(error.message, 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
     const acct = await SP.provisionWithNotice(person, code);
@@ -587,7 +599,8 @@ async function editPersonel(id) {
         if (!pri.ok) { showAppAlert(pri.message, 'warning'); return; }
         if (pri.value !== p.pri) patch.pri = pri.value;
     }
-    if (!(await window.writeOk(window.updateItem('personel', id, patch)))) { showAppAlert('Personel güncellenemedi.', 'error'); return; }
+    try { await window.AppModules.EBYSDefinitions.savePersonnel({ ...p, ...patch }, window.AppModules.EBYSDefinitionsUI.readPersonnel()); }
+    catch (error) { showAppAlert(error.message, 'error'); return; }
     if (typeof renderPersonelTable === 'function') renderPersonelTable();
     closePersonelModal();
     showAppAlert('Personel güncellendi.', 'success');

@@ -3,7 +3,7 @@
 **Tarih:** 1 Kasım 2026  
 **Dal:** `feat/v3.4-ebys`  
 **Plan commit'i:** `299e2fc` — yalnız onaylanan üç tasarım belgesi.  
-**Uygulama:** Yerel çalışma ağacında; bu aşamanın kodu commit edilmedi. Aşama/commit onayı bekleniyor. Deploy ve canlı veri işlemi yok.  
+**Uygulama:** Ana tanım ve servis dosyaları `5be0579` commit'inde. `script.js` içindeki personel modalı açma/kaydetme bağlantısına ait üç hunk yerel çalışma ağacında kaldı; ayrı seçilerek sonraki onaylı commit kapsamına alınmalı. Deploy ve canlı veri işlemi yok.
 **Durum:** Uygulandı, aşağıdaki yerel kontroller geçti; üretim doğrulaması ve tam UAT sonucu değildir.
 
 ## 1. Yapılan geliştirmeler
@@ -93,4 +93,4 @@ Yeni test/kanıt araçları: `tests/unit/ebys-definitions.test.mjs`, `tests/rule
 - Hosting kontrolünde mevcut `release-journal/index.html`, `release-journal/journal.js`, `release-journal/style.css` beklenen yayın listesinde yok. Bu dosyalar bu geliştirmede oluşturulmadı; onların yayın politikası düzeltilmeden hosting kalite kapısı geçmiyor. Yerel Aşama 2 testlerini engellemiyor; bu tur deploy yapılmadı.
 - Dosya ekleri, belge süreçleri ve gerçek imza bu aşamanın uygulama kapsamı değildir.
 
-**Kabul için sunulan sonuç:** Aşama 2 yerel uygulaması ve belirtilen testler hazır. Aşama kod commit'i için proje sahibi onayı; tam uygulama UAT/yayın için ilgili sonraki kontroller bekleniyor. Sonraki ürün paketi Aşama 3 kalemli satın alma/döviz tasarımıdır; para politikası kesinleşmeden uygulanmaz.
+**Kabul için sunulan sonuç:** Aşama 2 yerel uygulaması ve belirtilen testler hazır. Personel ekranı bağlantısının ayrı commit kapsamına alınması için proje sahibi onayı; tam uygulama UAT/yayın için ilgili sonraki kontroller bekleniyor.

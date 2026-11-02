@@ -4,6 +4,7 @@
 // [WHY]: admin.html'de modüller ayrı tag'lerle ve farklı ?v= URL'leriyle yükleniyordu; firebase-handler iki kez çalışıyordu (ARC-02).
 // [HOW]: Tüm admin modülleri tek URL ile, eski tag sırasıyla buradan import edilir. Son ikisi yalnız yan-etki import'udur.
 import '../../services/firebase-handler.js';
+import '../../services/ebys-rates.js';
 import './admin-dashboard.js';
 import '../../services/purchase-servises.js';
 import '../edm-workflow.js';

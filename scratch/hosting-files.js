@@ -48,8 +48,10 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
 //             admin-quick-unlock.js, dialog-stack.js, shelf-capacity.js. (Global-Architecture.md ve "Mimari ve
 //             Geliştirmeler/" zaten firebase.json "ignore"da, bu sayıma girmez.)
 //        68 = + yerel Font Awesome CSS ve webfont paketi (5 dosya).
-// EBYS Aşama 2: saf şema, servis ve DOM entegrasyonu için üç yeni uygulama dosyası.
-const EXPECTED_COUNT = 71;
+// EBYS Aşama 2: üç yeni uygulama dosyası; Aşama 3: para hesabı, kalem editörü ve yazdırma CSS'i;
+// UAT düzeltmesi: belge türü kataloğu ve Tanımlar görünümü.
+// Operasyon Merkezi: ortak EBYS kur ayarı servisi.
+const EXPECTED_COUNT = 77;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

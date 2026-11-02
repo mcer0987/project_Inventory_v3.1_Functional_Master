@@ -450,7 +450,14 @@
     async function provisionWithNotice(person, code) {
         if (typeof window.provisionStaffAccount !== 'function') return { ok: false, text: 'Giriş hesabı açılamadı (modül yüklenmedi). Personel tablosundan "Hesap Aç" ile açılabilir.' };
         try {
-            return describe(await window.provisionStaffAccount(person, { code }));
+            const provisioned = await window.provisionStaffAccount(person, { code });
+            const result = describe(provisioned);
+            if (!result.ok && /localhost|127\.0\.0\.1/.test(window.location?.hostname || '') && !window.AppEnv?.EMULATOR) {
+                result.text += ' Yerel adres tek başına emülatör değildir; izole test için Firebase emülatörlerini başlatıp sayfayı ?emu=1 ile açın.';
+            } else if (provisioned?.status === 'conflict' && window.AppEnv?.EMULATOR) {
+                result.text += ' Emülatör testinde mevcut bağlı test hesaplarını kullanın veya yeni bir PRI seçin; UID bağlantısını rastgele silmeyin.';
+            }
+            return result;
         } catch (e) {
             // Kurallar J10 değilse (firebase-handler._requireStaffRules) açıklayıcı mesaj gösterilir; diğerlerinde hata kodu
             return describe({ status: 'error', reason: (e && (e.code === 'rules-not-deployed' ? e.message : (e.code || e.message))) || 'bilinmeyen hata' });
