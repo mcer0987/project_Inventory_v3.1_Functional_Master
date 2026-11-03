@@ -55,6 +55,10 @@ const puppeteer=require('puppeteer'), fs=require('fs'), assert=require('node:ass
   await page.waitForFunction(()=>document.querySelector('dialog[open] textarea[name=content]')?.disabled===true);
   await page.evaluate(()=>[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Çıktı önizleme').click());
   assert.match(await page.$eval('.ebys-preview',n=>n.textContent),/Deneme üst yazı/);
+
+  await page.evaluate(()=>window.showTab('purchaseTab'));
+  const actionLayout=await page.$eval('#ebysDocumentRows .ebys-registry-actions',n=>{const b=[...n.querySelectorAll('button')].map(b=>b.getBoundingClientRect());return{display:getComputedStyle(n).display,count:b.length,separated:b.length===2&&(b[1].left-b[0].right>=7||b[1].top-b[0].bottom>=7)};});
+  assert.equal(actionLayout.display,'flex');assert.equal(actionLayout.count,2);assert.equal(actionLayout.separated,true);
   await page.evaluate(()=>window.cleanup());
   assert.equal(await page.$eval('#ebysDocumentRows',n=>n.children.length),0);
   await page.setViewport({width:390,height:844});await page.evaluate(()=>document.getElementById('ebysDocumentNew').click());await page.waitForSelector('dialog[open] .ebys-document-form');

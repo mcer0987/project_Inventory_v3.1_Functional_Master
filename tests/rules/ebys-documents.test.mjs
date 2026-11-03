@@ -18,7 +18,7 @@ function service(store=db, uid=owner, transform=v=>v) {
         runTransaction:(d,fn)=>sdk.runTransaction(d,tx=>fn({get:r=>tx.get(r),set:(r,v)=>tx.set(r,plain(transform(v)))}))});
     vm.runInContext(readFileSync('src/utils/ebys-document-schema.js','utf8'),context);
     const code=readFileSync('src/services/ebys-document-service.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'');
-    vm.runInContext(code,context); return {api:window.AppModules.EBYSDocuments,schema:window.AppModules.EBYSDocumentSchema};
+    vm.runInContext(code,context); return {api:window.AppModules.EBYSDocuments,schema:window.AppModules.EBYSDocumentSchema,window};
 }
 before(async()=>{env=await initializeTestEnvironment({projectId:'demo-ebys-documents',firestore:{rules:readFileSync('firestore.rules','utf8')}});db=env.authenticatedContext(owner,{email:'admin@medipol.local',firebase:{sign_in_provider:'password'}}).firestore();});
 after(async()=>env?.cleanup());
@@ -89,6 +89,14 @@ test('taslaktan farklı içerikle sürüm üretilemez; başarısız dondurma ato
     assert.equal((await sdk.getDoc(ref('ebysDocuments',data.id))).data().state,'draft');
     const normal=await api.freezeVersion({documentId:data.id,expectedRevision:1});
     assert.equal((await sdk.getDoc(ref('ebysVersions',normal.versionId))).data().content,data.content);
+});
+test('A4 P2: farklı yazarın dolu rezervasyonu açılmadan yeni adayla kayıt tamamlanır',async()=>{
+    const first=input();await api.saveDraft(first);const number=(await api.registerDocument({documentId:first.id,expectedRevision:1})).registrationNo;
+    await env.withSecurityRulesDisabled(async c=>{const raw=c.firestore();await sdk.setDoc(ref('personel','collision',raw),{id:'collision',name:'Diğer',uid:'collision',pri:'collision.test',active:true});await sdk.setDoc(ref('staffAccounts','collision',raw),{personelId:'collision',pri:'collision.test'});await sdk.setDoc(ref('accessGate','staff',raw),{staffAccessEnabled:true});});
+    const store=env.authenticatedContext('collision',{email:'collision.test@staff.medipol.local',firebase:{sign_in_provider:'password'}}).firestore();const f=service(store,'collision'), second=input();let tries=0;
+    f.window.AppModules.EBYSDocumentSchema={...f.schema,registrationNo:code=>++tries===1?number:schema.registrationNo(code)};
+    await f.api.saveDraft(second);await assertFails(sdk.getDoc(ref('ebysRegistrationIds',number,store)));
+    const result=await f.api.registerDocument({documentId:second.id,expectedRevision:1});assert.notEqual(result.registrationNo,number);assert.equal(tries,2);
 });
 test('bağlı personel kendi taslağını kaydeder; başka kişinin içeriği, sahte yetki ve pasif birim reddedilir',async()=>{
     await env.withSecurityRulesDisabled(async c=>{

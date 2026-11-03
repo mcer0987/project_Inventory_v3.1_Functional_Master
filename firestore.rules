@@ -243,14 +243,13 @@ service cloud.firestore {
         && d.exchangeRateSource.size() <= 120 && noTag(d.exchangeRateSource)
         && d.get('reportingTotalTRY', -1) is number && d.reportingTotalTRY >= 0 && d.reportingTotalTRY <= 1000000000;
     }
-    function poFxDecisionOk(old, d, step, status) {
+    function poFxDecisionOk(root, old, d, step, status) {
       let fields = ['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'];
+      let snapshot = /databases/$(database)/documents/$(root)/purchaseFinance/items/$(string(d.get('id','')));
       return status == 'approved' && step == 0
-        ? d.keys().hasAll(fields) && d.exchangeRate is map && d.exchangeRate.get('TRY', 0) == 1
-          && d.exchangeRate.get('USD', 0) > 0 && d.exchangeRate.get('EUR', 0) > 0
-          && d.exchangeRateDate.matches('\\d{4}-\\d{2}-\\d{2}')
-          && d.exchangeRateSource is string && d.exchangeRateSource.trim().size() > 0 && noTag(d.exchangeRateSource)
-          && d.reportingTotalTRY is number && d.reportingTotalTRY >= 0
+        ? d.keys().hasAll(fields) && (old.keys().hasAll(fields) || (
+            d.exchangeRate == getAfter(snapshot).data.exchangeRate && d.exchangeRateDate == getAfter(snapshot).data.exchangeRateDate
+            && d.exchangeRateSource == getAfter(snapshot).data.exchangeRateSource && d.reportingTotalTRY == getAfter(snapshot).data.reportingTotalTRY))
           && (!old.keys().hasAny(fields) || !d.diff(old).affectedKeys().hasAny(fields))
         : !d.diff(old).affectedKeys().hasAny(fields);
     }
@@ -386,7 +385,7 @@ service cloud.firestore {
         && me != '' && (stepUser == me || stepUser.lower() == me.lower())
         && (old.keys().hasAny(['items'])
             ? d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis', 'exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
-              && poFxDecisionOk(old, d, cs, st)
+              && poFxDecisionOk(root, old, d, cs, st)
             : d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis']))
         && nwf.diff(wf).affectedKeys().hasOnly(['steps', 'currentStep', 'finished', 'currentState', 'history', 'started'])
         && nwf.get('started', false) == true
@@ -545,7 +544,8 @@ service cloud.firestore {
 
     match /{root}/{col}/items/{docId} {
       // Ek D "Ziyaretçi ✗": oturumsuz / anonim / personele bağlı olmayan hesap hiçbir şey okuyamaz.
-      allow read: if validRoot(root) && knownCol(col) && member(root);
+      allow read: if validRoot(root) && knownCol(col) && member(root)
+        && (col != 'purchaseOrders' || isAdmin() || lpRead(resource.data,request.auth.uid));
 
       // Admin: tüm bilinen koleksiyonlar; bakım modundan etkilenmez. Personel kaydına düz metin kod yeniden giremez.
       // v3.3: b1/b2 içerik sözleşmesi (stockCreateOk / stockUpdateOk).
@@ -561,7 +561,7 @@ service cloud.firestore {
         && (col != 'purchaseOrders' || !resource.data.keys().hasAny(['items'])
             || request.resource.data.get('workflow', {}).get('steps', []).size() == 0
             || request.resource.data.workflow.steps[0].get('status', '') != 'approved'
-            || poFxDecisionOk(resource.data, request.resource.data, 0, 'approved'))
+            || poFxDecisionOk(root, resource.data, request.resource.data, 0, 'approved'))
         && (col != 'purchaseOrders' || (poItemsOk(request.resource.data)
           && (resource.data.get('workflow', {}).get('started', false) != true && !resource.data.keys().hasAny(['exchangeRate'])
               || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['items', 'totals', 'urun', 'adet', 'butce', 'budgetMode', 'budgetEstimateRates', 'documentTypeCode', 'aciklama', 'birim', 'tur', 'evrakNo', 'files', 'oncelik']))
@@ -772,33 +772,36 @@ service cloud.firestore {
       return d.keys().hasOnly(['id','ownerUid','kind','unitId','organizationCode','state','currentVersionId','versionNo','registrationNo','revision','lastOperationId','createdAt','updatedAt'])
         && d.id == id && ebysId(id) && ebysId(d.lastOperationId) && d.kind in ['incoming','outgoing','internal']
         && ebysText(d.unitId, 128, true) && d.organizationCode.matches('[A-Z0-9]{2,12}')
-        && d.state in ['draft','registered','in_review'] && d.revision is int && d.revision > 0
+        && d.state in ['draft','registered','in_review','internally_approved','returned','rejected','withdrawn'] && d.revision is int && d.revision > 0
         && d.versionNo is int && d.updatedAt == request.time;
     }
     function ebysActiveUnit(r, d) { return get(ebysPath(r, 'units', d.unitId)).data.get('active', true) == true; }
     function ebysDraftHead(r, d) {
       let draft = getAfter(ebysPath(r, 'ebysDrafts', d.id)).data;
-      return d.state in ['draft','registered'] && d.currentVersionId == '' && d.versionNo == 0
+      return d.state in ['draft','registered'] && d.currentVersionId == '' && d.versionNo >= 0
         && draft.revision == d.revision && draft.ownerUid == d.ownerUid && ebysCommand(r, d, 'saveDraft') && ebysActiveUnit(r, d);
     }
     function ebysHeadUpdate(r, old, d) {
       return ebysHead(d, old.id) && d.ownerUid == old.ownerUid && d.createdAt == old.createdAt
         && d.kind == old.kind && d.organizationCode == old.organizationCode && d.revision == old.revision + 1
-        && (old.state in ['draft','registered'] && d.state == old.state && d.registrationNo == old.registrationNo && ebysDraftHead(r, d)
+        && (old.state in ['draft','registered'] && d.state == old.state && d.versionNo == old.versionNo && d.registrationNo == old.registrationNo && ebysDraftHead(r, d)
           || (old.state in ['draft','registered'] && d.state == 'in_review' && d.unitId == old.unitId
-            && d.registrationNo == old.registrationNo && d.versionNo == 1 && ebysId(d.currentVersionId)
+            && d.registrationNo == old.registrationNo && d.versionNo == old.versionNo+1 && ebysId(d.currentVersionId)
             && getAfter(ebysPath(r, 'ebysVersions', d.currentVersionId)).data.documentId == d.id && ebysCommand(r, d, 'freezeVersion'))
+          || (old.currentVersionId != '' && d.state == 'draft' && d.versionNo == old.versionNo && d.registrationNo == old.registrationNo
+            && get(ep(r,old.currentVersionId)).data.state in ['returned','rejected','withdrawn'] && ebysDraftHead(r,d))
           || (old.registrationNo == '' && old.state in ['draft','in_review'] && d.state == (old.state == 'draft' ? 'registered' : old.state)
             && d.unitId == old.unitId && d.currentVersionId == old.currentVersionId && d.versionNo == old.versionNo
             && getAfter(ebysPath(r, 'ebysRegistrationIds', d.registrationNo)).data.documentId == d.id && ebysCommand(r, d, 'registerDocument')));
     }
     match /{r}/ebysDocuments/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDocuments',id)) || isAdmin() || resource.data.ownerUid == request.auth.uid);
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDocuments',id)) || isAdmin() || resource.data.ownerUid == request.auth.uid || epAccess(r,resource.data.currentVersionId));
       allow list: if validRoot(r) && member(r) && (isAdmin() || resource.data.ownerUid == request.auth.uid);
       allow create: if ebysOwn(r, request.resource.data) && ebysHead(request.resource.data, id)
-        && request.resource.data.state == 'draft' && request.resource.data.revision == 1 && request.resource.data.registrationNo == ''
+        && request.resource.data.state == 'draft' && request.resource.data.versionNo == 0 && request.resource.data.revision == 1 && request.resource.data.registrationNo == ''
         && request.resource.data.createdAt == request.time && ebysDraftHead(r, request.resource.data);
-      allow update: if ebysOwn(r, resource.data) && ebysHeadUpdate(r, resource.data, request.resource.data);
+      allow update: if (ebysOwn(r, resource.data) && ebysHeadUpdate(r, resource.data, request.resource.data))
+        || (validRoot(r) && member(r) && epHeadTransition(r,resource.data,request.resource.data));
       allow delete: if false;
     }
     function ebysDraftOk(r, id, d) {
@@ -820,13 +823,13 @@ service cloud.firestore {
       let h = getAfter(ebysPath(r,'ebysDocuments',d.documentId)).data;
       let draft = get(ebysPath(r,'ebysDrafts',d.documentId)).data;
       return d.keys().hasOnly(['id','processId','documentId','ownerUid','versionNo','schemaVersion','content','metadataSnapshot','attachments','attachmentMode','contentDigest','createdAt'])
-        && ebysOwn(r,d) && ebysId(id) && d.id == id && d.processId == id && d.schemaVersion == 1 && d.versionNo == 1
+        && ebysOwn(r,d) && ebysId(id) && d.id == id && d.processId == id && d.schemaVersion == 1 && d.versionNo == h.versionNo
         && h.currentVersionId == id && h.state == 'in_review' && h.ownerUid == d.ownerUid && ebysCommand(r,h,'freezeVersion')
         && d.content == draft.content && d.metadataSnapshot == draft.metadata && draft.ownerUid == d.ownerUid
         && d.contentDigest.matches('[a-f0-9]{64}') && d.attachments == [] && d.attachmentMode == 'none' && d.createdAt == request.time;
     }
     match /{r}/ebysVersions/items/{id} {
-      allow read: if ebysOwn(r,resource.data);
+      allow read: if ebysOwn(r,resource.data) || (validRoot(r) && member(r) && epAccess(r,id));
       allow create: if ebysVersionOk(r,id,request.resource.data);
       allow update, delete: if false;
     }
@@ -863,6 +866,206 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['id','documentId','ownerUid','operationId','type','revision','createdAt'])
         && request.resource.data.operationId == id && request.resource.data.type == getAfter(ebysPath(r,'ebysOperations',id)).data.command;
       allow update, delete: if false;
+    }
+    function financeSource(r,d,p) {
+      let config = ebysPath(r,'system_config','ebys_rates');
+      let a = p.items;
+      return d.exchangeRateSource == 'TRY'
+        ? d.exchangeRate == {'TRY':1,'USD':1,'EUR':1} && a[0].currency == 'TRY' && (a.size()<2 || a[1].currency == 'TRY') && (a.size()<3 || a[2].currency == 'TRY')
+        : d.exchangeRate == get(config).data.rates && d.exchangeRateDate == get(config).data.date && d.exchangeRateSource == get(config).data.source;
+    }
+    match /{r}/purchaseFinance/items/{id} {
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'purchaseFinance',id)) || isAdmin() || lpRead(get(ebysPath(r,'purchaseOrders',id)).data,request.auth.uid));
+      allow list: if validRoot(r) && isAdmin();
+      allow create: if validRoot(r) && member(r) && request.resource.data.keys().hasOnly(['exchangeRate','exchangeRateDate','exchangeRateSource','reportingTotalTRY'])
+        && poFxFieldsOk(request.resource.data) && request.resource.data.exchangeRate.USD > 0 && request.resource.data.exchangeRate.EUR > 0
+        && get(ebysPath(r,'purchaseOrders',id)).data.workflow.get('currentStep',-1) == 0
+        && get(ebysPath(r,'purchaseOrders',id)).data.workflow.steps[0].status == 'pending'
+        && getAfter(ebysPath(r,'purchaseOrders',id)).data.workflow.steps[0].status == 'approved'
+        && request.resource.data.exchangeRate == getAfter(ebysPath(r,'purchaseOrders',id)).data.exchangeRate
+        && request.resource.data.exchangeRateDate == getAfter(ebysPath(r,'purchaseOrders',id)).data.exchangeRateDate
+        && request.resource.data.exchangeRateSource == getAfter(ebysPath(r,'purchaseOrders',id)).data.exchangeRateSource
+        && request.resource.data.reportingTotalTRY == getAfter(ebysPath(r,'purchaseOrders',id)).data.reportingTotalTRY
+        && financeSource(r,request.resource.data,getAfter(ebysPath(r,'purchaseOrders',id)).data);
+      allow update,delete: if false;
+    }
+    function lpHistory(a,i,who) { return a.size()>i && a[i].get('userUid','') == who && a[i].get('status','') in ['approved','rejected']; }
+    function lpRead(d,who) {
+      let wf = d.get('workflow',{});
+      let a = wf.get('steps',[]);
+      let i = wf.get('currentStep',-1);
+      return d.get('createdByUid','') == who
+        || (wf.get('started',false) == true && wf.get('finished',false) != true && i is int && i>=0 && i<a.size() && a[i].get('userUid','') == who)
+        || lpHistory(a,0,who) || lpHistory(a,1,who) || lpHistory(a,2,who) || lpHistory(a,3,who) || lpHistory(a,4,who)
+        || lpHistory(a,5,who) || lpHistory(a,6,who) || lpHistory(a,7,who) || lpHistory(a,8,who) || lpHistory(a,9,who);
+    }
+    match /{r}/purchaseAccess/items/{id} {
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'purchaseAccess',id)) || isAdmin() || resource.data.assigneeUid == request.auth.uid || lpRead(get(ebysPath(r,'purchaseOrders',resource.data.purchaseId)).data,request.auth.uid));
+      allow list: if validRoot(r) && member(r) && (isAdmin() || resource.data.assigneeUid == request.auth.uid);
+      allow create: if validRoot(r) && member(r) && request.resource.data.keys().hasOnly(['purchaseId','assigneeUid','createdAt','updatedAt'])
+        && id == request.resource.data.purchaseId+'__'+request.resource.data.assigneeUid && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
+        && (isAdmin() || lpRead(get(ebysPath(r,'purchaseOrders',request.resource.data.purchaseId)).data,request.auth.uid))
+        && lpRead(get(ebysPath(r,'purchaseOrders',request.resource.data.purchaseId)).data,request.resource.data.assigneeUid);
+      allow update: if validRoot(r) && member(r)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']) && request.resource.data.updatedAt == request.time
+        && (isAdmin() || lpRead(get(ebysPath(r,'purchaseOrders',resource.data.purchaseId)).data,request.auth.uid))
+        && lpRead(get(ebysPath(r,'purchaseOrders',resource.data.purchaseId)).data,resource.data.assigneeUid);
+      allow delete: if false;
+    }
+    // Aşama 5: sahiplik ACL dizisi yerine doğrulanmış deterministik görev/karar.
+    function ep(r,id) { return ebysPath(r,'ebysProcesses',id); }
+    function epHeadTransition(r,old,d) {
+      let p = getAfter(ep(r,old.currentVersionId)).data;
+      return d.diff(old).affectedKeys().hasOnly(['state','revision','updatedAt']) && d.revision == old.revision+1 && d.updatedAt == request.time
+        && get(ep(r,old.currentVersionId)).data.state == 'active' && p.revision == get(ep(r,old.currentVersionId)).data.revision+1
+        && p.documentId == old.id && p.state in ['completed','returned','rejected','withdrawn']
+        && d.state == (p.state == 'completed' ? 'internally_approved' : p.state);
+    }
+    function et(r,id,who) { return ebysPath(r,'ebysTasks',id+'__'+who); }
+    function epLive(p,t) { return p.state == 'active' && t.state == 'active' && p.activeAssigneeUid == t.assigneeUid
+      && p.currentStep == t.stepIndex && request.time >= t.validFrom && request.time < t.validUntil; }
+    function epAccess(r,id) {
+      let path = et(r,id,request.auth.uid);
+      return exists(path) && (get(path).data.hasDecision == true || epLive(get(ep(r,id)).data,get(path).data));
+    }
+    function epCommand(r,p) {
+      let path = ebysPath(r,'ebysProcessOperations',p.lastOperationId);
+      let op = getAfter(path).data;
+      return !exists(path) && op.processId == p.id && op.actorUid == request.auth.uid && op.command == p.lastCommand && op.result.revision == p.revision;
+    }
+    function epStep(s,i,owner) {
+      return s.stepId == 'step-'+string(i) && s.personnelId is string && s.assigneeUid is string && s.assigneeUid != owner
+        && s.kind in ['paraf','approval','consent'] && s.dueHours is int && s.dueHours >= 1 && s.dueHours <= 720;
+    }
+    // Rota immutable kalır. Güvenlik koşulları her adım AKTİF yapılırken etWrite içinde
+    // doğrulanır; gelecekteki altı adımın aynı istekte tekrar açılması gerekmez.
+    function epRoute(a) { return a is list && a.size() >= 1 && a.size() <= 6; }
+    function epTemplate(r,p) {
+      let path = ebysPath(r,'ebysRouteTemplates',p.templateId);
+      return p.templateId == '' ? p.templateRevision == 0
+        : ebysId(p.templateId) && p.templateRevision == get(path).data.revision && p.routeSnapshot == get(path).data.routeSnapshot;
+    }
+    match /{r}/ebysRouteTemplates/items/{id} {
+      allow read: if validRoot(r) && member(r);
+      allow create: if validRoot(r) && isAdmin() && ebysId(id) && request.resource.data.id == id
+        && request.resource.data.keys().hasOnly(['id','ownerUid','name','revision','routeSnapshot','createdAt'])
+        && request.resource.data.ownerUid == request.auth.uid && ebysText(request.resource.data.name,120,true)
+        && request.resource.data.revision == 1 && epRoute(request.resource.data.routeSnapshot) && request.resource.data.createdAt == request.time;
+      allow update,delete: if false;
+    }
+    function epBase(p,id) {
+      return ebysId(id) && p.id == id && p.versionId == id && p.keys().hasOnly(['id','documentId','versionId','ownerUid','routeSnapshot','templateId','templateRevision','currentStep','activeAssigneeUid','state','revision','lastOperationId','lastCommand','lastResult','lastReason','createdAt','updatedAt'])
+        && p.updatedAt == request.time && p.revision is int && ebysId(p.lastOperationId) && ebysText(p.lastReason,1000,false);
+    }
+    function epActivation(r,p) {
+      let path = et(r,p.id,p.activeAssigneeUid);
+      let t = getAfter(path).data;
+      return t.state == 'active' && t.stepIndex == p.currentStep && t.updatedAt == request.time
+        && t.revision == (exists(path) ? get(path).data.revision+1 : 1);
+    }
+    function epClosedTask(r,p,next) {
+      let path = et(r,p.id,p.activeAssigneeUid);
+      let t = getAfter(path).data;
+      return t.revision == get(path).data.revision+1 && t.updatedAt == request.time
+        && (next.state == 'active' && next.activeAssigneeUid == p.activeAssigneeUid ? t.state == 'active' : t.state != 'active');
+    }
+    function epTerminalHead(r,p) {
+      let path = ebysPath(r,'ebysDocuments',p.documentId);
+      let after = getAfter(path).data;
+      return after.currentVersionId == p.id && after.revision == get(path).data.revision+1
+        && after.state == (p.state == 'completed' ? 'internally_approved' : p.state);
+    }
+    function epUpdate(r,p,n) {
+      let t = get(et(r,p.id,p.activeAssigneeUid)).data;
+      return epBase(n,p.id) && epCommand(r,n) && p.state == 'active'
+        && n.diff(p).affectedKeys().hasOnly(['currentStep','activeAssigneeUid','state','revision','lastOperationId','lastCommand','lastResult','lastReason','updatedAt'])
+        && n.revision == p.revision+1 && epClosedTask(r,p,n)
+        && (n.state == 'active' || epTerminalHead(r,n))
+        && (n.lastCommand == 'decide' && p.activeAssigneeUid == request.auth.uid && epLive(p,t)
+          && n.lastResult in ['approved','rejected','returned'] && (n.lastResult == 'approved' || n.lastReason.trim().size()>0)
+          && (n.lastResult == 'approved' && p.currentStep+1 < p.routeSnapshot.size()
+            ? n.state == 'active' && n.currentStep == p.currentStep+1 && n.activeAssigneeUid == p.routeSnapshot[n.currentStep].assigneeUid && epActivation(r,n)
+            : n.state == (n.lastResult == 'approved' ? 'completed' : n.lastResult) && n.currentStep == p.currentStep && n.activeAssigneeUid == '')
+        || n.lastCommand == 'withdraw' && n.lastResult == 'withdrawn' && p.ownerUid == request.auth.uid && n.state == 'withdrawn' && n.currentStep == p.currentStep && n.activeAssigneeUid == '' && n.lastReason.trim().size()>0
+        || n.lastCommand == 'delegate' && n.lastResult == 'delegated' && n.lastReason.trim().size()>0 && isAdmin() && n.state == 'active' && n.currentStep == p.currentStep && n.activeAssigneeUid != p.activeAssigneeUid && n.activeAssigneeUid != p.ownerUid && epActivation(r,n));
+    }
+    match /{r}/ebysProcesses/items/{id} {
+      allow get: if validRoot(r) && member(r) && (!exists(ep(r,id)) || isAdmin() || resource.data.ownerUid == request.auth.uid || resource.data.activeAssigneeUid == request.auth.uid || epAccess(r,id));
+      allow list: if validRoot(r) && member(r) && (isAdmin() || resource.data.ownerUid == request.auth.uid);
+      allow create: if validRoot(r) && member(r) && epBase(request.resource.data,id) && epRoute(request.resource.data.routeSnapshot)
+        && request.resource.data.ownerUid == request.auth.uid && epTemplate(r,request.resource.data) && request.resource.data.currentStep == 0 && request.resource.data.state == 'active'
+        && request.resource.data.activeAssigneeUid == request.resource.data.routeSnapshot[0].assigneeUid && request.resource.data.revision == 1
+        && request.resource.data.createdAt == request.time && request.resource.data.lastCommand == 'start'
+        && get(ebysPath(r,'ebysVersions',id)).data.documentId == request.resource.data.documentId
+        && get(ebysPath(r,'ebysVersions',id)).data.ownerUid == request.auth.uid
+        && get(ebysPath(r,'ebysDocuments',request.resource.data.documentId)).data.currentVersionId == id
+        && epCommand(r,request.resource.data) && epActivation(r,request.resource.data);
+      allow update: if validRoot(r) && member(r) && epUpdate(r,resource.data,request.resource.data);
+      allow delete: if false;
+    }
+    function etDecisions(r,old,d,p,before) {
+      let a = old.get('decisionsByStep',{});
+      let b = d.decisionsByStep;
+      let key = string(before.get('currentStep',-1));
+      let adds = p.lastCommand == 'decide' && before.get('activeAssigneeUid','') == d.assigneeUid && p.lastResult in ['approved','rejected'];
+      return b is map && d.hasDecision == (b.size()>0) && (adds
+        ? !a.keys().hasAny([key]) && b.diff(a).affectedKeys().hasOnly([key]) && b.size() == a.size()+1
+          && b[key] == {'stepId':old.stepId,'versionId':p.id,'kind':old.kind,'actorUid':request.auth.uid,'principalUid':old.principalUid,'result':p.lastResult,'reason':p.lastReason,'decidedAt':request.time}
+        : b == a);
+    }
+    function etPerson(r,pid,who) {
+      let person = get(ebysPath(r,'personel',pid)).data;
+      let account = get(ebysPath(r,'staffAccounts',who)).data;
+      return person.get('active',true) == true && person.uid == who && account.personelId == pid && account.pri == person.pri;
+    }
+    function etWrite(r,id,d,old) {
+      let p = getAfter(ep(r,d.processId)).data;
+      let before = exists(ep(r,d.processId)) ? get(ep(r,d.processId)).data : {};
+      let step = p.routeSnapshot[p.currentStep];
+      return id == p.id+'__'+d.assigneeUid && d.id == id && d.processId == p.id && d.versionId == p.id && d.documentId == p.documentId && d.ownerUid == p.ownerUid
+        && d.keys().hasOnly(['id','processId','versionId','documentId','ownerUid','assigneeUid','principalUid','stepIndex','stepId','kind','state','decisionsByStep','hasDecision','revision','createdAt','updatedAt','validFrom','validUntil','dueAt'])
+        && d.revision == old.get('revision',0)+1 && d.updatedAt == request.time && d.createdAt == old.get('createdAt',request.time)
+        && p.revision == before.get('revision',0)+1 && p.updatedAt == request.time && etDecisions(r,old,d,p,before)
+        && (p.state == 'active' && p.activeAssigneeUid == d.assigneeUid
+          ? epStep(step,p.currentStep,p.ownerUid) && d.state == 'active' && d.stepIndex == p.currentStep && d.stepId == step.stepId && d.kind == step.kind && d.principalUid == step.assigneeUid
+            && d.validFrom == request.time && d.validUntil > request.time && d.validUntil <= request.time+duration.value(90,'d')
+            && d.dueAt is timestamp && d.assigneeUid != p.ownerUid
+            && (p.lastCommand == 'delegate' ? isAdmin() : d.assigneeUid == step.assigneeUid)
+            && etPerson(r,p.lastCommand == 'delegate' ? getAfter(ebysPath(r,'ebysProcessOperations',p.lastOperationId)).data.result.personnelId : step.personnelId,d.assigneeUid)
+          : before.get('activeAssigneeUid','') == d.assigneeUid
+            && d.diff(old).affectedKeys().hasOnly(['decisionsByStep','hasDecision','state','revision','updatedAt'])
+            && d.state == (p.lastCommand == 'withdraw' ? 'cancelled' : p.lastCommand == 'delegate' ? 'delegated' : 'closed'));
+    }
+    match /{r}/ebysTasks/items/{id} {
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysTasks',id)) || isAdmin() || resource.data.ownerUid == request.auth.uid || resource.data.assigneeUid == request.auth.uid || epAccess(r,resource.data.processId));
+      allow list: if validRoot(r) && member(r) && (resource.data.assigneeUid == request.auth.uid || resource.data.ownerUid == request.auth.uid);
+      allow create: if validRoot(r) && member(r) && etWrite(r,id,request.resource.data,{});
+      allow update: if validRoot(r) && member(r) && etWrite(r,id,request.resource.data,resource.data);
+      allow delete: if false;
+    }
+    match /{r}/ebysProcessOperations/items/{id} {
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysProcessOperations',id)) || resource.data.actorUid == request.auth.uid || resource.data.ownerUid == request.auth.uid);
+      allow list: if validRoot(r) && member(r) && (resource.data.actorUid == request.auth.uid || resource.data.ownerUid == request.auth.uid);
+      allow create: if validRoot(r) && member(r) && ebysId(id) && request.resource.data.id == id && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['id','processId','actorUid','ownerUid','command','payloadDigest','result','createdAt'])
+        && request.resource.data.ownerUid == getAfter(ep(r,request.resource.data.processId)).data.ownerUid
+        && request.resource.data.payloadDigest.matches('[a-f0-9]{64}') && request.resource.data.createdAt == request.time
+        && getAfter(ep(r,request.resource.data.processId)).data.lastOperationId == id && request.resource.data.result.processId == request.resource.data.processId
+        && request.resource.data.command == getAfter(ep(r,request.resource.data.processId)).data.lastCommand
+        && request.resource.data.result.revision == getAfter(ep(r,request.resource.data.processId)).data.revision
+        && getAfter(ebysPath(r,'ebysProcessEvents',id)).data.command == request.resource.data.command;
+      allow update,delete: if false;
+    }
+    match /{r}/ebysProcessEvents/items/{id} {
+      allow read: if validRoot(r) && member(r) && (resource.data.actorUid == request.auth.uid || resource.data.ownerUid == request.auth.uid);
+      allow create: if validRoot(r) && member(r) && request.resource.data.keys().hasOnly(['id','processId','actorUid','ownerUid','command','revision','reason','createdAt'])
+        && request.resource.data.ownerUid == getAfter(ep(r,request.resource.data.processId)).data.ownerUid
+        && request.resource.data.id == id && request.resource.data.actorUid == request.auth.uid && request.resource.data.createdAt == request.time
+        && request.resource.data.command == getAfter(ebysPath(r,'ebysProcessOperations',id)).data.command
+        && getAfter(ep(r,request.resource.data.processId)).data.lastOperationId == id
+        && request.resource.data.reason == getAfter(ep(r,request.resource.data.processId)).data.lastReason
+        && request.resource.data.revision == getAfter(ep(r,request.resource.data.processId)).data.revision;
+      allow update,delete: if false;
     }
     // V1 arşiv kilidi. Kök /system_config bloğu kaldırıldı (uygulama ${root}/system_config/items kullanıyor; RULE-04).
     match /inventory/{document=**} {

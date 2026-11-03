@@ -72,6 +72,8 @@ before(async () => {
     const stubFile = path.join(dir, 'firebase-stub.mjs');
     fs.writeFileSync(stubFile, SDK_STUB);
     const src = fs.readFileSync(path.join(ROOT, 'src/services/firebase-handler.js'), 'utf8')
+        // Bu fixture stok yazıcısını sınar; satın alma erişimi ayrı Rules testindedir.
+        .replace(/import \{ subscribeRestrictedPurchases, ensurePurchaseAccess \} from '\.\/purchase-access\.js';/, 'const subscribeRestrictedPurchases = () => () => {}; const ensurePurchaseAccess = async () => ({created:0,unresolved:[]});')
         .replace(/"https:\/\/www\.gstatic\.com\/firebasejs\/[^"]+"/g, JSON.stringify(pathToFileURL(stubFile).href));
     assert.ok(!src.includes('gstatic.com'), 'tüm CDN içe aktarmaları taklide yönlendirildi');
     const handlerFile = path.join(dir, 'firebase-handler.mjs');

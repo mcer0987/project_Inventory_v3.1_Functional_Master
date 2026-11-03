@@ -35,7 +35,8 @@ const iconAssets = new Set([
     'assets/fontawesome/webfonts/fa-v4compatibility.woff2',
 ]);
 const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/.test(f) || /^manifest\.json$/.test(f)
-    || /^src\/.+\.(js|css)$/.test(f) || /^pdf-fonts\/(Roboto-[A-Za-z]+\.js|OFL\.txt)$/.test(f) || iconAssets.has(f);
+    || /^src\/.+\.(js|css)$/.test(f) || /^pdf-fonts\/(Roboto-[A-Za-z]+\.js|OFL\.txt)$/.test(f) || iconAssets.has(f)
+    || ['release-journal/index.html', 'release-journal/journal.js', 'release-journal/style.css'].includes(f);
 // [WHY]: Faz 5 kapanışı — desen tek başına "fazladan meşru görünen" bir dosyayı (ör. kökte unutulan bir .js dökümü) yakalamaz.
 // [HOW]: Toplam sayı da sabitlenir; uygulamaya dosya eklenip çıkarıldığında bu sayı bilinçli olarak güncellenir.
 //        52 = Faz 5 öncesi 47 + P0-P1 (atomic-writer.js, stock-import.js) 2 + pdf-fonts 3.
@@ -51,7 +52,10 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
 // EBYS Aşama 2: üç yeni uygulama dosyası; Aşama 3: para hesabı, kalem editörü ve yazdırma CSS'i;
 // UAT düzeltmesi: belge türü kataloğu ve Tanımlar görünümü.
 // Operasyon Merkezi: ortak EBYS kur ayarı servisi.
-const EXPECTED_COUNT = 77;
+// Aşama 4: evrak şeması, servis, arayüz ve stil (4 dosya).
+// Admin panelinden bağlı Gelişim Günlüğü (3).
+// Aşama 5: süreç şeması/servisi/arayüzü ve legacy özel sorgu adaptörü (4).
+const EXPECTED_COUNT = 88;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

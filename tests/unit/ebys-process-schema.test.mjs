@@ -1,0 +1,4 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import{readFileSync}from'node:fs';
+const window={AppModules:{}};vm.runInNewContext(readFileSync('src/utils/ebys-process-schema.js','utf8'),{window});const s=window.AppModules.EBYSProcessSchema;
+test('rota adımları kalıcı ID ve desteklenen görev türleriyle doğrulanır',()=>{const r=s.route([{personnelId:'p',kind:'paraf'}]);assert.equal(r[0].dueHours,72);assert.equal(r[0].stepId,'step-0');for(const bad of [[],Array(7).fill({personnelId:'p',kind:'approval'}),[{personnelId:'p',kind:'e_sign'}],[{personnelId:'../p',kind:'approval'}],[{personnelId:'p',kind:'approval',dueHours:900}]])assert.throws(()=>s.route(bad));});
+test('red/iade gerekçesi zorunlu, etiket ve aşırı uzun metin yasak',()=>{assert.equal(s.reason('approved',''),'');for(const [r,v]of [['rejected',''],['returned','  '],['approved','<script>'],['approved','a'.repeat(1001)]])assert.throws(()=>s.reason(r,v));});

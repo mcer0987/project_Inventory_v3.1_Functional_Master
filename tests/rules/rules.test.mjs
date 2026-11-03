@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, serverTimestamp, setLogLevel, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, serverTimestamp, setLogLevel, collection, query, orderBy, limit, getDocs, writeBatch } from 'firebase/firestore';
 
 // Beklenen her ret SDK'da PERMISSION_DENIED uyarısı basar; sonuçlar node:test raporunda.
 setLogLevel('silent');
@@ -46,6 +46,7 @@ const ctx = {
 };
 
 const item = (db, root, col, id) => doc(db, root, col, 'items', String(id));
+function financeApprove(db,id,value){const batch=writeBatch(db);batch.set(item(db,LIVE,'purchaseOrders',id),{...value,id});batch.set(item(db,LIVE,'purchaseFinance',id),Object.fromEntries(['exchangeRate','exchangeRateDate','exchangeRateSource','reportingTotalTRY'].map(k=>[k,value[k]])));return batch.commit();}
 async function seed(fn) { await env.withSecurityRulesDisabled(async (c) => fn(c.firestore())); }
 async function setMaintenance(on, root = LIVE) { await seed(db => setDoc(item(db, root, 'system_config', 'admin_settings'), { maintenance: on })); }
 const put = (col, id, data, root = LIVE) => seed(db => setDoc(item(db, root, col, id), { id, ...data }));
@@ -353,20 +354,24 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
             exchangeRate: { TRY: 1, USD: 32.5, EUR: 38 }, exchangeRateDate: '2026-11-01',
             exchangeRateSource: 'TCMB', reportingTotalTRY: 799.5
         });
-        await assertSucceeds(setDoc(target, { id: 'po-fx', ...first }));
+        await assertFails(financeApprove(ctx.s2(),'po-fx',first));
+        await put('system_config','ebys_rates',{rates:{TRY:1,USD:32.5,EUR:38},date:'2026-11-01',source:'TCMB'});
+        await assertFails(financeApprove(ctx.s2(),'po-fx',{...first,exchangeRate:{TRY:1,USD:40,EUR:38}}));
+        await assertFails(financeApprove(ctx.s2(),'po-fx',{...first,exchangeRateSource:'Başka kaynak'}));
+        await assertSucceeds(financeApprove(ctx.s2(),'po-fx',first));
         await assertFails(updateDoc(target, { 'exchangeRate.USD': 40 }));
         await put('purchaseOrders', 'po-fx-admin', base);
         await assertFails(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-fx-admin'), { id: 'po-fx-admin', ...approved(base, 0) }));
-        await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-fx-admin'), { id: 'po-fx-admin', ...first }));
+        await assertSucceeds(financeApprove(ctx.admin(),'po-fx-admin',first));
         await put('purchaseOrders', 'po-fx-admin-direct', { ...base, workflow: { started: false, currentStep: 0, steps: [] } });
         await assertFails(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-fx-admin-direct'), { id: 'po-fx-admin-direct', ...approved(base, 0) }));
     });
     test('üç kalemli TRY talebinin ilk onayı da mali anlık görüntüyle geçer', async () => {
         const base = { ...running(), items: Array.from({ length: 3 }, (_, i) => ({ ...line, id: `l-${i}` })), totals };
         await put('purchaseOrders', 'po-try', base);
-        await assertSucceeds(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'po-try'), { id: 'po-try', ...approved(base, 0, {}, {
-            exchangeRate: { TRY: 1, USD: 32.5, EUR: 38 }, exchangeRateDate: '2026-11-01', exchangeRateSource: 'TCMB', reportingTotalTRY: 24.6
-        }) }));
+        await assertSucceeds(financeApprove(ctx.s2(),'po-try',approved(base, 0, {}, {
+            exchangeRate: { TRY: 1, USD: 1, EUR: 1 }, exchangeRateDate: '2026-11-01', exchangeRateSource: 'TRY', reportingTotalTRY: 24.6
+        })));
     });
     test('ilk onaydan sonra geri çekilen belgenin mali içeriği ve aynı belgeyle yeniden başlatılması kilitli kalır', async () => {
         const frozen = { ...running(), durum: 'Taslak', items: [line], totals,

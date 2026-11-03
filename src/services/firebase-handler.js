@@ -9,6 +9,7 @@
 
 // 1. MODÜLER FIREBASE IMPORTLARI (Versiyon 10+)
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { subscribeRestrictedPurchases, ensurePurchaseAccess } from './purchase-access.js';
 import {
     initializeAuth, onAuthStateChanged, connectAuthEmulator, setPersistence,
     browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
@@ -404,6 +405,15 @@ window.startRealtimeSync = function () {
     // [ENV_GUARD] Sabit "inventory_v2" yerine COLLECTION_ROOT kullanılıyor.
     // Bu, demo/localhost ortamında yanlışlıkla üretim verisi dinlenmesini engeller.
     COLLECTIONS.forEach(colName => {
+        if (colName === 'purchaseOrders' && !window.isDbAdmin()) {
+            _syncUnsubscribers.push(subscribeRestrictedPurchases(fireDb,COLLECTION_ROOT,window.userAuth.uid,items=>{
+                window.data.purchaseOrders=items; window._dbMirror.purchaseOrders=typeof structuredClone==='function'?structuredClone(items):JSON.parse(JSON.stringify(items));
+                _bumpDataRevision(); _markListenerHealthy('purchaseOrders');
+                window.LoadingCoordinator?.markLoaded('purchaseOrders');
+                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated',{detail:{collection:'purchaseOrders',isPatch:false}}));
+            },error=>reportListenerError('purchaseOrders',error)));
+            return;
+        }
         _syncUnsubscribers.push(onSnapshot(collection(fireDb, COLLECTION_ROOT, colName, "items"), (snapshot) => {
             console.log(`[DB-PATH-CHECK] Şu an aktif olarak dinlenen koleksiyon: ${COLLECTION_ROOT}/${colName}/items`);
             _markListenerHealthy(colName);
@@ -1013,6 +1023,10 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
             if (p.op === 'set') batch.set(ref, p.data);
             else if (p.op === 'update') batch.update(ref, p.data);
             else batch.delete(ref);
+            if (p.col === 'purchaseOrders' && p.op === 'set' && p.data.exchangeRate && p.data.workflow?.steps?.[0]?.status === 'approved'
+                && !(window._dbMirror.purchaseOrders || []).find(x=>String(x.id)===String(p.id))?.exchangeRate) {
+                batch.set(doc(fireDb,COLLECTION_ROOT,'purchaseFinance','items',String(p.id)),Object.fromEntries(['exchangeRate','exchangeRateDate','exchangeRateSource','reportingTotalTRY'].map(k=>[k,p.data[k]])));
+            }
         });
         await batch.commit();
     } catch (e) {
@@ -1033,7 +1047,25 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
     return result;
 };
 
-export const upsertItem = window.upsertItem = (col, item, opts) => applyItemOps([{ op: 'set', col, item }], opts);
+export const upsertItem = window.upsertItem = async (col, item, opts) => {
+    const result = await applyItemOps([{ op: 'set', col, item }], opts);
+    if (col === 'purchaseOrders' && result?.written) {
+        try { await ensurePurchaseAccess(fireDb,COLLECTION_ROOT,[item],window.userAuth.uid,window.isDbAdmin()); }
+        catch (error) { console.error('Satın alma kaydedildi; görev eşlemesi onarılmalı:',error.code); window.showAppAlert?.('Talep kaydedildi; onay kuyruğu eşlemesi tamamlanamadı. Yönetici erişim eşlemesini onarmalı.','warning'); }
+    }
+    return result;
+};
+window.previewLegacyPurchaseAccess = async () => {
+    if (!window.isDbAdmin()) throw new Error('Yönetici yetkisi gerekli.');
+    const snapshot = await getDocsFromServer(collection(fireDb,COLLECTION_ROOT,'purchaseOrders','items'));
+    const orders = snapshot.docs.map(d=>({...d.data(),id:d.data().id ?? d.id}));
+    return {orders:orders.length,unresolved:orders.flatMap(p=>(p.workflow?.steps||[]).filter(s=>!s.userUid).map(s=>({id:String(p.id),name:s.user||''})))};
+};
+window.prepareLegacyPurchaseAccess = async () => {
+    if (!window.isDbAdmin()) throw new Error('Yönetici yetkisi gerekli.');
+    const snapshot = await getDocsFromServer(collection(fireDb,COLLECTION_ROOT,'purchaseOrders','items'));
+    return ensurePurchaseAccess(fireDb,COLLECTION_ROOT,snapshot.docs.map(d=>({...d.data(),id:d.data().id ?? d.id})),window.userAuth.uid,true);
+};
 export const appendItem = window.appendItem = (col, item, opts) => applyItemOps([{ op: 'set', col, item, mustBeNew: true }], opts);
 export const updateItems = window.updateItems = (col, list, opts) => applyItemOps((list || []).map(x => ({ op: 'update', col, id: x.id, fields: x.fields })), opts);
 export const updateItem = window.updateItem = (col, id, fields, opts) => applyItemOps([{ op: 'update', col, id, fields }], opts);

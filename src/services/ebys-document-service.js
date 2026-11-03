@@ -6,7 +6,7 @@ const S = () => window.AppModules.EBYSDocumentSchema;
 const root = () => window.AppEnv.COLLECTION_ROOT;
 const uid = () => { const id = window.userAuth?.uid; if (!id) throw new Error('Oturum açmalısınız.'); return id; };
 const ref = (col, id) => doc(fireDb, root(), col, 'items', id);
-export const EBYS_COLLECTION_REGISTRY = Object.freeze(['ebysDocuments', 'ebysDrafts', 'ebysVersions', 'ebysRegistrationIds', 'ebysOperations', 'ebysEvents']);
+export const EBYS_COLLECTION_REGISTRY = Object.freeze(['ebysDocuments', 'ebysDrafts', 'ebysVersions', 'ebysRegistrationIds', 'ebysOperations', 'ebysEvents', 'ebysProcesses', 'ebysTasks', 'ebysProcessOperations', 'ebysProcessEvents', 'ebysRouteTemplates']);
 const check = (head, expected) => {
     if (!head || head.ownerUid !== uid()) throw new Error('Evrakın yazarı değilsiniz.');
     if (!Number.isInteger(expected) || head.revision !== expected) throw new Error('Evrak değişti; yeniden açın.');
@@ -27,7 +27,7 @@ const replay = (snapshot, command, payloadDigest) => {
 export async function saveDraft(input) {
     const data = S().normalize(input), ownerUid = uid();
     const operationId = input.operationId || S().uuid(), id = input.id || operationId;
-    const payloadDigest = await S().digest({ id, ...data, expectedRevision: input.expectedRevision ?? null });
+    const payloadDigest = await S().digest({ id, ...data, expectedRevision: input.expectedRevision ?? null, reopen: input.reopen === true });
     return runTransaction(fireDb, async tx => {
         const [op, old, draft, unit] = await Promise.all([tx.get(ref('ebysOperations', operationId)), tx.get(ref('ebysDocuments', id)),
             tx.get(ref('ebysDrafts', id)), tx.get(ref('units', data.unitId))]);
@@ -36,11 +36,14 @@ export async function saveDraft(input) {
         const previous = old.exists() ? old.data() : null;
         if (previous) {
             check(previous, input.expectedRevision);
-            if (!['draft', 'registered'].includes(previous.state)) throw new Error('Dondurulan evrak düzenlenemez.');
+            if (input.reopen) {
+                const p = await tx.get(ref('ebysProcesses',previous.currentVersionId));
+                if (!p.exists() || !['returned','rejected','withdrawn'].includes(p.data().state)) throw new Error('Yalnız iade, red veya geri çekme sonrası yeni sürüm hazırlanabilir.');
+            } else if (!['draft', 'registered'].includes(previous.state)) throw new Error('Dondurulan evrak düzenlenemez.');
             if (previous.kind !== data.kind || previous.organizationCode !== data.organizationCode) throw new Error('Evrak yönü ve kurum kodu sabittir.');
         }
         const next = { ...(previous || {}), id, ownerUid, kind: data.kind, unitId: data.unitId, organizationCode: data.organizationCode,
-            state: previous?.state || 'draft', currentVersionId: '', versionNo: 0, registrationNo: previous?.registrationNo || '',
+            state: input.reopen ? 'draft' : previous?.state || 'draft', currentVersionId: '', versionNo: previous?.versionNo || 0, registrationNo: previous?.registrationNo || '',
             revision: (previous?.revision || 0) + 1, lastOperationId: operationId,
             createdAt: previous?.createdAt || serverTimestamp(), updatedAt: serverTimestamp() };
         tx.set(ref('ebysDocuments', id), next);
@@ -64,8 +67,8 @@ export async function freezeVersion({ documentId, expectedRevision, operationId 
         const result = replay(op, 'freezeVersion', payloadDigest); if (result) return result;
         const head = headSnap.data(), draft = draftSnap.data(); check(head, expectedRevision);
         if (!['draft', 'registered'].includes(head.state) || !draft || draft.revision !== source.revision) throw new Error('Taslak değişti veya zaten donduruldu; yeniden açın.');
-        const next = { ...head, state: 'in_review', currentVersionId: versionId, versionNo: 1, revision: head.revision + 1, lastOperationId: operationId, updatedAt: serverTimestamp() };
-        tx.set(ref('ebysVersions', versionId), { id: versionId, processId: versionId, documentId, ownerUid: head.ownerUid, versionNo: 1, schemaVersion: 1,
+        const next = { ...head, state: 'in_review', currentVersionId: versionId, versionNo: head.versionNo+1, revision: head.revision + 1, lastOperationId: operationId, updatedAt: serverTimestamp() };
+        tx.set(ref('ebysVersions', versionId), { id: versionId, processId: versionId, documentId, ownerUid: head.ownerUid, versionNo: next.versionNo, schemaVersion: 1,
             content: draft.content, metadataSnapshot: draft.metadata, attachments: [], attachmentMode: 'none', contentDigest, createdAt: serverTimestamp() });
         tx.set(ref('ebysDocuments', documentId), next);
         const output = { documentId, versionId, revision: next.revision };
@@ -76,6 +79,7 @@ export async function freezeVersion({ documentId, expectedRevision, operationId 
 export async function registerDocument({ documentId, expectedRevision, operationId = S().uuid() }) {
     const payloadDigest = await S().digest({ documentId, expectedRevision });
     for (let attempt = 0; attempt < 5; attempt++) {
+        let candidateDenied = false;
         try {
             return await runTransaction(fireDb, async tx => {
                 const [op, snapshot] = await Promise.all([tx.get(ref('ebysOperations', operationId)), tx.get(ref('ebysDocuments', documentId))]);
@@ -84,7 +88,10 @@ export async function registerDocument({ documentId, expectedRevision, operation
                 if (head.registrationNo) return { documentId, registrationNo: head.registrationNo, revision: head.revision };
                 if (!['draft', 'in_review'].includes(head.state)) throw new Error('Evrak kayda uygun değil.');
                 const number = S().registrationNo(head.organizationCode);
-                if ((await tx.get(ref('ebysRegistrationIds', number))).exists()) throw new Error('registration-collision');
+                let reservation;
+                try { reservation = await tx.get(ref('ebysRegistrationIds', number)); }
+                catch (error) { candidateDenied = error.code === 'permission-denied'; throw error; }
+                if (reservation.exists()) throw new Error('registration-collision');
                 const next = { ...head, registrationNo: number, state: head.state === 'draft' ? 'registered' : head.state,
                     revision: head.revision + 1, lastOperationId: operationId, updatedAt: serverTimestamp() };
                 tx.set(ref('ebysRegistrationIds', number), { id: number, documentId, ownerUid: head.ownerUid, operationId, createdAt: serverTimestamp() });
@@ -92,7 +99,17 @@ export async function registerDocument({ documentId, expectedRevision, operation
                 const output = { documentId, registrationNo: number, revision: next.revision };
                 log(tx, next, operationId, 'registerDocument', payloadDigest, output); return output;
             });
-        } catch (error) { if (error.message !== 'registration-collision' || attempt === 4) throw error; }
+        } catch (error) {
+            if (candidateDenied && attempt < 4) {
+                // Yalnız aday rezervasyonun get reddi: Rules eksik adayı üyeye açar,
+                // başka yazarın dolu rezervasyonunu kapatır. Kendi evrakını sunucudan
+                // tekrar okuyamayan aktörün gerçek yetki reddi yeniden denenmez.
+                const proof = await getDocFromServer(ref('ebysDocuments', documentId));
+                check(proof.data(), expectedRevision);
+                continue;
+            }
+            if (error.message !== 'registration-collision' || attempt === 4) throw error;
+        }
     }
 }
 export async function readDocument(id) {
@@ -103,10 +120,14 @@ export async function readDocument(id) {
     if (actor !== uid()) throw new Error('Oturum değişti; evrakı yeniden açın.');
     return { head: data, body: body.data() };
 }
+export async function reopenDraft({documentId,expectedRevision,operationId}) {
+    const {head,body} = await readDocument(documentId);
+    return saveDraft({id:documentId,expectedRevision,operationId,reopen:true,kind:head.kind,unitId:head.unitId,organizationCode:head.organizationCode,content:body.content,metadata:body.metadataSnapshot || body.metadata});
+}
 export function listDocuments(onData, onError, cursor = null, kind = 'incoming') {
     const conditions = window.isDbAdmin?.() ? [] : [where('ownerUid', '==', uid())];
-    // Tek alan sırası: sahip sorgusu için bileşik indeks gerektirmemek amacıyla owner ekranı ayrı sade sorgudur.
-    const constraints = conditions.length ? [...conditions, limit(50)] : [where('kind', '==', kind), orderBy('updatedAt', 'desc'), ...(cursor ? [startAfter(cursor)] : []), limit(50)];
+    // Yön, sahip ve zaman sırası için bileşik indeksler firestore.indexes.json içindedir.
+    const constraints = [...conditions, where('kind', '==', kind), orderBy('updatedAt', 'desc'), ...(cursor ? [startAfter(cursor)] : []), limit(50)];
     return onSnapshot(query(collection(fireDb, root(), 'ebysDocuments', 'items'), ...constraints), snap => onData(snap.docs.map(d => ({ ...d.data(), _cursor: d }))), onError);
 }
 export async function countDocuments() {
@@ -127,4 +148,4 @@ export async function exportOwnDocuments() {
     return { schemaVersion: 1, root: root(), ownerUid, exportedAt: new Date().toISOString(), consistency: 'sequential-reads', attachmentMode: 'none', data };
 }
 window.AppModules = window.AppModules || {};
-window.AppModules.EBYSDocuments = { saveDraft, freezeVersion, registerDocument, readDocument, listDocuments, countDocuments, exportOwnDocuments };
+window.AppModules.EBYSDocuments = { saveDraft, freezeVersion, registerDocument, readDocument, listDocuments, countDocuments, exportOwnDocuments, reopenDraft };

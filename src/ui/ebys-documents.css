@@ -10,3 +10,39 @@ dialog.ebys-document-dialog{position:fixed;inset:0;margin:auto!important;width:m
 .ebys-preview{padding:12px}.ebys-preview-content{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;margin:24px 0}
 @media(max-width:600px){.ebys-document-dialog .ebys-document-form{grid-template-columns:1fr}dialog.ebys-document-dialog{padding:18px}}
 @media print{body.printing-ebys>*:not(.ebys-document-dialog){display:none!important}body.printing-ebys .ebys-document-dialog:not(:last-of-type){display:none!important}body.printing-ebys dialog.ebys-document-dialog{position:static;display:block;width:100%;max-height:none;overflow:visible;border:0;color:#000;background:#fff;box-shadow:none}body.printing-ebys .ebys-preview-actions,body.printing-ebys .ebys-dialog-close{display:none!important}}
+/* Süreç özeti ve yönetim işlemleri */
+.ebys-process-dialog>h3{font-size:1.2rem;padding-right:40px;margin:0 0 18px}
+.ebys-process-dialog .ebys-process-summary{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:16px;border:1px solid var(--color-border,#cbd5e1);border-radius:12px;background:var(--color-surface-alt,#f1f5f9)}
+.ebys-process-summary p,.ebys-process-summary small{flex-basis:100%;margin:0;line-height:1.5}
+.ebys-process-badge{display:inline-flex;border-radius:20px;padding:5px 12px;background:rgba(59,130,246,.14);color:var(--color-primary,#3b82f6);font-size:.85rem;font-weight:700}
+.ebys-process-heading{font-size:.95rem;margin:22px 0 12px}
+.ebys-process-route{list-style:none;margin:0 0 20px;padding:0;display:grid;gap:8px}
+.ebys-process-route li{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--color-border,#cbd5e1);border-radius:10px}
+.ebys-process-route li.is-current{border-color:var(--color-primary,#3b82f6);background:rgba(59,130,246,.06)}
+.ebys-process-step{display:flex;flex:0 0 30px;height:30px;align-items:center;justify-content:center;border-radius:50%;background:var(--color-surface-alt,#e2e8f0);font-weight:700}
+.ebys-process-route li>div{min-width:0;flex:1;overflow-wrap:anywhere}
+.ebys-process-route li small{display:block;margin-top:4px;opacity:.8}
+.ebys-process-step-state{font-size:.8rem;opacity:.85}
+.ebys-process-panel{margin:12px 0;padding:16px;border:1px solid var(--color-border,#cbd5e1);border-radius:12px}
+.ebys-process-panel h4{font-size:1rem;margin:0 0 12px}
+.ebys-process-panel summary{cursor:pointer;font-weight:600;line-height:1.5}
+.ebys-process-panel[open] summary{margin-bottom:12px}
+.ebys-process-help{font-size:.85rem;line-height:1.6;opacity:.85;margin:10px 0 14px}
+.ebys-process-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ebys-process-field{display:flex;flex-direction:column;gap:7px;margin:0 0 14px;font-size:.85rem;min-width:0}
+.ebys-process-dialog .ebys-process-field select,.ebys-process-dialog .ebys-process-field input,.ebys-process-dialog .ebys-process-field textarea{width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;margin:0;border-radius:8px}
+.ebys-process-actions,.ebys-process-footer{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.ebys-process-dialog button:not(.ebys-dialog-close){padding:9px 14px;border-radius:8px;font-size:.9rem;cursor:pointer}
+.ebys-process-dialog .ebys-process-primary{background:var(--color-primary,#3b82f6);color:#fff}
+.ebys-process-withdraw summary{color:var(--color-danger,#dc2626)}
+.ebys-process-footer{justify-content:space-between;margin-top:20px;padding-top:16px;border-top:1px solid var(--color-border,#cbd5e1)}
+.ebys-process-footer small{font-size:.8rem;opacity:.8;flex:1;min-width:180px;line-height:1.5}
+.ebys-process-status:not([hidden]){padding:10px 12px;border-radius:8px;background:rgba(220,38,38,.08);color:var(--color-danger,#dc2626);font-size:.85rem}
+@media(max-width:600px){.ebys-process-grid{grid-template-columns:1fr}.ebys-process-step-state{flex-basis:100%;padding-left:42px}.ebys-process-route li{flex-wrap:wrap}}
+.ebys-registry-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:170px}
+.ebys-registry-actions button{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;margin:0!important;border-radius:8px;white-space:nowrap;font-size:.85rem}
+.ebys-task-card .ebys-task-title{font-size:1.05rem;margin:12px 0 6px}
+.ebys-task-meta,.ebys-task-state,.ebys-task-help{font-size:.85rem;line-height:1.6;margin:7px 0;opacity:.85}
+.ebys-task-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.ebys-task-actions button{margin:0!important;padding:9px 12px;border-radius:8px}
+.ebys-queue-heading{margin:24px 0 14px}.ebys-queue-heading h4{margin-bottom:6px}.ebys-queue-heading p{font-size:.85rem;line-height:1.6;opacity:.85}

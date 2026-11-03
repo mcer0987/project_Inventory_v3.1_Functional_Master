@@ -31,6 +31,7 @@
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="src/ui/purchase-print.css">
+    <link rel="stylesheet" href="src/ui/ebys-documents.css">
     <link rel="stylesheet" href="dark-theme.css">
     <link rel="stylesheet" href="mobile-responsive.css">
     <link rel="stylesheet" href="login-redesign.css">
@@ -840,6 +841,30 @@
                         <tbody id="purchaseTableBody">
                         </tbody>
                     </table>
+            <div class="modern-approval-header-slim mb-4" id="ebysTasksHeader">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="header-icon-box-slim"><i class="fas fa-file-signature" aria-hidden="true"></i></div>
+                    <div class="d-flex flex-column">
+                        <h3 class="header-main-title-slim">Evrak görevlerim</h3>
+                        <p class="header-subtitle-animated">Size atanmış evrakları ve karar verdiğiniz sabit sürümleri burada izleyin. Geçmiş karar, yeni sürüme erişim sağlamaz.</p>
+                    </div>
+                </div>
+            </div>
+            <section id="ebysMyTasks" aria-labelledby="ebysTasksHeader" class="mb-4"></section>
+            <div class="ebys-queue-heading">
+                <h4>Geri dönen evraklarım</h4>
+                <p>Yazarı olduğunuz iade, red veya geri çekme ile kapanmış evraklar için yeni sürüm hazırlayın.</p>
+            </div>
+            <section id="ebysMyReturned" aria-label="Geri dönen evraklarım" class="mb-4"></section>
+            <div class="modern-approval-header-slim mb-4" id="legacyApprovalsHeader">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="header-icon-box-slim"><i class="fas fa-shopping-cart" aria-hidden="true"></i></div>
+                    <div class="d-flex flex-column">
+                        <h3 class="header-main-title-slim">Satın alma onayları</h3>
+                        <p class="header-subtitle-animated">Mevcut satın alma taleplerindeki onay adımlarınızı bu bölümden yönetin.</p>
+                    </div>
+                </div>
+            </div>
                 </div>
             </div>
         </div>
@@ -1536,3 +1561,4 @@
 </body>
 
 </html>
+    <script type="module" src="src/ui/ebys-documents-ui.js"></script>
