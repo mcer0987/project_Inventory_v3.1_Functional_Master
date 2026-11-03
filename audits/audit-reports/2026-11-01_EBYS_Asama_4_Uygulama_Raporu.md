@@ -1,5 +1,7 @@
 # EBYS Aşama 4 — Evrak kaydı, üst yazı ve gelen/giden yönetimi
 
+**3 Kasım 2026 kapanış kaydı:** Aşama 4 çekirdek ve UI/UX uygulaması `990a924` commit'indedir; önceki bölümlerdeki “commit edilmedi” ifadeleri yazıldıkları andaki tarihsel durumu anlatır. Proje sahibi Aşama 5 öncesi mevcut çalışma ağacının Hosting yayınını ayrıca onayladı; 86 dosyalık paket başarıyla yayımlandı. Ana sayfa, admin sayfası, manuel çıkış modülü/şeması ve evrak arayüzünün canlı dosyaları yerel SHA-256 ile aynı doğrulandı. Yayın beyaz listesi güncel kapsam için 86/86 ve izinsiz XSS kullanımı 0 olarak geçti. Bağımsız denetimin A4-02 yayın kapsamı kapısı bu doğrulamayla kapandı; A4-01 farklı yazar rezervasyon çakışması P2'si Aşama 5 başlangıç planına devredildi. Bu kapanış kaydı ve tam admin yerleşim testi ayrı kabul commit'ine hazırlanmıştır; diğer envanter/import/manuel çıkış çalışma ağacı değişiklikleri Aşama 4 kodu diye commit'e alınmaz.
+
 Uygulama tarihi: 2 Kasım 2026. Dosya adı istenen rapor sözleşmesiyle korunmuştur.
 
 Dal: `feat/v3.4-ebys-asama-4`. Başlangıç commit'i: `d2b117a` — `feat(ebys): kalemli satın alma ve döviz yönetimini tamamla`.
@@ -115,3 +117,11 @@ Bu düzeltmeden sonra `node scratch/ebys-stage4-ui.cjs`, `npm run lint:xss` ve `
 Değişenler: `admin.html`, `src/ui/ebys-documents-ui.js`, `src/ui/ebys-documents.css`, `src/services/ebys-document-service.js`, `scratch/ebys-stage4-ui.cjs`, `tests/rules/ebys-documents.test.mjs`, bu rapor. Firestore yazma kuralları değiştirilmedi.
 
 Doğrulama: `npm run lint:xss` geçti (65 dosya, 202 sink, 262 HTML şablonu, 932 dinamik ifade; güvenli 919, izinli 13, izinsiz 0). Tam HTML ve gerçek stillerle UI/UX testi; merkez konumu, 2 kolon, 85vh sınırı, çarpı/Escape/backdrop, gerçek kurumsal onay/iptal, taslakta kapanma ve liste yenileme, 50'yi aşan KPI görünümü, başlık sırası, çıktı ve mobil tek kolon kontrolünü geçti; pageerror 0. `scratch/admin-layout-regression.cjs` geçti: 9 sekme doğru kapsayıcıda, 6 geçiş doğru yerleşimde. Aggregate count ve kayıt kuralları gerçek servisle 7/7 geçti; log `scratch/ebys-stage4-ux-counts.log`. Görsel kanıt `scratch/ebys-stage4-form-ux.png`. Diff kontrolü temiz. Değişiklikler yerel dalda; commit/deploy yapılmadı.
+
+## 9. Canlı manualExits okuma hatası
+
+Proje sahibinin deploy sonrası bildirdiği `manualExits: Missing or insufficient permissions` hatası için canlı Firestore release kaydı salt okunur API ile incelendi. `medipol-inventory-v3` projesinin `cloud.firestore` release zamanı `2026-10-30T11:51:21.119698Z`. Yayınlanmış kurallarda `manualExits` ve yeni EBYS koleksiyonları bulunmuyor; yerel kurallarda mevcut. İstemci/Rules sürümleri farklıdır. Bu incelemede canlı kural veya veri değiştirilmedi.
+
+`tests/rules/manual-exits.test.mjs` içine canlı/demo köklerinde admin listeleme, bağlı personel okuması ve misafir/bağsız hesap/tanımsız kök ret kontrolleri eklendi. Hedefli emülatör koşusu **4/4 geçti**, başarısız 0. Log: `scratch/manual-exits-read-rules.log`.
+
+Gerekli yayın komutu: `firebase deploy --only "firestore:rules,firestore:indexes" --project medipol-inventory-v3`. Hosting yayını Firestore kurallarını/indekslerini kendiliğinden güncellemez. Yayın tamamlandıktan sonra sayfa tam yenilenmeli; izin hatasıyla kapanmış dinleyici tekrar başlatılmalıdır. Bu komut inceleme sırasında çalıştırılmadı.
