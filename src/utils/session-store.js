@@ -83,10 +83,21 @@
         return !!getActiveUser();
     }
 
-    // Firebase admin oturumu: e-posta ile açılmış, anonim OLMAYAN ve admin e-postasına ait oturum.
+    let liveAdminSession = null;
+
+    function isPrimaryDbAdmin(user = window.userAuth) {
+        return !!(user && !user.isAnonymous && user.email === ADMIN_EMAIL);
+    }
+
+    function setFirebaseAuthClaims(user, token) {
+        const personId = token?.claims?.inventoryLiveAdmin;
+        liveAdminSession = isStaffAccountSession(user) && token?.signInProvider === 'password'
+            && typeof personId === 'string' && personId ? user : null;
+    }
+
     function isDbAdmin() {
-        const u = window.userAuth;
-        return !!(u && !u.isAnonymous && u.email === ADMIN_EMAIL);
+        return isPrimaryDbAdmin() || (window.AppEnv?.COLLECTION_ROOT === 'lifeserver_master'
+            && liveAdminSession !== null && liveAdminSession === window.userAuth);
     }
 
     // [WHY]: Faz 4 · J1 (M1, M5) — Rules v2 personelin silme ve admin koleksiyonu yazmalarını reddediyor; birçok fonksiyon
@@ -160,7 +171,7 @@
 
     const Session = {
         ENABLE_BIOMETRIC_LOGIN,
-        getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, requireDbAdmin,
+        getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, isPrimaryDbAdmin, setFirebaseAuthClaims, requireDbAdmin,
         maskUserData, unmaskUserData, sanitizeUser, ADMIN_EMAIL,
         STAFF_AUTH_MODES, DEFAULT_STAFF_AUTH_MODE, getStaffAuthMode, isStaffAccountSession,
         getAdminVisaRemaining, hasValidAdminVisa, grantAdminVisa, extendAdminVisa, clearAdminVisa,

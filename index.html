@@ -767,9 +767,27 @@
                     </div>
                 </div>
             </div>
-            <div id="myApprovalsContainer" class="approval-grid">
-                <!-- Onay kartları buraya yüklenecek -->
-            </div>
+            <section class="approval-queue-group" aria-labelledby="ebysTasksTitle">
+                <header class="approval-queue-divider" id="ebysTasksHeader">
+                    <h4 id="ebysTasksTitle">Evrak görevlerim</h4>
+                    <p>Size atanmış evrakları ve karar verdiğiniz sabit sürümleri burada izleyin. Geçmiş karar, yeni sürüme erişim sağlamaz.</p>
+                </header>
+                <section id="ebysMyTasks" aria-labelledby="ebysTasksTitle"></section>
+                <aside class="approval-returned-group" aria-labelledby="ebysReturnedTitle">
+                    <h5 id="ebysReturnedTitle">Geri dönen evraklarım</h5>
+                    <p>Yazarı olduğunuz iade, red veya geri çekme ile kapanmış evraklar için yeni sürüm hazırlayın.</p>
+                    <section id="ebysMyReturned" aria-labelledby="ebysReturnedTitle"></section>
+                </aside>
+            </section>
+            <section class="approval-queue-group" aria-labelledby="legacyApprovalsTitle">
+                <header class="approval-queue-divider" id="legacyApprovalsHeader">
+                    <h4 id="legacyApprovalsTitle">Satın alma onayları</h4>
+                    <p>Mevcut satın alma taleplerindeki onay adımlarınızı bu bölümden yönetin.</p>
+                </header>
+                <div id="myApprovalsContainer" class="approval-grid">
+                    <!-- Onay kartları buraya yüklenecek -->
+                </div>
+            </section>
         </div>
 
         <div id="unitsTab" class="tab-content">
@@ -841,30 +859,6 @@
                         <tbody id="purchaseTableBody">
                         </tbody>
                     </table>
-            <div class="modern-approval-header-slim mb-4" id="ebysTasksHeader">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="header-icon-box-slim"><i class="fas fa-file-signature" aria-hidden="true"></i></div>
-                    <div class="d-flex flex-column">
-                        <h3 class="header-main-title-slim">Evrak görevlerim</h3>
-                        <p class="header-subtitle-animated">Size atanmış evrakları ve karar verdiğiniz sabit sürümleri burada izleyin. Geçmiş karar, yeni sürüme erişim sağlamaz.</p>
-                    </div>
-                </div>
-            </div>
-            <section id="ebysMyTasks" aria-labelledby="ebysTasksHeader" class="mb-4"></section>
-            <div class="ebys-queue-heading">
-                <h4>Geri dönen evraklarım</h4>
-                <p>Yazarı olduğunuz iade, red veya geri çekme ile kapanmış evraklar için yeni sürüm hazırlayın.</p>
-            </div>
-            <section id="ebysMyReturned" aria-label="Geri dönen evraklarım" class="mb-4"></section>
-            <div class="modern-approval-header-slim mb-4" id="legacyApprovalsHeader">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="header-icon-box-slim"><i class="fas fa-shopping-cart" aria-hidden="true"></i></div>
-                    <div class="d-flex flex-column">
-                        <h3 class="header-main-title-slim">Satın alma onayları</h3>
-                        <p class="header-subtitle-animated">Mevcut satın alma taleplerindeki onay adımlarınızı bu bölümden yönetin.</p>
-                    </div>
-                </div>
-            </div>
                 </div>
             </div>
         </div>

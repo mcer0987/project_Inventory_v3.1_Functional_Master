@@ -175,11 +175,7 @@ export const updateNavbarUI = function (user) {
 
     header.appendChild(userDisplay);
 
-    // [WHY]: Admin butonu yalnızca Muhammed Cer veya Admin adlı kullanıcılara gösterilir.
-    // [HOW]: İsim karşılaştırması; yetki kontrolünü Firebase Auth'tan değil
-    //        localStorage objesinden yapıyor (UI-only karar, güvenlik değil).
-    // J3: parola sonrası kimlik personel listesinde yoksa "Yönetici" etiketi taşır; düğme Firebase admin oturumunda da görünür.
-    const isAdmin = (user.name === 'Muhammed Cer' || user.name === 'Admin') || window.isDbAdmin();
+    const isAdmin = window.isDbAdmin();
     const adminButtonHTML = isAdmin ? `
         <button type="button" class="btn-admin-panel user-action-button user-admin-button"
                 aria-label="Yönetici paneline geç" title="Yönetici paneline geç"
@@ -249,7 +245,7 @@ export const checkAuth = function () {
     // [HOW]: Admin oturumu yalnız geçerli vize + parola sonrası atanmış kimlikle geçerlidir. Biri eksikse oturum "bayat" →
     //        endAdminSession('stale') Firebase oturumunu da kapatır (yoksa kimliksiz bir DB-admin token'ı kalırdı).
     //        Giriş sürerken (vize henüz yazılmadı) karar ertelenir.
-    if (window.isDbAdmin()) {
+    if (window.AppModules.Session.isPrimaryDbAdmin()) {
         const S = window.SecurityConfig;
         if (S && S.isSignInPending()) return;
         if (window.AppModules.Session.hasValidAdminVisa() && activeUser) {
@@ -541,6 +537,7 @@ async function completeStaffLogin(pri, code, { priInput, codeInput, loginModal }
         return;
     }
     const user = window.getActiveUser();
+    if (window.isDbAdmin()) Session.grantAdminVisa();
 
     // ─── BAŞARILI GİRİŞ ───
     setLoginStatus('');

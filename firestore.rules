@@ -19,11 +19,20 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
 
     // Admin = bilinen e-posta + e-posta/parola sağlayıcısı (anonim token'da e-posta iddiası geçmez).
-    function isAdmin() {
+    function isPrimaryAdmin() {
       return signedIn()
         && request.auth.token.get('email', '') == 'admin@medipol.local'
         && request.auth.token.firebase.sign_in_provider == 'password';
     }
+
+    function isAdmin(root) {
+      return signedIn() && request.auth.token.firebase.sign_in_provider == 'password'
+        && (request.auth.token.get('email','') == 'admin@medipol.local'
+          || (root == 'lifeserver_master' && request.auth.token.get('inventoryLiveAdmin','') != ''
+            && request.auth.token.inventoryLiveAdmin == get(staffAccount(root)).data.get('personelId','')
+            && isStaff(root)));
+    }
+
 
     // J10 · personel: e-posta/parola oturumu, kurumsal kimlik e-postası (<pri>@staff.medipol.local) ve — asıl kanıt — yöneticinin
     // yazdığı hesap eşlemesi (staffAccounts/{uid} → personelId) ile o personel kaydındaki uid ve PRI'nin bu oturumla aynı olması.
@@ -65,7 +74,11 @@ service cloud.firestore {
       return get(staffGate(root)).data.get('staffAccessEnabled', false) == true;
     }
     function isStaff(root) { return staffAccessOpen(root) && staffIdentity(root); }
-    function member(root) { return isAdmin() || isStaff(root); }
+    // isStaff zaten ana yönetici e-postasını dışlar. Yetki iddiası yoksa yönetici kontrolü tekrarlanmaz.
+    function regularStaff(root) {
+      return isStaff(root) && (!request.auth.token.keys().hasAny(['inventoryLiveAdmin']) || !isAdmin(root));
+    }
+    function member(root) { return isAdmin(root) || isStaff(root); }
 
     // T1: canlı kök lifeserver_master (28.09.2026'dan beri) + localhost/demo kökü. inventory_v2 aşağıda ayrı (KJ-2).
     function validRoot(r) { return r in ['lifeserver_master', 'inventory_demo']; }
@@ -225,13 +238,14 @@ service cloud.firestore {
     function poItemsOk(d) {
       let a = d.get('items', []);
       let totals = d.get('totals', {});
-      return (!d.keys().hasAny(['documentTypeCode']) || d.documentTypeCode == 'PURCHASE_REQUEST')
+      let n = a is list ? a.size() : 0;
+      return d.get('documentTypeCode', 'PURCHASE_REQUEST') == 'PURCHASE_REQUEST'
         && (!d.keys().hasAny(['items', 'totals']) || (
-        a is list && a.size() >= 1 && a.size() <= 3
+        n >= 1 && n <= 3
         && totals is map && totals.keys().hasAll(['TRY', 'USD', 'EUR'])
         && poLineOk(a[0])
-        && (a.size() == 1 || (poLineOk(a[1])
-            && (a.size() == 2 || poLineOk(a[2]))))));
+        && (n == 1 || (poLineOk(a[1])
+            && (n == 2 || poLineOk(a[2]))))));
     }
     function poFxFieldsOk(d) {
       let rates = d.get('exchangeRate', {});
@@ -243,14 +257,20 @@ service cloud.firestore {
         && d.exchangeRateSource.size() <= 120 && noTag(d.exchangeRateSource)
         && d.get('reportingTotalTRY', -1) is number && d.reportingTotalTRY >= 0 && d.reportingTotalTRY <= 1000000000;
     }
-    function poFxDecisionOk(root, old, d, step, status) {
+    function poPathId(docId, d) {
+      return d.id == docId || (d.id is int && string(d.id) == docId);
+    }
+    function poFxSnapshot(d) {
+      return {'exchangeRate':d.exchangeRate, 'exchangeRateDate':d.exchangeRateDate,
+              'exchangeRateSource':d.exchangeRateSource, 'reportingTotalTRY':d.reportingTotalTRY};
+    }
+    function poFxDecisionOk(root, docId, old, d, step, status) {
       let fields = ['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'];
-      let snapshot = /databases/$(database)/documents/$(root)/purchaseFinance/items/$(string(d.get('id','')));
+      let snapshot = ebysPath(root,'purchaseFinance',docId);
       return status == 'approved' && step == 0
-        ? d.keys().hasAll(fields) && (old.keys().hasAll(fields) || (
-            d.exchangeRate == getAfter(snapshot).data.exchangeRate && d.exchangeRateDate == getAfter(snapshot).data.exchangeRateDate
-            && d.exchangeRateSource == getAfter(snapshot).data.exchangeRateSource && d.reportingTotalTRY == getAfter(snapshot).data.reportingTotalTRY))
-          && (!old.keys().hasAny(fields) || !d.diff(old).affectedKeys().hasAny(fields))
+        ? (old.keys().hasAny(fields)
+            ? old.keys().hasAll(fields) && !d.diff(old).affectedKeys().hasAny(fields)
+            : d.id == docId && !exists(snapshot) && getAfter(snapshot).data == poFxSnapshot(d))
         : !d.diff(old).affectedKeys().hasAny(fields);
     }
     function poInitialEventOk(d, me) {
@@ -295,33 +315,35 @@ service cloud.firestore {
       let nwf = d.get('workflow', {});
       let me = old.get('createdByName', '');
       let changed = d.diff(old).affectedKeys();
+      let started = nwf.get('started',false) == true;
+      let status = d.get('durum','');
       return (!old.keys().hasAny(['exchangeRate'])
-            || (nwf.get('started', false) != true
+            || (!started
                 && !changed.hasAny(['items', 'totals', 'urun', 'adet', 'butce', 'budgetMode', 'budgetEstimateRates', 'documentTypeCode', 'aciklama', 'birim', 'tur', 'evrakNo', 'files', 'oncelik'])))
         && (!changed.hasAny(['items', 'totals', 'exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
             || (poItemsOk(d) && !changed.hasAny(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])))
         && wf.get('started', false) != true
         && !changed.hasAny(['createdBy', 'createdByName', 'talepEden'])
         && old.get('durum', '') in ['Onay Bekliyor', 'Taslak', '']
-        && d.get('durum', '') in ['Onay Bekliyor', 'Taslak', 'İptal Edildi']
-        && (nwf.get('started', false) == true
+        && status in ['Onay Bekliyor', 'Taslak', 'İptal Edildi']
+        && (started
             ? freshSteps(nwf.get('steps', []), request.auth.uid)
             : nwf.get('steps', []).size() == 0)
         && nwf.get('currentStep', 0) == 0
-        && (nwf.get('finished', false) != true || d.get('durum', '') == 'İptal Edildi')
-        && (nwf.get('started', false) != true || d.get('durum', '') == 'Onay Bekliyor')
-        && (nwf.get('started', false) == true ? nwf.get('currentState', '') == 'initiation'
-            : (d.get('durum', '') == 'İptal Edildi'
+        && (nwf.get('finished', false) != true || status == 'İptal Edildi')
+        && (!started || status == 'Onay Bekliyor')
+        && (started ? nwf.get('currentState', '') == 'initiation'
+            : (status == 'İptal Edildi'
                ? nwf.get('currentState', '') == 'cancelled'
                  && wf.get('currentState', 'initiation') in ['initiation', 'manager_approval', 'hr_approval', 'finance_approval', 'director_approval', 'suspended']
                : nwf.get('currentState', null) == wf.get('currentState', null)))
         // J11.7 · P1 (bağımsız denetim): ownerEventOk "kayıt eklenmemesini" de kabul eder; başlatma ve iptalde istemcinin ürettiği
         // kayıt ZORUNLU (başlatma: +1 history 'create' +1 akış; iptal: +1 akış). Düzenleme / ek silme dalı değişmedi.
-        && ownerEventOk(wf.get('history', []), nwf.get('history', []), me, 'action', nwf.get('started', false) == true ? ['create'] : [],
-             nwf.get('started', false) == true, nwf.get('templateId', null) != null)
-        && ownerEventOk(old.get('akis', []), d.get('akis', []), me, 'islem', nwf.get('started', false) == true ? ['İş akışı başlatıldı']
-             : (d.get('durum', '') == 'İptal Edildi' ? ['Talep İptal Edildi'] : ['Talep güncellendi', 'Ek dosya silindi']),
-             nwf.get('started', false) == true || d.get('durum', '') == 'İptal Edildi', false);
+        && ownerEventOk(wf.get('history', []), nwf.get('history', []), me, 'action', started ? ['create'] : [],
+             started, nwf.get('templateId', null) != null)
+        && ownerEventOk(old.get('akis', []), d.get('akis', []), me, 'islem', started ? ['İş akışı başlatıldı']
+             : (status == 'İptal Edildi' ? ['Talep İptal Edildi'] : ['Talep güncellendi', 'Ek dosya silindi']),
+             started || status == 'İptal Edildi', false);
     }
     // Sahibi, akış SÜRERKEN: yalnız geri çeker (taslağa döner; içerik değişmez, geçmiş korunur).
     function poWithdrawOk(old, d) {
@@ -329,7 +351,7 @@ service cloud.firestore {
       let nwf = d.get('workflow', {});
       let me = old.get('createdByName', '');
       return wf.get('started', false) == true && wf.get('finished', false) != true
-        && d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis'])
+        && d.diff(old).affectedKeys().hasOnly(['id', 'workflow', 'durum', 'akis'])
         && d.get('durum', '') == 'Taslak'
         && nwf.get('started', true) == false && nwf.get('finished', true) == false
         && nwf.get('steps', [1]).size() == 0 && nwf.get('currentStep', -1) == 0
@@ -366,43 +388,43 @@ service cloud.firestore {
     //   - Bilinçli sınırlama: tarih alanları (timestamp / tarih / date) istemci saatidir; sunucu saatine bağlanamaz (dizi içinde
     //     serverTimestamp yok, veri katmanı JSON kopyası alır). Onayda history'nin from/to değerleri bağlanmadı: istemcinin durum
     //     döngüsü 6+ adımlı akışta 'completed'a geçip fixWorkflowCurrentStep ile 'initiation'a döner (meşru akış kırılırdı).
-    function poApprovalOk(root, old, d) {
+    function poApprovalOk(root, docId, old, d) {
       let wf = old.get('workflow', {});
       let nwf = d.get('workflow', {});
-      let cs = wf.get('currentStep', -1);
-      let n = wf.get('steps', []).size();
-      let st = nwf.get('steps', [])[cs].get('status', '');
+      let cs = wf.currentStep;
+      let n = wf.steps.size();
+      let st = nwf.steps[cs].status;
       let hSize = wf.get('history', []).size();
-      let aSize = old.get('akis', []).size();
+      let aSize = old.akis.size();
       let me = staffName(root);
       let stepUser = string(wf.steps[cs].get('user', '')).trim();
       let uid = request.auth.uid;
-      return wf.get('started', false) == true && wf.get('finished', false) != true && wf.get('currentState', '') != 'suspended'
+      return wf.started == true && wf.get('finished', false) != true && wf.get('currentState', '') != 'suspended'
         && cs is int && cs >= 0 && cs < n
         && wf.steps[cs].get('userUid', '') == uid
         && wf.steps[cs].get('status', 'pending') == 'pending'
         && old.get('createdByUid', '') != uid
         && me != '' && (stepUser == me || stepUser.lower() == me.lower())
         && (old.keys().hasAny(['items'])
-            ? d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis', 'exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
-              && poFxDecisionOk(root, old, d, cs, st)
-            : d.diff(old).affectedKeys().hasOnly(['workflow', 'durum', 'akis']))
+            ? d.diff(old).affectedKeys().hasOnly(['id', 'workflow', 'durum', 'akis', 'exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
+              && poFxDecisionOk(root, docId, old, d, cs, st)
+            : d.diff(old).affectedKeys().hasOnly(['id', 'workflow', 'durum', 'akis']))
         && nwf.diff(wf).affectedKeys().hasOnly(['steps', 'currentStep', 'finished', 'currentState', 'history', 'started'])
-        && nwf.get('started', false) == true
+        && nwf.started == true
         && nwf.steps.size() == n
         && (cs == 0 || nwf.steps[0:cs] == wf.steps[0:cs])
         && (cs + 1 == n || nwf.steps[cs + 1:n] == wf.steps[cs + 1:n])
         && nwf.steps[cs].diff(wf.steps[cs]).affectedKeys().hasOnly(['status', 'date', 'actor', 'note'])
         && nwf.steps[cs].get('actor', '') == me
         && (hSize == 0 || nwf.history[0:hSize] == wf.get('history', []))
-        && nwf.get('history', []).size() == hSize + 1
-        && nwf.history[hSize].get('actor', '') == me
-        && nwf.history[hSize].get('uid', '') == uid
-        && nwf.history[hSize].get('action', '') == 'transition'
+        && nwf.history.size() == hSize + 1
+        && nwf.history[hSize].actor == me
+        && nwf.history[hSize].uid == uid
+        && nwf.history[hSize].action == 'transition'
         && (aSize == 0 || d.akis[0:aSize] == old.get('akis', []))
         && (st == 'approved'
-          ? (nwf.get('currentStep', -1) == cs + 1 && nwf.get('finished', false) == (cs + 1 == n)
-              && d.get('durum', '') == (cs + 1 == n ? 'Onaylandı' : 'Onay Bekliyor')
+          ? (nwf.currentStep == cs + 1 && nwf.get('finished', false) == (cs + 1 == n)
+              && d.durum == (cs + 1 == n ? 'Onaylandı' : 'Onay Bekliyor')
               && nwf.steps[cs].get('note', '') == wf.steps[cs].get('note', '')
               && nwf.history[hSize].keys().hasOnly(['id', 'from', 'to', 'actor', 'uid', 'timestamp', 'action', 'note', 'metadata'])
               && nwf.history[hSize].get('to', '') != 'cancelled'
@@ -410,16 +432,16 @@ service cloud.firestore {
               // çekemez. Son adımda 'completed'; değilse approveStep'in durum makinesinin TEK meşru ardılı (eski durumdan):
               // initiation → manager → hr → finance → director → (completed, fixWorkflowCurrentStep ile) initiation. Boş /
               // hatalı 'completed' eski durum istemcide initiation sayılır (onarım) → manager_approval.
-              && nwf.get('currentState', '') == (cs + 1 == n ? 'completed'
+              && nwf.currentState == (cs + 1 == n ? 'completed'
                    : {'': 'manager_approval', 'initiation': 'manager_approval', 'completed': 'manager_approval',
                       'manager_approval': 'hr_approval', 'hr_approval': 'finance_approval',
                       'finance_approval': 'director_approval', 'director_approval': 'initiation'}.get(wf.get('currentState', ''), '-'))
-              && d.get('akis', []).size() == aSize + 1
-              && d.akis[aSize].get('yapan', '') == me && d.akis[aSize].get('uid', '') == uid
-              && d.akis[aSize].get('islem', '').matches('✅ Onaylandı: .*')
+              && d.akis.size() == aSize + 1
+              && d.akis[aSize].yapan == me && d.akis[aSize].uid == uid
+              && d.akis[aSize].islem.matches('✅ Onaylandı: .*')
               && d.akis[aSize].keys().hasOnly(['islem', 'yapan', 'uid', 'tarih', 'note']))
-          : (st == 'rejected' && nwf.get('currentStep', -1) == cs && nwf.get('finished', false) == true
-              && d.get('durum', '') == 'Reddedildi' && nwf.get('currentState', '') == 'cancelled'
+          : (st == 'rejected' && nwf.currentStep == cs && nwf.finished == true
+              && d.durum == 'Reddedildi' && nwf.currentState == 'cancelled'
               && poRejectAkisOk(d.akis, aSize, nwf.history[hSize], nwf.steps[cs].get('note', ''), me, uid)));
     }
     // Red: tam +3 akış kaydı, üçü de onaylayanın adı + uid'siyle, rejectStep'in sırası ve türleriyle; gerekçe boş olamaz ve her
@@ -428,21 +450,22 @@ service cloud.firestore {
     function poRejectAkisOk(a, k, h, why, me, uid) {
       return why is string && why.trim() != '' && a.size() == k + 3
         && h.keys().hasOnly(['id', 'from', 'to', 'actor', 'uid', 'timestamp', 'action', 'note', 'metadata'])
-        && h.get('to', '') == 'cancelled' && h.get('note', '') == 'Reddedildi: ' + why
-        && a[k].get('yapan', '') == me && a[k].get('uid', '') == uid
-        && a[k].get('islem', '').matches('❌ REDDEDİLDİ: .*') && a[k].get('not', '') == why
+        && h.to == 'cancelled' && h.note == 'Reddedildi: ' + why
+        && a[k].yapan == me && a[k].uid == uid
+        && a[k].islem.matches('❌ REDDEDİLDİ: .*') && a[k].not == why
         && a[k].keys().hasOnly(['islem', 'yapan', 'uid', 'tarih', 'not'])
-        && a[k + 1].get('yapan', '') == me && a[k + 1].get('uid', '') == uid
-        && a[k + 1].get('islem', '').matches('🔄 State Geçişi: .*') && a[k + 1].get('not', '') == 'Reddedildi: ' + why
+        && a[k + 1].yapan == me && a[k + 1].uid == uid
+        && a[k + 1].islem.matches('🔄 State Geçişi: .*') && a[k + 1].not == 'Reddedildi: ' + why
         && a[k + 1].keys() == a[k].keys()
-        && a[k + 2].get('yapan', '') == me && a[k + 2].get('uid', '') == uid
-        && a[k + 2].get('islem', '').matches('❌ Reddedildi: .*') && a[k + 2].get('not', '') == why
+        && a[k + 2].yapan == me && a[k + 2].uid == uid
+        && a[k + 2].islem.matches('❌ Reddedildi: .*') && a[k + 2].not == why
         && a[k + 2].keys().hasOnly(['islem', 'yapan', 'uid', 'tarih', 'not', 'stateNote']);
     }
     // Sahibi: akış başlamamışsa taslak işlemleri, başlamışsa yalnız geri çekme (sahibi değilse onay adımı: poApprovalOk; dağıtım
     // update kuralında ?: ile — yalnız seçilen dal değerlendirilir).
-    function poOwnerUpdateOk(old, d) {
-      return old.get('workflow', {}).get('started', false) == true ? poWithdrawOk(old, d) : poDraftOk(old, d);
+    function poOwnerUpdateOk(root,docId,old,d) {
+      return old.get('workflow',{}).get('started',false) == true
+        ? poWithdrawOk(old,d) && poKeepHistory(root,docId,old,d) : poDraftOk(old,d);
     }
 
     // ─── Görev (tasks) ────────────────────────────────────────────────────────────────────────────────────
@@ -538,30 +561,31 @@ service cloud.firestore {
     }
     match /{root}/manualExits/items/{docId} {
       allow read: if validRoot(root) && member(root);
-      allow create, update: if validRoot(root) && isAdmin() && manualExitOk(docId, request.resource.data);
-      allow delete: if validRoot(root) && isAdmin();
+      allow create, update: if validRoot(root) && isAdmin(root) && manualExitOk(docId, request.resource.data);
+      allow delete: if validRoot(root) && isAdmin(root);
     }
 
     match /{root}/{col}/items/{docId} {
       // Ek D "Ziyaretçi ✗": oturumsuz / anonim / personele bağlı olmayan hesap hiçbir şey okuyamaz.
       allow read: if validRoot(root) && knownCol(col) && member(root)
-        && (col != 'purchaseOrders' || isAdmin() || lpRead(resource.data,request.auth.uid));
+        && (col != 'purchaseOrders' || isAdmin(root) || lpRead(root,docId,resource.data,request.auth.uid));
 
       // Admin: tüm bilinen koleksiyonlar; bakım modundan etkilenmez. Personel kaydına düz metin kod yeniden giremez.
       // v3.3: b1/b2 içerik sözleşmesi (stockCreateOk / stockUpdateOk).
-      allow create: if validRoot(root) && knownCol(col) && isAdmin()
+      allow create: if isAdmin(root) && validRoot(root) && knownCol(col)
         && definitionOk(root, col, docId, request.resource.data)
-        && (col != 'purchaseOrders' || poItemsOk(request.resource.data))
+        && (col != 'purchaseOrders' || (poPathId(docId,request.resource.data) && poItemsOk(request.resource.data)))
         && (col != 'purchaseOrders' || !request.resource.data.keys().hasAny(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY']))
         && definitionLinkOk(root, col, request.resource.data, {})
         && (col != 'personel' || personelCodeOk(request.resource.data))
         && (!(col in ['b1', 'b2']) || stockCreateOk(root, col, request.resource.data));
-      allow update: if validRoot(root) && knownCol(col) && isAdmin()
+      allow update: if isAdmin(root) && validRoot(root) && knownCol(col)
         && definitionOk(root, col, docId, request.resource.data)
-        && (col != 'purchaseOrders' || !resource.data.keys().hasAny(['items'])
+        && (col != 'purchaseOrders' || (poPathId(docId,request.resource.data) && poKeepHistory(root,docId,resource.data,request.resource.data)))
+        && (col != 'purchaseOrders' || !request.resource.data.keys().hasAny(['items'])
             || request.resource.data.get('workflow', {}).get('steps', []).size() == 0
             || request.resource.data.workflow.steps[0].get('status', '') != 'approved'
-            || poFxDecisionOk(root, resource.data, request.resource.data, 0, 'approved'))
+            || poFxDecisionOk(root, docId, resource.data, request.resource.data, 0, 'approved'))
         && (col != 'purchaseOrders' || (poItemsOk(request.resource.data)
           && (resource.data.get('workflow', {}).get('started', false) != true && !resource.data.keys().hasAny(['exchangeRate'])
               || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['items', 'totals', 'urun', 'adet', 'butce', 'budgetMode', 'budgetEstimateRates', 'documentTypeCode', 'aciklama', 'birim', 'tur', 'evrakNo', 'files', 'oncelik']))
@@ -582,13 +606,13 @@ service cloud.firestore {
             || request.resource.data.get('organizationId', '') == resource.data.organizationId)
         && (col != 'personel' || personelCodeOk(request.resource.data))
         && (!(col in ['b1', 'b2']) || stockUpdateOk(root, col, request.resource.data, resource.data));
-      allow delete: if validRoot(root) && knownCol(col) && isAdmin() && !(col in ['units', 'personel']);
+      allow delete: if validRoot(root) && knownCol(col) && isAdmin(root) && !(col in ['units', 'personel']);
 
       // Personel: yalnız iş akışı koleksiyonları, bakım kapalıyken, etiketsiz metinle; sahiplik zorunlu ve değişmez.
-      allow create: if validRoot(root) && !isAdmin() && isStaff(root)
+      allow create: if validRoot(root) && regularStaff(root)
         && staffWritable(col) && !maintenanceOn(root) && textOk(col, request.resource.data)
         && (col == 'requests' ? requestCreateOk(root, request.resource.data)
-            : col == 'purchaseOrders' ? poCreateOk(root, request.resource.data)
+            : col == 'purchaseOrders' ? poPathId(docId,request.resource.data) && poCreateOk(root, request.resource.data)
             : (request.resource.data.get('creatorUid', '') == request.auth.uid
                 && request.resource.data.get('creatorId', '') == staffName(root)));
       // J11 · P1 #5: textOk onay dalında değerlendirilmez — onaylayıcı textOk'un baktığı hiçbir alanı değiştiremez
@@ -596,19 +620,19 @@ service cloud.firestore {
       // J11.5: sahibin satın alma yolunda textOk yalnız textOk'un baktığı alanlardan biri DEĞİŞİYORSA çalışır (başlatma / geri
       // çekme / iptal bu alanlara dokunmaz). Değişmeyen değer sahibin bu yazmada getirdiği yeni metin değildir; etiket savunması
       // aynı kalır. Kazanılan bütçe 10 adımlı başlatmadaki sahibin olay türü / uid denetimine (ownerEventOk) gider.
-      allow update: if validRoot(root) && !isAdmin() && isStaff(root)
+      allow update: if validRoot(root) && regularStaff(root)
         && staffWritable(col) && !maintenanceOn(root)
         && ownerUnchanged(col, request.resource.data, resource.data)
         && (col == 'requests' ? textOk(col, request.resource.data) && requestUpdateOk(resource.data, request.resource.data)
-            : col == 'purchaseOrders' ? (resource.data.get('createdByUid', '') == request.auth.uid
+            : col == 'purchaseOrders' ? poPathId(docId,request.resource.data) && (resource.data.get('createdByUid', '') == request.auth.uid
                 ? (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['id', 'urun', 'aciklama', 'talepEden', 'birim', 'tur',
                       'evrakNo', 'oncelik', 'createdByName']) || textOk(col, request.resource.data))
-                  && poOwnerUpdateOk(resource.data, request.resource.data)
-                : poApprovalOk(root, resource.data, request.resource.data))
+                  && poOwnerUpdateOk(root,docId,resource.data,request.resource.data)
+                : poApprovalOk(root, docId, resource.data, request.resource.data))
             : textOk(col, request.resource.data) && taskUpdateOk(resource.data, request.resource.data));
 
       // Silme: personel yalnız KENDİ oluşturduğu görevi; talepler, satın almalar, zimmet ve servis kayıtları admin'e ait.
-      allow delete: if validRoot(root) && !isAdmin() && isStaff(root) && col == 'tasks' && !maintenanceOn(root)
+      allow delete: if validRoot(root) && regularStaff(root) && col == 'tasks' && !maintenanceOn(root)
         && resource.data.get('creatorUid', '') == request.auth.uid;
     }
 
@@ -616,7 +640,7 @@ service cloud.firestore {
     // eşlemesini yazamaz (kendine hesap açan biri kendini personele bağlayamaz). Kurallar get() ile okur (okuma izninden bağımsız).
     // Oturumsuz giriş rehberi (staffDirectory) KALDIRILDI: eşleşen kural yok → herkese kapalı.
     match /{root}/staffAccounts/items/{uid} {
-      allow read, write: if validRoot(root) && isAdmin();
+      allow read, write: if validRoot(root) && isAdmin(root);
     }
 
     // J11 · P0 erişim kilidi. Okuma: yönetici ve (kilit kapalıyken de) kimliği doğrulanmış personel — yalnız durum + sayılar, kişisel
@@ -647,9 +671,9 @@ service cloud.firestore {
       return gateBaseOk(d) && (d.staffAccessEnabled == false || closureOk(d.get('closure', null)));
     }
     match /{root}/accessGate/items/{gateId} {
-      allow read: if validRoot(root) && gateId == 'staff' && (isAdmin() || staffIdentity(root));
-      allow create, update: if validRoot(root) && gateId == 'staff' && isAdmin() && gateWriteOk(request.resource.data);
-      allow delete: if validRoot(root) && gateId == 'staff' && isAdmin();
+      allow read: if validRoot(root) && gateId == 'staff' && (isAdmin(root) || staffIdentity(root));
+      allow create, update: if validRoot(root) && gateId == 'staff' && isAdmin(root) && gateWriteOk(request.resource.data);
+      allow delete: if validRoot(root) && gateId == 'staff' && isAdmin(root);
     }
 
     // ─── v3.3 · Aşama 2/3 · Raf kataloğu (Denetim P1-02) — ${root}/shelves/items/{depot}_{KOD} ───────────────────────
@@ -684,8 +708,8 @@ service cloud.firestore {
     }
     match /{root}/shelves/items/{shelfId} {
       allow read: if validRoot(root) && member(root);
-      allow create: if validRoot(root) && isAdmin() && shelfDocOk(shelfId, request.resource.data);
-      allow update: if validRoot(root) && isAdmin()
+      allow create: if validRoot(root) && isAdmin(root) && shelfDocOk(shelfId, request.resource.data);
+      allow update: if validRoot(root) && isAdmin(root)
         && request.resource.data.code == resource.data.code
         && request.resource.data.depot == resource.data.depot
         && ((shelfDocOk(shelfId, request.resource.data)
@@ -694,7 +718,7 @@ service cloud.firestore {
              && (request.resource.data.capacity == resource.data.capacity
                  || request.resource.data.capacity >= request.resource.data.usedSlots))
             || (restoreLockOn(root) && shelfShapeOk(shelfId, request.resource.data)));
-      allow delete: if validRoot(root) && isAdmin()
+      allow delete: if validRoot(root) && isAdmin(root)
         && (resource.data.get('usedSlots', 0) == 0 || restoreLockOn(root));
     }
 
@@ -726,14 +750,14 @@ service cloud.firestore {
                           : getAfter(stockDoc(r, d.sourceCol, d.sourceId)).data.get('adet', -1) == d.stockAfter));
     }
     match /{root}/stockOperations/items/{opId} {
-      allow read: if validRoot(root) && isAdmin();
-      allow create: if validRoot(root) && isAdmin() && stockOpOk(root, opId, request.resource.data);
+      allow read: if validRoot(root) && isAdmin(root);
+      allow create: if validRoot(root) && isAdmin(root) && stockOpOk(root, opId, request.resource.data);
       allow update, delete: if false;
     }
 
     // Denetim günlüğü (4.7 · KJ-7): yalnız ekleme, katı şema, sunucu saati, kendi uid'i; admin dahil kimse düzeltemez/silemez.
     match /{root}/auditLogs/items/{logId} {
-      allow read: if validRoot(root) && isAdmin();
+      allow read: if validRoot(root) && isAdmin(root);
       allow create: if validRoot(root) && member(root)
         && request.resource.data.keys().hasOnly(['id', 'type', 'refCol', 'refId', 'item', 'qty', 'actorName',
              'actorPersonelId', 'uid', 'authKind', 'result', 'reason', 'page', 'ts'])
@@ -747,7 +771,7 @@ service cloud.firestore {
 
     // KJ-2: eski canlı kök (canlı site artık kullanmıyor, veri korunuyor) — yalnız admin (yedek / göç).
     match /inventory_v2/{document=**} {
-      allow read, write: if isAdmin();
+      allow read, write: if isPrimaryAdmin();
     }
 
     // EBYS evrakları genel knownCol / satın alma yazma yoluna dahil değildir.
@@ -795,8 +819,8 @@ service cloud.firestore {
             && getAfter(ebysPath(r, 'ebysRegistrationIds', d.registrationNo)).data.documentId == d.id && ebysCommand(r, d, 'registerDocument')));
     }
     match /{r}/ebysDocuments/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDocuments',id)) || isAdmin() || resource.data.ownerUid == request.auth.uid || epAccess(r,resource.data.currentVersionId));
-      allow list: if validRoot(r) && member(r) && (isAdmin() || resource.data.ownerUid == request.auth.uid);
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDocuments',id)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid || epAccess(r,resource.data.currentVersionId));
+      allow list: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.ownerUid == request.auth.uid);
       allow create: if ebysOwn(r, request.resource.data) && ebysHead(request.resource.data, id)
         && request.resource.data.state == 'draft' && request.resource.data.versionNo == 0 && request.resource.data.revision == 1 && request.resource.data.registrationNo == ''
         && request.resource.data.createdAt == request.time && ebysDraftHead(r, request.resource.data);
@@ -834,7 +858,7 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     match /{r}/ebysRegistrationIds/items/{number} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysRegistrationIds',number)) || isAdmin() || resource.data.ownerUid == request.auth.uid);
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysRegistrationIds',number)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid);
       allow list: if ebysOwn(r,resource.data);
       allow create: if ebysOwn(r,request.resource.data) && number.matches('EBYS-[A-Z0-9]{2,12}-[0-9]{6}-[A-F0-9]{32}')
         && request.resource.data.keys().hasOnly(['id','documentId','ownerUid','operationId','createdAt'])
@@ -874,42 +898,93 @@ service cloud.firestore {
         ? d.exchangeRate == {'TRY':1,'USD':1,'EUR':1} && a[0].currency == 'TRY' && (a.size()<2 || a[1].currency == 'TRY') && (a.size()<3 || a[2].currency == 'TRY')
         : d.exchangeRate == get(config).data.rates && d.exchangeRateDate == get(config).data.date && d.exchangeRateSource == get(config).data.source;
     }
-    match /{r}/purchaseFinance/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'purchaseFinance',id)) || isAdmin() || lpRead(get(ebysPath(r,'purchaseOrders',id)).data,request.auth.uid));
-      allow list: if validRoot(r) && isAdmin();
-      allow create: if validRoot(r) && member(r) && request.resource.data.keys().hasOnly(['exchangeRate','exchangeRateDate','exchangeRateSource','reportingTotalTRY'])
-        && poFxFieldsOk(request.resource.data) && request.resource.data.exchangeRate.USD > 0 && request.resource.data.exchangeRate.EUR > 0
-        && get(ebysPath(r,'purchaseOrders',id)).data.workflow.get('currentStep',-1) == 0
-        && get(ebysPath(r,'purchaseOrders',id)).data.workflow.steps[0].status == 'pending'
-        && getAfter(ebysPath(r,'purchaseOrders',id)).data.workflow.steps[0].status == 'approved'
-        && request.resource.data.exchangeRate == getAfter(ebysPath(r,'purchaseOrders',id)).data.exchangeRate
-        && request.resource.data.exchangeRateDate == getAfter(ebysPath(r,'purchaseOrders',id)).data.exchangeRateDate
-        && request.resource.data.exchangeRateSource == getAfter(ebysPath(r,'purchaseOrders',id)).data.exchangeRateSource
-        && request.resource.data.reportingTotalTRY == getAfter(ebysPath(r,'purchaseOrders',id)).data.reportingTotalTRY
-        && financeSource(r,request.resource.data,getAfter(ebysPath(r,'purchaseOrders',id)).data);
+    match /{r}/purchaseFinance/items/{docId} {
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'purchaseFinance',docId)) || isAdmin(r)
+        || lpRead(r,docId,get(ebysPath(r,'purchaseOrders',docId)).data,request.auth.uid));
+      allow list: if validRoot(r) && isAdmin(r);
+      allow create: if validRoot(r) && member(r) && poFinanceCreate(r,docId,request.resource.data);
       allow update,delete: if false;
     }
+    function poFinanceCreate(r,docId,d) {
+      let path = ebysPath(r,'purchaseOrders',docId);
+      let old = get(path).data;
+      let next = getAfter(path).data;
+      return next.id == docId && old.workflow.get('currentStep',-1) == 0 && old.workflow.steps[0].status == 'pending'
+        && next.workflow.steps[0].status == 'approved' && d == poFxSnapshot(next)
+        && poFxFieldsOk(d) && d.exchangeRate.USD > 0 && d.exchangeRate.EUR > 0 && financeSource(r,d,next);
+    }
     function lpHistory(a,i,who) { return a.size()>i && a[i].get('userUid','') == who && a[i].get('status','') in ['approved','rejected']; }
-    function lpRead(d,who) {
+    function lpDecided(a,who) {
+      return lpHistory(a,0,who) || lpHistory(a,1,who) || lpHistory(a,2,who) || lpHistory(a,3,who) || lpHistory(a,4,who)
+        || lpHistory(a,5,who) || lpHistory(a,6,who) || lpHistory(a,7,who) || lpHistory(a,8,who) || lpHistory(a,9,who);
+    }
+    function poHistoryId(docId,wf) { return docId+'__'+string(wf.get('history',[]).size()); }
+    function poHistoryPath(r,docId,wf) { return ebysPath(r,'purchaseHistory',poHistoryId(docId,wf)); }
+    function poWithdrawTransition(old,d) {
+      return d.get('durum','') == 'Taslak' && d.get('workflow',{}).get('started',true) == false
+        && old.get('workflow',{}).get('started',false) == true;
+    }
+    function poKeepHistory(r,docId,old,d) {
+      let steps = old.get('workflow',{}).get('steps',[]);
+      return !poWithdrawTransition(old,d) || steps.size() == 0 || !(steps[0].get('status','') in ['approved','rejected'])
+        || poHistoryWritten(r,docId,old,d.workflow);
+    }
+    function poHistoryWritten(r,docId,old,wf) {
+      let path = poHistoryPath(r,docId,wf);
+      return !exists(path) && getAfter(path).data.snapshot == old;
+    }
+    function lpFrozenRead(r,docId,d,wf,who) {
+      let path = poHistoryPath(r,docId,wf);
+      return exists(path) && lpFrozenMatch(d,get(path).data.snapshot,who);
+    }
+    function lpFrozenMatch(d,frozen,who) {
+      return lpDecided(frozen.workflow.steps,who) && d.diff(frozen).affectedKeys().hasOnly(['id','workflow','durum','akis']);
+    }
+    function lpRead(r,docId,d,who) {
       let wf = d.get('workflow',{});
       let a = wf.get('steps',[]);
       let i = wf.get('currentStep',-1);
       return d.get('createdByUid','') == who
         || (wf.get('started',false) == true && wf.get('finished',false) != true && i is int && i>=0 && i<a.size() && a[i].get('userUid','') == who)
-        || lpHistory(a,0,who) || lpHistory(a,1,who) || lpHistory(a,2,who) || lpHistory(a,3,who) || lpHistory(a,4,who)
-        || lpHistory(a,5,who) || lpHistory(a,6,who) || lpHistory(a,7,who) || lpHistory(a,8,who) || lpHistory(a,9,who);
+        || lpDecided(a,who)
+        || (d.get('durum','') == 'Taslak' && wf.get('started',true) == false && lpFrozenRead(r,docId,d,wf,who));
+    }
+    match /{r}/purchaseHistory/items/{id} {
+      allow get: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.snapshot.get('createdByUid','') == request.auth.uid
+        || lpDecided(resource.data.snapshot.workflow.steps,request.auth.uid));
+      allow create: if validRoot(r) && member(r) && poHistoryCreate(r,id,request.resource.data);
+      allow update,delete,list: if false;
+    }
+    function poHistoryCreate(r,id,d) {
+      let path = ebysPath(r,'purchaseOrders',d.purchaseId);
+      let old = get(path).data;
+      let next = getAfter(path).data;
+      return d.keys().hasOnly(['purchaseId','snapshot','createdAt']) && d.createdAt == request.time
+        && (isAdmin(r) || old.createdByUid == request.auth.uid) && d.snapshot == old
+        && poWithdrawTransition(old,next) && next.workflow.steps.size() == 0
+        && next.workflow.history.size() == old.workflow.get('history',[]).size()+1
+        && next.workflow.history[next.workflow.history.size()-1].action == 'withdraw'
+        && id == poHistoryId(d.purchaseId,next.workflow);
+    }
+    function lpProofRead(r,d,who) {
+      return lpRead(r,d.purchaseId,get(ebysPath(r,'purchaseOrders',d.purchaseId)).data,who);
+    }
+    function lpHistoryProof(r,d) {
+      let archive = getAfter(ebysPath(r,'purchaseHistory',d.historyId)).data;
+      return archive.purchaseId == d.purchaseId && lpDecided(archive.snapshot.workflow.steps,d.assigneeUid)
+        && (isAdmin(r) || archive.snapshot.get('createdByUid','') == request.auth.uid || request.auth.uid == d.assigneeUid);
     }
     match /{r}/purchaseAccess/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'purchaseAccess',id)) || isAdmin() || resource.data.assigneeUid == request.auth.uid || lpRead(get(ebysPath(r,'purchaseOrders',resource.data.purchaseId)).data,request.auth.uid));
-      allow list: if validRoot(r) && member(r) && (isAdmin() || resource.data.assigneeUid == request.auth.uid);
-      allow create: if validRoot(r) && member(r) && request.resource.data.keys().hasOnly(['purchaseId','assigneeUid','createdAt','updatedAt'])
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'purchaseAccess',id)) || isAdmin(r) || resource.data.assigneeUid == request.auth.uid || lpProofRead(r,resource.data,request.auth.uid));
+      allow list: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.assigneeUid == request.auth.uid);
+      allow create: if validRoot(r) && member(r) && request.resource.data.keys().hasOnly(['purchaseId','assigneeUid','createdAt','updatedAt','historyId'])
         && id == request.resource.data.purchaseId+'__'+request.resource.data.assigneeUid && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
-        && (isAdmin() || lpRead(get(ebysPath(r,'purchaseOrders',request.resource.data.purchaseId)).data,request.auth.uid))
-        && lpRead(get(ebysPath(r,'purchaseOrders',request.resource.data.purchaseId)).data,request.resource.data.assigneeUid);
-      allow update: if validRoot(r) && member(r)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']) && request.resource.data.updatedAt == request.time
-        && (isAdmin() || lpRead(get(ebysPath(r,'purchaseOrders',resource.data.purchaseId)).data,request.auth.uid))
-        && lpRead(get(ebysPath(r,'purchaseOrders',resource.data.purchaseId)).data,resource.data.assigneeUid);
+        && (request.resource.data.get('historyId','') != '' ? lpHistoryProof(r,request.resource.data)
+          : (isAdmin(r) || lpProofRead(r,request.resource.data,request.auth.uid)) && lpProofRead(r,request.resource.data,request.resource.data.assigneeUid));
+      allow update: if validRoot(r) && member(r) && request.resource.data.updatedAt == request.time
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
+          ? (isAdmin(r) || lpProofRead(r,resource.data,request.auth.uid)) && lpProofRead(r,resource.data,resource.data.assigneeUid)
+          : request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt','historyId']) && lpHistoryProof(r,request.resource.data));
       allow delete: if false;
     }
     // Aşama 5: sahiplik ACL dizisi yerine doğrulanmış deterministik görev/karar.
@@ -947,7 +1022,7 @@ service cloud.firestore {
     }
     match /{r}/ebysRouteTemplates/items/{id} {
       allow read: if validRoot(r) && member(r);
-      allow create: if validRoot(r) && isAdmin() && ebysId(id) && request.resource.data.id == id
+      allow create: if validRoot(r) && isAdmin(r) && ebysId(id) && request.resource.data.id == id
         && request.resource.data.keys().hasOnly(['id','ownerUid','name','revision','routeSnapshot','createdAt'])
         && request.resource.data.ownerUid == request.auth.uid && ebysText(request.resource.data.name,120,true)
         && request.resource.data.revision == 1 && epRoute(request.resource.data.routeSnapshot) && request.resource.data.createdAt == request.time;
@@ -987,11 +1062,11 @@ service cloud.firestore {
             ? n.state == 'active' && n.currentStep == p.currentStep+1 && n.activeAssigneeUid == p.routeSnapshot[n.currentStep].assigneeUid && epActivation(r,n)
             : n.state == (n.lastResult == 'approved' ? 'completed' : n.lastResult) && n.currentStep == p.currentStep && n.activeAssigneeUid == '')
         || n.lastCommand == 'withdraw' && n.lastResult == 'withdrawn' && p.ownerUid == request.auth.uid && n.state == 'withdrawn' && n.currentStep == p.currentStep && n.activeAssigneeUid == '' && n.lastReason.trim().size()>0
-        || n.lastCommand == 'delegate' && n.lastResult == 'delegated' && n.lastReason.trim().size()>0 && isAdmin() && n.state == 'active' && n.currentStep == p.currentStep && n.activeAssigneeUid != p.activeAssigneeUid && n.activeAssigneeUid != p.ownerUid && epActivation(r,n));
+        || n.lastCommand == 'delegate' && n.lastResult == 'delegated' && n.lastReason.trim().size()>0 && isAdmin(r) && n.state == 'active' && n.currentStep == p.currentStep && n.activeAssigneeUid != p.activeAssigneeUid && n.activeAssigneeUid != p.ownerUid && epActivation(r,n));
     }
     match /{r}/ebysProcesses/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ep(r,id)) || isAdmin() || resource.data.ownerUid == request.auth.uid || resource.data.activeAssigneeUid == request.auth.uid || epAccess(r,id));
-      allow list: if validRoot(r) && member(r) && (isAdmin() || resource.data.ownerUid == request.auth.uid);
+      allow get: if validRoot(r) && member(r) && (!exists(ep(r,id)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid || resource.data.activeAssigneeUid == request.auth.uid || epAccess(r,id));
+      allow list: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.ownerUid == request.auth.uid);
       allow create: if validRoot(r) && member(r) && epBase(request.resource.data,id) && epRoute(request.resource.data.routeSnapshot)
         && request.resource.data.ownerUid == request.auth.uid && epTemplate(r,request.resource.data) && request.resource.data.currentStep == 0 && request.resource.data.state == 'active'
         && request.resource.data.activeAssigneeUid == request.resource.data.routeSnapshot[0].assigneeUid && request.resource.data.revision == 1
@@ -1030,14 +1105,14 @@ service cloud.firestore {
           ? epStep(step,p.currentStep,p.ownerUid) && d.state == 'active' && d.stepIndex == p.currentStep && d.stepId == step.stepId && d.kind == step.kind && d.principalUid == step.assigneeUid
             && d.validFrom == request.time && d.validUntil > request.time && d.validUntil <= request.time+duration.value(90,'d')
             && d.dueAt is timestamp && d.assigneeUid != p.ownerUid
-            && (p.lastCommand == 'delegate' ? isAdmin() : d.assigneeUid == step.assigneeUid)
+            && (p.lastCommand == 'delegate' ? isAdmin(r) : d.assigneeUid == step.assigneeUid)
             && etPerson(r,p.lastCommand == 'delegate' ? getAfter(ebysPath(r,'ebysProcessOperations',p.lastOperationId)).data.result.personnelId : step.personnelId,d.assigneeUid)
           : before.get('activeAssigneeUid','') == d.assigneeUid
             && d.diff(old).affectedKeys().hasOnly(['decisionsByStep','hasDecision','state','revision','updatedAt'])
             && d.state == (p.lastCommand == 'withdraw' ? 'cancelled' : p.lastCommand == 'delegate' ? 'delegated' : 'closed'));
     }
     match /{r}/ebysTasks/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysTasks',id)) || isAdmin() || resource.data.ownerUid == request.auth.uid || resource.data.assigneeUid == request.auth.uid || epAccess(r,resource.data.processId));
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysTasks',id)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid || resource.data.assigneeUid == request.auth.uid || epAccess(r,resource.data.processId));
       allow list: if validRoot(r) && member(r) && (resource.data.assigneeUid == request.auth.uid || resource.data.ownerUid == request.auth.uid);
       allow create: if validRoot(r) && member(r) && etWrite(r,id,request.resource.data,{});
       allow update: if validRoot(r) && member(r) && etWrite(r,id,request.resource.data,resource.data);

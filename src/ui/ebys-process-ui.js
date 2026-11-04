@@ -147,21 +147,49 @@ function renderTasks(tasks,section) {
 function registerQueue(key, host, subscribe, render) {
     if(!host)return;
     window.registerSyncListener(key,()=>{
-        let cursor=null,stop=null,stopRender=null,alive=true;
-        const load=()=>{
-            stop?.();
-            stop=subscribe(rows=>{
-                if(!alive)return;
-                stopRender?.();stopRender=render(rows,host);
-                const nav=n('div',null,'d-flex gap-2 my-2');
-                nav.append(n('small','Sayfa başına en fazla 50 kayıt'));
-                if(cursor)nav.append(btn('İlk sayfa',()=>{cursor=null;load();}));
-                if(rows.length===50)nav.append(btn('Sonraki sayfa',()=>{cursor=rows.at(-1)._cursor;load();}));
+        let cursor = null, stop = null, stopRender = null, alive = true, generation = 0;
+        const clearCards = () => {
+            const cleanup = stopRender;
+            stopRender = null;
+            cleanup?.();
+        };
+        const clearQuery = () => {
+            const cleanup = stop;
+            stop = null;
+            cleanup?.();
+        };
+        const load = () => {
+            const current = ++generation;
+            clearQuery();
+            clearCards();
+            host.replaceChildren();
+            const unsubscribe = subscribe(rows => {
+                if (!alive || current !== generation) return;
+                clearCards();
+                stopRender = render(rows, host);
+                const nav = n('div', null, 'd-flex gap-2 my-2');
+                nav.append(n('small', 'Sayfa başına en fazla 50 kayıt'));
+                if (cursor) nav.append(btn('İlk sayfa', () => { cursor = null; load(); }));
+                if (rows.length === 50) nav.append(btn('Sonraki sayfa', () => { cursor = rows.at(-1)._cursor; load(); }));
                 host.append(nav);
-            },e=>{if(alive)host.textContent=e.message;},cursor);
+            }, error => {
+                if (!alive || current !== generation) return;
+                generation++;
+                clearQuery();
+                clearCards();
+                host.textContent = error.message;
+            }, cursor);
+            if (alive && current === generation) stop = unsubscribe;
+            else unsubscribe();
         };
         load();
-        return()=>{alive=false;stop?.();stopRender?.();host.replaceChildren();document.querySelectorAll('.ebys-document-dialog').forEach(d=>d.remove());};
+        return () => {
+            alive = false;
+            clearQuery();
+            clearCards();
+            host.replaceChildren();
+            document.querySelectorAll('.ebys-document-dialog').forEach(dialog => dialog.remove());
+        };
     });
 }
 registerQueue('ebysMyTasks',document.getElementById('ebysMyTasks'),(...args)=>api().subscribeMyTasks(...args),renderTasks);

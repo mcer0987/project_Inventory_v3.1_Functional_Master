@@ -57,3 +57,22 @@ test('isStaffAccountSession: yalnız @staff.medipol.local e-posta/parola oturumu
     assert.equal(S.isStaffAccountSession(), true);
     assert.equal(S.isDbAdmin(), false, 'personel hesabı admin değildir');
 });
+
+
+test('canlı yönetici arayüzü belirteçteki role, aynı oturuma ve canlı köke bağlıdır', () => {
+    const user = { uid: 'u1', email: 'p1@staff.medipol.local', isAnonymous: false };
+    const { S, window } = load({ userAuth: user, AppEnv: { COLLECTION_ROOT: 'lifeserver_master' } });
+    S.setActiveUser({ name: 'Muhammed Cer', role: 'admin' });
+    assert.equal(S.isDbAdmin(), false);
+    S.setFirebaseAuthClaims(user, { signInProvider: 'password', claims: { inventoryLiveAdmin: 'p1' } });
+    assert.equal(S.isDbAdmin(), true);
+    assert.equal(S.isStaffAccountSession(), true);
+    window.AppEnv.COLLECTION_ROOT = 'inventory_demo';
+    assert.equal(S.isDbAdmin(), false);
+    window.AppEnv.COLLECTION_ROOT = 'lifeserver_master';
+    window.userAuth = { ...user, uid: 'u2' };
+    assert.equal(S.isDbAdmin(), false);
+    window.userAuth = user;
+    S.setFirebaseAuthClaims(user, { signInProvider: 'anonymous', claims: { inventoryLiveAdmin: 'p1' } });
+    assert.equal(S.isDbAdmin(), false);
+});

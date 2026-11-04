@@ -84,12 +84,21 @@ const SecurityConfig = {
     //        yalnız false döner. Parola kuralı girişle aynı (normalizeAdminPassword).
     async reauthenticateAdmin(password) {
         this.lastErrorMessage = null;
-        const norm = this.normalizeAdminPassword(password);
-        if (!norm.ok) { this.lastErrorMessage = norm.error; return false; }
+        if (!window.isDbAdmin?.()) {
+            this.lastErrorMessage = 'Yönetici oturumu yok.';
+            return false;
+        }
+        const primary = window.AppModules.Session.isPrimaryDbAdmin();
+        const norm = primary ? this.normalizeAdminPassword(password)
+            : { value: window.StaffProvisioning.staffPassword(password) };
+        if (!norm.value) {
+            this.lastErrorMessage = norm.error || 'Geçerli giriş kodunu girin.';
+            return false;
+        }
         try {
             const { sdk, auth } = await this._auth();
             const user = auth.currentUser;
-            if (!user || user.isAnonymous || user.email !== "admin@medipol.local") { this.lastErrorMessage = 'Yönetici oturumu yok.'; return false; }
+            if (!user || user.isAnonymous || user.uid !== window.userAuth?.uid || !window.isDbAdmin()) { this.lastErrorMessage = 'Yönetici oturumu yok.'; return false; }
             await sdk.reauthenticateWithCredential(user, sdk.EmailAuthProvider.credential(user.email, norm.value));
             return true;
         } catch (e) {

@@ -3,17 +3,22 @@ const puppeteer=require('puppeteer'),fs=require('fs'),path=require('path'),asser
  const page=await browser.newPage(),errors=[];await page.setViewport({width:1280,height:900});page.on('pageerror',e=>errors.push(e.message));page.on('dialog',()=>errors.push('Native dialog açıldı'));
  const html=fs.readFileSync('index.html','utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'');await page.setRequestInterception(true);page.on('request',r=>{const url=new URL(r.url()),file=path.resolve('.'+url.pathname);if(url.pathname==='/stage5-test')return r.respond({status:200,contentType:'text/html',body:html});if(url.hostname==='127.0.0.1'&&file.startsWith(process.cwd()+path.sep)&&fs.existsSync(file)&&fs.statSync(file).isFile())return r.respond({status:200,contentType:file.endsWith('.css')?'text/css':'application/octet-stream',body:fs.readFileSync(file)});r.respond({status:200,body:''});});await page.goto('http://127.0.0.1/stage5-test');
  await page.evaluate(()=>{
- window.userAuth={uid:'owner'};window.isDbAdmin=()=>window.userAuth.uid==='owner';window.data={personel:[{id:'a',uid:'a',name:'Aynı kişi',pri:'a.pri'},{id:'b',uid:'b',name:'Aynı kişi',pri:'b.pri'},{id:'passive',uid:'p',name:'Pasif',active:false}]};window.AppModules={};window.calls=[];window.cleanups={};window.callbacks={};window.registerSyncListener=(key,fn)=>{window.cleanups[key]=fn()};window.showAppAlert=(...v)=>{window.alertResult=v};
+ document.getElementById('loginModal')?.remove();
+ window.userAuth={uid:'owner'};window.isDbAdmin=()=>window.userAuth.uid==='owner';window.data={personel:[{id:'a',uid:'a',name:'Aynı kişi',pri:'a.pri'},{id:'b',uid:'b',name:'Aynı kişi',pri:'b.pri'},{id:'passive',uid:'p',name:'Pasif',active:false}]};window.AppModules={};window.calls=[];window.cleanups={};window.callbacks={};window.taskContextCount=0;window.registerSyncListener=(key,fn)=>{window.cleanups[key]=fn()};window.showAppAlert=(...v)=>{window.alertResult=v};
  let process=null;window.setProcess=value=>process=value;const api=window.AppModules.EBYSProcesses={
  listRouteTemplates:async()=>[{id:'t',name:'Hazır rota',revision:1,routeSnapshot:[{personnelId:'b',kind:'consent',dueHours:24}]}],getProcess:async()=>{window.calls.push(['processRead']);if(process?.state==='returned'&&window.userAuth.uid==='b')throw Error('İade sonrası süreç erişimi kapandı');return process;},getVersion:async id=>{window.calls.push(['versionRead',id]);return{versionNo:id==='old'?1:2,metadataSnapshot:{subject:id==='old'?'İlk evrak':'Sabit sürüm',correspondent:'Kurum',date:'2026-11-03'},content:id==='old'?'Eski sürüm içeriği':'<img src=x onerror=alert(1)> Güvenli düz metin'};},
- watchTaskContext:(task,callback)=>{callback({versionId:task.versionId,versionNo:task.versionId==='old'?1:2,subject:task.versionId==='old'?'İlk evrak':'Yeni evrak',state:task.versionId==='old'?'returned':'active',available:true});return()=>{};},
+ watchTaskContext:(task,callback)=>{window.taskContextCount++;callback({versionId:task.versionId,versionNo:task.versionId==='old'?1:2,subject:task.versionId==='old'?'İlk evrak':'Yeni evrak',state:task.versionId==='old'?'returned':'active',available:true});return()=>window.taskContextCount--;},
  startProcess:async value=>{window.calls.push(['start',value]);process={id:'v',documentId:'d',versionId:'v',ownerUid:'owner',routeSnapshot:value.route.map((s,i)=>({...s,name:s.personnelId,assigneeUid:s.personnelId,stepId:'step-'+i})),state:'active',currentStep:0,activeAssigneeUid:'a',revision:1};},
  decideTask:async value=>{window.calls.push(['decide',value]);process.state=value.result==='returned'?'returned':'completed';process.activeAssigneeUid='';},withdrawProcess:async value=>window.calls.push(['withdraw',value]),delegateTask:async value=>window.calls.push(['delegate',value]),
- subscribeMyTasks:(callback,error,cursor)=>{window.callbacks.tasks=callback;window.calls.push(['taskCursor',cursor]);callback([]);return()=>{}},subscribeMyProcesses:(callback,error,cursor)=>{window.callbacks.processes=callback;callback([]);return()=>{}}
+ subscribeMyTasks:(callback,error,cursor)=>{window.callbacks.tasks=callback;window.callbacks.tasksError=error;window.calls.push(['taskCursor',cursor]);callback([]);return()=>{}},subscribeMyProcesses:(callback,error,cursor)=>{window.callbacks.processes=callback;callback([]);return()=>{}}
  };window.AppModules.EBYSDocuments={};
  document.querySelectorAll('.tab-content').forEach(n=>{n.style.display=n.id==='myApprovalsTab'?'block':'none';});document.getElementById('ebysMyTasks').closest('.tab-content').style.display='block';
  });
  await page.addScriptTag({content:fs.readFileSync('src/ui/ebys-process-ui.js','utf8').replace(/^import .*;\r?\n/gm,'')});
+
+ assert.equal(await page.$$eval('#myApprovals .modern-approval-header-slim',nodes=>nodes.length),1);
+ assert.equal(await page.$$eval('#myApprovals>.approval-queue-group',nodes=>nodes.length),2);
+ assert.equal(await page.$eval('#ebysTasksHeader',n=>n.classList.contains('modern-approval-header-slim')),false);
  await page.evaluate(()=>window.AppModules.EBYSProcessUI.open('v','d'));await page.waitForSelector('dialog[open] [data-route-step]');assert.deepEqual(await page.$$eval('[data-person] option',a=>a.map(n=>n.textContent)),['Aynı kişi · a.pri','Aynı kişi · b.pri']);
  const click=async title=>page.evaluate(title=>[...document.querySelectorAll('dialog[open]:last-of-type button')].find(b=>b.textContent===title).click(),title);
  await page.select('[aria-label="Rota şablonu"]','t');assert.equal(await page.$eval('[data-person]',n=>n.disabled),true);assert.equal(await page.$eval('[data-kind]',n=>n.value),'consent');await page.select('[aria-label="Rota şablonu"]','');
@@ -43,7 +48,22 @@ const puppeteer=require('puppeteer'),fs=require('fs'),path=require('path'),asser
  await click('Yazara iade et');await page.waitForFunction(()=>!document.querySelector('dialog[open]'));assert.equal(await page.evaluate(()=>window.calls.filter(c=>c[0]==='processRead').length),beforeReads);assert.equal(await page.evaluate(()=>window.alertResult[1]),'success');
  await page.evaluate(()=>window.userAuth={uid:'a'});
  assert.equal(await page.evaluate(()=>!!(document.getElementById('ebysTasksHeader').compareDocumentPosition(document.getElementById('ebysMyTasks'))&Node.DOCUMENT_POSITION_FOLLOWING)),true);
- await page.setViewport({width:390,height:844});await page.evaluate(()=>window.AppModules.EBYSProcessUI.open('v','d'));await page.waitForSelector('dialog[open]');assert.ok(await page.$eval('dialog[open]',n=>n.getBoundingClientRect().right<=innerWidth));await page.screenshot({path:'scratch/ebys-stage5-mobile.png'});await page.mouse.click(2,2);await page.waitForFunction(()=>!document.querySelector('dialog[open]'));
+ await page.setViewport({width:390,height:844});assert.ok(await page.evaluate(()=>[...document.querySelectorAll('#myApprovals .approval-queue-group')].every(n=>n.getBoundingClientRect().right<=innerWidth)));await page.evaluate(()=>window.AppModules.EBYSProcessUI.open('v','d'));await page.waitForSelector('dialog[open]');assert.ok(await page.$eval('dialog[open]',n=>n.getBoundingClientRect().right<=innerWidth));await page.screenshot({path:'scratch/ebys-stage5-mobile.png'});await page.mouse.click(2,2);await page.waitForFunction(()=>!document.querySelector('dialog[open]'));
  await page.evaluate(()=>window.callbacks.tasks(Array.from({length:50},(_,i)=>({id:String(i),state:'closed',hasDecision:false,_cursor:'cursor-'+i}))));await page.evaluate(()=>[...document.querySelectorAll('#ebysMyTasks button')].find(b=>b.textContent==='Sonraki sayfa').click());assert.equal(await page.evaluate(()=>window.calls.at(-1)[1]),'cursor-49');
+
+ await page.setViewport({width:1280,height:1000});
+ await page.evaluate(()=>{
+    window.callbacks.tasks([{id:'v__a',processId:'v',versionId:'v',documentId:'doc-a',kind:'paraf',state:'active',hasDecision:false,validUntil:{toMillis:()=>Date.now()+10000},dueAt:{toDate:()=>new Date()}},{id:'old__a',processId:'old',versionId:'old',documentId:'doc-b',kind:'paraf',state:'closed',hasDecision:true,decisionsByStep:{0:{result:'approved',reason:'İlk test onaylandı'}}}]);
+    const legacy=document.createElement('article');legacy.className='modern-card';legacy.textContent='Satın alma talebi · Onay bekliyor';document.getElementById('myApprovalsContainer').replaceChildren(legacy);
+ });
+ const grouping=await page.$eval('#myApprovals',host=>{const hero=host.querySelector('.modern-approval-header-slim').getBoundingClientRect(),groups=[...host.querySelectorAll('.approval-queue-group')].map(n=>n.getBoundingClientRect());return{mainAbove:hero.bottom<=groups[0].top,gap:groups[1].top-groups[0].bottom};});assert.equal(grouping.mainAbove,true);assert.ok(grouping.gap>=30);
+ await page.$eval('#myApprovals',n=>n.scrollIntoView());await page.$eval('#myApprovals',n=>{n.style.display='block';});await (await page.$('#myApprovals')).screenshot({path:'scratch/ebys-approvals-hierarchy.png'});
+
+ assert.equal(await page.evaluate(()=>window.taskContextCount),2);
+ await page.evaluate(()=>window.callbacks.tasksError({code:'failed-precondition',message:'Test sorgu hatası'}));
+ assert.equal(await page.evaluate(()=>window.taskContextCount),0);
+ assert.match(await page.$eval('#ebysMyTasks',n=>n.textContent),/Test sorgu hatası/);
+ await page.evaluate(()=>window.callbacks.tasks([{id:'stale',state:'active'}]));
+ assert.equal(await page.evaluate(()=>window.taskContextCount),0);
  await page.evaluate(()=>Object.values(window.cleanups).forEach(fn=>fn()));assert.equal(await page.$eval('#ebysMyTasks',n=>n.children.length),0);assert.deepEqual(errors,[]);console.log('Aşama 5 UI: UID ayırımı, pasif filtre, rota, karar, sürümün düz metni, çoklu karar geçmişi, cursor, mobil modal, Escape/backdrop ve çıkış temizliği geçti. pageerror=0');
  }finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

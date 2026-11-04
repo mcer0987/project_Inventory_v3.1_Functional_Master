@@ -366,6 +366,33 @@ describe('Satın alma (purchaseOrders) — oluşturma ve sahibi', () => {
         await put('purchaseOrders', 'po-fx-admin-direct', { ...base, workflow: { started: false, currentStep: 0, steps: [] } });
         await assertFails(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'po-fx-admin-direct'), { id: 'po-fx-admin-direct', ...approved(base, 0) }));
     });
+    test('A5-01: ilk finans kaydı yol kimliğine bağlıdır ve aynı yazmada oluşturulur', async () => {
+        const draftPath = item(ctx.s1(), LIVE, 'purchaseOrders', 'actual-new');
+        await assertFails(setDoc(draftPath, { ...draft, id: 'historical' }));
+        await assertFails(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'actual-new'), { ...draft, id: 'historical' }));
+        const base = { ...running(), items: [line], totals };
+        const financial = { exchangeRate: { TRY: 1, USD: 1, EUR: 1 }, exchangeRateDate: '2026-11-04', exchangeRateSource: 'TRY', reportingTotalTRY: 24.6 };
+        const first = approved(base, 0, {}, financial);
+        await put('purchaseOrders', 'historical', base);
+        await assertSucceeds(financeApprove(ctx.s2(), 'historical', first));
+        await put('purchaseOrders', 'legacy-upgrade', draft);
+        await assertFails(setDoc(item(ctx.admin(), LIVE, 'purchaseOrders', 'legacy-upgrade'), { ...first, id: 'legacy-upgrade' }));
+        await put('purchaseOrders', 'actual-new', { ...base, id: 'historical' });
+        for (const db of [ctx.s2(), ctx.admin()]) {
+            const target = item(db, LIVE, 'purchaseOrders', 'actual-new');
+            await assertFails(setDoc(target, { ...first, id: 'historical' }));
+            await assertFails(setDoc(target, { ...first, id: 'actual-new' }));
+        }
+        // Aynı yolda önceden duran yetim kayıt da yeni batch yazmasının yerine geçemez.
+        const finance = item(ctx.s2(), LIVE, 'purchaseFinance', 'actual-new');
+        await seed(db => setDoc(item(db, LIVE, 'purchaseFinance', 'actual-new'), financial));
+        await assertFails(setDoc(item(ctx.s2(), LIVE, 'purchaseOrders', 'actual-new'), { ...first, id: 'actual-new' }));
+        await assertFails(updateDoc(finance, { exchangeRateDate: '2026-11-05' }));
+        await seed(db => deleteDoc(item(db, LIVE, 'purchaseFinance', 'actual-new')));
+        await assertSucceeds(financeApprove(ctx.s2(), 'actual-new', first));
+        await put('purchaseOrders', '173000', { ...base, id: 173000 });
+        await assertSucceeds(financeApprove(ctx.s2(), '173000', first));
+    });
     test('üç kalemli TRY talebinin ilk onayı da mali anlık görüntüyle geçer', async () => {
         const base = { ...running(), items: Array.from({ length: 3 }, (_, i) => ({ ...line, id: `l-${i}` })), totals };
         await put('purchaseOrders', 'po-try', base);
@@ -1381,3 +1408,21 @@ describe('v3.3 · Raf kataloğu (shelves) ve stok işlem defteri (stockOperation
 });
 
 function assert(v) { if (!v) throw new Error('assert'); }
+
+
+test('canlı yönetici rolü bağlı personel UID’si ve canlı kökle sınırlıdır', async () => {
+    const signedIn = claim => env.authenticatedContext('uid-s2', {
+        email: 'bora.kaya@staff.medipol.local',
+        firebase: { sign_in_provider: 'password' },
+        inventoryLiveAdmin: claim,
+    }).firestore();
+    const authorized = signedIn('s2');
+    await assertSucceeds(setDoc(item(authorized, LIVE, 'system_config', 'role-test'), { ok: true }));
+    await assertFails(setDoc(item(authorized, DEMO, 'system_config', 'role-test'), { ok: true }));
+    await assertFails(getDoc(doc(authorized, 'inventory_v2', 'b1', 'items', 'old1')));
+    await assertFails(setDoc(item(signedIn('s3'), LIVE, 'system_config', 'role-test'), { ok: true }));
+    await setMaintenance(false);
+    await put('accessGate', 'staff', { staffAccessEnabled: false });
+    await assertFails(setDoc(item(authorized, LIVE, 'system_config', 'role-test'), { ok: true }));
+    await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'system_config', 'role-test'), { ok: true }));
+});

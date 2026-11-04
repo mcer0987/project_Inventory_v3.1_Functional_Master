@@ -9,7 +9,7 @@
 
 // 1. MODÜLER FIREBASE IMPORTLARI (Versiyon 10+)
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { subscribeRestrictedPurchases, ensurePurchaseAccess } from './purchase-access.js';
+import { subscribeRestrictedPurchases, ensurePurchaseAccess, appendPurchaseWithdrawalHistory } from './purchase-access.js';
 import {
     initializeAuth, onAuthStateChanged, connectAuthEmulator, setPersistence,
     browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
@@ -436,7 +436,7 @@ window.startRealtimeSync = function () {
             const items = [];
             snapshot.forEach(docSnap => {
                 // Kayıtta id alanı yoksa doküman id'si kullanılır; aksi halde düzenleme/silme hedefsiz kalıyor ve kayıt temp_ id ile çoğalıyordu.
-                items.push({ id: docSnap.id, ...docSnap.data() });
+                items.push(colName === 'purchaseOrders' ? { ...docSnap.data(), id: docSnap.id } : { id: docSnap.id, ...docSnap.data() });
             });
 
             // Veriyi global hafızaya ve Mirror'a (kopya) al
@@ -984,6 +984,7 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
             if (!o.item || typeof o.item !== 'object') return fail('invalid-argument', 'set işlemi item bekliyor.');
             const item = _stripRenderFields(o.item);
             if (item.id == null || String(item.id).trim() === '') item.id = window.makeId();
+            if (o.col === 'purchaseOrders') item.id = String(item.id);
             if (o.mustBeNew && (window._dbMirror[o.col] || []).some(_sameId(item.id))) {
                 return fail('duplicate-id', `"${o.col}" içinde ${item.id} id'li kayıt zaten var.`, { collection: o.col, id: item.id });
             }
@@ -1018,16 +1019,19 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
 
     try {
         const batch = writeBatch(fireDb);
-        prepared.forEach(p => {
+        for (const p of prepared) {
             const ref = _docRef(p.col, p.id);
             if (p.op === 'set') batch.set(ref, p.data);
             else if (p.op === 'update') batch.update(ref, p.data);
             else batch.delete(ref);
+            if (p.col === 'purchaseOrders' && p.op === 'set') {
+                await appendPurchaseWithdrawalHistory(fireDb, COLLECTION_ROOT, batch, p.id, p.data);
+            }
             if (p.col === 'purchaseOrders' && p.op === 'set' && p.data.exchangeRate && p.data.workflow?.steps?.[0]?.status === 'approved'
                 && !(window._dbMirror.purchaseOrders || []).find(x=>String(x.id)===String(p.id))?.exchangeRate) {
                 batch.set(doc(fireDb,COLLECTION_ROOT,'purchaseFinance','items',String(p.id)),Object.fromEntries(['exchangeRate','exchangeRateDate','exchangeRateSource','reportingTotalTRY'].map(k=>[k,p.data[k]])));
             }
-        });
+        }
         await batch.commit();
     } catch (e) {
         if (e && e.code === 'not-found') return fail('not-found', 'Kayıt Firestore\'da bulunamadı; başka biri silmiş olabilir.', { code: e.code });
@@ -1058,13 +1062,13 @@ export const upsertItem = window.upsertItem = async (col, item, opts) => {
 window.previewLegacyPurchaseAccess = async () => {
     if (!window.isDbAdmin()) throw new Error('Yönetici yetkisi gerekli.');
     const snapshot = await getDocsFromServer(collection(fireDb,COLLECTION_ROOT,'purchaseOrders','items'));
-    const orders = snapshot.docs.map(d=>({...d.data(),id:d.data().id ?? d.id}));
+    const orders = snapshot.docs.map(d=>({...d.data(),id:d.id}));
     return {orders:orders.length,unresolved:orders.flatMap(p=>(p.workflow?.steps||[]).filter(s=>!s.userUid).map(s=>({id:String(p.id),name:s.user||''})))};
 };
 window.prepareLegacyPurchaseAccess = async () => {
     if (!window.isDbAdmin()) throw new Error('Yönetici yetkisi gerekli.');
     const snapshot = await getDocsFromServer(collection(fireDb,COLLECTION_ROOT,'purchaseOrders','items'));
-    return ensurePurchaseAccess(fireDb,COLLECTION_ROOT,snapshot.docs.map(d=>({...d.data(),id:d.data().id ?? d.id})),window.userAuth.uid,true);
+    return ensurePurchaseAccess(fireDb,COLLECTION_ROOT,snapshot.docs.map(d=>({...d.data(),id:d.id})),window.userAuth.uid,true);
 };
 export const appendItem = window.appendItem = (col, item, opts) => applyItemOps([{ op: 'set', col, item, mustBeNew: true }], opts);
 export const updateItems = window.updateItems = (col, list, opts) => applyItemOps((list || []).map(x => ({ op: 'update', col, id: x.id, fields: x.fields })), opts);
@@ -1107,6 +1111,17 @@ window.addEventListener('onAppLogout', () => {
 });
 
 onAuthStateChanged(auth, async (user) => {
+    const session = window.AppModules?.Session;
+    let token;
+    if (COLLECTION_ROOT === LIVE_COLLECTION_ROOT && session?.isStaffAccountSession(user)) {
+        try {
+            token = await user.getIdTokenResult();
+        } catch (error) {
+            console.warn('[Auth] Yönetici yetkisi doğrulanamadı:', error.code);
+        }
+    }
+    if (auth.currentUser !== user) return;
+    session?.setFirebaseAuthClaims(user, token);
     if (user) {
         window.userAuth = user;
         console.log("✅ [Auth] Firebase Oturumu Doğrulandı UID:", user.uid);

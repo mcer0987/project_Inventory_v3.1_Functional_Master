@@ -180,3 +180,19 @@ Sonuçlar: **289/289 birim testi**, **261/261 Rules testi**, XSS **0 izinsiz ifa
 Kullanıcının Aşama 5 commit onayı doğrultusunda yalnız EBYS hunks ve dosyaları seçildi. Ortak dosyalardaki manuel çıkış, envanter ve içe aktarma değişiklikleri indexe alınmadı. Seçili indexin ayrı dosya kopyasında birim testleri **276/276**, Rules testleri **257/257**, XSS **0 izinsiz ifade** ile geçti. Bu sayılar, tüm çalışma ağacındaki 289/261 sonuçlarından farklıdır; diğer işlerin commit edilmemesinden kaynaklanır. Commit kapsamının Hosting manifestosu **88/88**, mevcut çalışma ağacının manifestosu ek manuel çıkış dosyaları nedeniyle **90/90** olarak doğrulandı. Günlükler `scratch/ebys-stage5-index-{unit,rules,xss}.log` dosyalarındadır.
 
 Son başlık hiyerarşisi hotfixi bu kabul commitinden sonra ayrı çalışma ağacı değişikliği olarak uygulanacaktır.
+
+## 15. Aşama 5 commit'i sonrası başlık hiyerarşisi hotfixi
+
+Aşama 5 kabul paketi `8a61a7a` (`feat(ebys): aşama 5 kişisel görev ve sürüm erişimini tamamla`) commit'iyle kaydedildi. Commit'e ilgisiz envanter/import/manuel çıkış değişiklikleri eklenmedi.
+
+Kullanıcının son UX geri bildirimi üzerine, bu commit'ten **sonra** yalnız görünüm hotfixi uygulandı: Bana Gelen Onaylar tek ana kart başlığıdır. Evrak görevleri ve satın alma onayları sade başlık/alt açıklama/çizgi ile ayrılan iki bölüm haline getirildi. Geri dönen evraklar, evrak bölümünde daha küçük bir alt alan olarak düzenlendi. Bölümler arasında belirgin boşluk bırakıldı; tekrarlayan büyük ikonlu başlık kartları kaldırıldı.
+
+Hotfix kapsamında `index.html`, `src/ui/ebys-documents.css` ve ilgili tarayıcı testi güncellendi. Tek ana başlık, iki kategori bölümü, bölüm sırası, aradaki boşluk ve mobilde taşmama doğrulandı. Aşama 4/5 arayüzleri, tam admin yerleşimi ve XSS kontrolü geçti (`pageerror=0`, izinsiz ifade 0). Görsel kanıt: `scratch/ebys-approvals-hierarchy.png`. Akış/Rules servisleri bu hotfixte değiştirilmedi.
+
+
+## 16. Denetim kapanışı
+
+- İlk satın alma onayı, finans anlık görüntüsünü aynı Firestore yazım grubunda ve talebin belge yolundaki kimlikle kaydeder.
+- Geri çekilen satın alma taleplerinde karar veren personelin erişimi sabit geçmiş kaydıyla korunur.
+- Görev kuyruğu sorgusu hata verdiğinde arayüz kartlarının alt dinleyicileri kapatılır.
+- Canlı ortam yönetici rolü, Firebase Auth yetki iddiasına, aktif personel bağına ve personel erişim kilidine bağlıdır.

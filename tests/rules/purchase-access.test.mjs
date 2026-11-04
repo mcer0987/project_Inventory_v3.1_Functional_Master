@@ -9,7 +9,7 @@ const ref=(db,c,id)=>sdk.doc(db,root,c,'items',id);
 const ctx=uid=>env.authenticatedContext(uid,{email:uid==='admin'?'admin@medipol.local':uid+'.test@staff.medipol.local',firebase:{sign_in_provider:'password'}}).firestore();
 const plain=x=>Array.isArray(x)?Array.from(x,plain):x&&x.constructor?.name==='Object'?Object.fromEntries(Object.entries(x).map(([k,v])=>[k,plain(v)])):x;
 const c=vm.createContext({...sdk,setDoc:(r,v)=>sdk.setDoc(r,plain(v))});
-vm.runInContext(readFileSync('src/services/purchase-access.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'')+'\nglobalThis.adapter={ensurePurchaseAccess,subscribeRestrictedPurchases};',c);
+vm.runInContext(readFileSync('src/services/purchase-access.js','utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'')+'\nglobalThis.adapter={ensurePurchaseAccess,subscribeRestrictedPurchases,appendPurchaseWithdrawalHistory};',c);
 const waitFor=async predicate=>{const end=Date.now()+5000;while(!predicate()){if(Date.now()>end)throw Error('Canlı kuyruk bekleme süresi doldu');await new Promise(r=>setTimeout(r,25));}};
 const order=()=>({id:'order',createdByUid:'owner',urun:'Eski talep',workflow:{started:true,finished:false,currentStep:0,steps:[{userUid:'a',user:'A',status:'pending'},{userUid:'b',user:'B',status:'pending'}]}});
 const put=async value=>env.withSecurityRulesDisabled(c=>sdk.setDoc(ref(c.firestore(),'purchaseOrders','order'),value));
@@ -43,4 +43,49 @@ test('stale kuyruk eşlemesi içerik yetkisi vermez; tekrar atama dinleyiciyi g�
 });
 test('UID eksik legacy adım raporlanır; isimden otomatik içerik yetkisi üretilmez',async()=>{
  const source=order();delete source.workflow.steps[0].userUid;await put(source);const result=await c.adapter.ensurePurchaseAccess(ctx('admin'),root,[source],'admin',true);assert.equal(result.created,0);assert.equal(result.unresolved.length,1);await assertFails(sdk.getDoc(ref(ctx('a'),'purchaseOrders','order')));
+});
+
+test('A5-02: geri çekme sonrası gerçek karar sahibi dondurulmuş kopyayı okur, düzenlenmiş taslağı okuyamaz', async () => {
+ const source = order();
+ source.createdByName = 'owner';
+ source.durum = 'Onay Bekliyor';
+ source.akis = [];
+ source.workflow.currentStep = 1;
+ source.workflow.currentState = 'manager_approval';
+ source.workflow.steps[0].status = 'approved';
+ source.workflow.history = [{ action: 'transition', uid: 'a' }];
+ await put(source);
+ const db = ctx('owner'), target = ref(db, 'purchaseOrders', 'order');
+ const next = { ...source, durum: 'Taslak',
+  workflow: { ...source.workflow, started: false, steps: [], currentStep: 0, currentState: 'initiation',
+   history: [...source.workflow.history, { action: 'withdraw', actor: 'owner', uid: 'owner', timestamp: 't', to: 'initiation' }] },
+  akis: [{ islem: 'Talep Geri Çekildi (Taslak Moduna Alındı)', yapan: 'owner', uid: 'owner', tarih: 't' }]
+ };
+ const archive = ref(db, 'purchaseHistory', 'order__2');
+ await assertFails(sdk.setDoc(archive, { purchaseId: 'order', snapshot: source, createdAt: sdk.serverTimestamp() }));
+ await assertFails(sdk.setDoc(target, next));
+ const forged = sdk.writeBatch(db);
+ forged.set(target, next);
+ forged.set(archive, { purchaseId: 'order', snapshot: { ...source, urun: 'Sahte içerik' }, createdAt: sdk.serverTimestamp() });
+ await assertFails(forged.commit());
+ let rows = [], errors = [];
+ const stop = c.adapter.subscribeRestrictedPurchases(ctx('a'), root, 'a', data => rows = data, error => errors.push(error));
+ try {
+  const batch = sdk.writeBatch(db);
+  batch.set(target, next);
+  await c.adapter.appendPurchaseWithdrawalHistory(db, root, { set: (r, v) => batch.set(r, plain(v)) }, 'order', next);
+  await assertSucceeds(batch.commit());
+  await assertSucceeds(sdk.getDoc(ref(ctx('a'), 'purchaseOrders', 'order')));
+  await assertFails(sdk.getDoc(ref(ctx('b'), 'purchaseOrders', 'order')));
+  await assertFails(sdk.getDoc(ref(ctx('b'), 'purchaseHistory', 'order__2')));
+  await assertFails(sdk.updateDoc(archive, { 'snapshot.urun': 'Değişiklik' }));
+  await assertFails(sdk.setDoc(ref(db, 'purchaseAccess', 'order__b'), { purchaseId: 'order', assigneeUid: 'b', historyId: 'order__2', createdAt: sdk.serverTimestamp(), updatedAt: sdk.serverTimestamp() }));
+  await waitFor(() => rows[0]?.workflow.finished === true);
+  await assertSucceeds(sdk.updateDoc(target, { urun: 'Yeniden düzenlenmiş taslak' }));
+  await assertFails(sdk.getDoc(ref(ctx('a'), 'purchaseOrders', 'order')));
+  const frozen = (await sdk.getDoc(ref(ctx('a'), 'purchaseHistory', 'order__2'))).data();
+  assert.equal(frozen.snapshot.urun, 'Eski talep');
+  await waitFor(() => rows[0]?.urun === 'Eski talep');
+  assert.deepEqual(errors, []);
+ } finally { stop(); }
 });
