@@ -41,54 +41,168 @@ body {
 }
 
 /* ── 3. LAYOUT ────────────────────────────────────────────── */
+/* [WHY]: Sidebar premium revizyonu — kenarları dolduran düz satırlar yerine
+   yüzen (floating) pill menü öğeleri, ikon "chip"leri ve sol aktif/hover
+   şeridi. [HOW]: Yalnızca yapı/boşluk/köşe/gölge değişti; dark-theme.css ve
+   admin-system-control.css (VIP) içindeki renk override'ları dokunulmadan
+   kalır, çünkü onlar aynı özellikleri (background/color) daha yüksek
+   özgüllükle zaten eziyor. */
 .sidebar {
   width: 250px;
-  background: var(--primary);
+  background: linear-gradient(185deg, var(--primary) 0%, #1f2e3d 100%);
   color: white;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  padding: 0 10px 14px;
+  box-shadow: 3px 0 24px rgba(0, 0, 0, 0.16);
+  position: relative;
+  z-index: 1;
 }
 
 .sidebar-header {
-  padding: 20px;
-  font-size: 1.2rem;
-  font-weight: bold;
-  background: var(--secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 22px 10px 20px;
+  margin: 0 -10px 10px;
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   text-align: center;
-  letter-spacing: 1px;
+  letter-spacing: 0.4px;
+}
+
+.sidebar-header span {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.sidebar-header i {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--accent) 0%, #1f6fb8 100%);
+  box-shadow: 0 6px 14px rgba(52, 152, 219, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  font-size: 16px;
+  color: #fff;
+  flex-shrink: 0;
 }
 
 .nav-item {
-  padding: 15px 20px;
+  position: relative;
+  padding: 11px 14px;
+  margin: 2px 0;
+  border-radius: 10px;
+  border-left: 3px solid transparent;
+  border-bottom: 0;
   color: #ecf0f1;
   text-decoration: none;
-  border-bottom: 1px solid #3b5064;
-  transition: background 0.2s, padding-left 0.2s;
+  transition: background 0.2s ease, padding-left 0.2s ease, border-color 0.2s ease;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .nav-item:hover {
-  background: var(--accent);
-  padding-left: 25px;
+  background: rgba(255, 255, 255, 0.08);
+  padding-left: 18px;
+  border-left-color: rgba(255, 255, 255, 0.3);
+}
+
+.nav-item.active {
+  background: rgba(255, 255, 255, 0.1);
+  border-left-color: var(--accent);
 }
 
 /* ── Sitemap Butonu Hover İptali ──
-   WHY: Sistem Kılavuzu butonu sabit ve dikkat çekici bir yapıdadır; 
+   WHY: Sistem Kılavuzu butonu sabit ve dikkat çekici bir yapıdadır;
         üzerine gelindiğinde diğer menü öğeleri gibi kayması/renk değiştirmesi
         hem tasarıma uymaz hem de tıklama hissini ucuzlatır.
    HOW: :hover durumunda background ve padding-left değerleri ezilerek sabitlenir. */
 .nav-item.sitemap-nav-item:hover {
   background: transparent !important;
-  padding-left: 20px !important;
+  padding-left: 14px !important;
+  border-left-color: transparent !important;
 }
 
-.nav-item i {
-  width: 16px;
+/* İkon "chip"i: yalnızca doğrudan alt öğe olan gerçek <i> ikonlarını hedefler,
+   böylece EBYS Rehberi'nin span içine sarılı animasyonlu değnek ikonunu
+   etkilemez (bkz. ebys-showcase-modal.css .ebys-guide-spark). */
+.nav-item > i {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 14px;
+  flex-shrink: 0;
   text-align: center;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.nav-item:hover > i {
+  background: rgba(255, 255, 255, 0.14);
+  transform: scale(1.05);
+}
+
+.nav-item.active > i {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(52, 152, 219, 0.35);
+}
+
+/* ── Sistem Kılavuzu ışıltısı ──
+   WHY: EBYS Rehberi'yle aynı "dikkat çek" mantığı (ikon hareketi + metin
+        parıltısı) ama birebir aynısı değil: ikon döndürülmek yerine bir
+        radar/ping halkasıyla nabız atıyor, metin moru değil kendi yeşil
+        tonunu (--vip-matrix) kullanıyor ve ritmi daha yavaş (4s). */
+.nav-item.sitemap-nav-item > i {
+  position: relative;
+  background: rgba(0, 255, 136, 0.08);
+  animation: sitemapIconPulse 4s ease-in-out infinite;
+}
+
+.nav-item.sitemap-nav-item > i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  border: 1px solid var(--vip-matrix, #00ff88);
+  opacity: 0;
+  animation: sitemapRingPing 4s ease-out infinite;
+}
+
+.nav-item.sitemap-nav-item span {
+  background: linear-gradient(100deg, #00ff88 0%, #00ff88 42%, #baffdf 50%, #00ff88 58%, #00ff88 100%);
+  background-size: 250% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: sitemapTextShimmer 4s ease-in-out infinite;
+}
+
+@keyframes sitemapIconPulse {
+  0%, 55%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(0, 255, 136, 0)); }
+  70% { transform: scale(1.08); filter: drop-shadow(0 0 5px rgba(0, 255, 136, 0.7)); }
+  85% { transform: scale(1.02); filter: drop-shadow(0 0 2px rgba(0, 255, 136, 0.4)); }
+}
+
+@keyframes sitemapRingPing {
+  0%, 60% { opacity: 0; transform: scale(0.85); }
+  72% { opacity: 0.6; transform: scale(1); }
+  92%, 100% { opacity: 0; transform: scale(1.3); }
+}
+
+@keyframes sitemapTextShimmer {
+  0%, 55% { background-position: 100% 0; }
+  88%, 100% { background-position: 0 0; }
 }
 
 .main-content {

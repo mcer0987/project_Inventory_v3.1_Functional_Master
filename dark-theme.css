@@ -103,21 +103,36 @@ body *::after {
     transform: rotate(20deg);
 }
 
-/* Admin sidebar için koyu arka plana uyumlu override */
+/* Admin sidebar için koyu arka plana uyumlu override — nav-item'larla aynı
+   yuvarlak/chip dilinde, tek düz gri çubuk yerine daha "tatlı" bir rozet görünümü. */
 .sidebar .theme-toggle-btn {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.07);
     color: #ecf0f1;
     width: 100%;
-    border-radius: var(--radius-sm, 4px);
-    height: 40px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    height: 38px;
     /* Genel button { margin: 0 4px } kuralı %100 genişliğe eklenip kenar çubuğunda yatay kaydırma açıyordu. */
-    margin: 8px 0 0;
+    margin: 6px 0 12px;
     font-size: 13px;
+    font-weight: 600;
     gap: 8px;
 }
 
+.sidebar .theme-toggle-btn i {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.12);
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
 .sidebar .theme-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.2);
     transform: none;
 }
 
