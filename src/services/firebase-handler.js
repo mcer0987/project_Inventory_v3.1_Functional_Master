@@ -885,7 +885,7 @@ function _b3Violation(p, opts = {}) {
         const errors = S.validateB3(p.data, { legacy: opts.b3Legacy === true });
         return errors.length ? errors : null;
     }
-    const bad = Object.keys(p.data || {}).filter(k => !S.B3_KEYS.includes(k));
+    const bad = Object.keys(p.data || {}).filter(k => !S.B3_KEYS.includes(k) && !(S.B3_OPTIONAL_KEYS || []).includes(k));
     return bad.length ? bad.map(k => (S.B3_LEGACY_KEYS.includes(k) ? `eski alan: ${k}` : `bilinmeyen alan: ${k}`)) : null;
 }
 // ─── Faz 5 · K2 · B1/B2 çalışma zamanı muhafızı (5.8) ─────────────────────────────────────────────
@@ -1271,8 +1271,20 @@ export const computeStockPatch = window.computeStockPatch = function (colName, d
 //                  [{ col, id, delta, createIfMissing }]  doküman yoksa createIfMissing yazılır (servisten dönüş)
 //          writes: [{ op:'set', col, item } | { op:'update', col, id, fields } | { op:'delete', col, id }]
 //        Yalnız Firebase admin oturumu (karar 3: stok hareketleri Faz 4 yetki matrisine kadar yöneticide).
+//        v3.4 · istisna: opts.staffExit === true ise personel hesabı oturumu SARF ÇIKIŞI yapabilir. Plan önce
+//        ExitPolicy.checkStaffPlan'dan geçer (yalnız stok düşümü + ürün başına tek b3 'cikis' kaydı); ürün yamasına aynı
+//        kaydın id'si sonCikisId olarak eklenir (kurallar düşülen adedi bu bağla doğrular). Raf sayaçları personel için
+//        yazılmaz (kurallar personele raf yazdırmaz): adet 0'a inerse sayaç bir fazla kalır, yöneticinin "Raf sayaçlarını
+//        eşitle" işlemi düzeltir — kapasite tarafında güvenli yön (raf dolu görünür, taşma olmaz).
 //        Dönüş: { stock: [{col, id, name, before, after, statusBefore, statusAfter, created}], ids: [yazılan kayıt id'leri] }
 export const EXIT_ADMIN_ONLY_MESSAGE = window.EXIT_ADMIN_ONLY_MESSAGE = 'Çıkış işlemi yalnızca sistem yöneticisi tarafından yapılabilir.';
+export const EXIT_STAFF_MESSAGE = window.EXIT_STAFF_MESSAGE = 'Envanter çıkışı yalnız yönetici ve giriş hesabı olan personel tarafından yapılabilir.';
+
+// v3.4: çıkış ekranını kim kullanabilir — yönetici her ürün için; personel hesabı (BT ekibi) yalnız sarf için (ExitPolicy).
+export const canExitStock = window.canExitStock = function () {
+    if (typeof window.isDbAdmin === 'function' && window.isDbAdmin()) return true;
+    return !!(window.userAuth && window.AppModules?.Session?.isStaffAccountSession?.());
+};
 const STOCK_COLLECTIONS = ['b1', 'b2'];
 
 // Transaction'ın saf hesaplama kısmı (okunan dokümanlar → yazılacak stok değişiklikleri). Sunucu verisiyle transaction
@@ -1301,7 +1313,9 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
         return false;
     };
     if (!window.userAuth) return fail('no-auth', 'Oturum bulunamadı; işlem yapılamadı.');
-    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) return fail('forbidden', opts.forbiddenMessage || EXIT_ADMIN_ONLY_MESSAGE);
+    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+    const staffExit = !isAdmin && opts.staffExit === true && !!window.AppModules?.Session?.isStaffAccountSession?.();
+    if (!isAdmin && !staffExit) return fail('forbidden', opts.forbiddenMessage || EXIT_ADMIN_ONLY_MESSAGE);
 
     // Stok girdilerini doküman başına birleştir
     const stockByKey = new Map();
@@ -1339,6 +1353,15 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
         _announceDenied('bulk-locked', BULK_LOCK_MESSAGE);
         return fail('bulk-locked', BULK_LOCK_MESSAGE);
     }
+    let staffLinks = null;   // 'col|id' → b3 kaydının id'si (personel çıkışında ürüne sonCikisId olarak yazılır)
+    if (staffExit) {
+        if (_maintenanceBlocksWrite()) return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
+        const P = window.ExitPolicy;
+        if (!P || typeof P.checkStaffPlan !== 'function') return fail('forbidden', 'Çıkış politikası (exit-policy.js) yüklenmemiş; işlem yapılmadı.');
+        const plan = P.checkStaffPlan([...stockByKey.values()], prepared);
+        if (!plan.ok) return fail('forbidden', plan.error);
+        staffLinks = plan.links;
+    }
 
     // v3.3 Aşama 4 (Denetim P1-02 devamı): bir stok deltası işgal durumunu DEĞİŞTİRİYORSA (0↔pozitif geçiş, ya da
     // createIfMissing ile yeniden oluşturma) ilgili raf sayacı (usedSlots) AYNI transaction'da güncellenir. Matematik
@@ -1365,9 +1388,10 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
             const snaps = [];
             for (const e of entries) snaps.push(await tx.get(_docRef(e.col, e.id)));   // tüm okumalar yazmalardan önce
             const results = planStockOps(entries, snaps.map(sn => sn.exists() ? sn.data() : null));
+            if (staffLinks) results.forEach(r => { r.patch = { ...r.patch, sonCikisId: staffLinks.get(`${r.col}|${r.id}`) }; });
 
             const deltas = new Map();
-            results.forEach((r, i) => {
+            if (!staffLinks) results.forEach((r, i) => {
                 _shelfDeltaFor(r.col, snaps[i], r).forEach(([sid, d]) => { if (sid) deltas.set(sid, (deltas.get(sid) || 0) + d); });
             });
             const shelfReads = {};

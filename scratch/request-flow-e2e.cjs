@@ -1,0 +1,308 @@
+// Envanter talebi yaşam döngüsü — uçtan uca doğrulama (KOD DEĞİŞTİRMEZ; yalnız ölçer).
+// 1) Tarayıcı: gerçek index.html + gerçek kod (script.js confirmRequest / rejectRequest / showRequestApprovalModal,
+//    inventory-logic receiveProduct, AssignmentService, admin inventory-management Zimmet tablosu + Zimmetten Düş).
+//    Yalnız Firebase katmanı (runStockOps / applyItemOps / saveData / updateItem) yazmaları window.data'ya uygulayan ve
+//    kaydeden saplamayla değişir.
+// 2) Emülatör: arayüzün ürettiği HER yazma, yapanın kimliğiyle (yönetici / personel) firestore.rules'a karşı yeniden oynatılır;
+//    personelin yetkisiz denemeleri (kendi talebini onaylama, reddetme, onaysız teslim, zimmet yazma) reddedilmeli.
+// Kullanım: npx firebase emulators:exec --config tests/rules/firebase.rules-test.json --only firestore --project demo-rules-test
+//           "node scratch/request-flow-e2e.cjs <ekran-görüntüsü-klasörü>"
+const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), puppeteer = require('puppeteer');
+const OUT = process.argv[2] || path.join(require('node:os').tmpdir(), 'request-flow-e2e');
+fs.mkdirSync(OUT, { recursive: true });
+const SCRIPTS = ['src/utils/schema.js', 'src/services/assignment-service.js', 'src/ui/device-ids.js', 'src/utils/exit-policy.js', 'src/ui/person-picker.js'];
+
+const SEED = {
+    personel: [
+        { id: 's1', name: 'Ayşe Yılmaz', pri: 'ayse.yilmaz', uid: 'uid-s1', birim: 'Bilgi İşlem' },
+        { id: 'adm', name: 'Sistem Yöneticisi', pri: 'sistem.yonetici' },
+    ],
+    productTypes: [{ id: 'pt_lap', name: 'Laptop', isDemirbas: true }, { id: 'pt_sarf', name: 'Sarf Malzeme', isDemirbas: false }],
+    b1: [
+        { id: 'p_lap', ürün: 'Latitude 5440', marka: 'Dell', tür: 'Laptop', raf: 'Raf-A 1', sütun: 'B1 -A', adet: 5, durumu: 'Kullanıma Hazır', açıklama: '', isDemirbas: true, lastUpdate: 1 },
+        { id: 'p_mouse', ürün: 'Mouse M90', marka: 'Lenovo', tür: 'Sarf Malzeme', raf: 'Raf-B 1', sütun: 'B1 -B', adet: 20, durumu: 'Kullanıma Hazır', açıklama: '', isDemirbas: false, lastUpdate: 1 },
+    ],
+    b2: [], b3: [], assignments: [],
+    requests: [
+        { id: 'r_dem', ürün: 'Dell Latitude 5440', adet: 2, durum: 'Beklemede', personel: 'Ayşe Yılmaz', personelId: 's1', personelUid: 'uid-s1', talepTuru: 'Kalıcı Zimmet', oncelik: 'Yüksek', not: 'Yeni başlayan stajyerler', tarih: '05.11.2026 09:00' },
+        { id: 'r_sarf', ürün: 'Lenovo Mouse M90', adet: 3, durum: 'Beklemede', personel: 'Ayşe Yılmaz', personelId: 's1', personelUid: 'uid-s1', talepTuru: 'Sarf Malzeme İhtiyacı', oncelik: 'Orta', not: 'Toplantı odası', tarih: '05.11.2026 09:05' },
+        { id: 'r_draft', ürün: 'Kulaklık', adet: 1, durum: 'draft', personel: 'Ayşe Yılmaz', personelId: 's1', personelUid: 'uid-s1', talepTuru: 'Kalıcı Zimmet', oncelik: 'Düşük', not: 'Henüz gönderilmedi', tarih: '05.11.2026 08:50' },
+        { id: 'r_rej', ürün: 'Monitör 27"', adet: 1, durum: 'Beklemede', personel: 'Ayşe Yılmaz', personelId: 's1', personelUid: 'uid-s1', talepTuru: 'Kalıcı Zimmet', oncelik: 'Düşük', not: 'İkinci ekran', tarih: '05.11.2026 09:10' },
+    ],
+};
+
+async function openPage(browser) {
+    const page = await browser.newPage(), errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.setViewport({ width: 1366, height: 900 });
+    const html = fs.readFileSync('index.html', 'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    await page.setRequestInterception(true);
+    page.on('request', r => {
+        const u = new URL(r.url());
+        if (u.pathname === '/page') return r.respond({ status: 200, contentType: 'text/html', body: html });
+        const f = decodeURIComponent(u.pathname.slice(1));
+        const type = f.endsWith('.css') ? 'text/css' : f.endsWith('.js') ? 'text/javascript' : f.endsWith('.woff2') ? 'font/woff2' : 'text/plain';
+        if (fs.existsSync(f) && /\.(css|js|woff2)$/.test(f)) return r.respond({ status: 200, contentType: type, body: fs.readFileSync(f) });
+        return r.respond({ status: 200, contentType: 'text/plain', body: '' });
+    });
+    await page.goto('http://127.0.0.1/page');
+    await page.evaluate(seed => {
+        window.data = JSON.parse(JSON.stringify(seed));
+        window._dbMirror = JSON.parse(JSON.stringify(seed));
+        window.mode = 'admin';
+        const users = { admin: { id: 'adm', name: 'Sistem Yöneticisi' }, staff: { id: 's1', name: 'Ayşe Yılmaz' } };
+        window.isDbAdmin = () => window.mode === 'admin';
+        window.requireDbAdmin = () => window.isDbAdmin();
+        window.validateAdminAction = () => window.isDbAdmin();
+        window.checkIsAdmin = () => window.isDbAdmin();
+        window.getActiveUser = () => users[window.mode];
+        Object.defineProperty(window, 'currentUser', { get: () => users[window.mode], set() {}, configurable: true });
+        Object.defineProperty(window, 'userAuth', { get: () => ({ uid: window.mode === 'admin' ? 'admin-uid' : 'uid-s1' }), configurable: true });
+        window.AppModules = { Session: { isStaffAccountSession: () => window.mode === 'staff' }, AdminTabs: { onShow() {} } };   // AdminTabs: admin.html sekme yönlendiricisi
+        window.SecurityConfig = { guardSelfApproval: async () => ({ allowed: true }), logSelfApproval: async () => {} };
+        window.alerts = []; window.showAppAlert = (m, t) => window.alerts.push([t, String(m)]);
+        window.showCustomConfirm = async () => true;
+        window.showWarehousePromptModal = async () => 'b1';
+        window.escapeHtml = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+        window.jsArg = v => JSON.stringify(v).replaceAll('"', '&quot;');
+        window.getTurkiyeSaati = () => '05.11.2026 10:00:00';
+        window.getTurkiyeTarihi = () => '05.11.2026';
+        window.bindActions = () => {};
+        window.sendArchiveEmail = () => {};
+
+        // ── Firebase katmanı saplaması: yazmaları uygular ve kaydeder (kim yaptı ile birlikte) ──
+        window.writeLog = [];
+        const find = (col, id) => (window.data[col] || []).find(x => String(x.id) === String(id));
+        const applyOp = (o, actor) => {
+            if (o.op === 'set') {
+                const item = JSON.parse(JSON.stringify(o.item)); const list = window.data[o.col] = window.data[o.col] || [];
+                const i = list.findIndex(x => String(x.id) === String(item.id)); if (i >= 0) list[i] = item; else list.push(item);
+                window.writeLog.push({ actor, kind: 'set', col: o.col, id: String(item.id), data: item });
+            } else if (o.op === 'update') {
+                const it = find(o.col, o.id); if (!it) throw new Error(`yok: ${o.col}/${o.id}`);
+                Object.assign(it, o.fields);
+                window.writeLog.push({ actor, kind: 'update', col: o.col, id: String(o.id), data: JSON.parse(JSON.stringify(o.fields)) });
+            }
+        };
+        window.runStockOps = async ({ stock = [], writes = [] }) => {
+            const actor = window.mode, out = [];
+            const batch = [];
+            stock.forEach(s => {
+                const p = find(s.col, s.id); const before = Number(p.adet); const after = before + s.delta;
+                if (after < 0) throw new Error('Yetersiz stok');
+                p.adet = after; out.push({ col: s.col, id: s.id, name: p.ürün, before, after });
+                batch.push({ actor, kind: 'update', col: s.col, id: String(s.id), data: { adet: after, lastUpdate: 2 } });
+            });
+            const start = window.writeLog.length;
+            writes.forEach(o => applyOp(o, actor));
+            window.writeLog.splice(start, 0, ...batch);
+            window.writeLog.push({ actor, kind: 'commit' });
+            return { stock: out, ids: [] };
+        };
+        window.applyItemOps = async writes => { writes.forEach(o => applyOp(o, window.mode)); window.writeLog.push({ actor: window.mode, kind: 'commit' }); };
+        window.saveData = async (col, arr) => {
+            const prev = new Map((window._dbMirror[col] || []).map(x => [String(x.id), JSON.stringify(x)]));
+            arr.filter(x => prev.get(String(x.id)) !== JSON.stringify(x)).forEach(x => window.writeLog.push({ actor: window.mode, kind: 'setMerge', col, id: String(x.id), data: JSON.parse(JSON.stringify(x)) }));
+            window.writeLog.push({ actor: window.mode, kind: 'commit' });
+            window.data[col] = arr; window._dbMirror[col] = JSON.parse(JSON.stringify(arr));
+        };
+        window.updateItem = async (col, id, fields) => { applyOp({ op: 'update', col, id, fields }, window.mode); window.writeLog.push({ actor: window.mode, kind: 'commit' }); };
+        window.writeOk = async p => { try { await p; return true; } catch { return false; } };
+        document.body.classList.add('logged-in');
+        document.getElementById('loginModal').style.setProperty('display', 'none', 'important');
+        document.querySelectorAll('body *').forEach(n => { if (getComputedStyle(n).position === 'fixed' && !n.closest('.modal')) n.style.display = 'none'; });
+        // admin.html'deki Zimmet tablosunun gövdesi (inventory-management renderTable yazar)
+        const t = document.createElement('table'); t.innerHTML = '<tbody id="invTableBody"></tbody>'; document.body.append(t);
+    }, SEED);
+    for (const s of SCRIPTS) await page.addScriptTag({ url: `http://127.0.0.1/${s}` });
+    await page.addScriptTag({ type: 'module', url: 'http://127.0.0.1/src/modules/inventory-logic.js' });
+    await page.addScriptTag({ type: 'module', url: 'http://127.0.0.1/src/modules/admin/inventory-management.js' });
+    await page.waitForFunction(() => typeof window.receiveProduct === 'function' && window.inventoryManagementModule);
+    await page.addScriptTag({ url: 'http://127.0.0.1/script.js' });
+    return { page, errors };
+}
+
+// Onay modalını gerçek kullanıcı gibi doldurur
+async function approve(page, requestId, { stockKey, devices, sn } = {}) {
+    await page.evaluate(id => { window._approval = window.confirmRequest(id); }, requestId);
+    await page.waitForSelector('#requestApprovalModal #raSource');
+    await page.evaluate(({ stockKey, devices, sn }) => {
+        const sel = document.querySelector('#raSource');
+        sel.value = stockKey; sel.dispatchEvent(new Event('change'));
+        if (devices) [...document.querySelectorAll('#raDevIds .dev-ids-row')].forEach((row, i) => {
+            row.querySelector('.dev-sn').value = devices[i].sn; row.querySelector('.dev-env').value = devices[i].env;
+        });
+        if (sn != null) document.querySelector('#raSn').value = sn;
+    }, { stockKey, devices, sn });
+    return page;
+}
+const okApproval = page => page.evaluate(async () => { document.querySelector('#raOk').click(); await window._approval; });
+const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => [...tr.cells].map(c => c.textContent.replace(/\s+/g, ' ').trim())));
+
+(async () => {
+    const browser = await puppeteer.launch({ headless: true, executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', args: ['--no-sandbox'] });
+    const report = [];
+    const ok = (name, detail = '') => report.push(`✔ ${name}${detail ? ` — ${detail}` : ''}`);
+    let log;
+    try {
+        const { page, errors } = await openPage(browser);
+
+        // ── Gelen Talepler (yönetici) ──
+        await page.evaluate(() => window.renderRequestsTable());
+        const head = await page.$$eval('#tableRequests thead th', ths => ths.map(t => t.textContent.trim()));
+        assert.ok(head.includes('ITSM / Gerekçe') && !head.some(h => /BioPro/.test(h)));
+        let r = await rows(page, '#tableRequests');
+        assert.equal(r.length, 4); assert.equal(r.filter(x => /Onayla/.test(x.at(-1)) && /Reddet/.test(x.at(-1))).length, 3);
+        ok('Gelen Talepler: 3 bekleyen talep Onayla/Reddet düğmeleriyle listelenir; başlık "ITSM / Gerekçe"');
+        const draftRow = r.find(x => /Kulaklık/.test(x[3]));
+        assert.deepEqual([draftRow[6], draftRow[7]], ['draft', 'İşlem Yapıldı']);
+        ok('Personelin TASLAK talebi de Gelen Talepler\'de görünüyor: durum "draft", işlem "İşlem Yapıldı"', 'BULGU-4: gönderilmemiş taslak işlenmiş gibi görünüyor');
+
+        // ── 1) Demirbaş talebinin onayı: cihaz kimlikleri zorunlu ──
+        await approve(page, 'r_dem', { stockKey: 'b1|p_lap', devices: [{ sn: '', env: '' }, { sn: '', env: '' }] });
+        await page.screenshot({ path: path.join(OUT, 'request-approve-modal.png') });
+        await page.evaluate(() => document.querySelector('#raOk').click());
+        assert.match(await page.$eval('#raError', e => e.textContent), /Seri No veya Envanter No/i);
+        await page.evaluate(() => [...document.querySelectorAll('#raDevIds .dev-ids-row')].forEach((row, i) => { row.querySelector('.dev-sn').value = ['SN-LAT-001', 'SN-LAT-002'][i]; row.querySelector('.dev-env').value = ['ENV-501', 'ENV-502'][i]; }));
+        await okApproval(page);
+        let s = await page.evaluate(() => {
+            const req = window.data.requests.find(x => x.id === 'r_dem');
+            const z = window.data.b3.filter(b => b.requestId === 'r_dem');
+            return { durum: req.durum, approvedBy: req.approvedBy, stockRepo: req.stockRepo, stock: window.data.b1.find(p => p.id === 'p_lap').adet,
+                z: z.map(b => [b.tip, b.adet, b.sn, b.envanterNo, b.personelId, b.alanKisi, b.isDemirbas, b.kaynakDepo]) };
+        });
+        assert.equal(s.durum, 'approved'); assert.equal(s.stockRepo, 'b1'); assert.equal(s.stock, 3);
+        assert.deepEqual(s.z, [['zimmet', 1, 'SN-LAT-001', 'ENV-501', 's1', 'Ayşe Yılmaz', true, 'b1'], ['zimmet', 1, 'SN-LAT-002', 'ENV-502', 's1', 'Ayşe Yılmaz', true, 'b1']]);
+        ok('Demirbaş onayı: cihaz kimliği girilmeden onay verilmez', '"Seri No veya Envanter No" uyarısı');
+        ok('Demirbaş onayı: talep approved, stok 5 → 3, cihaz başına 1 zimmet kaydı (b3 tip zimmet, personelId s1, SN + Env. No)');
+
+        // ── 2) Sarf talebinin onayı ──
+        await approve(page, 'r_sarf', { stockKey: 'b1|p_mouse', sn: 'ITSM-778' });
+        await okApproval(page);
+        s = await page.evaluate(() => ({ durum: window.data.requests.find(x => x.id === 'r_sarf').durum, stock: window.data.b1.find(p => p.id === 'p_mouse').adet,
+            z: window.data.b3.filter(b => b.requestId === 'r_sarf').map(b => [b.tip, b.adet, b.sn, b.isDemirbas]) }));
+        assert.deepEqual(s, { durum: 'approved', stock: 17, z: [['zimmet', 3, 'ITSM-778', false]] });
+        ok('Sarf onayı: stok 20 → 17; TEK zimmet kaydı (adet 3, isDemirbas false)', 'BULGU-1: sarf da "zimmet" olarak yazılıyor');
+
+        // ── 3) Red ──
+        await page.evaluate(() => window.rejectRequest('r_rej'));
+        s = await page.evaluate(() => ({ req: window.data.requests.find(x => x.id === 'r_rej'), b3: window.data.b3.filter(b => b.requestId === 'r_rej').length }));
+        assert.equal(s.req.durum, 'rejected'); assert.equal(s.req.rejectedBy, 'Sistem Yöneticisi'); assert.equal(s.b3, 0);
+        assert.equal(s.req.redGerekcesi, undefined);
+        ok('Red: talep rejected + rejectedBy/rejectedAt; zimmet/stok değişmez', 'BULGU-2: red gerekçesi sorulmuyor');
+
+        // tekrar onay / red engeli
+        await page.evaluate(async () => { window.alerts = []; await window.confirmRequest('r_dem'); await window.rejectRequest('r_rej'); });
+        assert.equal(await page.evaluate(() => window.alerts.filter(a => /zaten işlenmiş/.test(a[1])).length), 2);
+        ok('İşlenmiş talep tekrar onaylanamaz / reddedilemez');
+
+        await page.evaluate(() => window.renderRequestsTable());
+        r = await rows(page, '#tableRequests');
+        assert.deepEqual(r.filter(x => x[6] !== 'draft').map(x => x[6]), ['Onaylandı', 'Onaylandı', 'Reddedildi']);
+        assert.ok(r.every(x => /İşlem Yapıldı/.test(x[7])));
+        ok('Gelen Talepler: durumlar Onaylandı / Onaylandı / Reddedildi, düğmeler kalktı');
+
+        // ── 4) Yönetici Zimmet ekranı (admin) ──
+        await page.evaluate(() => window.inventoryManagementModule.renderTable());
+        let z = await page.evaluate(() => window.inventoryManagementModule.getNormalizedAssignments().map(a => [a.ürün, a.sn, a.durum, a.personelId]));
+        assert.deepEqual(z.map(x => x[2]), ['Zimmetli', 'Zimmetli', 'Zimmetli']);
+        assert.equal(await page.$$eval('#invTableBody tr', t => t.length), 3);
+        assert.ok(!z.some(x => /Monitör/.test(x[0])));
+        ok('Zimmet ekranı: onay anında 3 satır (2 laptop + 1 sarf) "Zimmetli"; reddedilen talep yok');
+
+        // ── 5) Personel: Taleplerim + Kişi Envanteri (teslim almadan önce) ──
+        await page.evaluate(() => { window.mode = 'staff'; window.renderMyRequestsTable(); window.renderPersonnelInventoryTable(); });
+        r = await rows(page, '#tableMyRequests');
+        assert.equal(r.filter(x => /Teslim Aldım/.test(x[4])).length, 2);
+        assert.equal(r.filter(x => /REDDEDİLDİ/.test(x[2]) && /Talep Reddedildi/.test(x[4])).length, 1);
+        let inv = await rows(page, '#tablePersonnelInventory');
+        assert.match(inv[0][0], /kayıtlı envanter bulunmamaktadır/);
+        s = await page.evaluate(() => window.AssignmentService.generatePersonnelZimmetData('s1').ozet);
+        assert.equal(s.kalemSayisi, 0); assert.equal(s.teslimBekleyen, 3);
+        ok('Personel: Taleplerim\'de 2 "Teslim Aldım" + 1 "Reddedildi"; Kişi Envanteri BOŞ, tutanakta 3 teslim bekleyen', 'BULGU-3: teslim alınana kadar Kişi Envanteri\'ne düşmüyor');
+
+        // ── 6) Teslim alma ──
+        await page.evaluate(async () => { await window.receiveProduct('r_dem'); await window.receiveProduct('r_sarf'); window.renderPersonnelInventoryTable(); });
+        inv = await rows(page, '#tablePersonnelInventory');
+        assert.equal(inv.length, 3);
+        assert.deepEqual(inv.map(x => x[4]).sort(), ['Demirbaş', 'Demirbaş', 'Sarf Malzeme']);
+        assert.ok(inv.some(x => /SN-LAT-001/.test(x[2]) && /ENV-501/.test(x[2])));
+        s = await page.evaluate(() => window.AssignmentService.generatePersonnelZimmetData('s1').ozet);
+        assert.deepEqual([s.kalemSayisi, s.demirbasAdet, s.sarfAdet, s.teslimBekleyen], [3, 2, 3, 0]);
+        await page.evaluate(() => window.switchTab && document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'personnelInventoryTab')));
+        await page.screenshot({ path: path.join(OUT, 'request-person-inventory.png') });
+        ok('Teslim Aldım: talepler completed; Kişi Envanteri 3 satır (2 demirbaş SN/Env.No ile + 1 sarf); zimmet tutanağı 3 kalem');
+
+        // personel kendi talebini onaylayamaz (arayüz)
+        await page.evaluate(async () => { window.alerts = []; window.data.requests.push({ id: 'r_self', ürün: 'X', adet: 1, durum: 'Beklemede', personel: 'Ayşe Yılmaz', personelId: 's1', personelUid: 'uid-s1' }); await window.confirmRequest('r_self'); });
+        assert.equal(await page.evaluate(() => window.data.requests.find(x => x.id === 'r_self').durum), 'Beklemede');
+        await page.evaluate(() => { window.data.requests = window.data.requests.filter(x => x.id !== 'r_self'); });
+        ok('Personel kendi talebini onaylayamaz (arayüz durdurur)');
+
+        // ── 7) Yönetici iadesi (Zimmet ekranı › Zimmetten Düş → B1) ──
+        await page.evaluate(async () => {
+            window.mode = 'admin';
+            const lap = window.data.b3.find(b => b.requestId === 'r_dem');
+            await window.inventoryManagementModule.removeAssignment(String(lap.id), 'b3');
+        });
+        s = await page.evaluate(() => {
+            window.mode = 'staff';
+            return { stock: window.data.b1.find(p => p.id === 'p_lap').adet, inv: window.AssignmentService.getPersonInventory(window.getActiveUser()).length,
+                req: window.data.requests.find(x => x.id === 'r_dem').iadeEdildi ?? null };
+        });
+        assert.deepEqual(s, { stock: 4, inv: 2, req: null });
+        ok('Zimmetten Düş (1 laptop → B1): stok 3 → 4, Kişi Envanteri 3 → 2; talep, ikinci cihaz iade edilene kadar açık kalır');
+        assert.deepEqual(errors, []);
+        log = await page.evaluate(() => window.writeLog);
+    } finally { await browser.close(); }
+
+    // ── Emülatör: arayüzün ürettiği yazmalar kurallardan geçiyor mu ──
+    if (!process.env.FIRESTORE_EMULATOR_HOST) { console.log(report.join('\n')); console.log('Emülatör yok: kural tekrarı atlandı.'); return; }
+    const { initializeTestEnvironment, assertSucceeds, assertFails } = await import('@firebase/rules-unit-testing');
+    const { doc, setDoc, updateDoc, writeBatch, setLogLevel } = await import('firebase/firestore');
+    setLogLevel('silent');
+    const env = await initializeTestEnvironment({ projectId: 'demo-request-flow', firestore: { rules: fs.readFileSync('firestore.rules', 'utf8') } });
+    const R = 'lifeserver_master';
+    const ref = (db, col, id) => doc(db, R, col, 'items', String(id));
+    const dbs = {
+        admin: () => env.authenticatedContext('admin-uid', { email: 'admin@medipol.local', firebase: { sign_in_provider: 'password' } }).firestore(),
+        staff: () => env.authenticatedContext('uid-s1', { email: 'ayse.yilmaz@staff.medipol.local', firebase: { sign_in_provider: 'password' } }).firestore(),
+    };
+    try {
+        await env.withSecurityRulesDisabled(async c => {
+            const db = c.firestore();
+            await setDoc(ref(db, 'personel', 's1'), SEED.personel[0]);
+            await setDoc(ref(db, 'staffAccounts', 'uid-s1'), { personelId: 's1', pri: 'ayse.yilmaz' });
+            await setDoc(ref(db, 'accessGate', 'staff'), { staffAccessEnabled: true });
+            for (const t of SEED.productTypes) await setDoc(ref(db, 'productTypes', t.id), t);
+            for (const p of SEED.b1) await setDoc(ref(db, 'b1', p.id), p);
+            for (const q of SEED.requests) await setDoc(ref(db, 'requests', q.id), q);
+        });
+        // yazma günlüğünü commit gruplarına böl ve sırayla, yapanın kimliğiyle oynat
+        let group = [], replayed = 0;
+        for (const w of log) {
+            if (w.kind !== 'commit') { group.push(w); continue; }
+            if (!group.length) continue;
+            const db = dbs[group[0].actor](), batch = writeBatch(db);
+            for (const g of group) {
+                if (g.kind === 'set') batch.set(ref(db, g.col, g.id), g.data);
+                else if (g.kind === 'setMerge') batch.set(ref(db, g.col, g.id), g.data, { merge: true });
+                else batch.update(ref(db, g.col, g.id), g.data);
+            }
+            await assertSucceeds(batch.commit()).catch(e => { throw new Error(`Kural reddetti (${group[0].actor}): ${group.map(g => `${g.kind} ${g.col}/${g.id}`).join(', ')} — ${e.message}`); });
+            replayed += group.length; group = [];
+        }
+        ok('Kural tekrarı: arayüzün ürettiği tüm yazmalar kimliğiyle kurallardan GEÇTİ', `${replayed} yazma (onay+stok+zimmet, red, teslim, iade)`);
+        // personelin yetkisiz denemeleri
+        await env.withSecurityRulesDisabled(c => setDoc(ref(c.firestore(), 'requests', 'r_new'), { ...SEED.requests[2], id: 'r_new' }));
+        const st = dbs.staff();
+        await assertFails(updateDoc(ref(st, 'requests', 'r_new'), { durum: 'approved' }));
+        await assertFails(updateDoc(ref(st, 'requests', 'r_new'), { durum: 'rejected' }));
+        await assertFails(updateDoc(ref(st, 'requests', 'r_new'), { durum: 'completed' }));
+        await assertFails(setDoc(ref(st, 'b3', 'fake'), { id: 'fake', tip: 'zimmet', requestId: 'r_new', personelId: 's1', adet: 1 }));
+        await assertFails(updateDoc(ref(st, 'requests', 'r_dem'), { iadeEdildi: true }));
+        ok('Kural: personel kendi talebini onaylayamaz / reddedemez / onaysız teslim alamaz / zimmet yazamaz / iade işaretleyemez');
+    } finally { await env.cleanup(); }
+    console.log(report.join('\n'));
+    console.log(`Ekran görüntüleri: ${OUT}`);
+})().catch(e => { console.error(e); process.exit(1); });

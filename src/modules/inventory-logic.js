@@ -26,9 +26,12 @@ const _alert = (msg, type) => { if (typeof window.showAppAlert === 'function') w
 const _missing = () => _alert('Kayıt bulunamadı; liste güncellenmiş olabilir. Sayfayı yenileyip tekrar deneyin.', 'error');
 
 // Seçili ürünü (#selectedProduct, selectProduct ile doldurulur) id ile çözer; stok düşümü ve b3 çıkış kaydı TEK transaction
-// (runExitTransaction · 3.4): ya ikisi birden ya hiçbiri — telafi (stok geri alma) gerekmez. Yalnız yönetici (karar 3).
+// (runExitTransaction · 3.4): ya ikisi birden ya hiçbiri — telafi (stok geri alma) gerekmez.
+// v3.4: yönetici her ürün için, alan kişiyi personel listesinden seçerek; personel hesabı (BT ekibi) yalnız sarf için ve
+// alan kişi kendisi olarak çıkış yapar (ExitPolicy · firestore.rules staffExitB3Ok aynı ölçüt).
 async function _performExit(requestedQty) {
-    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { _alert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
+    if (!(typeof window.canExitStock === 'function' && window.canExitStock())) { _alert(window.EXIT_STAFF_MESSAGE || window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
+    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
     if (!Number.isInteger(requestedQty) || requestedQty < 1) { _alert('Adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
     const selectedDiv = document.getElementById('selectedProduct');
     const selected = selectedDiv ? selectedDiv.dataset : null;
@@ -38,14 +41,25 @@ async function _performExit(requestedQty) {
     const product = _find(repo, selected.id);
     if (!product) { _missing(); return; }
 
+    let typeId = null;
+    if (!isAdmin) {
+        const ok = window.ExitPolicy.eligibility(product, window.data.productTypes);
+        if (!ok.ok) { _alert(ok.message, 'warning'); return; }
+        typeId = ok.typeId;
+    }
+    const receiver = window.ExitReceiver ? window.ExitReceiver.resolve('exit', isAdmin) : null;
+    if (!receiver) return;   // resolve uyarıyı kendisi gösterir
+
     // Kanonik b3 kaydı (3.6): tür, raf, sütun, marka ve depo yazma anında üründen kopyalanır.
     // Demirbaş (3.9a): adet kadar cihaz kimliği zorunlu (Seri No veya Envanter No); her cihaz ayrı b3 kaydı (adet 1),
-    // hepsi stok düşümüyle aynı transaction'da. Sarf malzeme: tek kayıt, serbest "SN / BioPro / Itsm" alanı.
+    // hepsi stok düşümüyle aynı transaction'da. Sarf malzeme: tek kayıt, serbest "ITSM / Gerekçe" alanı.
     const common = {
         tip: 'cikis', product, col: repo,
         not:      document.getElementById('exitNote')?.value,
-        alanKisi: document.getElementById('exitPerson')?.value,
-        personelId: window.getActiveUser?.()?.id,
+        alanKisi: receiver.name,
+        personelId: receiver.id,
+        islemYapanUid: window.userAuth?.uid,
+        ...(typeId ? { urunTuruId: typeId, isDemirbas: false } : {}),
     };
     let entries;
     if (window.Schema.isDemirbas(product)) {
@@ -59,7 +73,8 @@ async function _performExit(requestedQty) {
     let res;
     try {
         res = await window.runExitTransaction({ repo, productId: product.id, qty: requestedQty, b3Entry: entries[0],
-            extraWrites: entries.slice(1).map(item => ({ op: 'set', col: 'b3', item })) });
+            extraWrites: entries.slice(1).map(item => ({ op: 'set', col: 'b3', item })) },
+            isAdmin ? undefined : { staffExit: true, forbiddenMessage: 'Çıkış reddedildi: personel yalnız sarf malzeme çıkışı yapabilir. Demirbaş için "Envanter Talep Et" kullanın.' });
     } catch (e) {
         _alert(e.message || 'Çıkış kaydedilemedi.', 'error');   // hiçbir şey yazılmadı
         return;

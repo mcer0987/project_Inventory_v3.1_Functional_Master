@@ -1,0 +1,31 @@
+Envanter talebi yaşam döngüsü (onay · red · otomatik zimmet · teslim · Kişi Envanteri · Zimmet ekranı · iade) — doğrulama
+Tarih: 05.11.2026 12:56 · Dal: feat/v3.4-ebys-asama-5 · HEAD: 8350f91
+Uygulama kodu DEĞİŞTİRİLMEDİ (tek istisna: Gelen Talepler sütun başlığı). Betik: scratch/request-flow-e2e.cjs
+Yöntem: gerçek index.html + gerçek kod (confirmRequest, showRequestApprovalModal, rejectRequest, receiveProduct, AssignmentService,
+        admin inventory-management renderTable/removeAssignment); yalnız Firebase katmanı kaydeden saplama. Ardından arayüzün
+        ürettiği her yazma, yapanın kimliğiyle Firestore emülatöründe firestore.rules'a karşı yeniden oynatıldı.
+
+✔ Gelen Talepler: 3 bekleyen talep Onayla/Reddet düğmeleriyle listelenir; başlık "ITSM / Gerekçe"
+✔ Personelin TASLAK talebi de Gelen Talepler'de görünüyor: durum "draft", işlem "İşlem Yapıldı" — BULGU-4: gönderilmemiş taslak işlenmiş gibi görünüyor
+✔ Demirbaş onayı: cihaz kimliği girilmeden onay verilmez — "Seri No veya Envanter No" uyarısı
+✔ Demirbaş onayı: talep approved, stok 5 → 3, cihaz başına 1 zimmet kaydı (b3 tip zimmet, personelId s1, SN + Env. No)
+✔ Sarf onayı: stok 20 → 17; TEK zimmet kaydı (adet 3, isDemirbas false) — BULGU-1: sarf da "zimmet" olarak yazılıyor
+✔ Red: talep rejected + rejectedBy/rejectedAt; zimmet/stok değişmez — BULGU-2: red gerekçesi sorulmuyor
+✔ İşlenmiş talep tekrar onaylanamaz / reddedilemez
+✔ Gelen Talepler: durumlar Onaylandı / Onaylandı / Reddedildi, düğmeler kalktı
+✔ Zimmet ekranı: onay anında 3 satır (2 laptop + 1 sarf) "Zimmetli"; reddedilen talep yok
+✔ Personel: Taleplerim'de 2 "Teslim Aldım" + 1 "Reddedildi"; Kişi Envanteri BOŞ, tutanakta 3 teslim bekleyen — BULGU-3: teslim alınana kadar Kişi Envanteri'ne düşmüyor
+✔ Teslim Aldım: talepler completed; Kişi Envanteri 3 satır (2 demirbaş SN/Env.No ile + 1 sarf); zimmet tutanağı 3 kalem
+✔ Personel kendi talebini onaylayamaz (arayüz durdurur)
+✔ Zimmetten Düş (1 laptop → B1): stok 3 → 4, Kişi Envanteri 3 → 2; talep, ikinci cihaz iade edilene kadar açık kalır
+✔ Kural tekrarı: arayüzün ürettiği tüm yazmalar kimliğiyle kurallardan GEÇTİ — 14 yazma (onay+stok+zimmet, red, teslim, iade)
+✔ Kural: personel kendi talebini onaylayamaz / reddedemez / onaysız teslim alamaz / zimmet yazamaz / iade işaretleyemez
+
+=== Mevcut otomatik testler (değişmedi) ===
+ℹ tests 298
+ℹ pass 298
+ℹ fail 0
+✔ kalem kümesi = Kişi Envanterim (aktif + teslim alınmış), eskiden yeniye
+✔ zimmetleyen yönetici: onaylayan → approvedBy → bağlı talep → eski onay notu
+✔ zimmeti olmayan personel: boş kalem listesi, geçerli belge
+✔ b3 satır belgesi: zimmet, çıkış, iade, eski şema, bilinmeyen id

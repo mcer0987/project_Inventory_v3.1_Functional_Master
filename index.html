@@ -52,6 +52,9 @@
     <script src="src/utils/ownership.js"></script>
     <script src="src/services/assignment-service.js"></script>
     <script src="src/ui/device-ids.js"></script>
+    <script src="src/utils/exit-policy.js"></script>
+    <script src="src/ui/person-picker.js"></script>
+    <script src="src/ui/staff-guards.js"></script>
     <link rel="stylesheet" href="todo-module.css">
     <script src="todo-module.js"></script>
 
@@ -619,7 +622,9 @@
             </div>
             <div class="b3-help-panel" id="b3HelpPanel" role="region" aria-label="Envanter çıkışları kullanım bilgisi" hidden>
                 <ul>
-                    <li><strong>Arama:</strong> Ürün, alan kişi, envanter no, seri no, raf veya tarihe göre listeyi daraltır.</li>
+                    <li><strong>Arama:</strong> Ürün, alan kişi, envanter no, ITSM / gerekçe, raf veya tarihe göre listeyi daraltır.</li>
+                    <li><strong>Kim çıkış yapabilir:</strong> Yönetici her ürün için çıkış yapar ve "Alan Kişi"yi personel listesinden arayarak seçer. Giriş hesabı olan personel yalnız sarf malzeme çıkışı yapar; çıkış kendi adına kaydedilir. Demirbaş için "Envanter Talep Et" ile yöneticiye talep gönderilir.</li>
+                    <li><strong>Toplu çıkış:</strong> Personel tek seferde en fazla 6 farklı ürün çıkarabilir; daha fazlası için ikinci bir toplu çıkış yapılır.</li>
                     <li><strong>Görünüm:</strong> Telefonda kayıtlar günlere göre gruplanmış kartlar olarak gelir. Sağdaki düğmeyle tablo ve kart görünümü arasında geçebilirsiniz.</li>
                     <li><strong>Detaylar:</strong> Kartta “Detaylar” satırına dokunduğunuzda raf, seri no ve çıkış notu açılır.</li>
                     <li><strong>Zimmet PDF:</strong> Seçilen kaydın zimmet tutanağını yazdırılabilir biçimde açar.</li>
@@ -628,7 +633,7 @@
                 </ul>
             </div>
             <div class="search-bar">
-                <input type="search" id="searchB3" placeholder="Ürün, alan kişi, envanter no, SN veya tarih ara..."
+                <input type="search" id="searchB3" placeholder="Ürün, alan kişi, envanter no, ITSM veya tarih ara..."
                     oninput="window.renderExitTable()" autocomplete="off" aria-label="Çıkış kayıtlarında ara" style="background: transparent; color: inherit;">
                 <button type="button" class="view-toggle-btn" id="viewToggleB3" onclick="window.toggleB3CardView()"
                     title="Kart Görünümüne Geç" aria-label="Kart Görünümüne Geç">
@@ -669,7 +674,7 @@
                             <th>Raf No</th>
                             <th>Ürün Türü</th>
                             <th>Ürün Açıklama</th>
-                            <th>SN / BioPro / Itsm</th>
+                            <th>ITSM / Gerekçe</th>
                             <th>Sarf İse Adet</th>
                             <th>Açıklama / Not</th>
                             <th>Alan Kişi</th>
@@ -767,7 +772,7 @@
                             <th>Personel</th>
                             <th>Ürün</th>
                             <th>Gerekçe / Not</th>
-                            <th>SN / BioPro / Itsm</th>
+                            <th>ITSM / Gerekçe</th>
                             <th style="text-align:center;">Durum</th>
                             <th style="text-align:center;">İşlem</th>
                         </tr>
@@ -1224,6 +1229,7 @@
             <div class="modal-content">
                 <span class="close" onclick="closeExitModal()">&times;</span>
                 <h2 id="exitModalTitle">Envanter Çıkışı Yap</h2>
+                <p class="exit-role-note" id="exitRoleNote" aria-live="polite"></p>
                 <form id="exitForm" onsubmit="window.saveExit(event)" autocomplete="off">
                     <label>Ürün Ara: <input type="text" id="exitSearch" onkeyup="window.searchForExit()"
                             autocomplete="off"></label>
@@ -1234,11 +1240,12 @@
                     </div>
 
                     <label>Raf No: <input type="text" id="exitShelfNo" readonly></label>
-                    <label>Adet: <input type="number" id="exitQty" value="1" min="1" required oninput="window.DeviceIds && window.DeviceIds.syncExitForm()"></label> <label>SN /
-                        BioPro / Itsm: <input type="text" id="exitSn" required></label>
+                    <label>Adet: <input type="number" id="exitQty" value="1" min="1" required oninput="window.DeviceIds && window.DeviceIds.syncExitForm()"></label> <label>ITSM /
+                        Gerekçe: <input type="text" id="exitSn" required></label>
                     <div id="exitDeviceIds" hidden></div>
                     <label>Gerekçesi/ Notu: <input type="text" id="exitNote" required></label>
                     <label>Alan Kişi: <input type="text" id="exitPerson" readonly></label>
+                    <input type="hidden" id="exitPersonId">
 
                     <button type="submit" class="save-btn">Çıkışı Onayla</button>
                 </form>
@@ -1277,6 +1284,7 @@
             <div class="modal-content">
                 <span class="close" onclick="closeModal('cartModal')">&times;</span>
                 <h2>Toplu Envanter Çıkışı (Sepet)</h2>
+                <p class="exit-role-note" id="cartRoleNote" aria-live="polite"></p>
 
                 <div class="form-group" style="position: relative; margin-bottom: 15px;">
                     <label>Ürün Ara ve Sepete Ekle:</label>
@@ -1294,9 +1302,10 @@
                 </div>
 
                 <form id="cartForm" onsubmit="window.saveCartExit(event)" autocomplete="off">
-                    <label>SN / BioPro / Itsm <small>(sarf kalemleri için; demirbaş kalemlerde cihaz kimlikleri kalem altında)</small>: <input type="text" id="cartSn"></label>
+                    <label>ITSM / Gerekçe <small>(sarf kalemleri için; demirbaş kalemlerde cihaz kimlikleri kalem altında)</small>: <input type="text" id="cartSn"></label>
                     <label>Gerekçesi/ Notu: <input type="text" id="cartNote" required></label>
                     <label>Alan Kişi: <input type="text" id="cartPerson" readonly></label>
+                    <input type="hidden" id="cartPersonId">
                     <button type="submit" class="save-btn" style="background:#f39c12;">Toplu Çıkışı Onayla</button>
                 </form>
             </div>

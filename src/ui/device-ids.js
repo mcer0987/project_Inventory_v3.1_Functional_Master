@@ -69,7 +69,7 @@
             container.oninput = null;
         },
 
-        // Çıkış modalı: seçili ürün demirbaşsa serbest "SN / BioPro / Itsm" alanı yerine adet kadar kimlik satırı.
+        // Çıkış modalı: seçili ürün demirbaşsa serbest "ITSM / Gerekçe" alanı yerine adet kadar kimlik satırı.
         syncExitForm() {
             const box = document.getElementById('exitDeviceIds');
             const sel = document.getElementById('selectedProduct');

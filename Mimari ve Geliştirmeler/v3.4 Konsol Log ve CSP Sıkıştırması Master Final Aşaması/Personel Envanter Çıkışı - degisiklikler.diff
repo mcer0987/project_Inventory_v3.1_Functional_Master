@@ -1,0 +1,1514 @@
+diff --git a/firestore.rules b/firestore.rules
+index bf16126..9c28091 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -513,6 +513,58 @@ service cloud.firestore {
+         || restoreLockOn(r);
+     }
+ 
++    // ─── v3.4 · Personel (BT ekibi) SARF çıkışı ──────────────────────────────────────────────────────────────
++    // [WHY]: Envanter çıkışı yalnız yöneticideydi; 10 kişilik BT ekibi sarf malzeme çıkışı yapacak. Demirbaş çıkışı yine yalnız
++    //        yöneticide (personel "Envanter Talep Et" ile ister). İstemci kontrolü tek başına yetmez: personel konsoldan doğrudan
++    //        stok düşebilir ya da demirbaş için kayıt yazabilirdi.
++    // [HOW]: İki yazma AYNI commit'te ve birbirine bağlı (istemci: runStockOps staffExit · ExitPolicy.checkStaffPlan):
++    //        - b1/b2 güncellemesi yalnız stok DÜŞÜMÜ (+ computeStockPatch'in durum alanları) ve yeni sonCikisId; bu id commit
++    //          öncesinde OLMAYAN, commit sonrasında bu ürünü, bu depoyu, düşülen adedi ve oturumun uid'sini taşıyan b3 kaydı.
++    //        - b3 oluşturma yalnız 'cikis', isDemirbas false; ürünün türü katalogdaki (urunTuruId) türle KIRPILMIŞ adla birebir
++    //          aynı ve o türün isDemirbas alanı false (istemcideki Schema.isDemirbas'ta da tür tanımı önceliklidir); ürün
++    //          commit sonrasında bu kayda bağlı ve aradaki adet farkı kayıttaki adet. Alan kişi oturumdaki personelin kendisi.
++    //        Raf sayaçları personele yazdırılmaz (shelves bloğu); bkz. firebase-handler runStockOps notu.
++    function b3Doc(r, id) { return /databases/$(database)/documents/$(r)/b3/items/$(id); }
++    function staffExitStockOk(r, c, pid, old, d) {
++      let exitId = d.get('sonCikisId', '');
++      let keys = d.diff(old).affectedKeys();
++      let e = getAfter(b3Doc(r, exitId)).data;
++      return c in ['b1', 'b2'] && exitId is string && exitId.size() > 0 && exitId.size() <= 80
++        && exitId != old.get('sonCikisId', '')
++        && keys.hasOnly(['adet', 'qty', 'lastUpdate', 'durumu', 'status', 'stokOncekiDurum', 'sonCikisId'])
++        && keys.hasAll(['adet', 'sonCikisId'])
++        && old.get('adet', null) is int && stockQtyOk(d) && d.adet < old.adet
++        && (!keys.hasAny(['qty']) || d.get('qty', null) == d.adet)
++        && (!keys.hasAny(['durumu', 'status', 'stokOncekiDurum'])
++            || (d.adet == 0 && d.get('durumu', 'Tükendi') == 'Tükendi' && d.get('status', 'Tükendi') == 'Tükendi'
++                && d.get('stokOncekiDurum', '') is string && d.get('stokOncekiDurum', '').size() <= 60))
++        && !exists(b3Doc(r, exitId))
++        && string(e.get('productId', '')) == pid && e.get('kaynakDepo', '') == c
++        && e.get('adet', 0) == old.adet - d.adet && e.get('islemYapanUid', '') == request.auth.uid;
++    }
++    function staffExitB3Ok(r, id, d) {
++      let c = d.get('kaynakDepo', '');
++      let pid = string(d.get('productId', ''));
++      let before = get(stockDoc(r, c, pid)).data;
++      let after = getAfter(stockDoc(r, c, pid)).data;
++      let t = get(/databases/$(database)/documents/$(r)/productTypes/items/$(string(d.get('urunTuruId', '-')))).data;
++      let tur = before.get('tür', '') is string && before.get('tür', '').trim() != '' ? before.get('tür', '') : before.get('type', '');
++      return c in ['b1', 'b2'] && string(d.get('id', '')) == id
++        && d.keys().hasOnly(['id', 'sema', 'tip', 'kaynakDepo', 'productId', 'requestId', 'rafNo', 'sutun', 'urunTuruId', 'urunTuru',
++             'urunAciklama', 'marka', 'adet', 'sn', 'envanterNo', 'not', 'alanKisi', 'personelId', 'tarih', 'ts', 'isDemirbas',
++             'talepTuru', 'oncelik', 'iadeTarihi', 'iadeEdildi', 'iadeEdildiTarihi', 'iadeDepo', 'onaylayan', 'islemYapanUid'])
++        && d.get('sema', 0) == 2 && d.get('tip', '') == 'cikis' && d.get('isDemirbas', null) == false
++        && d.get('adet', 0) is int && d.adet >= 1
++        && d.get('requestId', null) == null && d.get('talepTuru', null) == null && d.get('iadeEdildi', null) == false
++        && d.get('islemYapanUid', '') == request.auth.uid
++        && string(d.get('personelId', '')) == staffPid(r)
++        && noTag(d.get('not', '')) && noTag(d.get('sn', '')) && noTag(d.get('alanKisi', '')) && noTag(d.get('envanterNo', ''))
++        && after.get('sonCikisId', '') == id
++        && before.get('adet', 0) - after.get('adet', 0) == d.adet
++        && t.get('isDemirbas', true) == false
++        && tur is string && t.get('name', '') is string && t.name.trim() == tur.trim();
++    }
++
+     // [WHY]: Tanımlarda ID ve hiyerarşi istemci dışından da korunur; silme yerine pasifleştirme.
+     // [HOW]: En fazla dört üst birim getAfter ile doğrulanır; aynı batch'teki döngüler de reddedilir.
+     function definitionKey(v) { return v is string && v.size() <= 120 && !v.matches('.*[<>/].*'); }
+@@ -631,6 +683,12 @@ service cloud.firestore {
+                 : poApprovalOk(root, docId, resource.data, request.resource.data))
+             : textOk(col, request.resource.data) && taskUpdateOk(resource.data, request.resource.data));
+ 
++      // v3.4 · personel (BT ekibi) SARF çıkışı: stok düşümü + bağlı b3 kaydı aynı commit'te (staffExitStockOk / staffExitB3Ok).
++      allow update: if validRoot(root) && col in ['b1', 'b2'] && regularStaff(root) && !maintenanceOn(root)
++        && staffExitStockOk(root, col, docId, resource.data, request.resource.data);
++      allow create: if validRoot(root) && col == 'b3' && regularStaff(root) && !maintenanceOn(root)
++        && staffExitB3Ok(root, docId, request.resource.data);
++
+       // Silme: personel yalnız KENDİ oluşturduğu görevi; talepler, satın almalar, zimmet ve servis kayıtları admin'e ait.
+       allow delete: if validRoot(root) && regularStaff(root) && col == 'tasks' && !maintenanceOn(root)
+         && resource.data.get('creatorUid', '') == request.auth.uid;
+diff --git a/index.html b/index.html
+index dc3dd6d..a166722 100644
+--- a/index.html
++++ b/index.html
+@@ -52,6 +52,9 @@
+     <script src="src/utils/ownership.js"></script>
+     <script src="src/services/assignment-service.js"></script>
+     <script src="src/ui/device-ids.js"></script>
++    <script src="src/utils/exit-policy.js"></script>
++    <script src="src/ui/person-picker.js"></script>
++    <script src="src/ui/staff-guards.js"></script>
+     <link rel="stylesheet" href="todo-module.css">
+     <script src="todo-module.js"></script>
+ 
+@@ -619,7 +622,9 @@
+             </div>
+             <div class="b3-help-panel" id="b3HelpPanel" role="region" aria-label="Envanter çıkışları kullanım bilgisi" hidden>
+                 <ul>
+-                    <li><strong>Arama:</strong> Ürün, alan kişi, envanter no, seri no, raf veya tarihe göre listeyi daraltır.</li>
++                    <li><strong>Arama:</strong> Ürün, alan kişi, envanter no, ITSM / gerekçe, raf veya tarihe göre listeyi daraltır.</li>
++                    <li><strong>Kim çıkış yapabilir:</strong> Yönetici her ürün için çıkış yapar ve "Alan Kişi"yi personel listesinden arayarak seçer. Giriş hesabı olan personel yalnız sarf malzeme çıkışı yapar; çıkış kendi adına kaydedilir. Demirbaş için "Envanter Talep Et" ile yöneticiye talep gönderilir.</li>
++                    <li><strong>Toplu çıkış:</strong> Personel tek seferde en fazla 6 farklı ürün çıkarabilir; daha fazlası için ikinci bir toplu çıkış yapılır.</li>
+                     <li><strong>Görünüm:</strong> Telefonda kayıtlar günlere göre gruplanmış kartlar olarak gelir. Sağdaki düğmeyle tablo ve kart görünümü arasında geçebilirsiniz.</li>
+                     <li><strong>Detaylar:</strong> Kartta “Detaylar” satırına dokunduğunuzda raf, seri no ve çıkış notu açılır.</li>
+                     <li><strong>Zimmet PDF:</strong> Seçilen kaydın zimmet tutanağını yazdırılabilir biçimde açar.</li>
+@@ -628,7 +633,7 @@
+                 </ul>
+             </div>
+             <div class="search-bar">
+-                <input type="search" id="searchB3" placeholder="Ürün, alan kişi, envanter no, SN veya tarih ara..."
++                <input type="search" id="searchB3" placeholder="Ürün, alan kişi, envanter no, ITSM veya tarih ara..."
+                     oninput="window.renderExitTable()" autocomplete="off" aria-label="Çıkış kayıtlarında ara" style="background: transparent; color: inherit;">
+                 <button type="button" class="view-toggle-btn" id="viewToggleB3" onclick="window.toggleB3CardView()"
+                     title="Kart Görünümüne Geç" aria-label="Kart Görünümüne Geç">
+@@ -669,7 +674,7 @@
+                             <th>Raf No</th>
+                             <th>Ürün Türü</th>
+                             <th>Ürün Açıklama</th>
+-                            <th>SN / BioPro / Itsm</th>
++                            <th>ITSM / Gerekçe</th>
+                             <th>Sarf İse Adet</th>
+                             <th>Açıklama / Not</th>
+                             <th>Alan Kişi</th>
+@@ -1204,6 +1209,7 @@
+             <div class="modal-content">
+                 <span class="close" onclick="closeExitModal()">&times;</span>
+                 <h2 id="exitModalTitle">Envanter Çıkışı Yap</h2>
++                <p class="exit-role-note" id="exitRoleNote" aria-live="polite"></p>
+                 <form id="exitForm" onsubmit="window.saveExit(event)" autocomplete="off">
+                     <label>Ürün Ara: <input type="text" id="exitSearch" onkeyup="window.searchForExit()"
+                             autocomplete="off"></label>
+@@ -1214,11 +1220,12 @@
+                     </div>
+ 
+                     <label>Raf No: <input type="text" id="exitShelfNo" readonly></label>
+-                    <label>Adet: <input type="number" id="exitQty" value="1" min="1" required oninput="window.DeviceIds && window.DeviceIds.syncExitForm()"></label> <label>SN /
+-                        BioPro / Itsm: <input type="text" id="exitSn" required></label>
++                    <label>Adet: <input type="number" id="exitQty" value="1" min="1" required oninput="window.DeviceIds && window.DeviceIds.syncExitForm()"></label> <label>ITSM /
++                        Gerekçe: <input type="text" id="exitSn" required></label>
+                     <div id="exitDeviceIds" hidden></div>
+                     <label>Gerekçesi/ Notu: <input type="text" id="exitNote" required></label>
+                     <label>Alan Kişi: <input type="text" id="exitPerson" readonly></label>
++                    <input type="hidden" id="exitPersonId">
+ 
+                     <button type="submit" class="save-btn">Çıkışı Onayla</button>
+                 </form>
+@@ -1257,6 +1264,7 @@
+             <div class="modal-content">
+                 <span class="close" onclick="closeModal('cartModal')">&times;</span>
+                 <h2>Toplu Envanter Çıkışı (Sepet)</h2>
++                <p class="exit-role-note" id="cartRoleNote" aria-live="polite"></p>
+ 
+                 <div class="form-group" style="position: relative; margin-bottom: 15px;">
+                     <label>Ürün Ara ve Sepete Ekle:</label>
+@@ -1274,9 +1282,10 @@
+                 </div>
+ 
+                 <form id="cartForm" onsubmit="window.saveCartExit(event)" autocomplete="off">
+-                    <label>SN / BioPro / Itsm <small>(sarf kalemleri için; demirbaş kalemlerde cihaz kimlikleri kalem altında)</small>: <input type="text" id="cartSn"></label>
++                    <label>ITSM / Gerekçe <small>(sarf kalemleri için; demirbaş kalemlerde cihaz kimlikleri kalem altında)</small>: <input type="text" id="cartSn"></label>
+                     <label>Gerekçesi/ Notu: <input type="text" id="cartNote" required></label>
+                     <label>Alan Kişi: <input type="text" id="cartPerson" readonly></label>
++                    <input type="hidden" id="cartPersonId">
+                     <button type="submit" class="save-btn" style="background:#f39c12;">Toplu Çıkışı Onayla</button>
+                 </form>
+             </div>
+diff --git a/scratch/hosting-files.js b/scratch/hosting-files.js
+index 083f33a..66adde2 100644
+--- a/scratch/hosting-files.js
++++ b/scratch/hosting-files.js
+@@ -56,7 +56,8 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
+ // Manuel çıkış modülü/şeması (2) ve admin panelinden bağlı Gelişim Günlüğü (3).
+ // Aşama 5: süreç şeması/servisi/arayüzü ve legacy özel sorgu adaptörü (4).
+ // EBYS Rehberi: tanıtım modalı ve stili (2).
+-const EXPECTED_COUNT = 92;
++// Personel (BT ekibi) çıkışı: çıkış politikası, alan kişi seçici, depo salt-okunur / sağ tık koruması (3).
++const EXPECTED_COUNT = 95;
+ const unexpected = files.filter(f => !expected(f));
+ console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
+ if (unexpected.length) {
+diff --git a/script.js b/script.js
+index 4975724..2d47b69 100644
+--- a/script.js
++++ b/script.js
+@@ -1101,16 +1101,21 @@ window.sendDraftInventoryRequest = async function (id) {
+     //        iki cihaz aynı anda çıkınca biri diğerinin düşümünü eziyor, sıfıra inen "Pasif"/"Hurda" ürünün durumu
+     //        "Tükendi" oluyordu; yetersiz kalemler sessizce atlanıp kalanlar "başarılı" kaydediliyordu.
+     // [HOW]: Kalemler ürün id'siyle tutulur; tüm kalemlerin stok düşümü + b3 kayıtları TEK transaction (runStockOps):
+-    //        bir kalem bile yetmezse hiçbir şey yazılmaz ve hangi ürün olduğu söylenir. Yalnız yönetici (karar 3).
++    //        bir kalem bile yetmezse hiçbir şey yazılmaz ve hangi ürün olduğu söylenir.
++    //        v3.4: yönetici her ürün için (alan kişiyi seçerek); personel hesabı yalnız sarf kalemleri, alan kişi kendisi.
++    const _isAdmin = () => typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+     window.openCartModal = function () {
+-        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
++        if (!(typeof window.canExitStock === 'function' && window.canExitStock())) { showAppAlert(window.EXIT_STAFF_MESSAGE || window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
+         cartItems = [];
+         document.getElementById('cartSearch').value = "";
+         document.getElementById('cartProductList').style.display = 'none';
+         document.getElementById('cartNote').value = "";
+-        document.getElementById('cartPerson').value = "";
+-        const activeUser = window.getActiveUser();
+-        if (activeUser) document.getElementById('cartPerson').value = activeUser.name;
++        document.getElementById('cartSn').value = "";
++        if (window.ExitReceiver) window.ExitReceiver.setup('cart', _isAdmin());
++        const roleNote = document.getElementById('cartRoleNote');
++        if (roleNote) roleNote.textContent = _isAdmin()
++            ? 'Sepetteki tüm ürünlerin stoğu tek seferde düşer; çıkışlar "Alan Kişi" olarak seçtiğiniz personele yazılır. Bir kalemde stok yetmezse hiçbiri kaydedilmez.'
++            : 'Yalnız sarf malzemeleri sepete ekleyebilirsiniz; çıkışlar sizin adınıza kaydedilir. Demirbaş için "Envanter Talep Et" kullanın.';
+         renderCartItems();
+         const modal = document.getElementById('cartModal');
+         if (modal) modal.style.display = 'block';
+@@ -1153,9 +1158,9 @@ window.sendDraftInventoryRequest = async function (id) {
+                 }
+                 div.onclick = function () {
+                     const isAdmin = window.isDbAdmin();   // J3: adminVizesi bayrağı elle yazılabiliyordu
+-                    if (res.isDemirbasStrict && !isAdmin) {
+-                        showAppAlert(`🛡️ GÜVENLİK: Bu ürün demirbaştır. Sadece yöneticiler çıkış yapabilir!`, "warning");
+-                        return;
++                    if (!isAdmin) {
++                        const ok = window.ExitPolicy.eligibility(res.item, window.data.productTypes);
++                        if (!ok.ok) { showAppAlert(ok.message, "warning"); return; }
+                     }
+                     addToCart(res);
+                     document.getElementById('cartSearch').value = "";
+@@ -1173,6 +1178,11 @@ window.sendDraftInventoryRequest = async function (id) {
+             if (exists.exitQty < res.qty) { exists.exitQty++; renderCartItems(); }
+             else showAppAlert("Stokta daha fazla yok!", "warning");
+         } else {
++            const max = window.ExitPolicy?.STAFF_MAX_ITEMS;
++            if (!_isAdmin() && max && cartItems.length >= max) {
++                showAppAlert(`Toplu çıkışta tek seferde en fazla ${max} farklı ürün ekleyebilirsiniz; kalanları ikinci bir çıkışla yapın.`, 'warning');
++                return;
++            }
+             cartItems.push({ ...res, exitQty: 1 });
+             renderCartItems();
+         }
+@@ -1228,14 +1238,18 @@ window.sendDraftInventoryRequest = async function (id) {
+     window.saveCartExit = async function (event) {
+         if (event) { event.preventDefault(); event.stopPropagation(); }
+         if (cartItems.length === 0) { showAppAlert("Sepette çıkış yapılacak ürün yok!", "warning"); return; }
+-        const alanKisi = document.getElementById('cartPerson').value || "-";
++        if (!(typeof window.canExitStock === 'function' && window.canExitStock())) { showAppAlert(window.EXIT_STAFF_MESSAGE || window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
++        const isAdmin = _isAdmin();
++        const receiver = window.ExitReceiver ? window.ExitReceiver.resolve('cart', isAdmin) : null;
++        if (!receiver) return;
++        const alanKisi = receiver.name;
++        const personelId = receiver.id;
++        const islemYapanUid = window.userAuth?.uid;
+         const not = document.getElementById('cartNote').value || "-";
+         const sn = document.getElementById('cartSn').value || "-";
+         const tarih = getTurkiyeSaati();
+-        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
+ 
+         const stock = [], writes = [], allDeviceIds = [];
+-        const personelId = window.getActiveUser?.()?.id;
+         const snGiven = sn !== '-' && sn.trim() !== '';
+         for (const cartItem of cartItems) {
+             const product = (window.data[cartItem.repo] || []).find(x => x && String(x.id) === String(cartItem.item.id));
+@@ -1243,6 +1257,12 @@ window.sendDraftInventoryRequest = async function (id) {
+             if (!product) { showAppAlert(`"${name}" artık listede yok; sepetten çıkarın.`, 'error'); return; }
+             const qty = Number(cartItem.exitQty);
+             if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Adetler en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
++            let staffType = null;
++            if (!isAdmin) {
++                const ok = window.ExitPolicy.eligibility(product, window.data.productTypes);
++                if (!ok.ok) { showAppAlert(`"${name}": ${ok.message}`, 'warning'); return; }
++                staffType = ok.typeId;
++            }
+             stock.push({ col: cartItem.repo, id: product.id, delta: -qty });
+             // Kanonik b3 kaydı (3.6) — tekil çıkışla aynı kurucu, aynı alanlar.
+             // Demirbaş (3.9a): kalem başına adet kadar kimlik, her cihaz ayrı kayıt; ortak SN/ITSM alanı nota "Ref" olarak eklenir.
+@@ -1253,12 +1273,13 @@ window.sendDraftInventoryRequest = async function (id) {
+                 allDeviceIds.push(...chk.ids);
+                 const refNot = snGiven ? `${not === '-' ? '' : not + ' · '}Ref: ${sn}` : not;
+                 chk.ids.forEach(d => writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+-                    tip: 'cikis', product, col: cartItem.repo, adet: 1, sn: d.sn, envanterNo: d.envanterNo, not: refNot, alanKisi, tarih, personelId,
++                    tip: 'cikis', product, col: cartItem.repo, adet: 1, sn: d.sn, envanterNo: d.envanterNo, not: refNot, alanKisi, tarih, personelId, islemYapanUid,
+                 }) }));
+             } else {
+-                if (!snGiven) { showAppAlert(`"${name}" (sarf) için "SN / BioPro / Itsm" alanını doldurun.`, 'warning'); return; }
++                if (!snGiven) { showAppAlert(`"${name}" (sarf) için "ITSM / Gerekçe" alanını doldurun.`, 'warning'); return; }
+                 writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
+-                    tip: 'cikis', product, col: cartItem.repo, adet: qty, sn, not, alanKisi, tarih, personelId,
++                    tip: 'cikis', product, col: cartItem.repo, adet: qty, sn, not, alanKisi, tarih, personelId, islemYapanUid,
++                    ...(staffType ? { urunTuruId: staffType, isDemirbas: false } : {}),
+                 }) });
+             }
+         }
+@@ -1268,7 +1289,8 @@ window.sendDraftInventoryRequest = async function (id) {
+ 
+         let res;
+         try {
+-            res = await window.runStockOps({ stock, writes });
++            res = await window.runStockOps({ stock, writes }, isAdmin ? undefined
++                : { staffExit: true, forbiddenMessage: 'Toplu çıkış reddedildi: personel yalnız sarf malzeme çıkışı yapabilir.' });
+         } catch (e) {
+             showAppAlert(`Toplu çıkış yapılamadı; hiçbir kalem kaydedilmedi. ${e.message || ''}`, 'error');
+             return;
+@@ -1336,6 +1358,8 @@ window.searchForExit = function () {
+         ((item.açıklama || '')?.toLocaleLowerCase('tr-TR').includes(filter))
+     ).slice(0, 10);
+ 
++    // v3.4: personel için demirbaş / türü belirsiz ürünler listede görünür ama seçilemez (neden yazılır)
++    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+     results.forEach(item => {
+         const div = document.createElement('div');
+         div.className = 'product-item';
+@@ -1343,8 +1367,16 @@ window.searchForExit = function () {
+         div.style.borderBottom = '1px solid #eee';
+         div.style.cursor = 'pointer';
+         const stock = item.adet !== undefined ? item.adet : (item.qty || 0);
+-        div.innerHTML = `<strong>${escapeHtml(item.ürün || item.name || '-')}</strong> <small>(${escapeHtml(item.marka || item.tür || '-')})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${escapeHtml(item.raf || item.shelf || '-')} | Stok: ${stock} | Depo: ${escapeHtml(item._repo.toUpperCase())}</span>`;
+-        if (stock > 0) {
++        div.innerHTML = `<strong>${escapeHtml(item.ürün || item.name || '-')}</strong> <small>(${escapeHtml(item.marka || item.tür || '-')})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${escapeHtml(item.raf || item.shelf || '-')} | Stok: ${escapeHtml(stock)} | Depo: ${escapeHtml(item._repo.toUpperCase())}</span>`;
++        const policy = !isAdmin && window.ExitPolicy ? window.ExitPolicy.eligibility(item, window.data.productTypes) : { ok: true };
++        if (!policy.ok) {
++            const note = document.createElement('div');
++            note.className = 'exit-item-locked';
++            note.textContent = policy.reason === 'demirbas' ? '🛡️ Demirbaş — yalnız yönetici çıkış yapar; "Envanter Talep Et" kullanın.' : '🔒 Türü listede birebir bulunamadı — çıkışı yönetici yapar.';
++            div.append(note);
++            div.style.opacity = '0.6';
++            div.onclick = () => showAppAlert(policy.message, 'warning');
++        } else if (stock > 0) {
+             div.onclick = () => window.selectProduct(item.ürün || item.name, item.tür || item.type || item.marka, item.raf || item.shelf, stock, item._repo, item._index, item.id);
+         } else {
+             div.style.opacity = '0.5'; div.style.pointerEvents = 'none'; div.innerHTML += ' <b style="color:red;">(STOK YOK)</b>';
+@@ -1541,7 +1573,7 @@ function _renderB3Cards(rows) {
+                     <summary><span>Detaylar</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+                     <dl>
+                         ${detail('Raf / Konum', row.rafNo) /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+-                        ${detail('SN / BioPro / Itsm', row.sn, 'b3-mono') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
++                        ${detail('ITSM / Gerekçe', row.sn, 'b3-mono') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                         ${detail('Tarih', row.tarih) /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                         ${detail('Açıklama / Not', row.not, 'b3-note') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                     </dl>
+@@ -2005,7 +2037,7 @@ window.exportToExcel = function (depo) {
+                 "Raf No": n.rafNo,
+                 "Ürün Türü": n.urunTuru,
+                 "Ürün Açıklama": n.urunAciklama,
+-                "SN / BioPro / Itsm": n.sn,
++                "ITSM / Gerekçe": n.sn,
+                 "Envanter No": n.envanterNo,
+                 "Adet": n.adet,
+                 "Not/Gerekçe": n.not,
+diff --git a/src/modules/inventory-logic.js b/src/modules/inventory-logic.js
+index 4cd885c..763c0c4 100644
+--- a/src/modules/inventory-logic.js
++++ b/src/modules/inventory-logic.js
+@@ -26,9 +26,12 @@ const _alert = (msg, type) => { if (typeof window.showAppAlert === 'function') w
+ const _missing = () => _alert('Kayıt bulunamadı; liste güncellenmiş olabilir. Sayfayı yenileyip tekrar deneyin.', 'error');
+ 
+ // Seçili ürünü (#selectedProduct, selectProduct ile doldurulur) id ile çözer; stok düşümü ve b3 çıkış kaydı TEK transaction
+-// (runExitTransaction · 3.4): ya ikisi birden ya hiçbiri — telafi (stok geri alma) gerekmez. Yalnız yönetici (karar 3).
++// (runExitTransaction · 3.4): ya ikisi birden ya hiçbiri — telafi (stok geri alma) gerekmez.
++// v3.4: yönetici her ürün için, alan kişiyi personel listesinden seçerek; personel hesabı (BT ekibi) yalnız sarf için ve
++// alan kişi kendisi olarak çıkış yapar (ExitPolicy · firestore.rules staffExitB3Ok aynı ölçüt).
+ async function _performExit(requestedQty) {
+-    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { _alert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
++    if (!(typeof window.canExitStock === 'function' && window.canExitStock())) { _alert(window.EXIT_STAFF_MESSAGE || window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
++    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+     if (!Number.isInteger(requestedQty) || requestedQty < 1) { _alert('Adet en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+     const selectedDiv = document.getElementById('selectedProduct');
+     const selected = selectedDiv ? selectedDiv.dataset : null;
+@@ -38,14 +41,25 @@ async function _performExit(requestedQty) {
+     const product = _find(repo, selected.id);
+     if (!product) { _missing(); return; }
+ 
++    let typeId = null;
++    if (!isAdmin) {
++        const ok = window.ExitPolicy.eligibility(product, window.data.productTypes);
++        if (!ok.ok) { _alert(ok.message, 'warning'); return; }
++        typeId = ok.typeId;
++    }
++    const receiver = window.ExitReceiver ? window.ExitReceiver.resolve('exit', isAdmin) : null;
++    if (!receiver) return;   // resolve uyarıyı kendisi gösterir
++
+     // Kanonik b3 kaydı (3.6): tür, raf, sütun, marka ve depo yazma anında üründen kopyalanır.
+     // Demirbaş (3.9a): adet kadar cihaz kimliği zorunlu (Seri No veya Envanter No); her cihaz ayrı b3 kaydı (adet 1),
+-    // hepsi stok düşümüyle aynı transaction'da. Sarf malzeme: tek kayıt, serbest "SN / BioPro / Itsm" alanı.
++    // hepsi stok düşümüyle aynı transaction'da. Sarf malzeme: tek kayıt, serbest "ITSM / Gerekçe" alanı.
+     const common = {
+         tip: 'cikis', product, col: repo,
+         not:      document.getElementById('exitNote')?.value,
+-        alanKisi: document.getElementById('exitPerson')?.value,
+-        personelId: window.getActiveUser?.()?.id,
++        alanKisi: receiver.name,
++        personelId: receiver.id,
++        islemYapanUid: window.userAuth?.uid,
++        ...(typeId ? { urunTuruId: typeId, isDemirbas: false } : {}),
+     };
+     let entries;
+     if (window.Schema.isDemirbas(product)) {
+@@ -59,7 +73,8 @@ async function _performExit(requestedQty) {
+     let res;
+     try {
+         res = await window.runExitTransaction({ repo, productId: product.id, qty: requestedQty, b3Entry: entries[0],
+-            extraWrites: entries.slice(1).map(item => ({ op: 'set', col: 'b3', item })) });
++            extraWrites: entries.slice(1).map(item => ({ op: 'set', col: 'b3', item })) },
++            isAdmin ? undefined : { staffExit: true, forbiddenMessage: 'Çıkış reddedildi: personel yalnız sarf malzeme çıkışı yapabilir. Demirbaş için "Envanter Talep Et" kullanın.' });
+     } catch (e) {
+         _alert(e.message || 'Çıkış kaydedilemedi.', 'error');   // hiçbir şey yazılmadı
+         return;
+diff --git a/src/services/firebase-handler.js b/src/services/firebase-handler.js
+index b87e29d..569366d 100644
+--- a/src/services/firebase-handler.js
++++ b/src/services/firebase-handler.js
+@@ -885,7 +885,7 @@ function _b3Violation(p, opts = {}) {
+         const errors = S.validateB3(p.data, { legacy: opts.b3Legacy === true });
+         return errors.length ? errors : null;
+     }
+-    const bad = Object.keys(p.data || {}).filter(k => !S.B3_KEYS.includes(k));
++    const bad = Object.keys(p.data || {}).filter(k => !S.B3_KEYS.includes(k) && !(S.B3_OPTIONAL_KEYS || []).includes(k));
+     return bad.length ? bad.map(k => (S.B3_LEGACY_KEYS.includes(k) ? `eski alan: ${k}` : `bilinmeyen alan: ${k}`)) : null;
+ }
+ // ─── Faz 5 · K2 · B1/B2 çalışma zamanı muhafızı (5.8) ─────────────────────────────────────────────
+@@ -1271,8 +1271,20 @@ export const computeStockPatch = window.computeStockPatch = function (colName, d
+ //                  [{ col, id, delta, createIfMissing }]  doküman yoksa createIfMissing yazılır (servisten dönüş)
+ //          writes: [{ op:'set', col, item } | { op:'update', col, id, fields } | { op:'delete', col, id }]
+ //        Yalnız Firebase admin oturumu (karar 3: stok hareketleri Faz 4 yetki matrisine kadar yöneticide).
++//        v3.4 · istisna: opts.staffExit === true ise personel hesabı oturumu SARF ÇIKIŞI yapabilir. Plan önce
++//        ExitPolicy.checkStaffPlan'dan geçer (yalnız stok düşümü + ürün başına tek b3 'cikis' kaydı); ürün yamasına aynı
++//        kaydın id'si sonCikisId olarak eklenir (kurallar düşülen adedi bu bağla doğrular). Raf sayaçları personel için
++//        yazılmaz (kurallar personele raf yazdırmaz): adet 0'a inerse sayaç bir fazla kalır, yöneticinin "Raf sayaçlarını
++//        eşitle" işlemi düzeltir — kapasite tarafında güvenli yön (raf dolu görünür, taşma olmaz).
+ //        Dönüş: { stock: [{col, id, name, before, after, statusBefore, statusAfter, created}], ids: [yazılan kayıt id'leri] }
+ export const EXIT_ADMIN_ONLY_MESSAGE = window.EXIT_ADMIN_ONLY_MESSAGE = 'Çıkış işlemi yalnızca sistem yöneticisi tarafından yapılabilir.';
++export const EXIT_STAFF_MESSAGE = window.EXIT_STAFF_MESSAGE = 'Envanter çıkışı yalnız yönetici ve giriş hesabı olan personel tarafından yapılabilir.';
++
++// v3.4: çıkış ekranını kim kullanabilir — yönetici her ürün için; personel hesabı (BT ekibi) yalnız sarf için (ExitPolicy).
++export const canExitStock = window.canExitStock = function () {
++    if (typeof window.isDbAdmin === 'function' && window.isDbAdmin()) return true;
++    return !!(window.userAuth && window.AppModules?.Session?.isStaffAccountSession?.());
++};
+ const STOCK_COLLECTIONS = ['b1', 'b2'];
+ 
+ // Transaction'ın saf hesaplama kısmı (okunan dokümanlar → yazılacak stok değişiklikleri). Sunucu verisiyle transaction
+@@ -1301,7 +1313,9 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
+         return false;
+     };
+     if (!window.userAuth) return fail('no-auth', 'Oturum bulunamadı; işlem yapılamadı.');
+-    if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) return fail('forbidden', opts.forbiddenMessage || EXIT_ADMIN_ONLY_MESSAGE);
++    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
++    const staffExit = !isAdmin && opts.staffExit === true && !!window.AppModules?.Session?.isStaffAccountSession?.();
++    if (!isAdmin && !staffExit) return fail('forbidden', opts.forbiddenMessage || EXIT_ADMIN_ONLY_MESSAGE);
+ 
+     // Stok girdilerini doküman başına birleştir
+     const stockByKey = new Map();
+@@ -1339,6 +1353,15 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
+         _announceDenied('bulk-locked', BULK_LOCK_MESSAGE);
+         return fail('bulk-locked', BULK_LOCK_MESSAGE);
+     }
++    let staffLinks = null;   // 'col|id' → b3 kaydının id'si (personel çıkışında ürüne sonCikisId olarak yazılır)
++    if (staffExit) {
++        if (_maintenanceBlocksWrite()) return fail('maintenance', MAINTENANCE_WRITE_MESSAGE);
++        const P = window.ExitPolicy;
++        if (!P || typeof P.checkStaffPlan !== 'function') return fail('forbidden', 'Çıkış politikası (exit-policy.js) yüklenmemiş; işlem yapılmadı.');
++        const plan = P.checkStaffPlan([...stockByKey.values()], prepared);
++        if (!plan.ok) return fail('forbidden', plan.error);
++        staffLinks = plan.links;
++    }
+ 
+     // v3.3 Aşama 4 (Denetim P1-02 devamı): bir stok deltası işgal durumunu DEĞİŞTİRİYORSA (0↔pozitif geçiş, ya da
+     // createIfMissing ile yeniden oluşturma) ilgili raf sayacı (usedSlots) AYNI transaction'da güncellenir. Matematik
+@@ -1365,9 +1388,10 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
+             const snaps = [];
+             for (const e of entries) snaps.push(await tx.get(_docRef(e.col, e.id)));   // tüm okumalar yazmalardan önce
+             const results = planStockOps(entries, snaps.map(sn => sn.exists() ? sn.data() : null));
++            if (staffLinks) results.forEach(r => { r.patch = { ...r.patch, sonCikisId: staffLinks.get(`${r.col}|${r.id}`) }; });
+ 
+             const deltas = new Map();
+-            results.forEach((r, i) => {
++            if (!staffLinks) results.forEach((r, i) => {
+                 _shelfDeltaFor(r.col, snaps[i], r).forEach(([sid, d]) => { if (sid) deltas.set(sid, (deltas.get(sid) || 0) + d); });
+             });
+             const shelfReads = {};
+diff --git a/src/ui/device-ids.js b/src/ui/device-ids.js
+index 6b7fede..8f02e27 100644
+--- a/src/ui/device-ids.js
++++ b/src/ui/device-ids.js
+@@ -69,7 +69,7 @@
+             container.oninput = null;
+         },
+ 
+-        // Çıkış modalı: seçili ürün demirbaşsa serbest "SN / BioPro / Itsm" alanı yerine adet kadar kimlik satırı.
++        // Çıkış modalı: seçili ürün demirbaşsa serbest "ITSM / Gerekçe" alanı yerine adet kadar kimlik satırı.
+         syncExitForm() {
+             const box = document.getElementById('exitDeviceIds');
+             const sel = document.getElementById('selectedProduct');
+diff --git a/src/ui/ui-components.js b/src/ui/ui-components.js
+index a0aaab3..d882a3e 100644
+--- a/src/ui/ui-components.js
++++ b/src/ui/ui-components.js
+@@ -112,6 +112,12 @@ export const UIComponents = {
+             ? repoItems.find(x => x && String(x.id) === String(id)) || null
+             : (repoItems[index] || null);
+ 
++        // v3.4: personel demirbaşı ya da türü katalogda birebir bulunmayan ürünü seçemez (ExitPolicy · kurallarla aynı ölçüt)
++        if (item && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin()) && window.ExitPolicy) {
++            const ok = window.ExitPolicy.eligibility(item, window.data.productTypes);
++            if (!ok.ok) { if (typeof showAppAlert === 'function') showAppAlert(ok.message, 'warning'); return; }
++        }
++
+         div.dataset.name  = name;
+         div.dataset.type  = type;
+         div.dataset.shelf = shelf;
+@@ -662,33 +668,26 @@ export const UIComponents = {
+     // =========================================================================
+     // Satırdan açılırsa ikinci argüman ürün id'sidir (DATA-06).
+     openExitModal(repoName, productId) {
+-        // Karar 3: Faz 4 yetki matrisine kadar stok çıkışı yalnız yönetici (Firestore kuralları da personele b1/b2/b3 yazdırmaz);
+-        // personel formu doldurup sonra reddedilmek yerine baştan net mesaj görür.
+-        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+-            if (typeof showAppAlert === 'function') showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE || 'Çıkış işlemi yalnızca sistem yöneticisi tarafından yapılabilir.', 'error');
++        // v3.4: yönetici ve personel hesabı (BT ekibi) açabilir; personel yalnız sarf çıkışı yapar (ExitPolicy + firestore.rules).
++        if (!(typeof window.canExitStock === 'function' && window.canExitStock())) {
++            if (typeof showAppAlert === 'function') showAppAlert(window.EXIT_STAFF_MESSAGE || window.EXIT_ADMIN_ONLY_MESSAGE, 'error');
+             return;
+         }
++        // J3: yetki Firebase admin oturumundan; adminVizesi (sessionStorage) elle yazılarak muhafız atlanabiliyordu.
++        const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+         window.currentExitRepo  = repoName || (document.querySelector('.tab-content.active')?.id || 'b1');
+         window.currentExitIndex = null;
+         const hasRow = productId !== undefined && productId !== null && productId !== '';
+         const findRow = () => (window.data[window.currentExitRepo] || []).find(x => x && String(x.id) === String(productId)) || null;
+ 
+-        // Demirbaş Koruması
++        // Demirbaş Koruması (tek kural: Schema.isDemirbas; personel için ExitPolicy)
+         if (hasRow) {
+             const item = findRow();
+-
+-            if (item && (item.isDemirbas === true || item.isDemirbas === 'true')) {
+-                // J3: yetki Firebase admin oturumundan; adminVizesi (sessionStorage) elle yazılarak muhafız atlanabiliyordu.
+-                const isAdmin = window.isDbAdmin();
+-
+-                if (!isAdmin) {
+-                    if (typeof showAppAlert === 'function') {
+-                        showAppAlert(`🛡️ GÜVENLİK: "${item.ürün || item.name}" demirbaştır. Sadece yöneticiler çıkış yapabilir!`, 'warning');
+-                    }
+-                    return;
+-                } else {
+-                    if (typeof showAppAlert === 'function') showAppAlert('BİLGİ: Demirbaş ürününden çıkış yapıyorsunuz.', 'info');
+-                }
++            if (item && !isAdmin) {
++                const ok = window.ExitPolicy.eligibility(item, window.data.productTypes);
++                if (!ok.ok) { if (typeof showAppAlert === 'function') showAppAlert(ok.message, 'warning'); return; }
++            } else if (item && window.Schema.isDemirbas(item) && typeof showAppAlert === 'function') {
++                showAppAlert('BİLGİ: Demirbaş ürününden çıkış yapıyorsunuz.', 'info');
+             }
+         }
+ 
+@@ -714,10 +713,12 @@ export const UIComponents = {
+                 rowItem.raf || rowItem.shelf, rowItem.adet ?? rowItem.qty ?? 0, rowRepo, null, rowItem.id);
+         }
+ 
+-        // Aktif kullanıcı adını forma yaz
+-        const activeUser  = window.getActiveUser();
+-        const personInput = document.getElementById('exitPerson');
+-        if (personInput && activeUser) personInput.value = activeUser.name;
++        // Alan kişi: yönetici listeden seçer (varsayılan kendisi), personelde kendisi ve kilitli (v3.4 · person-picker.js)
++        if (window.ExitReceiver) window.ExitReceiver.setup('exit', isAdmin);
++        const roleNote = document.getElementById('exitRoleNote');
++        if (roleNote) roleNote.textContent = isAdmin
++            ? 'Seçtiğiniz ürünün stoğu düşer ve çıkış, "Alan Kişi" olarak seçtiğiniz personelin envanterine yazılır.'
++            : 'Sarf malzeme çıkışı yapabilirsiniz; stok düşer ve çıkış sizin adınıza kaydedilir. Demirbaş ürünler için "Envanter Talep Et" ile yöneticiye talep gönderin.';
+ 
+         modal.style.display = 'block';
+ 
+@@ -898,6 +899,20 @@ export const UIComponents = {
+ 
+         let buttonsHtml = '';
+ 
++        // v3.4: depolar personel için yalnız görüntülenebilir — stok/düzenleme düğmeleri yerine açıklama (staff-guards.js)
++        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
++            const fabBtns = _dom.fabBtns();
++            if (fabBtns) {
++                fabBtns.replaceChildren();
++                const note = document.createElement('span');
++                note.className = 'fab-readonly-note';
++                note.textContent = '🔒 Yalnız görüntüleme — çıkış için Envanter Takibi › Envanter Çıkışı Yap';
++                fabBtns.append(note);
++            }
++            fab.classList.add('fab-visible');
++            return;
++        }
++
+         if (count === 1) {
+             // TEKİL MOD: Tüm işlemler
+             const item      = (window.data[first.depo] || []).find(x => x && String(x.id) === String(first.id)) || {};
+@@ -961,7 +976,13 @@ export const UIComponents = {
+         const bsBtns    = _dom.bsBtns();
+ 
+         if (bsName) bsName.textContent = itemData.name || 'Ürün';
+-        if (bsBtns) bsBtns.innerHTML = `
++        if (bsBtns && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
++            bsBtns.replaceChildren();
++            const note = document.createElement('p');
++            note.className = 'fab-readonly-note';
++            note.textContent = '🔒 Depolar personel için yalnız görüntülenebilir. Sarf malzeme çıkışı için Envanter Takibi › Envanter Çıkışı Yap.';
++            bsBtns.append(note);
++        } else if (bsBtns) bsBtns.innerHTML = `
+             <button class="bs-action-btn bs-btn-inc" data-action="increaseStock" data-depo="${d}" data-id="${i}">
+                 <i class="fas fa-plus"></i> Artır
+             </button>
+diff --git a/src/utils/schema.js b/src/utils/schema.js
+index a2a4c8c..9e71cec 100644
+--- a/src/utils/schema.js
++++ b/src/utils/schema.js
+@@ -38,6 +38,10 @@
+         'not', 'alanKisi', 'personelId', 'tarih', 'ts', 'isDemirbas',
+         'talepTuru', 'oncelik', 'iadeTarihi', 'iadeEdildi', 'iadeEdildiTarihi', 'iadeDepo', 'onaylayan'
+     ]);
++    // v3.4 · personel çıkışı (exit-policy.js): kurallar personel çıkışında ikisini de zorunlu tutar; yönetici yazmalarında isteğe bağlı.
++    //   urunTuruId    — ürünün türünün katalog kimliği (productTypes/items/{id}); kural türün demirbaş OLMADIĞINI buradan doğrular.
++    //   islemYapanUid — çıkışı yapan oturumun uid'si (alan kişi ile aynı olmak zorunda değil; denetim izi).
++    const B3_OPTIONAL_KEYS = Object.freeze(['urunTuruId', 'islemYapanUid']);
+     // Eski şemaların kanonik karşılığı olan alanları (göçte kaldırılır; kanonik kayıtta bulunmamalı).
+     const B3_LEGACY_KEYS = Object.freeze([
+         'shelfNo', 'productType', 'sarfAdet', 'note', 'date', 'person', 'personel', 'sourceRepo', 'approvedBy',
+@@ -149,6 +153,8 @@
+             iadeEdildiTarihi: null,
+             iadeDepo: null,
+             onaylayan: pick(o.onaylayan) ?? null,
++            ...(isBlank(o.urunTuruId) ? {} : { urunTuruId: String(o.urunTuruId) }),
++            ...(isBlank(o.islemYapanUid) ? {} : { islemYapanUid: String(o.islemYapanUid) }),
+         };
+     }
+ 
+@@ -258,7 +264,9 @@
+     //          stokOncekiDurum — stok 0'a düşerken saklanan önceki durum (computeStockPatch); tam kayıt yazan yollar
+     //                            (saveData / upsertItem / geri yükleme) kaydı bu alanla birlikte yeniden yazar.
+     //          envanterNo      — B1/B2 stok kaydı kimliği (benzersizlik kontrolü importta yapılır).
+-    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo']);
++    //          sonCikisId      — v3.4: personel çıkışında stok düşümünü aynı commit'teki b3 kaydına bağlar (firestore.rules
++    //                            staffExitStockOk); yalnız runStockOps personel çıkışı yazar.
++    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo', 'sonCikisId']);
+     const B2_OPTIONAL_KEYS = Object.freeze([...B1_OPTIONAL_KEYS]);
+     const STOCK_STRING_KEYS = Object.freeze(['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status', 'envanterNo', 'stokOncekiDurum']);
+ 
+@@ -639,7 +647,7 @@
+ 
+     const Schema = {
+         makeId, normName, idToTs, isDemirbas, normalizeStock, findStock, isSelfApproval,
+-        B3_SCHEMA_VERSION, B3_KEYS, B3_LEGACY_KEYS, B3_TIP, STOK_DISI,
++        B3_SCHEMA_VERSION, B3_KEYS, B3_OPTIONAL_KEYS, B3_LEGACY_KEYS, B3_TIP, STOK_DISI,
+         buildB3Entry, normalizeB3, toCanonicalB3, validateB3,
+         B1_KEYS, B1_LEGACY_KEYS, B2_KEYS, B2_LEGACY_KEYS, B1_OPTIONAL_KEYS, B2_OPTIONAL_KEYS, stockKnownKeys, legacyStockPatch,
+         validateB1, validateB2, toCanonicalStock,
+diff --git a/style.css b/style.css
+index bac55be..fcd5fac 100644
+--- a/style.css
++++ b/style.css
+@@ -5519,3 +5519,98 @@ body,
+         transition: none;
+     }
+ }
++
++/* =============================================================================
++   v3.4 · PERSONEL ÇIKIŞI VE SALT-OKUNUR DEPO
++   [WHY]: BT ekibi sarf çıkışı yapabilir; yönetici alan kişiyi listeden seçer; depolar personelde yalnız görüntülenir.
++   [HOW]: Rol notu (modal başı), aranabilir kişi listesi (person-picker.js), kilitli ürün satırı ve
++          body.staff-readonly altında pasif depo çubuğu (staff-guards.js tıklamayı ayrıca engeller).
++   ============================================================================= */
++.exit-role-note {
++    margin: -4px 0 12px;
++    padding: 8px 12px;
++    border-radius: 8px;
++    border-left: 3px solid var(--color-primary);
++    background: var(--color-surface-alt);
++    color: var(--color-text);
++    font-size: 13px;
++    line-height: 1.5;
++}
++
++.exit-role-note:empty { display: none; }
++
++.person-picker { position: relative; }
++
++.person-picker-list {
++    position: absolute;
++    z-index: 30;
++    top: calc(100% + 2px);
++    left: 0;
++    right: 0;
++    max-height: 240px;
++    margin: 0;
++    padding: 4px;
++    overflow-y: auto;
++    list-style: none;
++    background: var(--color-surface);
++    border: 1px solid var(--color-border);
++    border-radius: 8px;
++    box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.12));
++}
++
++.person-picker-list li {
++    display: flex;
++    flex-direction: column;
++    gap: 1px;
++    padding: 7px 10px;
++    border-radius: 6px;
++    cursor: pointer;
++    color: var(--color-text);
++}
++
++.person-picker-list li small { color: var(--color-text-muted); font-size: 11.5px; }
++.person-picker-list li[aria-selected="true"] { background: var(--color-surface-alt); outline: 2px solid var(--color-primary); outline-offset: -2px; }
++.person-picker-list .person-picker-empty { cursor: default; color: var(--color-text-muted); }
++
++#exitPerson[readonly],
++#cartPerson[readonly] { background: var(--color-surface-alt); cursor: not-allowed; }
++
++.exit-item-locked {
++    margin-top: 4px;
++    font-size: 12px;
++    font-weight: 600;
++    color: var(--color-text-muted);
++}
++
++.fab-readonly-note {
++    margin: 0;
++    padding: 4px 8px;
++    font-size: 13px;
++    font-weight: 600;
++    color: inherit;
++}
++
++body.staff-readonly .uab-bar .uab-btn,
++body.staff-readonly .uab-bar .uab-checkbox-wrap {
++    opacity: 0.45;
++    cursor: not-allowed;
++    filter: grayscale(0.4);
++    box-shadow: none;
++    transform: none;
++}
++
++body.staff-readonly .uab-bar::before {
++    content: '🔒 Yalnız görüntüleme';
++    display: inline-flex;
++    align-items: center;
++    height: 32px;
++    padding: 0 12px;
++    margin-right: 4px;
++    border-radius: 999px;
++    border: 1px solid var(--color-border-light);
++    background: var(--color-surface-alt);
++    color: var(--color-text-muted);
++    font-size: 12px;
++    font-weight: 700;
++    white-space: nowrap;
++}
+diff --git a/tests/unit/stock-schema.test.mjs b/tests/unit/stock-schema.test.mjs
+index a1ab331..0d898bd 100644
+--- a/tests/unit/stock-schema.test.mjs
++++ b/tests/unit/stock-schema.test.mjs
+@@ -151,8 +151,9 @@ test('[update] yalnız "eksik zorunlu alan" muafiyeti: set aynı kısmi kaydı e
+ 
+ test('alan kümeleri açık: Envanter No B1/B2 ortak opsiyonel alanı; status yalnız B2', () => {
+     const S = loadSchema();
+-    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'stokOncekiDurum']);
+-    assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'stokOncekiDurum']);
++    // v3.4: sonCikisId — personel çıkışında stok düşümünü b3 kaydına bağlar (firestore.rules staffExitStockOk)
++    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'sonCikisId', 'stokOncekiDurum']);
++    assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'sonCikisId', 'stokOncekiDurum']);
+     assert.ok(S.stockKnownKeys('b1').includes('envanterNo') && !S.stockKnownKeys('b1').includes('status'));
+     assert.ok(S.stockKnownKeys('b2').includes('envanterNo') && S.stockKnownKeys('b2').includes('status'));
+ });
+diff --git a/src/utils/exit-policy.js b/src/utils/exit-policy.js
+new file mode 100644
+index 0000000..5486cee
+--- /dev/null
++++ b/src/utils/exit-policy.js
+@@ -0,0 +1,70 @@
++// [WHY]: v3.4 · Personel (BT ekibi) çıkışı — envanter çıkışı yalnız yöneticideydi. BT ekibinin sarf malzeme çıkışı yapabilmesi,
++//        demirbaş çıkışının ise yine yalnız yöneticide kalması gerekiyor. Karar hem arayüzde hem Firestore kurallarında aynı
++//        ölçütle verilmeli; ikisi ayrışırsa personel formu doldurup sunucuda reddedilir.
++// [HOW]: Saf fonksiyonlar (DOM / Firebase yok, birim testli):
++//          eligibility(product, productTypes) → personel bu ürünün çıkışını yapabilir mi? Ölçüt firestore.rules
++//            staffExitB3Ok ile BİREBİR aynı: ürünün türü (tür/type) kataloğda KIRPILMIŞ ADIYLA birebir bulunan bir türe
++//            denk gelmeli ve o türün isDemirbas alanı tam olarak false olmalı. Tür kataloğda yoksa ya da ad farklı
++//            yazılmışsa (büyük/küçük harf dahil) karar verilemez → çıkış yöneticiye kalır (güvenli taraf).
++//          checkStaffPlan(stock, writes) → personelin gönderdiği işlem yalnız "stok düşümü + her ürün için TEK b3 çıkış
++//            kaydı" olabilir; aynı kayıt ürüne sonCikisId olarak bağlanır (kurallar bu bağla düşülen adedi doğrular).
++(function () {
++    const STOCK_COLS = ['b1', 'b2'];
++    // Personel toplu çıkışında en fazla kalem: kurallar kalem başına birkaç belge okur; emülatör ölçümünde 7 kalem geçti,
++    // 8 kalem Firestore'un istek başına belge erişimi sınırına takıldı (tests/rules/staff-exit.test.mjs). Bir kalem pay.
++    const STAFF_MAX_ITEMS = 6;
++    const trimmed = v => (typeof v === 'string' ? v.trim() : '');
++
++    const MESSAGES = Object.freeze({
++        demirbas: 'Bu ürün demirbaştır. Demirbaş çıkışını yalnız yönetici yapar; "Envanter Talep Et" ile yöneticiye talep gönderin.',
++        unknownType: 'Bu ürünün türü ürün türleri listesinde birebir bulunamadı; çıkışı yönetici yapabilir ya da "Envanter Talep Et" ile talep gönderebilirsiniz.',
++        noProduct: 'Ürün bulunamadı; liste güncellenmiş olabilir.',
++    });
++
++    function productTypeName(product) {
++        if (!product || typeof product !== 'object') return '';
++        return trimmed(product.tür) || trimmed(product.type);
++    }
++
++    // → { ok: true, typeId, typeName } | { ok: false, reason: 'demirbas'|'unknownType'|'noProduct', message }
++    function eligibility(product, productTypes) {
++        if (!product) return { ok: false, reason: 'noProduct', message: MESSAGES.noProduct };
++        const name = productTypeName(product);
++        const type = name ? (Array.isArray(productTypes) ? productTypes : [])
++            .find(t => t && typeof t.id === 'string' && t.id && trimmed(t.name) === name) : null;
++        if (!type) return { ok: false, reason: 'unknownType', message: MESSAGES.unknownType };
++        if (type.isDemirbas !== false) return { ok: false, reason: 'demirbas', message: MESSAGES.demirbas };
++        return { ok: true, typeId: type.id, typeName: name };
++    }
++
++    // stock: [{ col, id, delta }]  writes: [{ op, col, id, data }] (runStockOps'un hazırladığı biçim)
++    // → { ok: true, links: Map('col|id' → b3Id) } | { ok: false, error }
++    function checkStaffPlan(stock, writes) {
++        const fail = error => ({ ok: false, error });
++        if (!Array.isArray(stock) || !stock.length) return fail('Personel çıkışı en az bir ürün içermelidir.');
++        if (stock.length > STAFF_MAX_ITEMS) return fail(`Personel toplu çıkışı tek seferde en fazla ${STAFF_MAX_ITEMS} farklı ürün içerebilir; kalanları ikinci bir çıkışla yapın.`);
++        if (!Array.isArray(writes) || writes.length !== stock.length) return fail('Personel çıkışında her ürün için tek bir çıkış kaydı olmalıdır.');
++        const links = new Map();
++        for (const s of stock) {
++            if (!s || !STOCK_COLS.includes(s.col) || !Number.isInteger(s.delta) || s.delta >= 0) return fail('Personel yalnız stok düşen çıkış yapabilir.');
++            if (s.createIfMissing) return fail('Personel stok kaydı oluşturamaz.');
++            const key = `${s.col}|${s.id}`;
++            if (links.has(key)) return fail('Aynı ürün çıkışta iki kez yer alamaz.');
++            const w = writes.find(x => x && x.op === 'set' && x.col === 'b3' && x.data
++                && x.data.kaynakDepo === s.col && String(x.data.productId) === String(s.id));
++            if (!w) return fail('Her ürün için bir çıkış kaydı gerekir.');
++            const d = w.data;
++            if (d.tip !== 'cikis') return fail('Personel yalnız çıkış kaydı oluşturabilir.');
++            if (d.isDemirbas !== false) return fail(MESSAGES.demirbas);
++            if (d.adet !== -s.delta) return fail('Çıkış kaydındaki adet stok düşümüyle aynı olmalıdır.');
++            if (!trimmed(d.urunTuruId)) return fail(MESSAGES.unknownType);
++            if (!trimmed(d.islemYapanUid)) return fail('Çıkışı yapan kişi belirlenemedi.');
++            links.set(key, String(w.id));
++        }
++        if (writes.some(w => !w || w.op !== 'set' || w.col !== 'b3')) return fail('Personel çıkışında yalnız çıkış kaydı yazılabilir.');
++        if (new Set([...links.values()]).size !== links.size) return fail('Çıkış kayıtları birbirinden farklı olmalıdır.');
++        return { ok: true, links };
++    }
++
++    window.ExitPolicy = Object.freeze({ eligibility, checkStaffPlan, productTypeName, MESSAGES, STAFF_MAX_ITEMS });
++})();
+diff --git a/src/ui/person-picker.js b/src/ui/person-picker.js
+new file mode 100644
+index 0000000..0b9afa7
+--- /dev/null
++++ b/src/ui/person-picker.js
+@@ -0,0 +1,130 @@
++// [WHY]: v3.4 · "Alan Kişi" çıkış ve toplu çıkış formlarında salt okunur ve her zaman oturumdaki kişiydi; yönetici başka bir
++//        personele çıkış yaptığında kayıt (ve Kişi Envanteri) yöneticinin üzerine düşüyordu.
++// [HOW]: PersonPicker — personel listesinden (window.data.personel, pasifler hariç) yazarak arayıp seçilen erişilebilir bir
++//        combobox; seçilen kişinin id'si gizli alana yazılır. Yalnız createElement/textContent kullanılır.
++//        ExitReceiver — iki formun alan kişisini kurar ve gönderimde çözer: yönetici listeden seçer (varsayılan kendisi);
++//        personel hesabında alan kişi kendisidir ve değiştirilemez (firestore.rules staffExitB3Ok aynısını zorunlu tutar).
++(function () {
++    const MAX_RESULTS = 8;
++    const norm = s => String(s ?? '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase('tr-TR');
++    const nameOf = p => String(p?.name || p?.adSoyad || p?.ad || '').trim();
++    const people = () => (window.data?.personel || []).filter(p => p && p.id != null && p.active !== false && nameOf(p));
++
++    function attach(input, hidden) {
++        if (!input || !hidden || input.dataset.personPicker === '1') return;
++        input.dataset.personPicker = '1';
++        const wrap = document.createElement('div');
++        wrap.className = 'person-picker';
++        input.parentNode.insertBefore(wrap, input);
++        wrap.append(input);
++        const list = document.createElement('ul');
++        list.className = 'person-picker-list';
++        list.id = `${input.id}List`;
++        list.setAttribute('role', 'listbox');
++        list.hidden = true;
++        wrap.append(list);
++        input.setAttribute('role', 'combobox');
++        input.setAttribute('aria-autocomplete', 'list');
++        input.setAttribute('aria-controls', list.id);
++        input.setAttribute('aria-expanded', 'false');
++        input.autocomplete = 'off';
++
++        let options = [], active = -1;
++        const close = () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); active = -1; };
++        const choose = p => { input.value = nameOf(p); hidden.value = String(p.id); input.dataset.chosenName = nameOf(p); close(); };
++        const highlight = i => {
++            active = i;
++            [...list.children].forEach((li, k) => li.setAttribute('aria-selected', String(k === i)));
++            if (list.children[i]) { input.setAttribute('aria-activedescendant', list.children[i].id); list.children[i].scrollIntoView({ block: 'nearest' }); }
++        };
++        const render = () => {
++            if (input.readOnly) return;
++            const q = norm(input.value);
++            if (input.dataset.chosenName !== input.value) hidden.value = '';
++            options = people().filter(p => !q || norm(nameOf(p)).includes(q) || norm(p.pri).includes(q) || norm(p.birim || p.unit || '').includes(q))
++                .slice(0, MAX_RESULTS);
++            list.replaceChildren();
++            if (!options.length) {
++                const li = document.createElement('li');
++                li.className = 'person-picker-empty';
++                li.textContent = 'Eşleşen personel yok';
++                list.append(li);
++            }
++            options.forEach((p, i) => {
++                const li = document.createElement('li');
++                li.id = `${list.id}-${i}`;
++                li.setAttribute('role', 'option');
++                li.setAttribute('aria-selected', 'false');
++                const strong = document.createElement('strong');
++                strong.textContent = nameOf(p);
++                li.append(strong);
++                const meta = [p.pri, p.birim || p.unit].filter(Boolean).join(' · ');
++                if (meta) { const small = document.createElement('small'); small.textContent = meta; li.append(small); }
++                li.addEventListener('mousedown', e => { e.preventDefault(); choose(p); });
++                list.append(li);
++            });
++            list.hidden = false;
++            input.setAttribute('aria-expanded', 'true');
++            active = -1;
++        };
++        input.addEventListener('input', render);
++        // Odakta tüm metin seçilir (yazınca varsayılan ad değişir); fareyle odaklanınca mouseup seçimi bozmasın.
++        let justFocused = false;
++        input.addEventListener('focus', () => { if (!input.readOnly) { justFocused = true; input.select(); render(); } });
++        input.addEventListener('mouseup', e => { if (justFocused) { e.preventDefault(); justFocused = false; } });
++        input.addEventListener('blur', () => {
++            // Tam ad yazılıp listeden tıklanmadıysa tek eşleşme kabul edilir
++            if (!hidden.value) {
++                const exact = people().filter(p => norm(nameOf(p)) === norm(input.value));
++                if (exact.length === 1) choose(exact[0]);
++            }
++            close();
++        });
++        input.addEventListener('keydown', e => {
++            if (list.hidden || !options.length) return;
++            if (e.key === 'ArrowDown') { e.preventDefault(); highlight((active + 1) % options.length); }
++            else if (e.key === 'ArrowUp') { e.preventDefault(); highlight((active - 1 + options.length) % options.length); }
++            else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); choose(options[active]); }
++            else if (e.key === 'Escape') { e.preventDefault(); close(); }
++        });
++        input._personPick = choose;
++    }
++
++    const FORMS = { exit: ['exitPerson', 'exitPersonId'], cart: ['cartPerson', 'cartPersonId'] };
++    const els = kind => FORMS[kind].map(id => document.getElementById(id));
++
++    // Modal açılırken çağrılır.
++    function setup(kind, isAdmin) {
++        const [input, hidden] = els(kind);
++        if (!input || !hidden) return;
++        attach(input, hidden);
++        const me = window.getActiveUser?.() || {};
++        input.value = nameOf(me) || String(me.name || '');
++        hidden.value = me.id != null ? String(me.id) : '';
++        input.dataset.chosenName = input.value;
++        input.readOnly = !isAdmin;
++        input.placeholder = isAdmin ? 'Personel adı veya kurumsal kimlik yazın…' : '';
++        input.title = isAdmin ? 'Çıkışı alan personeli listeden seçin' : 'Personel çıkışında alan kişi siz olursunuz';
++    }
++
++    // Gönderimde çağrılır → { id, name } | null (uyarı gösterilmiştir)
++    function resolve(kind, isAdmin) {
++        const me = window.getActiveUser?.() || {};
++        if (!isAdmin) {
++            if (me.id == null || !String(me.name || '').trim()) { window.showAppAlert?.('Oturumdaki personel kaydı bulunamadı; sayfayı yenileyin.', 'error'); return null; }
++            return { id: String(me.id), name: String(me.name).trim() };
++        }
++        const [input, hidden] = els(kind);
++        const name = String(input?.value || '').trim();
++        if (!name) { window.showAppAlert?.('Lütfen "Alan Kişi" için bir personel seçin.', 'warning'); input?.focus(); return null; }
++        if (hidden?.value) return { id: hidden.value, name };
++        // Yönetici kendi adını değiştirmeden bıraktıysa (personel kaydı olmayan yönetici kimliği) eski davranış korunur.
++        if (name === String(me.name || '').trim()) return { id: me.id != null ? String(me.id) : null, name };
++        window.showAppAlert?.('Lütfen "Alan Kişi"yi listeden seçin; yazılan ad bir personelle eşleşmiyor.', 'warning');
++        input?.focus();
++        return null;
++    }
++
++    window.PersonPicker = Object.freeze({ attach });
++    window.ExitReceiver = Object.freeze({ setup, resolve });
++})();
+diff --git a/src/ui/staff-guards.js b/src/ui/staff-guards.js
+new file mode 100644
+index 0000000..0ee6f35
+--- /dev/null
++++ b/src/ui/staff-guards.js
+@@ -0,0 +1,67 @@
++// [WHY]: v3.4 · BT ekibi (personel hesabı) çıkış ekranını kullanırken B1/B2 depoları onlar için yalnız görüntülenebilir olmalı.
++//        Depo çubuğundaki (.uab-bar) düğmeler personelde tıklanınca ayrı ayrı "yetkiniz yok" hatası veriyor ya da hiçbir şey
++//        söylemeden (Excel) çalışıyordu. Ayrıca depo ekranında sağ tık menüsü ve geliştirici araçları kısayolları açıktı.
++// [HOW]: 1) Oturum yönetici değilse <body> 'staff-readonly' sınıfı alır (görsel olarak pasif düğmeler + "Yalnız görüntüleme"
++//           rozeti). Asıl engel tıklama anında, yakalama (capture) aşamasında yapılır: yönetici değilse .uab-bar içindeki her
++//           etkileşim durdurulur ve tek bir açıklayıcı uyarı gösterilir. Sunucu tarafı zaten kurallarla kapalıdır.
++//        2) Bu sayfada (index.html) herkes için sağ tık menüsü ve geliştirici araçları / kaynak görüntüleme kısayolları
++//           (F12, Ctrl/Cmd+Shift+I/J/C/K, Ctrl/Cmd+U, Cmd+Option+I/J/C/U) engellenir. Not: tarayıcı menüsünden açılan
++//           geliştirici araçlarını hiçbir web sayfası engelleyemez; verinin asıl koruması Firestore kurallarıdır.
++(function () {
++    const READONLY_MESSAGE = '🔒 Depolar personel için yalnız görüntülenebilir. Sarf malzeme çıkışı için "Envanter Takibi" sekmesindeki "Envanter Çıkışı Yap" düğmesini kullanın.';
++    const isAdmin = () => typeof window.isDbAdmin === 'function' && window.isDbAdmin();
++    const loggedIn = () => document.body && document.body.classList.contains('logged-in');
++
++    function refresh() {
++        if (!document.body) return;
++        const readonly = loggedIn() && !isAdmin();
++        document.body.classList.toggle('staff-readonly', readonly);
++        document.querySelectorAll('.uab-bar .uab-btn, .uab-bar .uab-checkbox-wrap, .uab-bar input').forEach(el => {
++            if (readonly) el.setAttribute('aria-disabled', 'true'); else el.removeAttribute('aria-disabled');
++        });
++    }
++
++    let lastNotice = 0;
++    function notify(message) {
++        if (Date.now() - lastNotice < 1500) return;   // tek tık birden fazla olay üretir (label → input); tek uyarı yeter
++        lastNotice = Date.now();
++        if (typeof window.showAppAlert === 'function') window.showAppAlert(message, 'warning');
++    }
++
++    function guardDepotBar(e) {
++        const target = e.target instanceof Element ? e.target : null;
++        if (!target || !target.closest('.uab-bar') || isAdmin()) return;
++        e.preventDefault();
++        e.stopImmediatePropagation();
++        notify(READONLY_MESSAGE);
++    }
++    ['click', 'change', 'keydown'].forEach(type => document.addEventListener(type, e => {
++        if (type === 'keydown' && !['Enter', ' '].includes(e.key)) return;
++        guardDepotBar(e);
++    }, true));
++
++    // ─── Sağ tık ve geliştirici araçları kısayolları ──────────────────────────────────────────────────────
++    function isInspectShortcut(e) {
++        const key = String(e.key || '').toLowerCase();
++        if (key === 'f12') return true;
++        const mod = e.ctrlKey || e.metaKey;
++        if (mod && e.shiftKey && ['i', 'j', 'c', 'k'].includes(key)) return true;        // Windows/Linux, Firefox konsolu
++        if (e.metaKey && e.altKey && ['i', 'j', 'c', 'u'].includes(key)) return true;     // macOS
++        if (mod && !e.shiftKey && !e.altKey && key === 'u') return true;                   // kaynağı görüntüle
++        return false;
++    }
++    document.addEventListener('contextmenu', e => { e.preventDefault(); }, true);
++    document.addEventListener('keydown', e => {
++        if (!isInspectShortcut(e)) return;
++        e.preventDefault();
++        e.stopImmediatePropagation();
++    }, true);
++
++    ['onNavbarRendered', 'onAppLogout', 'onInventoryDataUpdated'].forEach(evt => window.addEventListener(evt, () => setTimeout(refresh, 0)));
++    document.addEventListener('DOMContentLoaded', refresh);
++    // 'logged-in' sınıfı giriş/çıkışta body'ye eklenir; aynı değerle toggle yeni değişiklik üretmez (döngü yok).
++    if (document.body) new MutationObserver(refresh).observe(document.body, { attributes: true, attributeFilter: ['class'] });
++    else document.addEventListener('DOMContentLoaded', () => new MutationObserver(refresh).observe(document.body, { attributes: true, attributeFilter: ['class'] }));
++
++    window.StaffGuards = Object.freeze({ refresh, isInspectShortcut, READONLY_MESSAGE });
++})();
+diff --git a/tests/rules/staff-exit.test.mjs b/tests/rules/staff-exit.test.mjs
+new file mode 100644
+index 0000000..44e7cfd
+--- /dev/null
++++ b/tests/rules/staff-exit.test.mjs
+@@ -0,0 +1,156 @@
++// [WHY]: v3.4 · BT ekibi (personel hesabı) sarf çıkışı. Kural açığı stok kaybı ya da demirbaşın kayıtsız çıkışı demek;
++//        bu yüzden olumlu yol kadar kötü niyetli her varyasyon emülatörde denenir.
++// [HOW]: Personel stok düşümünü ve b3 kaydını tek batch'te yazar (istemcide runStockOps staffExit ile aynı biçim).
++import { test, before, after, beforeEach, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import { readFileSync } from 'node:fs';
++import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
++import { doc, setDoc, getDoc, updateDoc, writeBatch, setLogLevel } from 'firebase/firestore';
++
++setLogLevel('silent');
++const LIVE = 'lifeserver_master';
++let env;
++
++const staff = (uid, pri) => () => env.authenticatedContext(uid, { email: `${pri}@staff.medipol.local`, firebase: { sign_in_provider: 'password' } }).firestore();
++const s1 = staff('uid-s1', 'ayse.yilmaz');
++const admin = () => env.authenticatedContext('admin-uid', { email: 'admin@medipol.local', firebase: { sign_in_provider: 'password' } }).firestore();
++const item = (db, col, id) => doc(db, LIVE, col, 'items', String(id));
++const seed = fn => env.withSecurityRulesDisabled(async c => fn(c.firestore()));
++const read = async (col, id) => { let v; await seed(async db => { v = (await getDoc(item(db, col, id))).data(); }); return v; };
++
++function b3Entry(id, over = {}) {
++    return {
++        id, sema: 2, tip: 'cikis', kaynakDepo: 'b1', productId: 'p_sarf', requestId: null, rafNo: 'A1', sutun: 'B1 -A',
++        urunTuruId: 'pt_sarf', urunTuru: 'Sarf Malzeme', urunAciklama: 'Toner', marka: 'HP', adet: 2, sn: 'ITSM-123',
++        envanterNo: '-', not: 'Yazıcı toneri', alanKisi: 'Ayşe Yılmaz', personelId: 's1', tarih: '05.11.2026 10:00:00',
++        ts: 1793865600000, isDemirbas: false, talepTuru: null, oncelik: null, iadeTarihi: null, iadeEdildi: false,
++        iadeEdildiTarihi: null, iadeDepo: null, onaylayan: null, islemYapanUid: 'uid-s1', ...over,
++    };
++}
++// Tek ürün çıkışı: ürün yaması + b3 kaydı tek batch'te
++function exitBatch(db, { col = 'b1', pid = 'p_sarf', before = 10, qty = 2, b3Id = 'x1', patch = {}, entry = {}, skipStock = false, skipB3 = false } = {}) {
++    const batch = writeBatch(db);
++    if (!skipStock) batch.update(item(db, col, pid), { adet: before - qty, lastUpdate: 1793865600000, sonCikisId: b3Id, ...patch });
++    if (!skipB3) batch.set(item(db, 'b3', b3Id), b3Entry(b3Id, { kaynakDepo: col, productId: pid, adet: qty, ...entry }));
++    return batch.commit();
++}
++
++before(async () => {
++    env = await initializeTestEnvironment({ projectId: 'demo-staff-exit', firestore: { rules: readFileSync('firestore.rules', 'utf8') } });
++});
++after(async () => env?.cleanup());
++
++beforeEach(async () => {
++    await env.clearFirestore();
++    await seed(async db => {
++        await setDoc(item(db, 'personel', 's1'), { id: 's1', name: 'Ayşe Yılmaz', pri: 'ayse.yilmaz', uid: 'uid-s1' });
++        await setDoc(item(db, 'staffAccounts', 'uid-s1'), { personelId: 's1', pri: 'ayse.yilmaz' });
++        await setDoc(item(db, 'personel', 's2'), { id: 's2', name: 'Bora Kaya', pri: 'bora.kaya', uid: 'uid-s2' });
++        await setDoc(item(db, 'accessGate', 'staff'), { staffAccessEnabled: true });
++        await setDoc(item(db, 'system_config', 'admin_settings'), { maintenance: false });
++        await setDoc(item(db, 'productTypes', 'pt_sarf'), { id: 'pt_sarf', name: 'Sarf Malzeme', isDemirbas: false });
++        await setDoc(item(db, 'productTypes', 'pt_dem'), { id: 'pt_dem', name: 'Laptop', isDemirbas: true });
++        await setDoc(item(db, 'b1', 'p_sarf'), { id: 'p_sarf', ürün: 'Toner', tür: 'Sarf Malzeme', adet: 10, durumu: 'Kullanıma Hazır' });
++        await setDoc(item(db, 'b1', 'p_dem'), { id: 'p_dem', ürün: 'Dell Latitude', tür: 'Laptop', adet: 3, durumu: 'Kullanıma Hazır' });
++        await setDoc(item(db, 'b1', 'p_flag'), { id: 'p_flag', ürün: 'Laptop (eski)', tür: 'Laptop', adet: 3, isDemirbas: false });
++        await setDoc(item(db, 'b2', 'p_sarf2'), { id: 'p_sarf2', ürün: 'Kablo', tür: 'Sarf Malzeme', adet: 5, durumu: 'Kullanıma Hazır', status: 'Kullanıma Hazır' });
++        for (let i = 1; i <= 8; i++) await setDoc(item(db, 'b1', `p_c${i}`), { id: `p_c${i}`, ürün: `Sarf ${i}`, tür: 'Sarf Malzeme', adet: 10 });
++        await setDoc(item(db, 'b3', 'eski'), b3Entry('eski'));
++    });
++});
++
++describe('İzin verilen: personel sarf çıkışı', () => {
++    test('stok düşümü + bağlı b3 kaydı tek batch\'te geçer', async () => {
++        await assertSucceeds(exitBatch(s1()));
++        assert.equal((await read('b1', 'p_sarf')).adet, 8);
++        assert.equal((await read('b3', 'x1')).islemYapanUid, 'uid-s1');
++    });
++    test('stok 0\'a inince Tükendi durumu ve önceki durum yazılabilir', () => assertSucceeds(exitBatch(s1(), {
++        qty: 10, patch: { durumu: 'Tükendi', stokOncekiDurum: 'Kullanıma Hazır' } })));
++    test('B2 (durumu + status) ürününde çıkış geçer', () => assertSucceeds(exitBatch(s1(), {
++        col: 'b2', pid: 'p_sarf2', before: 5, qty: 5, patch: { durumu: 'Tükendi', status: 'Tükendi', stokOncekiDurum: 'Kullanıma Hazır' } })));
++    test('toplu çıkış: 3 farklı sarf kalemi tek batch\'te geçer', async () => {
++        const db = s1();
++        const batch = writeBatch(db);
++        for (let i = 1; i <= 3; i++) {
++            batch.update(item(db, 'b1', `p_c${i}`), { adet: 9, lastUpdate: 1, sonCikisId: `c${i}` });
++            batch.set(item(db, 'b3', `c${i}`), b3Entry(`c${i}`, { productId: `p_c${i}`, adet: 1 }));
++        }
++        await assertSucceeds(batch.commit());
++    });
++});
++
++describe('Reddedilen: demirbaş ve tür', () => {
++    test('demirbaş türündeki ürün (urunTuruId demirbaş tür) çıkamaz', () => assertFails(exitBatch(s1(), {
++        pid: 'p_dem', before: 3, qty: 1, entry: { urunTuruId: 'pt_dem', urunTuru: 'Laptop' } })));
++    test('KÖTÜ NİYET: demirbaş ürüne sarf türünün id\'siyle çıkış (ad eşleşmez) reddedilir', () => assertFails(exitBatch(s1(), {
++        pid: 'p_dem', before: 3, qty: 1 })));
++    test('KÖTÜ NİYET: kayıtta isDemirbas:false olsa da türü demirbaş olan ürün çıkamaz', () => assertFails(exitBatch(s1(), {
++        pid: 'p_flag', before: 3, qty: 1, entry: { urunTuruId: 'pt_dem' } })));
++    test('b3 kaydında isDemirbas true ise reddedilir', () => assertFails(exitBatch(s1(), { entry: { isDemirbas: true } })));
++    test('olmayan tür id\'si reddedilir', () => assertFails(exitBatch(s1(), { entry: { urunTuruId: 'pt_yok' } })));
++});
++
++describe('Reddedilen: bağ ve adet', () => {
++    test('b3 kaydı olmadan stok düşümü reddedilir', () => assertFails(exitBatch(s1(), { skipB3: true })));
++    test('stok düşmeden b3 kaydı reddedilir', () => assertFails(exitBatch(s1(), { skipStock: true })));
++    test('düşülen adet ile kayıt adedi farklıysa reddedilir', () => assertFails(exitBatch(s1(), { qty: 3, entry: { adet: 2 } })));
++    test('stok artırma reddedilir', async () => {
++        const db = s1();
++        const batch = writeBatch(db);
++        batch.update(item(db, 'b1', 'p_sarf'), { adet: 12, sonCikisId: 'x9' });
++        batch.set(item(db, 'b3', 'x9'), b3Entry('x9', { adet: -2 }));
++        await assertFails(batch.commit());
++    });
++    test('KÖTÜ NİYET: var olan b3 kaydına bağlanarak stok düşümü reddedilir', () => assertFails(exitBatch(s1(), { b3Id: 'eski', skipB3: true })));
++    test('KÖTÜ NİYET: çıkışla birlikte ürün adı değiştirilemez', () => assertFails(exitBatch(s1(), { patch: { ürün: 'Başka' } })));
++    test('KÖTÜ NİYET: durum Tükendi dışında bir değere çekilemez', () => assertFails(exitBatch(s1(), { patch: { durumu: 'Hurda' } })));
++    test('KÖTÜ NİYET: sonCikisId olmadan doğrudan adet düşümü reddedilir', () => assertFails(updateDoc(item(s1(), 'b1', 'p_sarf'), { adet: 1 })));
++});
++
++describe('Reddedilen: kimlik ve kayıt türü', () => {
++    test('başka personel adına (personelId) çıkış reddedilir', () => assertFails(exitBatch(s1(), { entry: { personelId: 's2', alanKisi: 'Bora Kaya' } })));
++    test('başkasının uid\'siyle (islemYapanUid) reddedilir', () => assertFails(exitBatch(s1(), { entry: { islemYapanUid: 'uid-s2' } })));
++    test('zimmet tipi reddedilir', () => assertFails(exitBatch(s1(), { entry: { tip: 'zimmet', talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta' } })));
++    test('talebe bağlı (requestId) kayıt reddedilir', () => assertFails(exitBatch(s1(), { entry: { requestId: 'r1' } })));
++    test('etiketli metin (XSS) reddedilir', () => assertFails(exitBatch(s1(), { entry: { not: '<img src=x onerror=alert(1)>' } })));
++    test('bilinmeyen alan reddedilir', () => assertFails(exitBatch(s1(), { entry: { gizliAlan: 1 } })));
++    test('bakım modunda reddedilir', async () => {
++        await seed(db => setDoc(item(db, 'system_config', 'admin_settings'), { maintenance: true }));
++        await assertFails(exitBatch(s1()));
++    });
++    test('erişim kilidi kapalıyken reddedilir', async () => {
++        await seed(db => setDoc(item(db, 'accessGate', 'staff'), { staffAccessEnabled: false }));
++        await assertFails(exitBatch(s1()));
++    });
++    test('personel kaydına bağlı olmayan hesap reddedilir', () => assertFails(exitBatch(staff('uid-x', 'kimse.yok')())));
++    test('personel b3 kaydını silemez / güncelleyemez', async () => {
++        await assertFails(updateDoc(item(s1(), 'b3', 'eski'), { not: 'değişti' }));
++    });
++});
++
++describe('Yönetici etkilenmez', () => {
++    test('yönetici demirbaş çıkışını eskisi gibi yapar', async () => {
++        const db = admin();
++        const batch = writeBatch(db);
++        batch.update(item(db, 'b1', 'p_dem'), { adet: 2 });
++        batch.set(item(db, 'b3', 'a1'), b3Entry('a1', { productId: 'p_dem', isDemirbas: true, adet: 1, personelId: 's2', alanKisi: 'Bora Kaya' }));
++        await assertSucceeds(batch.commit());
++    });
++});
++
++// Ölçüm (05.11.2026): 7 kalem geçer, 8 kalemde Firestore'un istek başına belge erişimi sınırı (20) aşılır. İstemci personel
++// toplu çıkışını ExitPolicy.STAFF_MAX_ITEMS = 6 ile sınırlar (bir kalem pay).
++describe('Toplu çıkışta kalem sınırı', () => {
++    const cart = n => {
++        const db = s1();
++        const batch = writeBatch(db);
++        for (let i = 1; i <= n; i++) {
++            batch.update(item(db, 'b1', `p_c${i}`), { adet: 9, lastUpdate: 1, sonCikisId: `m${i}` });
++            batch.set(item(db, 'b3', `m${i}`), b3Entry(`m${i}`, { productId: `p_c${i}`, adet: 1 }));
++        }
++        return batch.commit();
++    };
++    test('istemci sınırı (6 kalem) geçer', () => assertSucceeds(cart(6)));
++    test('8 kalem belge erişimi sınırına takılır', () => assertFails(cart(8)));
++});
+diff --git a/tests/unit/exit-policy.test.mjs b/tests/unit/exit-policy.test.mjs
+new file mode 100644
+index 0000000..a4d22fc
+--- /dev/null
++++ b/tests/unit/exit-policy.test.mjs
+@@ -0,0 +1,62 @@
++// v3.4 · personel (BT ekibi) sarf çıkışı politikası — firestore.rules staffExitB3Ok / staffExitStockOk ile aynı ölçüt.
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { readFileSync } from 'node:fs';
++import vm from 'node:vm';
++
++function load() {
++    const window = {};
++    vm.runInContext(readFileSync('src/utils/exit-policy.js', 'utf8'), vm.createContext({ window }));
++    return window.ExitPolicy;
++}
++const P = load();
++const types = [
++    { id: 'pt_sarf', name: 'Sarf Malzeme', isDemirbas: false },
++    { id: 'pt_lap', name: 'Laptop', isDemirbas: true },
++    { id: 'pt_eski', name: 'Kablo', isDemirbas: 'false' },   // metin bayrak: karar verilemez
++];
++
++test('sarf türündeki ürün uygun; tür id\'si döner', () => {
++    const r = P.eligibility({ id: 'p1', tür: ' Sarf Malzeme ' }, types);
++    assert.deepEqual([r.ok, r.typeId, r.typeName], [true, 'pt_sarf', 'Sarf Malzeme']);
++});
++test('demirbaş türü reddedilir; kayıttaki isDemirbas:false türü ezmez', () => {
++    assert.equal(P.eligibility({ tür: 'Laptop' }, types).reason, 'demirbas');
++    assert.equal(P.eligibility({ tür: 'Laptop', isDemirbas: false }, types).reason, 'demirbas');
++});
++test('tür kataloğda birebir yoksa (büyük/küçük harf dahil) karar yöneticiye kalır', () => {
++    assert.equal(P.eligibility({ tür: 'sarf malzeme' }, types).reason, 'unknownType');
++    assert.equal(P.eligibility({ tür: '' }, types).reason, 'unknownType');
++    assert.equal(P.eligibility({ tür: 'Bilinmeyen' }, []).reason, 'unknownType');
++});
++test('B2 eski "type" alanı da okunur; boolean olmayan bayrak demirbaş sayılır (güvenli taraf)', () => {
++    assert.equal(P.eligibility({ type: 'Sarf Malzeme' }, types).ok, true);
++    assert.equal(P.eligibility({ tür: 'Kablo' }, types).reason, 'demirbas');
++});
++test('ürün yoksa reddedilir', () => assert.equal(P.eligibility(null, types).reason, 'noProduct'));
++
++const b3 = (id, over = {}) => ({ op: 'set', col: 'b3', id, data: { id, tip: 'cikis', kaynakDepo: 'b1', productId: 'p1', adet: 2, isDemirbas: false, urunTuruId: 'pt_sarf', islemYapanUid: 'u1', ...over } });
++
++test('geçerli plan: ürün başına tek b3 kaydı, bağ haritası döner', () => {
++    const r = P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: -2 }], [b3('x1')]);
++    assert.equal(r.ok, true);
++    assert.equal(r.links.get('b1|p1'), 'x1');
++});
++test('stok artırma, eksik/fazla kayıt, adet uyumsuzluğu ve demirbaş reddedilir', () => {
++    assert.equal(P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: 2 }], [b3('x1')]).ok, false);
++    assert.equal(P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: -2 }], []).ok, false);
++    assert.equal(P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: -2 }], [b3('x1'), b3('x2')]).ok, false);
++    assert.equal(P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: -3 }], [b3('x1')]).ok, false);
++    assert.equal(P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: -2 }], [b3('x1', { isDemirbas: true })]).ok, false);
++    assert.equal(P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: -2 }], [b3('x1', { tip: 'zimmet' })]).ok, false);
++    assert.equal(P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: -2 }], [b3('x1', { urunTuruId: '' })]).ok, false);
++    assert.equal(P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: -2, createIfMissing: {} }], [b3('x1')]).ok, false);
++});
++test('b3 dışı yazma ve kalem sınırı aşımı reddedilir', () => {
++    assert.equal(P.checkStaffPlan([{ col: 'b1', id: 'p1', delta: -2 }], [{ op: 'set', col: 'requests', id: 'r', data: {} }]).ok, false);
++    const n = P.STAFF_MAX_ITEMS + 1;
++    const stock = Array.from({ length: n }, (_, i) => ({ col: 'b1', id: `p${i}`, delta: -1 }));
++    const writes = stock.map((s, i) => b3(`x${i}`, { productId: s.id, adet: 1 }));
++    assert.match(P.checkStaffPlan(stock, writes).error, /en fazla/);
++    assert.equal(P.checkStaffPlan(stock.slice(0, P.STAFF_MAX_ITEMS), writes.slice(0, P.STAFF_MAX_ITEMS)).ok, true);
++});
+diff --git a/scratch/staff-exit-ui.cjs b/scratch/staff-exit-ui.cjs
+new file mode 100644
+index 0000000..6bad315
+--- /dev/null
++++ b/scratch/staff-exit-ui.cjs
+@@ -0,0 +1,231 @@
++// v3.4 · personel (BT ekibi) çıkışı uçtan uca doğrulaması.
++// 1) Tarayıcı: gerçek index.html + gerçek modüller (schema, exit-policy, person-picker, staff-guards, ui-components,
++//    inventory-logic, script.js); yalnız Firebase katmanı (runExitTransaction / runStockOps) kayıt yakalayan saplamayla değişir.
++// 2) Emülatör: arayüzün personel çıkışında ÜRETTİĞİ kayıt ve ürün yaması, personel kimliğiyle firestore.rules'a karşı yazılır
++//    (istemci biçimi ile kural beklentisi birebir uyuşuyor mu). Demirbaş ve başka kişi adına denemeler reddedilmeli.
++// Kullanım: npx firebase emulators:exec --config tests/rules/firebase.rules-test.json --only firestore --project demo-rules-test
++//           "node scratch/staff-exit-ui.cjs <ekran-görüntüsü-klasörü>"
++const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), puppeteer = require('puppeteer');
++const OUT = process.argv[2] || '.';
++const SCRIPTS = ['src/utils/schema.js', 'src/utils/exit-policy.js', 'src/ui/person-picker.js', 'src/ui/staff-guards.js', 'src/ui/device-ids.js'];
++
++const DATA = {
++    b1: [
++        { id: 'p_sarf', ürün: 'HP 85A Toner', tür: 'Sarf Malzeme', marka: 'HP', raf: 'Raf-A 1', sütun: 'B1 -A', adet: 10, durumu: 'Kullanıma Hazır' },
++        { id: 'p_dem', ürün: 'Dell Latitude 5440', tür: 'Laptop', marka: 'Dell', raf: 'Raf-B 2', sütun: 'B1 -B', adet: 3, durumu: 'Kullanıma Hazır' },
++    ],
++    b2: [], b3: [], requests: [],
++    personel: [
++        { id: 's1', name: 'Ayşe Yılmaz', pri: 'ayse.yilmaz', uid: 'uid-s1', birim: 'Bilgi İşlem' },
++        { id: 's2', name: 'Bora Kaya', pri: 'bora.kaya', uid: 'uid-s2', birim: 'Bilgi İşlem' },
++        { id: 's3', name: 'Cem Demir', pri: 'cem.demir', active: false },
++    ],
++    productTypes: [{ id: 'pt_sarf', name: 'Sarf Malzeme', isDemirbas: false }, { id: 'pt_dem', name: 'Laptop', isDemirbas: true }],
++};
++
++async function openPage(browser, mode, width = 1280) {
++    const page = await browser.newPage(), errors = [];
++    page.on('pageerror', e => errors.push(e.message));
++    await page.setViewport({ width, height: 900 });
++    const html = fs.readFileSync('index.html', 'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
++    await page.setRequestInterception(true);
++    page.on('request', r => {
++        const u = new URL(r.url());
++        if (u.pathname === '/page') return r.respond({ status: 200, contentType: 'text/html', body: html });
++        const f = decodeURIComponent(u.pathname.slice(1));
++        const type = f.endsWith('.css') ? 'text/css' : f.endsWith('.js') ? 'text/javascript' : f.endsWith('.woff2') ? 'font/woff2' : 'text/plain';
++        if (fs.existsSync(f) && /\.(css|js|woff2)$/.test(f)) return r.respond({ status: 200, contentType: type, body: fs.readFileSync(f) });
++        return r.respond({ status: 200, contentType: 'text/plain', body: '' });
++    });
++    await page.goto('http://127.0.0.1/page');
++    await page.evaluate((mode, data) => {
++        const me = mode === 'staff' ? { id: 's1', name: 'Ayşe Yılmaz' } : { id: 'adm', name: 'Sistem Yöneticisi' };
++        window.data = data;
++        window.userAuth = { uid: mode === 'staff' ? 'uid-s1' : 'admin-uid' };
++        window.AppModules = { Session: { isStaffAccountSession: () => mode === 'staff' } };
++        window.isDbAdmin = () => mode === 'admin';
++        window.validateAdminAction = () => window.isDbAdmin();   // auth-engine ile aynı karar
++        window.getActiveUser = () => me;
++        window.canExitStock = () => window.isDbAdmin() || (!!window.userAuth && window.AppModules.Session.isStaffAccountSession());
++        window.EXIT_STAFF_MESSAGE = 'personel-mesajı';
++        window.alerts = []; window.showAppAlert = (m, t) => window.alerts.push([t, m]);
++        window.escapeHtml = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
++        window.jsArg = v => JSON.stringify(v).replaceAll('"', '&quot;');
++        window.getTurkiyeSaati = () => '05.11.2026 10:00:00';
++        window.bindActions = () => {};
++        window.captured = [];
++        const plan = (stock, writes, opts) => {
++            if (opts && opts.staffExit) {
++                const prepared = writes.map(w => ({ op: w.op, col: w.col, id: String(w.item.id), data: w.item }));
++                const chk = window.ExitPolicy.checkStaffPlan(stock, prepared);
++                if (!chk.ok) throw new Error(chk.error);
++            }
++            window.captured.push({ stock, writes: writes.map(w => w.item), opts: opts || null });
++            return { stock: stock.map(s => ({ col: s.col, id: s.id, name: s.id, before: 10, after: 10 + s.delta, statusBefore: '', statusAfter: '' })), ids: [] };
++        };
++        window.runExitTransaction = async ({ repo, productId, qty, b3Entry, extraWrites = [] }, opts) =>
++            plan([{ col: repo, id: productId, delta: -qty }], [{ op: 'set', col: 'b3', item: { ...b3Entry, productId } }, ...extraWrites], opts);
++        window.runStockOps = async ({ stock, writes }, opts) => plan(stock, writes, opts);
++        window.openProductModal = () => { window.productModalOpened = true; };
++        document.body.classList.add('logged-in');
++        document.getElementById('loginModal').style.setProperty('display', 'none', 'important');   // girişten sonraki durum
++        document.querySelectorAll('body *').forEach(n => { if (getComputedStyle(n).position === 'fixed' && !n.closest('.modal')) n.style.display = 'none'; });
++    }, mode, DATA);
++    for (const s of SCRIPTS) await page.addScriptTag({ url: `http://127.0.0.1/${s}` });
++    await page.addScriptTag({ type: 'module', url: 'http://127.0.0.1/src/ui/ui-components.js' });
++    await page.addScriptTag({ type: 'module', url: 'http://127.0.0.1/src/modules/inventory-logic.js' });
++    await page.waitForFunction(() => typeof window.openExitModal === 'function' && typeof window.saveExit === 'function');
++    await page.addScriptTag({ url: 'http://127.0.0.1/script.js' });
++    await page.evaluate(() => window.StaffGuards.refresh());
++    return { page, errors };
++}
++
++const fillExit = (page, { sn = 'ITSM-4412', note = 'Yazıcı toneri bitti', qty = 2 } = {}) => page.evaluate((sn, note, qty) => {
++    document.getElementById('exitQty').value = String(qty);
++    document.getElementById('exitSn').value = sn;
++    document.getElementById('exitNote').value = note;
++}, sn, note, qty);
++const submitExit = page => page.evaluate(() => window.saveExit(new Event('submit', { cancelable: true })));
++
++(async () => {
++    const browser = await puppeteer.launch({ headless: true, executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', args: ['--no-sandbox'] });
++    let staffCapture, adminCapture, cartCapture;
++    try {
++        // ── Personel: tekil çıkış ──
++        const st = await openPage(browser, 'staff');
++        await st.page.evaluate(() => { document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'b3')); window.openExitModal(); });
++        let s = await st.page.evaluate(() => ({ note: document.getElementById('exitRoleNote').textContent, person: document.getElementById('exitPerson').value,
++            ro: document.getElementById('exitPerson').readOnly, label: document.getElementById('exitSn').closest('label').textContent.replace(/\s+/g, ' ').trim() }));
++        assert.match(s.note, /Sarf malzeme çıkışı yapabilirsiniz/); assert.equal(s.person, 'Ayşe Yılmaz'); assert.equal(s.ro, true); assert.match(s.label, /^ITSM \/ Gerekçe/);
++        await st.page.type('#exitSearch', 'e');
++        await st.page.evaluate(() => window.searchForExit());
++        const locked = await st.page.$$eval('#productList .product-item', ns => ns.map(n => [n.querySelector('strong').textContent, !!n.querySelector('.exit-item-locked')]));
++        assert.deepEqual(locked.find(x => x[0].startsWith('Dell'))[1], true);
++        assert.deepEqual(locked.find(x => x[0].startsWith('HP'))[1], false);
++        await st.page.screenshot({ path: path.join(OUT, 'staff-exit-search.png') });
++        await st.page.evaluate(() => [...document.querySelectorAll('#productList .product-item')].find(n => n.textContent.includes('Dell')).click());
++        assert.match((await st.page.evaluate(() => window.alerts.at(-1)[1])), /demirbaştır/);
++        assert.equal(await st.page.evaluate(() => document.getElementById('selectedProduct').dataset.id || ''), '');
++        await st.page.evaluate(() => window.selectProduct('HP 85A Toner', 'Sarf Malzeme', 'Raf-A 1', 10, 'b1', null, 'p_sarf'));
++        await fillExit(st.page);
++        await st.page.screenshot({ path: path.join(OUT, 'staff-exit-modal.png') });
++        await submitExit(st.page);
++        staffCapture = await st.page.evaluate(() => window.captured.at(-1));
++        assert.equal(staffCapture.opts.staffExit, true);
++        assert.deepEqual([staffCapture.writes[0].personelId, staffCapture.writes[0].alanKisi, staffCapture.writes[0].urunTuruId, staffCapture.writes[0].islemYapanUid, staffCapture.writes[0].isDemirbas],
++            ['s1', 'Ayşe Yılmaz', 'pt_sarf', 'uid-s1', false]);
++        // demirbaş satırından çıkış açılamaz
++        await st.page.evaluate(() => { window.alerts = []; document.getElementById('exitModal').style.display = 'none'; window.openExitModal('b1', 'p_dem'); });
++        assert.equal(await st.page.evaluate(() => document.getElementById('exitModal').style.display), 'none');
++
++        // ── Personel: toplu çıkış (sarf) ──
++        await st.page.evaluate(() => { window.openCartModal(); window.addToCart({ item: window.data.b1[0], repo: 'b1', qty: 10, isDemirbasStrict: false });
++            document.getElementById('cartSn').value = 'ITSM-4413'; document.getElementById('cartNote').value = 'Toplu'; });
++        assert.match(await st.page.evaluate(() => document.getElementById('cartSn').closest('label').textContent), /^ITSM \/ Gerekçe/);
++        await st.page.evaluate(() => window.saveCartExit(new Event('submit', { cancelable: true })));
++        cartCapture = await st.page.evaluate(() => window.captured.at(-1));
++        assert.equal(cartCapture.opts.staffExit, true); assert.equal(cartCapture.writes[0].personelId, 's1');
++
++        // ── Personel: depo salt-okunur + sağ tık / kısayol ──
++        await st.page.evaluate(() => { document.getElementById('cartModal').style.display = 'none'; document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'b1')); window.alerts = []; });
++        s = await st.page.evaluate(() => {
++            document.querySelector('#uabB1 .uab-btn-primary').click();
++            const cb = document.getElementById('selectAllB1'); cb.click();
++            const ctx = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); document.getElementById('tableB1').dispatchEvent(ctx);
++            const f12 = new KeyboardEvent('keydown', { key: 'F12', bubbles: true, cancelable: true }); document.dispatchEvent(f12);
++            const devt = new KeyboardEvent('keydown', { key: 'I', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }); document.dispatchEvent(devt);
++            const src = new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, bubbles: true, cancelable: true }); document.dispatchEvent(src);
++            const typing = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }); document.dispatchEvent(typing);
++            return { opened: !!window.productModalOpened, checked: cb.checked, readonly: document.body.classList.contains('staff-readonly'),
++                alert: (window.alerts[0] || [])[1] || '', ctx: ctx.defaultPrevented, f12: f12.defaultPrevented, devt: devt.defaultPrevented, src: src.defaultPrevented, typing: typing.defaultPrevented,
++                aria: document.querySelector('#uabB1 .uab-btn-primary').getAttribute('aria-disabled') };
++        });
++        assert.deepEqual(s, { opened: false, checked: false, readonly: true, alert: s.alert, ctx: true, f12: true, devt: true, src: true, typing: false, aria: 'true' });
++        assert.match(s.alert, /yalnız görüntülenebilir/);
++        await st.page.screenshot({ path: path.join(OUT, 'staff-depot-readonly.png') });
++        assert.deepEqual(st.errors, []);
++
++        // ── Yönetici: alan kişi seçimi ──
++        const ad = await openPage(browser, 'admin');
++        await ad.page.evaluate(() => { document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'b3')); window.openExitModal(); });
++        s = await ad.page.evaluate(() => ({ person: document.getElementById('exitPerson').value, ro: document.getElementById('exitPerson').readOnly, readonlyBody: document.body.classList.contains('staff-readonly') }));
++        assert.deepEqual(s, { person: 'Sistem Yöneticisi', ro: false, readonlyBody: false });
++        await ad.page.click('#exitPerson');
++        await ad.page.keyboard.type('bor');
++        const opts = await ad.page.$$eval('#exitPersonList [role=option] strong', ns => ns.map(n => n.textContent));
++        assert.deepEqual(opts, ['Bora Kaya']);
++        await ad.page.keyboard.type('a.k');   // "bora.k" → PRI ile arama
++        assert.deepEqual(await ad.page.$$eval('#exitPersonList [role=option] strong', ns => ns.map(n => n.textContent)), ['Bora Kaya']);
++        await ad.page.screenshot({ path: path.join(OUT, 'admin-person-picker.png') });
++        await ad.page.keyboard.press('ArrowDown'); await ad.page.keyboard.press('Enter');
++        assert.deepEqual(await ad.page.evaluate(() => [document.getElementById('exitPerson').value, document.getElementById('exitPersonId').value]), ['Bora Kaya', 's2']);
++        // pasif personel listede yok
++        await ad.page.evaluate(() => { const i = document.getElementById('exitPerson'); i.value = 'Cem'; i.dispatchEvent(new Event('input')); });
++        assert.equal(await ad.page.$$eval('#exitPersonList [role=option]', ns => ns.length), 0);
++        // listede olmayan ad yazılırsa gönderim durur
++        await ad.page.evaluate(() => window.selectProduct('Dell Latitude 5440', 'Laptop', 'Raf-B 2', 3, 'b1', null, 'p_dem'));
++        await ad.page.evaluate(() => { const i = document.getElementById('exitPerson'); i.value = 'Olmayan Kişi'; i.dispatchEvent(new Event('input')); });
++        await fillExit(ad.page, { qty: 1 });
++        await ad.page.evaluate(() => { document.querySelector('#exitDeviceIds input')?.setAttribute('value', ''); });
++        await submitExit(ad.page);
++        assert.match(await ad.page.evaluate(() => window.alerts.at(-1)[1]), /listeden seçin/);
++        assert.equal(await ad.page.evaluate(() => window.captured.length), 0);
++        // geçerli seçim → yönetici yolu (staffExit yok), kayıt seçilen kişiye
++        await ad.page.evaluate(() => { document.getElementById('exitPerson')._personPick(window.data.personel[1]); window.selectProduct('HP 85A Toner', 'Sarf Malzeme', 'Raf-A 1', 10, 'b1', null, 'p_sarf'); });
++        await fillExit(ad.page, { qty: 1 });
++        await submitExit(ad.page);
++        adminCapture = await ad.page.evaluate(() => window.captured.at(-1));
++        assert.equal(adminCapture.opts, null);
++        assert.deepEqual([adminCapture.writes[0].personelId, adminCapture.writes[0].alanKisi, adminCapture.writes[0].islemYapanUid], ['s2', 'Bora Kaya', 'admin-uid']);
++        // yönetici depoda engellenmez
++        s = await ad.page.evaluate(() => {
++            document.getElementById('exitModal').style.display = 'none'; window.alerts = [];
++            const btn = document.querySelector('#uabB1 .uab-btn-primary'); let reached = false;
++            btn.addEventListener('click', () => { reached = true; });
++            btn.click();
++            return { reached, blocked: window.alerts.some(a => /yalnız görüntülenebilir/.test(a[1])), aria: btn.getAttribute('aria-disabled') };
++        });
++        assert.deepEqual(s, { reached: true, blocked: false, aria: null });
++        assert.deepEqual(ad.errors, []);
++    } finally { await browser.close(); }
++
++    // ── Emülatör: arayüzün ürettiği personel kaydı kurallardan geçiyor mu ──
++    if (!process.env.FIRESTORE_EMULATOR_HOST) { console.log('Emülatör yok: kural tekrarı atlandı.'); return; }
++    const { initializeTestEnvironment, assertSucceeds, assertFails } = await import('@firebase/rules-unit-testing');
++    const { doc, setDoc, writeBatch, setLogLevel } = await import('firebase/firestore');
++    setLogLevel('silent');
++    const env = await initializeTestEnvironment({ projectId: 'demo-staff-exit-ui', firestore: { rules: fs.readFileSync('firestore.rules', 'utf8') } });
++    const R = 'lifeserver_master';
++    const ref = (db, col, id) => doc(db, R, col, 'items', String(id));
++    try {
++        await env.withSecurityRulesDisabled(async c => {
++            const db = c.firestore();
++            await setDoc(ref(db, 'personel', 's1'), { id: 's1', name: 'Ayşe Yılmaz', pri: 'ayse.yilmaz', uid: 'uid-s1' });
++            await setDoc(ref(db, 'staffAccounts', 'uid-s1'), { personelId: 's1', pri: 'ayse.yilmaz' });
++            await setDoc(ref(db, 'accessGate', 'staff'), { staffAccessEnabled: true });
++            for (const t of DATA.productTypes) await setDoc(ref(db, 'productTypes', t.id), t);
++            for (const p of DATA.b1) await setDoc(ref(db, 'b1', p.id), p);
++        });
++        const staffDb = () => env.authenticatedContext('uid-s1', { email: 'ayse.yilmaz@staff.medipol.local', firebase: { sign_in_provider: 'password' } }).firestore();
++        const replay = (capture, mutate = e => e) => {
++            const db = staffDb(), batch = writeBatch(db);
++            capture.stock.forEach((s, i) => {
++                const product = DATA.b1.find(p => p.id === s.id);
++                const entry = mutate(capture.writes[i]);
++                batch.update(ref(db, s.col, s.id), { adet: product.adet + s.delta, lastUpdate: Date.now(), sonCikisId: String(entry.id) });
++                batch.set(ref(db, 'b3', entry.id), entry);
++            });
++            return batch.commit();
++        };
++        await assertSucceeds(replay(staffCapture));
++        DATA.b1[0].adet -= 2;
++        await assertSucceeds(replay({ ...cartCapture, writes: cartCapture.writes.map(w => ({ ...w, id: Number(w.id) + 1 })) }));
++        DATA.b1[0].adet -= 1;
++        await assertFails(replay(staffCapture, e => ({ ...e, id: e.id + 7, personelId: 's2', alanKisi: 'Bora Kaya' })));
++        await assertFails(replay({ stock: [{ col: 'b1', id: 'p_dem', delta: -1 }], writes: [{ ...staffCapture.writes[0], id: staffCapture.writes[0].id + 9, productId: 'p_dem', adet: 1 }] }));
++        // yönetici kaydını personel yazamaz (urunTuruId yok / başka kişi)
++        await assertFails(replay(adminCapture));
++        console.log('Kural tekrarı: arayüzün ürettiği personel tekil + toplu çıkışı GEÇTİ; başka kişi adına, demirbaş ve yönetici biçimli kayıt REDDEDİLDİ.');
++    } finally { await env.cleanup(); }
++    console.log('Personel çıkışı UI: rol notu, ITSM / Gerekçe, demirbaş kilidi, alan kişi (personel kilitli / yönetici aranabilir), toplu çıkış, depo salt-okunur, sağ tık + F12/Ctrl+Shift+I/Ctrl+U engeli. pageerror=0');
++})().catch(e => { console.error(e); process.exit(1); });
