@@ -253,7 +253,16 @@ window.renderAdminRequestTable = function () {
         deleteRequest: el => window.deleteRequest(el.dataset.id),
     });
     const esc = window.escapeHtml;
-    const allRequests = window.data.requests || [];
+    // B-4: personelin gönderilmemiş taslakları listelenmez (yönetici üzerinde işlem yapamaz); yalnız sayısı bilgi satırında.
+    const isDraftRequest = r => ['DRAFT', 'TASLAK'].includes(String((r && r.durum) || '').trim().toUpperCase());
+    const everyRequest = window.data.requests || [];
+    const allRequests = everyRequest.filter(r => !isDraftRequest(r));
+    const draftNote = document.getElementById('adminDraftRequestNote');
+    if (draftNote) {
+        const drafts = everyRequest.length - allRequests.length;
+        draftNote.textContent = drafts ? `Personelin gönderilmemiş ${drafts} taslak talebi var (listelenmez; gönderildiğinde burada görünür).` : '';
+        draftNote.hidden = drafts === 0;
+    }
     tableBody.innerHTML = '';
     let pendingCount = 0;
 
@@ -282,7 +291,7 @@ window.renderAdminRequestTable = function () {
         } else if (isRejected) {
             badgeHTML = `<span class="p-badge p-badge-danger" style="background:#fee2e2; color:#991b1b; padding:4px 8px; border-radius:12px; font-size:11px; font-weight:600;">
                             <i class="fas fa-times-circle"></i> REDDEDİLDİ
-                         </span>`;
+                         </span>${req.redGerekcesi ? `<div class="req-reject-reason">${esc(req.redGerekcesi)}</div>` : ''}`;
         } else if (isCompleted) {
             badgeHTML = `<span class="p-badge p-badge-completed" style="background: var(--badge-completed-bg); color: var(--badge-completed-text); border: 1px solid var(--badge-completed-border); padding:4px 8px; border-radius:12px; font-size:11px; font-weight:600;">
                             <i class="fas fa-check-double"></i> TESLİM ALINDI

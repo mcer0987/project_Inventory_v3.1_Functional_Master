@@ -10,6 +10,13 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), puppeteer = require('puppeteer');
 const OUT = process.argv[2] || path.join(require('node:os').tmpdir(), 'request-flow-e2e');
 fs.mkdirSync(OUT, { recursive: true });
+// admin-dashboard.js Firebase'i doğrudan içe aktardığı için yalnız tablo fonksiyonunun kaynağı alınır (window üzerinden çalışır).
+const ADMIN_TABLE_SRC = (() => {
+    const s = fs.readFileSync('src/modules/admin/admin-dashboard.js', 'utf8');
+    const a = s.indexOf('window.renderAdminRequestTable = function');
+    return s.slice(a, s.indexOf('\n};', a) + 3);
+})();
+let s0;
 const SCRIPTS = ['src/utils/schema.js', 'src/services/assignment-service.js', 'src/ui/device-ids.js', 'src/utils/exit-policy.js', 'src/ui/person-picker.js'];
 
 const SEED = {
@@ -142,7 +149,7 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
 (async () => {
     const browser = await puppeteer.launch({ headless: true, executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', args: ['--no-sandbox'] });
     const report = [];
-    const ok = (name, detail = '') => report.push(`✔ ${name}${detail ? ` — ${detail}` : ''}`);
+    const ok = (name, detail = '') => { const line = `✔ ${name}${detail ? ` — ${detail}` : ''}`; report.push(line); if (process.env.E2E_VERBOSE) console.log(line); };
     let log;
     try {
         const { page, errors } = await openPage(browser);
@@ -150,13 +157,26 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         // ── Gelen Talepler (yönetici) ──
         await page.evaluate(() => window.renderRequestsTable());
         const head = await page.$$eval('#tableRequests thead th', ths => ths.map(t => t.textContent.trim()));
-        assert.ok(head.includes('ITSM / Gerekçe') && !head.some(h => /BioPro/.test(h)));
+        assert.ok(head.includes('ITSM / Seri No') && !head.some(h => /BioPro|ITSM \/ Gerekçe/.test(h)));
         let r = await rows(page, '#tableRequests');
-        assert.equal(r.length, 4); assert.equal(r.filter(x => /Onayla/.test(x.at(-1)) && /Reddet/.test(x.at(-1))).length, 3);
-        ok('Gelen Talepler: 3 bekleyen talep Onayla/Reddet düğmeleriyle listelenir; başlık "ITSM / Gerekçe"');
-        const draftRow = r.find(x => /Kulaklık/.test(x[3]));
-        assert.deepEqual([draftRow[6], draftRow[7]], ['draft', 'İşlem Yapıldı']);
-        ok('Personelin TASLAK talebi de Gelen Talepler\'de görünüyor: durum "draft", işlem "İşlem Yapıldı"', 'BULGU-4: gönderilmemiş taslak işlenmiş gibi görünüyor');
+        assert.equal(r.length, 3); assert.equal(r.filter(x => /Onayla/.test(x.at(-1)) && /Reddet/.test(x.at(-1))).length, 3);
+        ok('Gelen Talepler: 3 bekleyen talep Onayla/Reddet düğmeleriyle listelenir; başlık "ITSM / Seri No"');
+        assert.ok(!r.some(x => /Kulaklık/.test(x[3])));
+        s0 = await page.$eval('#requestsDraftNote', n => ({ hidden: n.hidden, text: n.textContent }));
+        assert.equal(s0.hidden, false); assert.match(s0.text, /gönderilmemiş 1 taslak/);
+        ok('B-4: Taslak talep listelenmiyor; üstte "gönderilmemiş 1 taslak talebi var" bilgi satırı');
+        // admin paneli "Bekleyen Envanter Talepleri" (admin-dashboard.renderAdminRequestTable — gerçek fonksiyon kaynağı)
+        await page.evaluate(src => {
+            const card = document.createElement('div'); card.className = 'card';
+            card.innerHTML = '<span id="pendingRequestCount"></span><p class="req-draft-note" id="adminDraftRequestNote" hidden></p><table><tbody id="adminPendingRequestsBody"></tbody></table>';
+            document.body.append(card);
+            (0, eval)(src);
+            window.renderAdminRequestTable();
+        }, ADMIN_TABLE_SRC);
+        s0 = await page.evaluate(() => ({ rows: document.querySelectorAll('#adminPendingRequestsBody tr').length, count: document.getElementById('pendingRequestCount').innerText,
+            note: document.getElementById('adminDraftRequestNote').textContent, draft: document.getElementById('adminPendingRequestsBody').textContent.includes('Kulaklık') }));
+        assert.deepEqual(s0, { rows: 3, count: '3', note: s0.note, draft: false }); assert.match(s0.note, /1 taslak/);
+        ok('B-4: Admin "Bekleyen Envanter Talepleri" de taslağı listelemiyor; sayaç 3, taslak notu görünür');
 
         // ── 1) Demirbaş talebinin onayı: cihaz kimlikleri zorunlu ──
         await approve(page, 'r_dem', { stockKey: 'b1|p_lap', devices: [{ sn: '', env: '' }, { sn: '', env: '' }] });
@@ -184,23 +204,65 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         assert.deepEqual(s, { durum: 'approved', stock: 17, z: [['zimmet', 3, 'ITSM-778', false]] });
         ok('Sarf onayı: stok 20 → 17; TEK zimmet kaydı (adet 3, isDemirbas false)', 'BULGU-1: sarf da "zimmet" olarak yazılıyor');
 
-        // ── 3) Red ──
-        await page.evaluate(() => window.rejectRequest('r_rej'));
-        s = await page.evaluate(() => ({ req: window.data.requests.find(x => x.id === 'r_rej'), b3: window.data.b3.filter(b => b.requestId === 'r_rej').length }));
-        assert.equal(s.req.durum, 'rejected'); assert.equal(s.req.rejectedBy, 'Sistem Yöneticisi'); assert.equal(s.b3, 0);
-        assert.equal(s.req.redGerekcesi, undefined);
-        ok('Red: talep rejected + rejectedBy/rejectedAt; zimmet/stok değişmez', 'BULGU-2: red gerekçesi sorulmuyor');
+        // ── 3) Red: zorunlu gerekçe penceresi (B-2) ──
+        await page.evaluate(() => { window._reject = window.rejectRequest('r_rej'); });
+        await page.waitForSelector('#requestRejectModal [role=dialog]');
+        const errOf = () => page.$eval('#requestRejectModal .req-modal-error', e => (e.hidden ? '' : e.textContent));
+        await page.click('#reqRejectOk');
+        assert.match(await errOf(), /gerekçesi seçin/);
+        await page.evaluate(() => { [...document.querySelectorAll('input[name=reqRejectPreset]')].find(i => i.value === 'Diğer').click(); });
+        await page.click('#reqRejectOk');
+        assert.match(await errOf(), /açıklama zorunludur/);
+        await page.evaluate(() => { [...document.querySelectorAll('input[name=reqRejectPreset]')].find(i => i.value === 'Stokta yok').click(); document.getElementById('reqRejectText').value = '<img src=x onerror=alert(1)>'; });
+        await page.click('#reqRejectOk');
+        assert.match(await errOf(), /etiket benzeri/);
+        await page.evaluate(() => { document.getElementById('reqRejectText').value = '27" monitör Q1\'de gelecek, tekrar talep edin.'; });
+        await page.screenshot({ path: path.join(OUT, 'request-reject-modal.png') });
+        await page.evaluate(async () => { document.getElementById('reqRejectOk').click(); await window._reject; });
+        s = await page.evaluate(() => ({ req: window.data.requests.find(x => x.id === 'r_rej'), b3: window.data.b3.filter(b => b.requestId === 'r_rej').length,
+            write: window.writeLog.filter(w => w.col === 'requests' && w.id === 'r_rej').map(w => [w.kind, Object.keys(w.data).sort()]),
+            modal: !!document.getElementById('requestRejectModal') }));
+        assert.equal(s.req.durum, 'rejected'); assert.equal(s.req.rejectedBy, 'Sistem Yöneticisi'); assert.equal(s.b3, 0); assert.equal(s.modal, false);
+        assert.equal(s.req.redGerekcesi, 'Stokta yok — 27" monitör Q1\'de gelecek, tekrar talep edin.');
+        assert.deepEqual(s.write, [['update', ['durum', 'redGerekcesi', 'rejectedAt', 'rejectedBy']]]);
+        ok('B-2: Red penceresi — seçimsiz, "Diğer"+boş açıklama ve etiketli metin reddedilir; gerekçe "Seçim — açıklama" olarak kaydedilir');
+        ok('B-5: Red yalnız 4 alanı (durum, redGerekcesi, rejectedBy, rejectedAt) günceller; tam kayıt yazılmaz; stok/zimmet değişmez');
+
+        // Vazgeç gerçekten vazgeçer
+        await page.evaluate(() => { window.data.requests.push({ id: 'r_cancel', ürün: 'Klavye', adet: 1, durum: 'Beklemede', personel: 'Ayşe Yılmaz', personelId: 's1', personelUid: 'uid-s1' }); window._reject = window.rejectRequest('r_cancel'); });
+        await page.waitForSelector('#requestRejectModal');
+        await page.keyboard.press('Escape');
+        await page.evaluate(() => window._reject);
+        assert.equal(await page.evaluate(() => window.data.requests.find(x => x.id === 'r_cancel').durum), 'Beklemede');
+        await page.evaluate(() => { window.data.requests = window.data.requests.filter(x => x.id !== 'r_cancel'); });
+        ok('Red penceresinde Esc / Vazgeç: talep bekleyen kalır');
 
         // tekrar onay / red engeli
         await page.evaluate(async () => { window.alerts = []; await window.confirmRequest('r_dem'); await window.rejectRequest('r_rej'); });
         assert.equal(await page.evaluate(() => window.alerts.filter(a => /zaten işlenmiş/.test(a[1])).length), 2);
         ok('İşlenmiş talep tekrar onaylanamaz / reddedilemez');
 
+        // B-6: talebe bağlı hareket kaydı zaten varken onay durur, stok düşmez
+        s = await page.evaluate(async () => {
+            window.data.requests.push({ id: 'r_dup', ürün: 'Mouse M90', adet: 1, durum: 'Beklemede', personel: 'Ayşe Yılmaz', personelId: 's1', personelUid: 'uid-s1' });
+            window.data.b3.push({ id: 'b3_dup', requestId: 'r_dup', tip: 'zimmet' });
+            const before = window.writeLog.length, stock = window.data.b1.find(p => p.id === 'p_mouse').adet;
+            window.alerts = [];
+            await window.confirmRequest('r_dup');
+            const out = { writes: window.writeLog.length - before, stock: window.data.b1.find(p => p.id === 'p_mouse').adet - stock,
+                modal: !!document.getElementById('requestApprovalModal'), durum: window.data.requests.find(x => x.id === 'r_dup').durum, alert: (window.alerts.at(-1) || [])[1] };
+            window.data.requests = window.data.requests.filter(x => x.id !== 'r_dup'); window.data.b3 = window.data.b3.filter(x => x.id !== 'b3_dup');
+            return out;
+        });
+        assert.deepEqual([s.writes, s.stock, s.modal, s.durum], [0, 0, false, 'Beklemede']); assert.match(s.alert, /zaten var; onay yapılmadı ve stok düşülmedi/);
+        ok('B-6: Talebe bağlı kayıt zaten varsa onay penceresi açılmaz, yazma yok, stok değişmez, uyarı gösterilir');
+
         await page.evaluate(() => window.renderRequestsTable());
         r = await rows(page, '#tableRequests');
-        assert.deepEqual(r.filter(x => x[6] !== 'draft').map(x => x[6]), ['Onaylandı', 'Onaylandı', 'Reddedildi']);
+        assert.deepEqual(r.map(x => (x[6].match(/^(Onaylandı|Reddedildi|Bekliyor|Teslim Alındı)/) || [x[6]])[0]), ['Onaylandı', 'Onaylandı', 'Reddedildi']);
+        assert.match(r[2][6], /Stokta yok — 27" monitör/);
         assert.ok(r.every(x => /İşlem Yapıldı/.test(x[7])));
-        ok('Gelen Talepler: durumlar Onaylandı / Onaylandı / Reddedildi, düğmeler kalktı');
+        ok('Gelen Talepler: durumlar Onaylandı / Onaylandı / Reddedildi; reddedilen satırda gerekçe görünür');
 
         // ── 4) Yönetici Zimmet ekranı (admin) ──
         await page.evaluate(() => window.inventoryManagementModule.renderTable());
@@ -215,6 +277,10 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         r = await rows(page, '#tableMyRequests');
         assert.equal(r.filter(x => /Teslim Aldım/.test(x[4])).length, 2);
         assert.equal(r.filter(x => /REDDEDİLDİ/.test(x[2]) && /Talep Reddedildi/.test(x[4])).length, 1);
+        assert.ok(r.some(x => /Gerekçe: Stokta yok — 27" monitör Q1'de gelecek/.test(x[2])));
+        ok('B-2: Personel Taleplerim\'de red gerekçesini görüyor');
+        await page.evaluate(() => document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'myRequests')));
+        await page.screenshot({ path: path.join(OUT, 'request-my-requests-reason.png') });
         let inv = await rows(page, '#tablePersonnelInventory');
         assert.match(inv[0][0], /kayıtlı envanter bulunmamaktadır/);
         s = await page.evaluate(() => window.AssignmentService.generatePersonnelZimmetData('s1').ozet);
@@ -301,7 +367,9 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         await assertFails(updateDoc(ref(st, 'requests', 'r_new'), { durum: 'completed' }));
         await assertFails(setDoc(ref(st, 'b3', 'fake'), { id: 'fake', tip: 'zimmet', requestId: 'r_new', personelId: 's1', adet: 1 }));
         await assertFails(updateDoc(ref(st, 'requests', 'r_dem'), { iadeEdildi: true }));
-        ok('Kural: personel kendi talebini onaylayamaz / reddedemez / onaysız teslim alamaz / zimmet yazamaz / iade işaretleyemez');
+        await assertFails(updateDoc(ref(st, 'requests', 'r_rej'), { redGerekcesi: 'değiştirildi' }));
+        await assertFails(updateDoc(ref(st, 'requests', 'r_new'), { redGerekcesi: 'kendime not' }));
+        ok('Kural: personel kendi talebini onaylayamaz / reddedemez / onaysız teslim alamaz / zimmet yazamaz / iade işaretleyemez / red gerekçesini değiştiremez');
     } finally { await env.cleanup(); }
     console.log(report.join('\n'));
     console.log(`Ekran görüntüleri: ${OUT}`);

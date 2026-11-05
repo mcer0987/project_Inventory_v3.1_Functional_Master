@@ -5614,3 +5614,132 @@ body.staff-readonly .uab-bar::before {
     font-weight: 700;
     white-space: nowrap;
 }
+
+/* =============================================================================
+   TALEP SÜRECİ · RED GEREKÇESİ VE TASLAK NOTU (feat/envanter-talep-iade · Faz 1)
+   [WHY]: Red gerekçesi personele iletilir; yönetici listelerinde taslaklar yerine yalnız sayıları görünür.
+   ============================================================================= */
+.req-panel-desc {
+    margin: 0 0 10px;
+    max-width: 860px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--color-text-muted);
+}
+
+.req-draft-note {
+    margin: 0 0 10px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px dashed var(--color-border-light);
+    background: var(--color-surface-alt);
+    color: var(--color-text-muted);
+    font-size: 12.5px;
+}
+
+.card > .req-draft-note { margin: 10px 16px 0; }
+.req-draft-note[hidden] { display: none; }
+
+.req-reject-reason {
+    margin-top: 6px;
+    max-width: 320px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--color-text-muted);
+    text-align: left;
+    word-break: break-word;
+}
+
+.req-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 11000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(15, 23, 42, 0.72);
+}
+
+.req-modal {
+    width: 520px;
+    max-width: 100%;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    padding: 24px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border-light);
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+}
+
+.req-modal h3 { margin: 0 0 6px; font-size: 1.2rem; }
+.req-modal-summary { margin: 0 0 4px; font-weight: 600; }
+.req-modal-help { margin: 0 0 14px; font-size: 13px; color: var(--color-text-muted); }
+.req-modal-label { display: block; margin: 12px 0 4px; font-size: 13px; font-weight: 600; }
+
+.req-reject-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 6px;
+}
+
+.req-reject-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border-light);
+    background: var(--color-surface-alt);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.req-reject-option:has(input:checked) { border-color: var(--color-danger, #e74c3c); }
+.req-reject-option input { margin: 0; accent-color: var(--color-danger, #e74c3c); }
+
+.req-modal textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+    font: inherit;
+    resize: vertical;
+}
+
+.req-reject-counter { display: block; text-align: right; font-size: 11px; color: var(--color-text-muted); }
+
+.req-modal-error {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--badge-rejected-bg);
+    color: var(--badge-rejected-text);
+    font-size: 13px;
+}
+
+.req-modal-error[hidden] { display: none; }
+
+.req-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+
+.req-modal-btn {
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--color-text);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.req-modal-btn.danger { border-color: transparent; background: var(--color-danger, #e74c3c); color: #fff; }
+
+.req-modal-btn:focus-visible,
+.req-reject-option:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+[data-theme="dark"] .req-modal-error { background: rgba(248, 113, 113, 0.14); color: #fca5a5; }

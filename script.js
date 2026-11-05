@@ -646,11 +646,20 @@ window.renderRequestsTable = function () {
     const tbody = document.querySelector('#tableRequests tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    if (!window.data.requests || window.data.requests.length === 0) {
+    // B-4: personelin gönderilmemiş taslakları yönetici listesinde gösterilmez; yalnız sayıları bilgi satırında.
+    const all = window.data.requests || [];
+    const visible = all.filter(r => !_isDraftRequest(r));
+    const draftNote = document.getElementById('requestsDraftNote');
+    if (draftNote) {
+        const drafts = all.length - visible.length;
+        draftNote.textContent = drafts ? `Personelin gönderilmemiş ${drafts} taslak talebi var (listelenmez; gönderildiğinde burada görünür).` : '';
+        draftNote.hidden = drafts === 0;
+    }
+    if (visible.length === 0) {
         tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Henüz bekleyen talep bulunmuyor.</td></tr>';
         return;
     }
-    window.data.requests.forEach((req, index) => {
+    visible.forEach((req, index) => {
         const row = tbody.insertRow();
         const rawDurum = (req.durum || '').trim().toUpperCase();
         const isApproved = rawDurum === 'APPROVED' || rawDurum === 'ONAYLANDI';
@@ -674,7 +683,7 @@ window.renderRequestsTable = function () {
             <td>${escapeHtml(req.ürün || "-")} <strong>(${escapeHtml(req.adet || 1)} Adet)</strong></td>
             <td style="color:#7f8c8d;">${escapeHtml(req.not || "-")}</td>
             <td style="font-weight:bold; color:#2c3e50;">${escapeHtml(req.sn || "-")}</td>
-            <td style="text-align:center;"><span class="status-badge-pill ${statusClass}">${escapeHtml(statusText)}</span></td>
+            <td style="text-align:center;"><span class="status-badge-pill ${statusClass}">${escapeHtml(statusText)}</span>${isRejected && req.redGerekcesi ? `<div class="req-reject-reason">${escapeHtml(req.redGerekcesi)}</div>` : ''}</td>
             <td style="text-align:center;">
                 ${isPending ? `
                     <button onclick="confirmRequest(${jsArg(req.id)})" class="req-approve-btn">Onayla</button>
@@ -716,7 +725,7 @@ function renderMyRequestsTable() {
         let statusHTML = '';
         if (isPending) statusHTML = `<div class="status-badge-pill status-pending-pill">ONAY BEKLİYOR</div>`;
         else if (isApproved) statusHTML = `<div class="status-badge-pill status-approved-pill">ONAYLANDI</div>`;
-        else if (isRejected) statusHTML = `<div class="status-badge-pill status-rejected-pill">REDDEDİLDİ</div>`;
+        else if (isRejected) statusHTML = `<div class="status-badge-pill status-rejected-pill">REDDEDİLDİ</div>${req.redGerekcesi ? `<div class="req-reject-reason"><strong>Gerekçe:</strong> ${escapeHtml(req.redGerekcesi)}</div>` : ''}`;
         else if (isCompleted) statusHTML = `<div class="status-badge-pill status-completed-pill">TESLİM ALINDI</div>`;
         else if (isDraft) statusHTML = `<div class="status-badge-pill" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;">TASLAK</div>`;
         else statusHTML = `<div class="status-badge-pill status-pending-pill">${escapeHtml(req.durum || '-')}</div>`;
@@ -805,8 +814,100 @@ const _refreshRequestTables = () => {
     ['renderRequestsTable', 'renderMyRequestsTable', 'renderAdminRequestTable', 'renderPersonnelInventoryTable']
         .forEach(fn => { if (typeof window[fn] === 'function') window[fn](); });
 };
-const _saveRequestItem = updated => window.saveData('requests',
-    (window.data.requests || []).map(r => String(r.id) === String(updated.id) ? updated : r));
+// [WHY]: B-6 · Talebe bağlı hareket kaydı (b3) zaten varken onay zimmeti tekrar yazmıyor ama stoğu YİNE düşüyordu.
+// [HOW]: Bu tutarsız durumda onay hiç yazmadan durur ve uyarır; yönetici kaydı Envanter Takibi'nde kontrol eder.
+function _stopIfLinkedMovement(req) {
+    if (!(window.data.b3 || []).some(b => String(b.requestId) === String(req.id))) return false;
+    showAppAlert('Bu talebe bağlı bir hareket kaydı zaten var; onay yapılmadı ve stok düşülmedi. Envanter Takibi\'nde kaydı kontrol edin.', 'warning');
+    _refreshRequestTables();
+    return true;
+}
+
+// Talep taslak mı (personel henüz göndermedi / geri çekti) — yönetici listelerinde gösterilmez (B-4).
+function _isDraftRequest(r) { return ['DRAFT', 'TASLAK'].includes(String((r && r.durum) || '').trim().toUpperCase()); }
+window.isDraftRequest = _isDraftRequest;
+
+// [WHY]: B-2 · Red gerekçesi sorulmuyordu; personel talebinin neden reddedildiğini göremiyordu. B-5 · Red, talebin yerel
+//        kopyasının tamamını yazıyordu (saveData); aynı anda yapılan bir düzenleme ezilebilirdi.
+// [HOW]: Zorunlu gerekçe penceresi (hazır seçenek + açıklama; "Diğer"de açıklama zorunlu; ≤1000 karakter, etiket benzeri metin
+//        yok). Yalnız durum alanları updateItem ile yazılır. Pencere DOM'la kurulur, kayıt verisi textContent ile yazılır.
+const REJECT_REASONS = Object.freeze(['Stokta yok', 'Bütçe uygun değil', 'Mükerrer talep', 'Bilgi eksik', 'Diğer']);
+const REJECT_MAX = 1000;
+window.REQUEST_REJECT_REASONS = REJECT_REASONS;
+
+// Seçim + açıklama → { reason } | { error }. Saf; testten de çağrılır.
+window.composeRejectReason = function (preset, text) {
+    const p = String(preset || '').trim(), t = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!REJECT_REASONS.includes(p)) return { error: 'Bir red gerekçesi seçin.' };
+    if (p === 'Diğer' && !t) return { error: '"Diğer" seçildiğinde açıklama zorunludur.' };
+    const reason = p === 'Diğer' ? t : (t ? `${p} — ${t}` : p);
+    if (reason.length > REJECT_MAX) return { error: `Gerekçe en fazla ${REJECT_MAX} karakter olabilir.` };
+    if (/<[a-zA-Z\/!?]/.test(reason)) return { error: 'Gerekçede "<" ile başlayan etiket benzeri ifade kullanılamaz.' };
+    return { reason };
+};
+
+// Red gerekçesi penceresi → gerekçe metni | null (Vazgeç / Esc)
+window.showRequestRejectModal = function (request) {
+    return new Promise(resolve => {
+        const el = (tag, props = {}, children = []) => {
+            const n = Object.assign(document.createElement(tag), props);
+            children.forEach(c => c && n.append(c));
+            return n;
+        };
+        const lastFocus = document.activeElement;
+        const overlay = el('div', { id: 'requestRejectModal', className: 'req-modal-overlay' });
+        const titleId = 'requestRejectTitle';
+        const dialog = el('div', { className: 'req-modal' });
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('aria-labelledby', titleId);
+
+        const options = el('div', { className: 'req-reject-options' });
+        options.setAttribute('role', 'radiogroup');
+        options.setAttribute('aria-label', 'Red gerekçesi');
+        REJECT_REASONS.forEach((label, i) => {
+            const input = el('input', { type: 'radio', name: 'reqRejectPreset', value: label, id: `reqRejectPreset${i}` });
+            options.append(el('label', { className: 'req-reject-option', htmlFor: input.id }, [input, el('span', { textContent: label })]));
+        });
+        const text = el('textarea', { id: 'reqRejectText', rows: 3, maxLength: REJECT_MAX, placeholder: 'Açıklama (isteğe bağlı; "Diğer" seçildiyse zorunlu)' });
+        const counter = el('small', { className: 'req-reject-counter', textContent: `0 / ${REJECT_MAX}` });
+        const error = el('div', { className: 'req-modal-error', hidden: true });
+        error.setAttribute('role', 'alert');
+        const cancel = el('button', { type: 'button', className: 'req-modal-btn', textContent: 'Vazgeç' });
+        const ok = el('button', { type: 'button', className: 'req-modal-btn danger', id: 'reqRejectOk', textContent: 'Talebi Reddet' });
+
+        dialog.append(
+            el('h3', { id: titleId, textContent: 'Talebi Reddet' }),
+            el('p', { className: 'req-modal-summary', textContent: `${request.personel || '-'} · ${request.ürün || '-'} · ${Number(request.adet) || 1} adet` }),
+            el('p', { className: 'req-modal-help', textContent: 'Gerekçe, talep sahibine "Taleplerim" ekranında gösterilir.' }),
+            options,
+            el('label', { className: 'req-modal-label', htmlFor: text.id, textContent: 'Açıklama' }), text, counter,
+            error,
+            el('div', { className: 'req-modal-actions' }, [cancel, ok]),
+        );
+        overlay.append(dialog);
+        document.body.append(overlay);
+
+        // Esc, odak nerede olursa olsun pencere açıkken çalışır (odak pencereye geçmeden basılsa da).
+        const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); close(null); } };
+        const close = val => {
+            document.removeEventListener('keydown', onKey, true);
+            overlay.remove();
+            if (lastFocus && lastFocus.focus) lastFocus.focus();
+            resolve(val);
+        };
+        document.addEventListener('keydown', onKey, true);
+        text.addEventListener('input', () => { counter.textContent = `${text.value.length} / ${REJECT_MAX}`; });
+        cancel.addEventListener('click', () => close(null));
+        ok.addEventListener('click', () => {
+            const preset = (dialog.querySelector('input[name="reqRejectPreset"]:checked') || {}).value;
+            const res = window.composeRejectReason(preset, text.value);
+            if (res.error) { error.textContent = res.error; error.hidden = false; return; }
+            close(res.reason);
+        });
+        setTimeout(() => dialog.querySelector('input[name="reqRejectPreset"]')?.focus(), 0);
+    });
+};
 
 // [WHY]: Talep serbest metin olduğu için onay stoktan hiç düşmüyordu; onaylanan ürün depoda görünmeye devam ediyor,
 //        iadesi de "stok bağlantısı yok" diye depoya dönmüyordu (ITSM-08, Karar K7-a).
@@ -935,6 +1036,7 @@ window.confirmRequest = async function (requestId) {
         const isSelf = window.Schema.isSelfApproval({ actor: window.getActiveUser() || window.currentUser, record: request, kind: 'request' });
         if (isSelf && !window.isDbAdmin()) { await window.SecurityConfig.guardSelfApproval(selfCtx(request)); return; }
         if (!window.requireDbAdmin('Talep onayı')) return;
+        if (_stopIfLinkedMovement(request)) return;   // B-6: pencere hiç açılmaz
 
         const choice = await window.showRequestApprovalModal(request);
         if (!choice) return;
@@ -943,6 +1045,7 @@ window.confirmRequest = async function (requestId) {
         // modal açıkken snapshot gelmiş olabilir: güncel nesne ve durum yeniden kontrol edilir
         const live = _findRequest(requestId);
         if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
+        if (_stopIfLinkedMovement(live)) return;   // B-6 (pencere açıkken bu arada yazılmış olabilir)
         const guard = await window.SecurityConfig.guardSelfApproval(selfCtx(live));
         if (!guard.allowed) return;
 
@@ -964,21 +1067,19 @@ window.confirmRequest = async function (requestId) {
         // Kanonik b3 zimmet kaydı (3.6): stok kalemi seçildiyse tür/raf/depo üründen kopyalanır; seçilmediyse kaynakDepo
         // 'stok-disi' (tabloda Raf No "Stok dışı" — eskiden "TALEP" basılıyordu).
         // Demirbaş (3.9a): cihaz başına bir b3 zimmet kaydı (adet 1, kendi Seri No / Envanter No'su), hepsi aynı transaction'da.
-        const alreadyLogged = (window.data.b3 || []).some(b => String(b.requestId) === String(live.id));
-        if (!alreadyLogged) {
-            const base = {
-                tip: 'zimmet', requestId: live.id,
-                ...(product ? { product, col: repo } : { urunAciklama: live.ürün, isDemirbas: choice.demirbas === true }),
-                not: [live.not, `Onaylayan: ${approver}`].filter(s => s && String(s).trim() && s !== '-').join(' · '),
-                alanKisi: live.personel,
-                personelId: live.personelId || window.AssignmentService?.resolvePersonelId(live.personel),
-                tarih: getTurkiyeTarihi(),
-                talepTuru: live.talepTuru, oncelik: live.oncelik, iadeTarihi: live.iadeTarihi,
-                onaylayan: approver,
-            };
-            const units = choice.ids ? choice.ids.map(d => ({ adet: 1, sn: d.sn, envanterNo: d.envanterNo })) : [{ adet: qty, sn: snValue }];
-            units.forEach(u => writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({ ...base, ...u }) }));
-        }
+        // (Talebe bağlı kayıt zaten varsa onay yukarıda durdurulur — B-6.)
+        const base = {
+            tip: 'zimmet', requestId: live.id,
+            ...(product ? { product, col: repo } : { urunAciklama: live.ürün, isDemirbas: choice.demirbas === true }),
+            not: [live.not, `Onaylayan: ${approver}`].filter(s => s && String(s).trim() && s !== '-').join(' · '),
+            alanKisi: live.personel,
+            personelId: live.personelId || window.AssignmentService?.resolvePersonelId(live.personel),
+            tarih: getTurkiyeTarihi(),
+            talepTuru: live.talepTuru, oncelik: live.oncelik, iadeTarihi: live.iadeTarihi,
+            onaylayan: approver,
+        };
+        const units = choice.ids ? choice.ids.map(d => ({ adet: 1, sn: d.sn, envanterNo: d.envanterNo })) : [{ adet: qty, sn: snValue }];
+        units.forEach(u => writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({ ...base, ...u }) }));
 
         let stockChange = null;
         try {
@@ -1012,14 +1113,15 @@ window.rejectRequest = async function (requestId) {
         const request = _findRequest(requestId);
         if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
         if (!_isPendingRequest(request)) { showAppAlert('Bu talep zaten işlenmiş veya taslak durumda.', 'warning'); _refreshRequestTables(); return; }
-        const onay = await showCustomConfirm("Talebi Reddet", `${request.personel} isimli personelin talebi reddedilecek. Emin misiniz?`);
-        if (onay !== true) return;
+        if (!window.requireDbAdmin('Talep reddi')) return;
+        const reason = await window.showRequestRejectModal(request);
+        if (reason == null) return;
         const live = _findRequest(requestId);
         if (!live || !_isPendingRequest(live)) { showAppAlert('Talep bu arada değişti; işlem iptal edildi.', 'warning'); _refreshRequestTables(); return; }
-        const updated = { ...live, durum: 'rejected', rejectedBy: window.currentUser?.name || 'Yönetici', rejectedAt: getTurkiyeSaati() };
-        if (!(await window.writeOk(_saveRequestItem(updated)))) { showAppAlert('Red kaydedilemedi.', 'error'); return; }
+        const fields = { durum: 'rejected', rejectedBy: window.currentUser?.name || 'Yönetici', rejectedAt: getTurkiyeSaati(), redGerekcesi: reason };
+        if (!(await window.writeOk(window.updateItem('requests', live.id, fields)))) { showAppAlert('Red kaydedilemedi.', 'error'); return; }
         _refreshRequestTables();
-        showAppAlert(`${live.personel} talebi reddedildi.`, "error");
+        showAppAlert(`${live.personel} talebi reddedildi. Gerekçe personele iletildi.`, "error");
     } finally {
         _requestActionsInFlight.delete(lockKey);
     }
