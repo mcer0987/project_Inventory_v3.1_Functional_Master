@@ -179,8 +179,16 @@ async function seedShelves(list) {
 }
 let importSeq = 0;
 async function importRows(db, st, rows, mutate) {
+    const importData = rows.map(row => {
+        const hasId = Object.keys(row).some(header =>
+            I.FIELD_ALIASES.envanterNo.some(alias => I.headerKey(alias) === I.headerKey(header))
+        );
+        return !hasId && String(row.Ürün || '').trim()
+            ? { ...row, 'Envanter No': `TEST-EMU-${importSeq++}` }
+            : row;
+    });
     const cached = Object.values(await snapshot(db, 'shelves')).filter(d => d.depot === 'b1');
-    const built = I.buildStockRecords(rows, 'b1', {
+    const built = I.buildStockRecords(importData, 'b1', {
         schema: S, makeId: () => 9000000 + (importSeq++), now: Date.now(),
         shelfCapacityInfo: new Map(cached.map(d => [d.code, { capacity: d.capacity, usedSlots: d.usedSlots, active: d.active }])),
     });
@@ -200,7 +208,9 @@ async function importRows(db, st, rows, mutate) {
     });
     return { res, plan };
 }
-const rowsTo = (code, n, prefix) => Array.from({ length: n }, (_, i) => ({ Ürün: `${prefix} ${i}`, Adet: '1', Raf: code }));
+const rowsTo = (code, n, prefix) => Array.from({ length: n }, (_, i) => ({
+    Ürün: `${prefix} ${i}`, Adet: '1', Raf: code, 'Envanter No': `TEST-EMU-${importSeq++}`,
+}));
 
 // v3.3 P1 ek (proje sahibinin talebi): buildStockRecords artık MAX_IMPORT_ROWS=200 üstünü reddeder (admin dahil aşılamaz;
 // bkz. stock-import.js dosya başı [WHY]). Bu, gerçek atomicImportStock giriş noktasından 900 satırlık bir içe aktarmayı
@@ -247,16 +257,16 @@ test('emülatör + kurallar (P1): capacity=5/usedSlots=4 → 1. içe aktarma raf
     assert.equal(b1[second.plan.records[0].id].raf, '');
 });
 
-test('emülatör + kurallar (P1): yeni rafa 6 kayıt → 5 rafta, 1 Havuz\'da; raf belgesi usedSlots=5 ile yaratıldı', async () => {
+test('emülatör + kurallar: import ile yeni raf 12 kapasiteyle yaratılır; kapasite aşımı Havuz\'a gider', async () => {
     const db = adminDb();
-    const r = await importRows(db, store(db), rowsTo('Yeni Raf', 6, 'N'));
+    const r = await importRows(db, store(db), rowsTo('Yeni Raf', 13, 'N'));
     assert.equal(r.plan.poolOverflowCount, 1);
     const shelves = await snapshot(db, 'shelves');
     const { updatedAt, ...rest } = shelves['b1_YENI RAF'];
     assert.ok(updatedAt instanceof Timestamp);
-    assert.deepEqual(rest, { code: 'YENI RAF', depot: 'b1', capacity: 5, usedSlots: 5, active: true, updatedBy: 'admin-uid' });
+    assert.deepEqual(rest, { code: 'YENI RAF', depot: 'b1', capacity: 12, usedSlots: 12, active: true, updatedBy: 'admin-uid' });
     const b1 = await snapshot(db, 'b1');
-    assert.equal(r.plan.records.filter(x => b1[x.id] && b1[x.id].raf === 'YENI RAF').length, 5);
+    assert.equal(r.plan.records.filter(x => b1[x.id] && b1[x.id].raf === 'YENI RAF').length, 12);
 });
 
 test('emülatör + kurallar (P1): GERÇEK sunucu reddiyle ara parça düşer → ürünler, yeni raf ve sayaç BİRLİKTE geri alınır', async () => {

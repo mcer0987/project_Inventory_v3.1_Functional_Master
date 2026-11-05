@@ -17,11 +17,23 @@ function load(productTypes = [{ name: 'Laptop', isDemirbas: true }, { name: 'Kab
         vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
     }
     let n = 0;
-    return { S: ctx.window.Schema, I: ctx.window.StockImport, makeId: () => 1000 + (n++) };
+    return { S: ctx.window.Schema, I: ctx.window.StockImport, productTypes, makeId: () => 1000 + (n++) };
 }
+const addTestInventoryNumbers = rows => {
+    const { I } = load();
+    return rows.map((row, index) => {
+        const hasProduct = Object.entries(row).some(([header, value]) =>
+            I.FIELD_ALIASES.ürün.some(alias => I.headerKey(alias) === I.headerKey(header)) && String(value ?? '').trim()
+        );
+        const hasInventoryNo = Object.keys(row).some(header =>
+            I.FIELD_ALIASES.envanterNo.some(alias => I.headerKey(alias) === I.headerKey(header))
+        );
+        return hasProduct && !hasInventoryNo ? { ...row, 'Envanter No': `TEST-ENV-${index}` } : row;
+    });
+};
 const build = (rows, col = 'b1', extra = {}) => {
-    const { S, I, makeId } = load();
-    return plain(I.buildStockRecords(rows, col, { schema: S, makeId, now: 1760000000000, ...extra }));
+    const { S, I, productTypes, makeId } = load();
+    return plain(I.buildStockRecords(addTestInventoryNumbers(rows), col, { schema: S, makeId, now: 1760000000000, productTypes, ...extra }));
 };
 
 // ─── Schema.toCanonicalStock ─────────────────────────────────────────────────────────────────────────
@@ -106,6 +118,32 @@ test('içe aktarma b2: status + durumu birlikte, tam B2 sözleşmesi', () => {
     assert.deepEqual(plain(S.validateB2(rec)), []);
 });
 
+test('içe aktarma: kayıtlı tür boşluk/büyük-küçük harf farkıyla eşleşir ve katalog adıyla yazılır', () => {
+    const { S, I, productTypes, makeId } = load([{ name: 'Monitör', isDemirbas: true }]);
+    const result = plain(I.buildStockRecords([
+        { Ürün: 'ASUS', Tür: '  MONİTÖR  ', Adet: '1', 'Envanter No': 'E-11' },
+    ], 'b2', { schema: S, makeId, productTypes }));
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.records[0].tür, 'Monitör');
+    assert.equal(result.records[0].isDemirbas, true);
+});
+
+test('içe aktarma: sistemde kayıtlı olmayan ürün türü dosyanın tamamını durdurur', () => {
+    const result = build([
+        { Ürün: 'Monitör', Tür: 'Laptop' },
+        { Ürün: 'Buzdolabı', Tür: 'Buzdolabı' },
+    ], 'b2');
+    assert.deepEqual(result.records, []);
+    assert.deepEqual(result.shelfRequests, []);
+    assert.ok(result.errors.some(error => /Satır 3: ürün türü "Buzdolabı" sistemde kayıtlı değil/.test(error)));
+});
+
+test('içe aktarma: boş ürün türü mevcut davranışla kabul edilir', () => {
+    const result = build([{ Ürün: 'Ürün', Tür: '' }], 'b2');
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.records[0].tür, '');
+});
+
 test('içe aktarma: tek hatalı satır → hiçbir kayıt döndürülmez (dosya ya tamamen ya hiç)', () => {
     const r = build([
         { Ürün: 'İyi', Adet: '3' },
@@ -129,6 +167,13 @@ test('içe aktarma: ürün sütunu yoksa durur; tanınmayan sütun uyarıdır', 
     assert.equal(r.records.length, 1);
     assert.ok(r.warnings.some(w => /"Renk" sütunu tanınmadı/.test(w)));
     assert.ok(!('Renk' in r.records[0]));
+});
+
+test('içe aktarma: "Raf/Shelf" başlığı raf alanına eşlenir ve tanınmayan sütun uyarısı üretmez', () => {
+    const r = build([{ Ürün: 'A', 'Raf/Shelf': 'B2-R07' }]);
+    assert.deepEqual(r.errors, []);
+    assert.deepEqual(r.warnings, []);
+    assert.equal(r.records[0].raf, 'B2-R07');
 });
 
 test('içe aktarma: geçersiz depo reddedilir', () => {
@@ -155,6 +200,43 @@ test('raf katalogda VARSA ve müsaitse eşleşir, kanonik koda normalize edilir;
     assert.deepEqual(r.shelvesToCreate, []);
 });
 
+test('raf eşleşmesi: nokta/tire ve eksik tire farkı mevcut rafla eşleşme önerir', () => {
+    const { I, S, makeId } = load();
+    const shelfCapacityInfo = shelfInfo([['B2-A4-01', 5, 0], ['B2-R07', 5, 0]]);
+    const result = plain(I.buildStockRecords([
+        { Ürün: 'A', Raf: 'B2.a4.01', 'Envanter No': 'E-SHELF-1' },
+        { Ürün: 'B', Raf: 'B2R07', 'Envanter No': 'E-SHELF-2' },
+    ], 'b2', { schema: S, makeId, shelfCapacityInfo }));
+    assert.deepEqual(result.shelfCorrections, [
+        { code: 'B2.A4.01', candidates: ['B2-A4-01'] },
+        { code: 'B2R07', candidates: ['B2-R07'] },
+    ]);
+    const applied = plain(I.applyShelfCorrections(result.records, result.shelfRequests, result.shelfCorrections, {
+        'B2.A4.01': 'B2-A4-01',
+        B2R07: 'B2-R07',
+    }));
+    assert.deepEqual(applied.records.map(r => r.raf), ['B2-A4-01', 'B2-R07']);
+    assert.deepEqual(applied.requests.map(r => r.code), ['B2-A4-01', 'B2-R07']);
+});
+
+test('raf eşleşmesi: birden fazla aday gösterilir; farklı karakter/sıfır dolgusu otomatik eşleşmez', () => {
+    const { I, S, makeId } = load();
+    const shelfCapacityInfo = shelfInfo([['B2-A4-01', 5, 0], ['B2A4.01', 5, 0], ['B2-R07', 5, 0]]);
+    const result = plain(I.buildStockRecords([
+        { Ürün: 'Ambiguous', Raf: 'B2A4-01', Adet: '1', 'Envanter No': 'E-SHELF-3' },
+        { Ürün: 'Different digit', Raf: 'B2-R08', Adet: '1', 'Envanter No': 'E-SHELF-4' },
+        { Ürün: 'Zero padding', Raf: 'B2-R007', Adet: '1', 'Envanter No': 'E-SHELF-5' },
+    ], 'b2', { schema: S, makeId, shelfCapacityInfo }));
+    assert.deepEqual(result.shelfCorrections, [
+        { code: 'B2A4-01', candidates: ['B2-A4-01', 'B2A4.01'] },
+    ]);
+    const keptNew = plain(I.applyShelfCorrections(result.records, result.shelfRequests, result.shelfCorrections, {}));
+    assert.equal(keptNew.records[0].raf, 'B2A4-01', 'eşleşme seçilmezse yeni raf olarak mevcut yazım korunur');
+    assert.throws(() => I.applyShelfCorrections(result.records, result.shelfRequests, result.shelfCorrections, {
+        'B2A4-01': 'B2-R07',
+    }), /Geçersiz raf eşleşmesi/);
+});
+
 test('raf katalogda YOKSA satır REDDEDİLMEZ — yeni raf OTOMATİK YARATILACAK şekilde işaretlenir, Havuz\'a DÜŞMEZ', () => {
     const r = build([
         { Ürün: 'A', Adet: '1', Raf: 'Olmayan Raf 7' },
@@ -169,17 +251,17 @@ test('raf katalogda YOKSA satır REDDEDİLMEZ — yeni raf OTOMATİK YARATILACAK
     assert.equal(r.poolOverflowCount, 0);
 });
 
-test('aynı YENİ rafa giden satırlar varsayılan kapasiteyi (5) aşınca FAZLASI Havuz\'a alınır; ilk 5\'i korunur', () => {
-    const rows = Array.from({ length: 7 }, (_, i) => ({ Ürün: `Ürün ${i}`, Adet: '1', Raf: 'Yeni Raf 1' }));
+test('import ile yeni rafın kapasitesi 12 olur; 12 ürün rafa, fazlası Havuz\'a alınır', () => {
+    const rows = Array.from({ length: 13 }, (_, i) => ({ Ürün: `Ürün ${i}`, Adet: '1', Raf: 'Yeni Raf 1' }));
     const r = build(rows, 'b1', { shelfCapacityInfo: shelfInfo([]) });
     assert.deepEqual(r.errors, []);
     const placed = r.records.filter(x => x.raf === 'YENI RAF 1');   // normShelfCode: i/ı/İ hepsi I olur
     const pooled = r.records.filter(x => x.raf === '');
-    assert.equal(placed.length, 5, 'varsayılan kapasite 5');
-    assert.equal(pooled.length, 2);
-    assert.equal(r.poolOverflowCount, 2);
+    assert.equal(placed.length, 12, 'import ile yeni raf kapasitesi 12');
+    assert.equal(pooled.length, 1);
+    assert.equal(r.poolOverflowCount, 1);
     assert.deepEqual(r.shelvesToCreate, ['YENI RAF 1'], 'en az bir ürün yerleşti → yaratılacak');
-    assert.equal(r.warnings.filter(w => /dolu/.test(w)).length, 2);
+    assert.equal(r.warnings.filter(w => /dolu/.test(w)).length, 1);
 });
 
 test('VAR OLAN rafın KALAN boşluğu dolunca fazlası Havuz\'a alınır; raf zaten katalogda olduğu için shelvesToCreate\'e girmez', () => {
@@ -235,17 +317,43 @@ test('Envanter No: B2 kaydına doğrudan eşlenir, tam B2 sözleşmesinden geçe
     assert.deepEqual(plain(load().S.validateB2(r.records[0])), []);
 });
 
-test('Envanter No: B1 için sütun TANINIR (uyarı basılmaz) ama değer göz ardı edilir (kayıtta hiç yer almaz)', () => {
+test('Envanter No: B1 kaydına da yazılır ve tam B1 sözleşmesinden geçer', () => {
     const r = build([{ Ürün: 'Kablo', 'Envanter No': 'ENV-999' }], 'b1');
     assert.deepEqual(r.errors, []);
     assert.ok(!r.warnings.some(w => /tanınmadı/.test(w)), '"Envanter No" sütunu tanınmayan sütun uyarısı almamalı');
-    assert.ok(!('envanterNo' in r.records[0]), 'B1 kaydı envanterNo taşımaz');
+    assert.equal(r.records[0].envanterNo, 'ENV-999');
+    assert.deepEqual(plain(load().S.validateB1(r.records[0])), []);
 });
 
-test('Envanter No: boşsa alan hiç eklenmez (limit ile aynı "yalnız değer varsa" deseni); yine de geçerli kayıt', () => {
-    const r = build([{ Ürün: 'Monitör', Tür: 'Monitör' }], 'b2');
-    assert.ok(!('envanterNo' in r.records[0]));
-    assert.deepEqual(plain(load().S.validateB2(r.records[0])), []);
+test('Envanter No: boş satır importu tamamen durdurur', () => {
+    const { S, I, makeId } = load();
+    const r = plain(I.buildStockRecords([{ Ürün: 'Laptop', Tür: 'Laptop' }], 'b2', { schema: S, makeId }));
+    assert.deepEqual(r.records, []);
+    assert.ok(r.errors.some(error => /Envanter No zorunludur/.test(error)));
+});
+
+test('Envanter No: dosya içi tekrarlar normalize edilerek reddedilir', () => {
+    const r = build([
+        { Ürün: 'Ürün 1', 'Envanter No': 'ENV-1' },
+        { Ürün: 'Ürün 2', 'Envanter No': 'env - 1' },
+    ], 'b1');
+    assert.deepEqual(r.records, []);
+    assert.ok(r.errors.some(error => /birden fazla kez/.test(error)));
+});
+
+test('Envanter No eşleşmesi: mevcut B1 veya B2 kaydı korunur, farklı alanlar raporlanır', () => {
+    const { S, I } = load();
+    const incoming = [
+        { id: 'b1_new', ürün: 'Yeni Ad', envanterNo: 'ENV-1', raf: 'R-2', adet: 1 },
+        { id: 'b1_add', ürün: 'Yeni', envanterNo: 'ENV-2', raf: 'R-1', adet: 1 },
+    ];
+    const result = plain(I.filterExistingInventoryNumbers(incoming, [{ id: 'b1_new', code: 'R-2' }], [
+        { depot: 'b2', records: [{ id: 'b2_old', ürün: 'Eski Ad', envanterNo: 'env-1', raf: 'R-1', adet: 2 }] },
+    ], S));
+    assert.deepEqual(result.records.map(record => record.id), ['b1_add']);
+    assert.deepEqual(result.requests, []);
+    assert.equal(result.skipped.length, 1);
+    assert.deepEqual(result.skipped[0].differences, ['raf', 'ürün', 'adet']);
 });
 
 // ─── v3.3 P1 ek (proje sahibinin talebi) — MAX_IMPORT_ROWS: sabit üst sınır, admin dahil aşılamaz ──────────────────────

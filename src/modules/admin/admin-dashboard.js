@@ -8,6 +8,7 @@ window.currentCriticalFilter = 'all';
 // CHART INSTANCE'LARI (Memory Leak Engellemek İçin)
 let demirbasChartInstance = null;
 let statsChartInstance = null;
+let criticalStockGroupsByKey = new Map();
 
 window.getCleanProductName = function (name) {
     if (!name) return "";
@@ -344,6 +345,7 @@ window.renderAdminRequestTable = function () {
 // Faz 6 · UI-01: Operasyon Merkezi — Hızlı Envanter Çıkış Masası.
 // [WHY]: "Bekleyen Envanter Talepleri" Talep Ve Süreçler sekmesine taşınınca Operasyon Merkezi'nde
 //        açılan alana, son çıkış hareketlerini özetleyen hafif bir masa eklendi (B3 hareket defterinden).
+// [HOW]: Index tasarım diline uygun olarak tarih/personel ikonları ve .p-badge adet rozetiyle listeler.
 window.renderQuickExitDesk = function () {
     const tableBody = document.getElementById('quickExitDeskBody');
     if (!tableBody) return;
@@ -355,16 +357,26 @@ window.renderQuickExitDesk = function () {
         .slice(0, 8);
 
     if (entries.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted p-3">Henüz çıkış hareketi yok.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted p-4" style="background:var(--color-surface);"><i class="fas fa-inbox fa-2x mb-2 d-block opacity-25"></i>Henüz çıkış hareketi yok.</td></tr>';
         return;
     }
 
     tableBody.innerHTML = entries.map(n => `
-        <tr>
-            <td class="ps-3">${esc(n.tarih || '-')}</td>
-            <td>${esc(n.alanKisi || '-')}</td>
-            <td>${esc(n.urunAciklama || '-')}</td>
-            <td class="text-end pe-3">${esc(n.adet || 1)}</td>
+        <tr style="border-bottom: 1px solid var(--color-border-light); transition: background 0.15s ease;">
+            <td style="padding: 11px 16px; font-size: 12.5px; white-space: nowrap; color: var(--color-text-muted);">
+                <i class="far fa-calendar-alt me-1 text-primary" style="opacity: 0.7;"></i>${esc(n.tarih || '-')}
+            </td>
+            <td style="padding: 11px 16px; font-size: 13px; font-weight: 600; color: var(--color-text);">
+                <i class="far fa-user me-1 text-muted" style="font-size: 11px;"></i>${esc(n.alanKisi || '-')}
+            </td>
+            <td style="padding: 11px 16px; font-size: 13px; color: var(--color-text);">
+                ${esc(n.urunAciklama || '-')}
+            </td>
+            <td class="text-end" style="padding: 11px 16px; white-space: nowrap;">
+                <span class="p-badge" style="background: var(--color-primary-light, #eff6ff); color: var(--color-primary, #3b82f6); font-weight: 700; padding: 4px 10px; border-radius: 12px; font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px;">
+                    <i class="fas fa-cube" style="font-size: 10px;"></i> ${esc(n.adet || 1)}
+                </span>
+            </td>
         </tr>
     `).join('');
 };
@@ -983,6 +995,7 @@ window.renderCriticalStockTable = function () {
 
     const rows = [];
     const groups = {}; // Gruplama anahtarı: "(Tür veya Ad) | Durum" veya sadece "Ad"
+    criticalStockGroupsByKey = new Map();
 
     // 1. Ürünleri Gruplandır (Demirbaşlar için Tür+Durum, Sarflar için sadece İsim)
     tumUrunler.forEach(item => {
@@ -1055,6 +1068,11 @@ window.renderCriticalStockTable = function () {
                 return;
             }
 
+            const models = [...new Set(group.items
+                .map(item => String(item.ürün || item.name || '').trim())
+                .filter(Boolean))];
+            criticalStockGroupsByKey.set(group.key, group);
+
             // Konum bilgisini belirle
             let locationInfo = "";
             if (group.items.length === 1) {
@@ -1068,6 +1086,7 @@ window.renderCriticalStockTable = function () {
             rows.push(generateCriticalRowHTML({
                 key: group.key,
                 name: group.displayName,
+                models,
                 mevcut: group.mevcut,
                 limit: finalLimit,
                 location: locationInfo
@@ -1093,19 +1112,29 @@ window.renderCriticalStockTable = function () {
             <tr class="align-middle">
                 <td>
                     <div class="fw-bold text-truncate" title="${escapeHtml(data.name)}">${escapeHtml(data.name)}</div>
+                    <small class="text-muted d-block" title="${escapeHtml(data.models.join(', '))}">
+                        Model: ${escapeHtml(data.models.slice(0, 2).join(', ') || '-')}
+                        ${data.models.length > 2 ? `+${data.models.length - 2} model` : ''}
+                    </small>
                     <small class="text-muted d-block">${escapeHtml(data.location)}</small>
                 </td>
                 <td class="text-center">
                     <span class="fw-bold ${data.mevcut <= 1 ? 'text-danger' : 'text-dark'}">${escapeHtml(data.mevcut)}</span>
                     <span class="text-muted small">/ ${escapeHtml(data.limit)}</span>
                 </td>
-                <td><div class="d-grid"><div class="${statusClass /* xss-ok: üç sabit sınıf */}">${statusText /* xss-ok: üç sabit metin */}</div></div></td>
-                <td class="text-end">
-                    <div class="action-buttons">
-                        <button class="btn-action btn-buy" title="Satın Al"><i class="fas fa-shopping-cart"></i></button>
-                        <button class="btn-action btn-mail" title="Bildirim Gönder"><i class="fas fa-envelope"></i></button>
-                        <button class="btn-action btn-passive" title="Pasif Yap"><i class="fas fa-eye-slash"></i></button>
-                        <button class="btn-action btn-danger" data-action="deleteCriticalGroup" data-key="${escapeHtml(data.key)}" title="Ürünü Sil"><i class="fas fa-trash"></i></button>
+                <td class="text-center align-middle">
+                    <span class="${statusClass /* xss-ok: üç sabit sınıf */} status-badge-compact">${statusText /* xss-ok: üç sabit metin */}</span>
+                </td>
+                <td class="text-end align-middle px-3">
+                    <div class="action-buttons justify-content-end align-items-center flex-nowrap" style="gap: 5px;">
+                        <button type="button" class="btn-action btn-buy" data-action="showCriticalProductInfo"
+                            data-key="${escapeHtml(data.key)}" title="Ürün Bilgisi" aria-label="Ürün Bilgisi">
+                            <i class="fas fa-circle-info"></i>
+                        </button>
+                        <button type="button" class="btn-action btn-buy" title="Satın Al" aria-label="Satın Al"><i class="fas fa-shopping-cart"></i></button>
+                        <button type="button" class="btn-action btn-mail" title="Bildirim Gönder" aria-label="Bildirim Gönder"><i class="fas fa-envelope"></i></button>
+                        <button type="button" class="btn-action btn-passive" title="Pasif Yap" aria-label="Pasif Yap"><i class="fas fa-eye-slash"></i></button>
+                        <button type="button" class="btn-action btn-danger" data-action="deleteCriticalGroup" data-key="${escapeHtml(data.key)}" title="Ürünü Sil" aria-label="Ürünü Sil"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>
             </tr>`;
@@ -1116,7 +1145,71 @@ window.renderCriticalStockTable = function () {
         ? rows.join('')
         : '<tr><td colspan="4" class="text-center p-4 text-muted">Stoklar ideal seviyede.</td></tr>';
     // [WHY]: Faz 4 · J2 — grup anahtarı (ürün/tür/durum adlarından) onclick'e kaçışsız gömülüyordu. [HOW]: data-key + delegation.
-    window.bindActions(tableBody, { deleteCriticalGroup: el => window.deleteCriticalGroup(el.dataset.key) });
+    window.bindActions(tableBody, {
+        deleteCriticalGroup: el => window.deleteCriticalGroup(el.dataset.key),
+        showCriticalProductInfo: el => window.showCriticalProductInfo(el.dataset.key),
+    });
+};
+
+window.showCriticalProductInfo = function (groupKey) {
+    const group = criticalStockGroupsByKey.get(groupKey);
+    if (!group) {
+        if (typeof window.showAppAlert === 'function') window.showAppAlert('Ürün grubu bulunamadı; kritik stok tablosunu yenileyip tekrar deneyin.', 'error');
+        return;
+    }
+
+    let modal = document.getElementById('criticalStockProductInfoModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'criticalStockProductInfoModal';
+        modal.className = 'modern-modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'criticalStockProductInfoTitle');
+        modal.style.cssText = 'display:none; position:fixed; inset:0; z-index:10001; background:rgba(15,23,42,.65); align-items:center; justify-content:center; padding:20px;';
+        modal.innerHTML = `
+            <section class="modern-modal-content" style="width:min(900px,96vw); max-height:90vh; overflow:auto; border-radius:16px;">
+                <header class="modern-modal-header">
+                    <h3 id="criticalStockProductInfoTitle" class="mb-0">Kritik Stok Ürün Bilgisi</h3>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-action="closeCriticalProductInfo"
+                        aria-label="Kapat"><i class="fas fa-times"></i></button>
+                </header>
+                <div id="criticalStockProductInfoBody" class="p-3"></div>
+            </section>`;
+        document.body.appendChild(modal);
+        window.bindActions(modal, {
+            closeCriticalProductInfo: () => { modal.style.display = 'none'; },
+        });
+        modal.addEventListener('click', event => {
+            if (event.target === modal) modal.style.display = 'none';
+        });
+    }
+
+    const title = document.getElementById('criticalStockProductInfoTitle');
+    const body = document.getElementById('criticalStockProductInfoBody');
+    const esc = window.escapeHtml;
+    if (title) title.textContent = `Ürün Bilgisi — ${group.displayName}`;
+    if (body) {
+        body.innerHTML = `
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead><tr>
+                        <th>Model / Ürün</th><th>Marka</th><th>Envanter No</th><th>Depo / Raf</th>
+                        <th>Adet</th><th>Durum</th><th>Açıklama</th>
+                    </tr></thead>
+                    <tbody>${group.items.map(item => `<tr>
+                        <td>${esc(item.ürün || item.name || '-')}</td>
+                        <td>${esc(item.marka || '-')}</td>
+                        <td>${esc(item.envanterNo || '-')}</td>
+                        <td>${esc(item.depo)} / ${esc(item.rafNo || item.raf || item.shelf || '-')}</td>
+                        <td>${esc(item.adet ?? item.qty ?? 0)}</td>
+                        <td>${esc(item.durumu || item.status || 'Kullanıma Hazır')}</td>
+                        <td>${esc(item.açıklama || item.description || '-')}</td>
+                    </tr>`).join('')}</tbody>
+                </table>
+            </div>`;
+    }
+    modal.style.display = 'flex';
 };
 
 window.deleteCriticalGroup = async function (groupKey) {
@@ -1961,4 +2054,3 @@ window.renderLocationsTable = function () {
         body.innerHTML = '<tr><td colspan="5" class="text-center p-5 text-muted">Henüz tanımlanmış bir mahal bulunmuyor.</td></tr>';
     }
 };
-

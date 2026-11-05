@@ -254,7 +254,7 @@ export const handleForceLogoutCommand = window.handleForceLogoutCommand = functi
 
 
 if (!window.data) {
-    window.data = { b1: [], b2: [], b3: [], personel: [], requests: [], productTypes: [], tasks: [], config: {}, assignments: [] };
+    window.data = { b1: [], b2: [], b3: [], manualExits: [], personel: [], requests: [], productTypes: [], tasks: [], config: {}, assignments: [] };
 }
 
 window.isFirebaseLoaded = false;
@@ -270,7 +270,7 @@ export const getDataRevision = window.getDataRevision = () => _dataRevision;
 const _bumpDataRevision = () => { _dataRevision++; };
 
 export const COLLECTIONS = window.COLLECTIONS = Object.freeze([
-    'b1', 'b2', 'b3', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords',
+    'b1', 'b2', 'b3', 'manualExits', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords',
     'staff', 'units', 'locations', 'tasks', 'requests', 'assignments'
 ]);
 
@@ -1735,16 +1735,32 @@ export const atomicImportStock = window.atomicImportStock = async function (col,
     const bad = _newItemsError(col, records, 'atomicImportStock');
     if (bad) return fail(bad);
     const clean = records.map(x => _clean(_stripRenderFields(x)));
+    const inventoryErrors = window.StockImport.validateImportInventoryNumbers(clean, window.Schema);
+    if (inventoryErrors.length) {
+        return fail(new SaveDataError('invalid-argument',
+            `İçe aktarma Envanter No doğrulamasından geçemedi: ${inventoryErrors.slice(0, 5).join(' ')}`,
+            { errors: inventoryErrors }));
+    }
 
-    let plan = null, res = null;
+    let plan = null, res = null, skippedDuplicates = [];
     for (let attempt = 1; ; attempt++) {
         try {
             res = await _runBulk({
                 name: 'atomicImportStock', collections: [col], opts: { ...opts, strict: true },
                 entries: async store => {
-                    const shelfDocs = (await store.readCollection(window.StockLedger ? window.StockLedger.SHELF_COL : 'shelves')).map(d => d.data);
+                    const [shelfRows, b1Rows, b2Rows] = await Promise.all([
+                        store.readCollection(window.StockLedger ? window.StockLedger.SHELF_COL : 'shelves'),
+                        store.readCollection('b1'),
+                        store.readCollection('b2'),
+                    ]);
+                    const existing = window.StockImport.filterExistingInventoryNumbers(clean, requests, [
+                        { depot: 'b1', records: b1Rows.map(d => ({ ...d.data, id: d.data.id ?? d.id })) },
+                        { depot: 'b2', records: b2Rows.map(d => ({ ...d.data, id: d.data.id ?? d.id })) },
+                    ], window.Schema);
+                    skippedDuplicates = existing.skipped;
+                    const shelfDocs = shelfRows.map(d => d.data);
                     const p = window.StockImport.planImportEntries({
-                        col, records: clean, requests, shelfDocs,
+                        col, records: existing.records, requests: existing.requests, shelfDocs,
                         uid: window.userAuth ? window.userAuth.uid : null, serverTime: window.AtomicWriter.SERVER_TIME,
                     });
                     plan = p.plan;
@@ -1766,6 +1782,7 @@ export const atomicImportStock = window.atomicImportStock = async function (col,
     return {
         ...res,
         records: plan.records,
+        skippedDuplicates,
         placement: {
             created: plan.shelfChanges.filter(c => c.created).map(c => c.code),
             updated: plan.shelfChanges.filter(c => !c.created).map(({ code, before, after }) => ({ code, before, after })),

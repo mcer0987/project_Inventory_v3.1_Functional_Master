@@ -73,6 +73,25 @@ function _bindProductActions(container, mobile = false) {
     });
 }
 
+function _productShelfOptions(depot, configuredShelves, shelfDocs, currentShelf, normShelfCode) {
+    const options = [];
+    const seen = new Set();
+    const add = value => {
+        if (typeof value !== 'string' || !value.trim()) return;
+        const code = value.trim();
+        const key = typeof normShelfCode === 'function' ? normShelfCode(code) : code.toLocaleUpperCase('tr-TR');
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        options.push(code);
+    };
+    (configuredShelves || []).forEach(add);
+    (Array.isArray(shelfDocs) ? shelfDocs : [])
+        .filter(shelf => shelf && shelf.depot === depot)
+        .forEach(shelf => add(shelf.code));
+    add(currentShelf);
+    return options;
+}
+
 export const UIComponents = {
 
     // =========================================================================
@@ -189,8 +208,16 @@ export const UIComponents = {
             colSelect.innerHTML = locConfig.columns
                 .map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
         }
-        if (shelfSelect && locConfig) {
-            shelfSelect.innerHTML = locConfig.shelves
+        const selectedShelf = item && (item.raf || item.shelf || item.rafNo) || '';
+        const shelfOptions = _productShelfOptions(
+            activeTab,
+            locConfig && locConfig.shelves,
+            window.data && window.data.shelves,
+            selectedShelf,
+            window.Schema && window.Schema.normShelfCode
+        );
+        if (shelfSelect) {
+            shelfSelect.innerHTML = shelfOptions
                 .map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
         }
         if (typeSelect) {
@@ -221,9 +248,14 @@ export const UIComponents = {
             };
 
             setVal('prodColumn', item.sütun);
-            setVal('prodShelf',  item.raf);
+            const shelfKey = shelf => window.Schema && typeof window.Schema.normShelfCode === 'function'
+                ? window.Schema.normShelfCode(shelf)
+                : String(shelf ?? '').trim().toLocaleUpperCase('tr-TR');
+            const matchedShelf = shelfOptions.find(shelf => shelfKey(shelf) === shelfKey(selectedShelf)) || selectedShelf;
+            setVal('prodShelf', matchedShelf);
             setVal('prodName',   item.ürün || item.name);
             setVal('prodBrand',  item.marka);
+            setVal('prodInventoryNo', mode === 'clone' ? '' : item.envanterNo);
             setVal('prodQty',    item.adet ?? item.qty ?? 0);
             // [WHY]: 'Pasif', 'Tükendi', B2 'Aktif' gibi değerler listede yok; select "" okuyup kayıtta durumu siliyordu (DATA-04).
             const statusSel = document.getElementById('prodStatus');
@@ -241,9 +273,13 @@ export const UIComponents = {
 
             if (typeSelect) {
                 const selectedType = (item.tür || item.type || item.prodType || '').trim();
+                const normalizeType = value => window.Schema && typeof window.Schema.normName === 'function'
+                    ? window.Schema.normName(value)
+                    : String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('tr-TR');
+                const selectedTypeKey = normalizeType(selectedType);
                 let found = false;
                 [...typeSelect.options].forEach(opt => {
-                    if (opt.value.trim().toLowerCase() === selectedType.toLowerCase()) {
+                    if (normalizeType(opt.value) === selectedTypeKey) {
                         opt.selected = true;
                         found = true;
                     }

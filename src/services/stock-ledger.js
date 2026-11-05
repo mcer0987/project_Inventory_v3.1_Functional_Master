@@ -199,6 +199,9 @@
             throw new LedgerError('insufficient-stock', `Yetersiz stok: güncel stok ${fresh}, taşınmak istenen ${inp.qty}.`, { before: fresh, requested: inp.qty });
         }
         const fullMove = inp.qty === fresh;
+        if (!fullMove && S.normDeviceId(source.envanterNo)) {
+            throw new LedgerError('invalid-argument', 'Envanter No bulunan ürün kısmi taşınamaz; Envanter No tek bir kaydı tanımlar.');
+        }
         const sameCol = inp.sourceCol === inp.targetCol;
         const sourceShelfId = shelfIdOf(inp.sourceCol, S.itemShelfCode(source));
         if (sameCol && sourceShelfId === inp.targetShelfId) {
@@ -234,6 +237,7 @@
                 isDemirbas: S.isDemirbas(source),
                 lastUpdate: inp.now,
             };
+            if (source.envanterNo) targetDoc.envanterNo = source.envanterNo;
             if (inp.targetCol === 'b2') targetDoc.status = status;
             const errors = (inp.targetCol === 'b1' ? S.validateB1 : S.validateB2)(targetDoc);
             if (errors.length) throw new LedgerError('schema-violation', `Hedef kayıt şema sözleşmesine uymuyor: ${errors.join(', ')}`, { errors });

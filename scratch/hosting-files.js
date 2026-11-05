@@ -53,9 +53,10 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
 // UAT düzeltmesi: belge türü kataloğu ve Tanımlar görünümü.
 // Operasyon Merkezi: ortak EBYS kur ayarı servisi.
 // Aşama 4: evrak şeması, servis, arayüz ve stil (4 dosya).
-// Admin panelinden bağlı Gelişim Günlüğü (3).
+// Manuel çıkış modülü/şeması (2) ve admin panelinden bağlı Gelişim Günlüğü (3).
 // Aşama 5: süreç şeması/servisi/arayüzü ve legacy özel sorgu adaptörü (4).
-const EXPECTED_COUNT = 88;
+// EBYS Rehberi: tanıtım modalı ve stili (2).
+const EXPECTED_COUNT = 92;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

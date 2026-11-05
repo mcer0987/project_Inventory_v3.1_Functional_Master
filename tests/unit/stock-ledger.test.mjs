@@ -40,7 +40,7 @@ const rejectsWith = (fn, code) => assert.throws(fn, e => { assert.equal(e.code, 
 const writesOf = (plan, col) => plain(plan.writes.filter(w => w.col === col));
 
 test('tam depo transferi: hedef aynı id ile kurulur, kaynak silinir; kaynak raf −1, hedef raf +1; işlem kaydı yazılır', () => {
-    const p = L.planTransfer(input(), reads());
+    const p = L.planTransfer(input(), reads({ source: src({ envanterNo: 'ENV-1' }) }));
     assert.equal(p.duplicate, false);
     assert.equal(p.result.fullMove, true);
     const b2 = writesOf(p, 'b2');
@@ -50,6 +50,7 @@ test('tam depo transferi: hedef aynı id ile kurulur, kaynak silinir; kaynak raf
     assert.equal(b2[0].data.adet, 10);
     assert.equal(b2[0].data.status, 'Kullanıma Hazır', 'b2 hedefinde status da yazılır');
     assert.equal(b2[0].data.raf, 'Raf-1', 'üründe seçilen yazım korunur (Aşama 4\'e kadar)');
+    assert.equal(b2[0].data.envanterNo, 'ENV-1', 'benzersiz Envanter No tam transferde korunur');
     assert.deepEqual(writesOf(p, 'b1'), [{ kind: 'delete', col: 'b1', id: 'b1_1' }]);
     assert.deepEqual(plain(p.result.shelves).sort((a, b) => a.id.localeCompare(b.id)),
         [{ id: 'b1_RAF-A 1', before: 3, after: 2 }, { id: 'b2_RAF-1', before: 2, after: 3 }]);
@@ -68,6 +69,10 @@ test('kısmi transfer: kaynak TAZE adetten düşülür (istemci kopyası değil)
     assert.deepEqual(writesOf(p, 'b1').map(w => [w.kind, w.data.adet]), [['update', 3]]);
     assert.equal(writesOf(p, 'b2')[0].id, 'b2_new');
     assert.deepEqual(plain(p.result.shelves), [{ id: 'b2_RAF-1', before: 2, after: 3 }], 'kaynak rafında kayıt pozitif kalır → slot değişmez');
+});
+
+test('Envanter No bulunan ürün kısmi transfer edilemez; aynı kimlik iki kayda kopyalanmaz', () => {
+    rejectsWith(() => L.planTransfer(input({ qty: 4 }), reads({ source: src({ adet: 7, envanterNo: 'ENV-1' }) })), 'invalid-argument');
 });
 
 test('taze stok yetersizse insufficient-stock (eşzamanlı başka çıkış)', () => {
@@ -278,13 +283,13 @@ test('planProductSave: düzenleme — bilinmeyen/eski alan reddedilir (applyItem
     assert.deepEqual(plain(plan.result.shelves), []);
 });
 
-test('planProductSave: v3.3 P1 Katı Şema — düzenleme TİPİ de denetler (önceden yalnız alan adı); B1\'e envanterNo yok', () => {
+test('planProductSave: katı şema — B1/B2 envanterNo alanını destekler, yanlış tipleri reddeder', () => {
     const edit = fields => () => L.planProductSave({ col: 'b1', id: 'b1_old1', isNew: false, fields, uid: 'u' }, { existing: existingB1(), shelves: {} });
     rejectsWith(edit({ ürün: 123 }), 'schema-violation');
     rejectsWith(edit({ raf: 7 }), 'schema-violation');
     rejectsWith(edit({ isDemirbas: 'evet' }), 'schema-violation');
-    rejectsWith(edit({ envanterNo: 'ENV-1' }), 'schema-violation');
-    rejectsWith(() => L.planProductSave({ col: 'b1', id: 'b1_n', isNew: true, fields: { ...newB1Fields(), envanterNo: 'E' }, uid: 'u' }, { existing: null, shelves: {} }), 'schema-violation');
+    edit({ envanterNo: 'ENV-1' })();
+    L.planProductSave({ col: 'b1', id: 'b1_n', isNew: true, fields: { ...newB1Fields(), envanterNo: 'E' }, uid: 'u' }, { existing: null, shelves: {} });
     // B2: envanterNo string serbest, sayı reddedilir (yeni kayıtta ve düzenlemede)
     const b2 = { ...existingB1({ id: 'b2_old1', status: 'Kullanıma Hazır', isDemirbas: true }) };
     const editB2 = fields => () => L.planProductSave({ col: 'b2', id: 'b2_old1', isNew: false, fields, uid: 'u' }, { existing: b2, shelves: {} });

@@ -27,7 +27,7 @@ const pageSize = 25;
 window.isAdminPanel = false;
 
 if (!window.data) {
-    window.data = { b1: [], b2: [], b3: [], personel: [], requests: [], productTypes: [], purchaseOrders: [], serviceRecords: [] };
+    window.data = { b1: [], b2: [], b3: [], manualExits: [], personel: [], requests: [], productTypes: [], purchaseOrders: [], serviceRecords: [] };
 }
 window.isFirebaseLoaded = window.isFirebaseLoaded || false;
 
@@ -425,6 +425,9 @@ window.switchTab = function (tabName) {
             break;
         case 'b3':
             if (typeof renderExitTable === 'function') renderExitTable();
+            break;
+        case 'manualExitTab':
+            if (window.manualExitsModule) window.manualExitsModule.render();
             break;
         case 'unitsTab':
             if (typeof renderUnitManagement === 'function') renderUnitManagement();
@@ -1396,36 +1399,259 @@ function _exportB3PDF() {
     setTimeout(() => { win.print(); win.close(); }, 300);
 }
 
-// Sekme B3 PDF/Excel & Diğer araçlar
-function renderExitTable() {
+// [WHY]: B3 bir depo listesi değil, hareket/zimmet kütüğüdür; mobilde tablo yatay kaydırmayla okunamıyordu.
+// [HOW]: renderExitTable() arama süzgecini uygular ve etkin görünüme göre tabloyu ya da gün gruplu kartları çizer.
+//        Telefon genişliğinde (≤768px) kart modu otomatik açılır; kullanıcı #viewToggleB3 ile tabloya geçebilir.
+window._cardViewActive = window._cardViewActive || {};
+const B3_CARD_MQ = window.matchMedia('(max-width: 768px)');
+
+function _b3SearchText(row) {
+    return [row.rafNo, row.urunTuru, row.urunAciklama, row.marka, row.sn, row.envanterNo, row.not, row.alanKisi, row.tarih]
+        .join(' ').toLocaleLowerCase('tr-TR');
+}
+
+function _getB3Rows() {
+    const term = (document.getElementById('searchB3')?.value || '').trim().toLocaleLowerCase('tr-TR');
+    return (window.data.b3 || []).map(item => ({ item, row: window.Schema.normalizeB3(item) }))
+        .filter(({ row }) => !term || _b3SearchText(row).includes(term));
+}
+
+function _b3ActionButtons(id) {
+    return `<button type="button" class="table-action-btn pdf-btn btn-pdf" title="Zimmet Tutanağı Yazdır" aria-label="Zimmet tutanağı yazdır" onclick="generateZimmetPDF(${jsArg(id)})">
+                <i class="fas fa-file-pdf"></i> <span>PDF</span>
+            </button>
+            <button type="button" class="table-action-btn undo-btn btn-undo" title="Çıkışı Geri Al" aria-label="Çıkışı geri al" onclick="window.showUndoNotice()">
+                <i class="fas fa-rotate-left"></i> <span>Geri Al</span>
+            </button>
+            <button type="button" class="table-action-btn delete-btn btn-delete" title="Kaydı Sil" aria-label="Kaydı sil" onclick="if(validateAdminAction()) deleteB3Row(${jsArg(id)})">
+                <i class="fas fa-trash-alt"></i> <span>Sil</span>
+            </button>`;
+}
+
+function _applyB3ViewState() {
+    const active = !!window._cardViewActive.b3;
+    const section = document.getElementById('b3');
+    const tableWrapper = document.querySelector('#b3 .table-responsive-wrapper');
+    const cardContainer = document.getElementById('cardViewB3');
+    const toggleBtn = document.getElementById('viewToggleB3');
+    if (section) section.classList.toggle('b3-cards-active', active);
+    if (tableWrapper) tableWrapper.style.display = active ? 'none' : '';
+    if (cardContainer) cardContainer.style.display = active ? 'block' : 'none';
+    if (toggleBtn) {
+        const label = active ? 'Tablo Görünümüne Geç' : 'Kart Görünümüne Geç';
+        toggleBtn.innerHTML = active ? '<i class="fas fa-table"></i>' : '<i class="fas fa-th-large"></i>';
+        toggleBtn.title = label;
+        toggleBtn.setAttribute('aria-label', label);
+        toggleBtn.classList.toggle('view-toggle-active', active);
+    }
+    const selectAll = document.getElementById('selectAllB3');
+    if (selectAll) selectAll.checked = false;
+}
+
+function _renderB3Table(rows) {
     const tbody = document.querySelector('#tableB3 tbody');
     if (!tbody) return;
-    tbody.innerHTML = '';
-    if (!window.data.b3 || window.data.b3.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Çıkış kaydı bulunamadı.</td></tr>';
+    if (rows.length === 0) {
+        const msg = (window.data.b3 || []).length ? 'Aramanızla eşleşen çıkış kaydı yok.' : 'Çıkış kaydı bulunamadı.';
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${msg}</td></tr>`;
         return;
     }
-    const rowsHtml = window.data.b3.map((item, index) => {
+    tbody.innerHTML = rows.map(({ item, row }) => {
         const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
-        const row = window.Schema.normalizeB3(item);
-        const envNo = row.envanterNo !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted);">Env. No: ${escapeHtml(row.envanterNo)}</div>` : '';
+        const envNo = row.envanterNo !== '-' ? `<div class="b3-env-sub">Env. No: ${escapeHtml(row.envanterNo)}</div>` : '';
         return `<tr class="${isPassive ? 'passive-row' : ''}">
+            <td style="text-align:center;"><input type="checkbox" class="row-select b3-row-select" data-id="${escapeHtml(item.id)}" aria-label="Kaydı seç"></td>
             <td${row.stokDisi ? ' style="color:var(--color-text-muted); font-style:italic;"' : ''}>${escapeHtml(row.rafNo)}</td>
             <td>${escapeHtml(row.urunTuru)}</td>
             <td>${escapeHtml(row.urunAciklama)}</td>
-            <td>${escapeHtml(row.sn)}${envNo}</td>
+            <td><span class="b3-mono">${escapeHtml(row.sn)}</span>${envNo}</td>
             <td>${escapeHtml(row.adet)}</td>
             <td>${escapeHtml(row.not)}</td>
             <td>${escapeHtml(row.alanKisi)}</td>
             <td>${escapeHtml(row.tarih)}</td>
-            <td>
-                <button class="pdf-btn" onclick="generateZimmetPDF(${jsArg(item.id)})">PDF</button>
-                <button class="delete-btn" onclick="if(validateAdminAction()) deleteB3Row(${jsArg(item.id)})">Sil</button>
+            <td class="action-cell">
+                <div class="table-row-actions">${_b3ActionButtons(item.id) /* xss-ok: id jsArg ile kaçırılır, geri kalan sabit */}</div>
             </td>
         </tr>`;
     }).join('');
-    tbody.innerHTML = rowsHtml;
 }
+
+// Tarih "03.11.2026 14:22:11" biçimindedir; gün ve saat ayrılır. Tarih yoksa kaydın zaman damgası kullanılır.
+function _b3DayParts(row) {
+    let raw = row.tarih !== '-' ? row.tarih : (row.ts ? tsToTurkiye(row.ts) : '');
+    raw = String(raw || '').replace(',', '').trim();
+    const [day = '', time = ''] = raw.split(/\s+/);
+    return { day: day || 'Tarihsiz', time: time ? time.slice(0, 5) : '' };
+}
+
+function _b3DayLabel(day) {
+    const today = getTurkiyeTarihi();
+    const y = new Date(Date.now() - 864e5).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
+    if (day === today) return 'Bugün';
+    if (day === y) return 'Dün';
+    return day;
+}
+
+function _renderB3Cards(rows) {
+    const container = document.getElementById('cardViewB3');
+    if (!container) return;
+    if (rows.length === 0) {
+        const searching = (window.data.b3 || []).length > 0;
+        container.innerHTML = `<div class="card-empty-state">
+                <i class="fas ${searching ? 'fa-search' : 'fa-box-open'}"></i>
+                <p>${searching ? 'Aramanızla eşleşen çıkış kaydı yok.' : 'Çıkış kaydı bulunamadı.'}</p>
+            </div>`;
+        return;
+    }
+    const sorted = [...rows].sort((a, b) => (b.row.ts || 0) - (a.row.ts || 0));
+    const groups = [];
+    sorted.forEach(entry => {
+        const parts = _b3DayParts(entry.row);
+        let g = groups[groups.length - 1];
+        if (!g || g.day !== parts.day) { g = { day: parts.day, items: [] }; groups.push(g); }
+        g.items.push({ ...entry, time: parts.time });
+    });
+
+    const tipLabel = { zimmet: 'Zimmet', hurda: 'Hurda', cikis: 'Çıkış' };
+    const cardHtml = ({ item, row, time }) => {
+        const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+        const tip = tipLabel[row.tip] ? row.tip : 'cikis';
+        const chips = [
+            row.alanKisi !== '-' ? `<span class="b3-chip b3-chip-person"><i class="fas fa-user" aria-hidden="true"></i> ${escapeHtml(row.alanKisi)}</span>` : '',
+            row.envanterNo !== '-' ? `<span class="b3-chip b3-chip-env"><i class="fas fa-barcode" aria-hidden="true"></i> ${escapeHtml(row.envanterNo)}</span>` : '',
+            row.adet > 0 ? `<span class="b3-chip b3-chip-qty"><i class="fas fa-box" aria-hidden="true"></i> ${escapeHtml(row.adet)} Adet</span>` : ''
+        ].join('');
+        const detail = (label, value, cls = '') => `<div class="b3-drawer-row"><dt>${escapeHtml(label)}</dt><dd class="${escapeHtml(cls)}">${escapeHtml(value)}</dd></div>`;
+        return `<article class="b3-card-item b3-tip-${escapeHtml(tip)}${isPassive ? ' card-item-passive' : ''}">
+                <header class="b3-card-header">
+                    <label class="b3-card-select">
+                        <input type="checkbox" class="row-select b3-row-select" data-id="${escapeHtml(item.id)}" aria-label="Kaydı seç">
+                    </label>
+                    <div class="b3-card-title">
+                        <span class="b3-card-name">${escapeHtml(row.urunAciklama)}</span>
+                        <span class="b3-card-sub">${escapeHtml(row.urunTuru)}${row.marka ? ` · ${escapeHtml(row.marka)}` : ''}</span>
+                    </div>
+                    <div class="b3-card-stamp">
+                        <span class="b3-tip-badge">${escapeHtml(tipLabel[tip])}</span>
+                        ${time ? `<span class="b3-card-time"><i class="far fa-clock" aria-hidden="true"></i> ${escapeHtml(time)}</span>` : ''}
+                    </div>
+                </header>
+                ${chips ? `<div class="b3-card-hero">${chips}</div>` : ''}
+                <details class="b3-card-drawer">
+                    <summary><span>Detaylar</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+                    <dl>
+                        ${detail('Raf / Konum', row.rafNo) /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                        ${detail('SN / BioPro / Itsm', row.sn, 'b3-mono') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                        ${detail('Tarih', row.tarih) /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                        ${detail('Açıklama / Not', row.not, 'b3-note') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                    </dl>
+                </details>
+                <footer class="b3-card-actions">${_b3ActionButtons(item.id) /* xss-ok: id jsArg ile kaçırılır, geri kalan sabit */}</footer>
+            </article>`;
+    };
+
+    container.innerHTML = `
+        <div class="b3-card-toolbar">
+            <label class="b3-card-selectall"><input type="checkbox" id="selectAllB3Cards"> Tümünü Seç</label>
+            <span class="b3-card-total">${rows.length} kayıt</span>
+        </div>
+        ${groups.map(g => `
+            <section class="b3-day-group">
+                <h3 class="b3-day-header">
+                    <span><i class="far fa-calendar" aria-hidden="true"></i> ${escapeHtml(_b3DayLabel(g.day))}</span>
+                    <span class="b3-day-count">${g.items.length} işlem</span>
+                </h3>
+                <div class="b3-day-body">${g.items.map(cardHtml).join('')}</div>
+            </section>`).join('')}`;
+}
+
+function renderExitTable() {
+    if (window._cardViewActive.b3 === undefined) window._cardViewActive.b3 = B3_CARD_MQ.matches;
+    _applyB3ViewState();
+    const rows = _getB3Rows();
+    if (window._cardViewActive.b3) {
+        _renderB3Cards(rows);
+        const tbody = document.querySelector('#tableB3 tbody');
+        if (tbody) tbody.innerHTML = '';
+    } else {
+        _renderB3Table(rows);
+        const cards = document.getElementById('cardViewB3');
+        if (cards) cards.innerHTML = '';
+    }
+}
+window.renderExitTable = renderExitTable;
+
+window.toggleB3CardView = function () {
+    window._cardViewActive.b3 = !window._cardViewActive.b3;
+    renderExitTable();
+};
+
+B3_CARD_MQ.addEventListener('change', () => {
+    window._cardViewActive.b3 = B3_CARD_MQ.matches;
+    renderExitTable();
+});
+
+window.toggleB3Help = function () {
+    const btn = document.getElementById('b3HelpToggle');
+    const panel = document.getElementById('b3HelpPanel');
+    if (!btn || !panel) return;
+    const open = panel.hidden;
+    panel.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+};
+
+// [WHY]: Çıkış geri alma özelliği için kullanıcı bilgilendirmesi
+// [HOW]: Henüz fonksiyon yazılmadan mini bildirim (toast) gösterir
+window.showUndoNotice = function () {
+    if (typeof showAppAlert === 'function') {
+        showAppAlert('Geri alma özelliği geliştirme aşamasındadır.', 'info');
+    } else {
+        alert('Geri alma özelliği geliştirme aşamasındadır.');
+    }
+};
+
+// [WHY]: B3 çıkış kayıtlarının aylık raporlama sonrasında toplu temizlenmesi
+// [HOW]: Seçili satır ID'lerini toplar, yönetici onayından sonra atomic window.bulkRemove('b3', ids) ile siler
+window.bulkDeleteB3 = async function () {
+    if (typeof validateAdminAction === 'function' && !validateAdminAction()) return;
+    const checked = Array.from(document.querySelectorAll('.b3-row-select:checked'));
+    if (checked.length === 0) {
+        if (typeof showAppAlert === 'function') showAppAlert('Lütfen silinecek çıkış kayıtlarını seçin.', 'warning');
+        return;
+    }
+    const ids = [...new Set(checked.map(cb => cb.dataset.id).filter(Boolean))];
+    const confirmed = typeof window.showCustomConfirm === 'function'
+        ? await window.showCustomConfirm('Toplu Çıkış Kaydı Silme', `${ids.length} adet çıkış kaydı kalıcı olarak silinecek. (Stok değişmez). Onaylıyor musunuz?`)
+        : confirm(`${ids.length} adet çıkış kaydı silinsin mi?`);
+    if (!confirmed) return;
+
+    try {
+        if (typeof window.bulkRemove === 'function') {
+            await window.bulkRemove('b3', ids);
+        } else if (typeof window.removeItem === 'function') {
+            for (const id of ids) {
+                await window.removeItem('b3', id);
+            }
+        }
+        if (typeof renderExitTable === 'function') renderExitTable();
+        if (typeof showAppAlert === 'function') showAppAlert(`${ids.length} adet çıkış kaydı başarıyla silindi.`, 'success');
+    } catch (err) {
+        console.error('[bulkDeleteB3] Toplu silme hatası:', err);
+        if (typeof showAppAlert === 'function') showAppAlert('Toplu silme sırasında bir hata oluştu.', 'error');
+    }
+};
+
+// [WHY]: B3 çıkış tablosu "Tümünü Seç" kutusu dinleyicisi
+// [HOW]: Delegated change dinleyicisi; tablo (selectAllB3) ve kart (selectAllB3Cards) kutuları yalnız kendi
+//        görünümündeki .b3-row-select elemanlarını işaretler (yalnız etkin görünüm çizilir).
+document.addEventListener('change', (e) => {
+    const scopes = { selectAllB3: '#tableB3', selectAllB3Cards: '#cardViewB3' };
+    const scope = e.target && scopes[e.target.id];
+    if (scope) {
+        const isChecked = e.target.checked;
+        document.querySelectorAll(`${scope} .b3-row-select`).forEach(cb => { cb.checked = isChecked; });
+    }
+});
 
 window.exportPDF = function (depo) {
     if (!validateAdminAction()) return;
@@ -1475,7 +1701,7 @@ window.exportPDF = function (depo) {
 };
 
 // [WHY]: Admin'ler hangi Excel/CSV sütun adlarının tanındığını ve hangi sırayla verilmesi gerektiğini bilmeden import
-//        deniyor, "sütun tanınmadı" uyarılarıyla (ya da B1'e Envanter No gibi yalnız-B2 alanlarıyla) karşılaşıyordu.
+//        deniyor, "sütun tanınmadı" uyarılarıyla karşılaşıyordu.
 // [HOW]: Tek, paylaşılan bilgi penceresi (showCustomConfirm'in salt-bilgi kullanımı); B1/B2 import düğmelerinin yanındaki
 //        ℹ️ ikonundan (index.html) ve WMS "Depo Aksiyonları" panelinden (admin.html) AYNI fonksiyon çağrılır — metin tek
 //        yerde (burada) güncellenir. Sütun adları stock-import.js FIELD_ALIASES'teki kabul edilen takma adlarla birebir;
@@ -1489,12 +1715,12 @@ window.showImportFormatHelp = function (depo = 'b1') {
         '1. Sütun  (opsiyonel — raf içindeki fiziksel bölme/kolon)',
         '2. Raf No  (opsiyonel — katalogda yoksa otomatik yaratılır, doluysa Havuz\'a alınır)',
         '3. Ürün Türü  (opsiyonel — demirbaş/sarf ayrımı ve kritik stok grubu için önemli)',
-        '4. Ürün Adı  (ZORUNLU — tek zorunlu sütun; boşsa satır reddedilir)',
+        '4. Ürün Adı  (ZORUNLU — boşsa satır reddedilir)',
         '5. Marka  (opsiyonel)',
         '6. Adet  (opsiyonel — boşsa 0/Tükendi sayılır; negatif ya da tam sayı olmayan değer reddedilir)',
         '7. Durumu  (opsiyonel — ör. Kullanıma Hazır, Pasif, Hurda, Servis Sürecinde)',
-        isB2 ? '8. Envanter No  (opsiyonel, YALNIZ B2 — B1 dosyasında bu sütun göz ardı edilir)' : null,
-        `${isB2 ? '9' : '8'}. Açıklama  (opsiyonel)`, '',
+        '8. Envanter No  (ZORUNLU — her satırda bulunmalı ve benzersiz olmalı)',
+        '9. Açıklama  (opsiyonel)', '',
         'Sütun adı büyük/küçük harf ve Türkçe karakterden bağımsız tanınır (ör. "Raf No", "raf numarası", "shelf" hepsi aynı alana eşlenir).',
         'Sıra önemli DEĞİLDİR — eşleme başlık adına göre yapılır; yukarıdaki sıra yalnız okunabilirlik içindir.',
         `Tek dosyada en fazla ${maxRows} veri satırı kabul edilir (yönetici dahil aşılamaz); daha büyük listeleri ${maxRows} satırlık parçalara bölüp ayrı ayrı içe aktarın.`,
@@ -1513,7 +1739,7 @@ window.showImportFormatHelp = function (depo = 'b1') {
             el('p', '', 'Dosyanızı hazırlayın, ürünlerinizi kolayca içe aktarın.'));
         guide.append(intro);
         const facts = el('div', 'import-guide-facts');
-        for (const [value, label] of [['.xlsx / .xls / .csv', 'Desteklenen dosyalar'], [`${maxRows} satır`, 'Dosya başına üst sınır'], ['Ürün Adı', 'Tek zorunlu sütun']]) {
+        for (const [value, label] of [['.xlsx / .xls / .csv', 'Desteklenen dosyalar'], [`${maxRows} satır`, 'Dosya başına üst sınır'], ['Ürün Adı + Envanter No', 'Zorunlu alanlar']]) {
             const fact = el('div', 'import-guide-fact');
             fact.append(el('span', '', label), el('strong', '', value));
             facts.append(fact);
@@ -1529,15 +1755,16 @@ window.showImportFormatHelp = function (depo = 'b1') {
             ['Marka', 'Ürünün marka bilgisi.', isB2 ? 'Dell' : 'Ugreen'],
             ['Adet', '0 veya pozitif tam sayı. Boş bırakılırsa 0 / Tükendi kabul edilir.', '1'],
             ['Durumu', 'Ör. Kullanıma Hazır, Pasif, Hurda veya Servis Sürecinde.', 'Kullanıma Hazır'],
-            ...(isB2 ? [['Envanter No', 'Yalnız B2 için kaydedilir. B1 dosyasında göz ardı edilir.', 'ENV-2026-001']] : []),
+            ['Envanter No', 'Her satırda zorunludur. B1 ve B2’de saklanır; mevcut numaralar yeniden eklenmez.', 'ENV-2026-001'],
             ['Açıklama', 'Ürünle ilgili ek bilgi veya not.', 'İdari işler'],
         ];
         const list = el('ol', 'import-guide-columns');
         columns.forEach(([name, description, example]) => {
-            const row = el('li', name === 'Ürün Adı' ? 'import-guide-column is-required' : 'import-guide-column');
+            const required = name === 'Ürün Adı' || name === 'Envanter No';
+            const row = el('li', required ? 'import-guide-column is-required' : 'import-guide-column');
             const detail = el('div', 'import-guide-column-detail');
             const heading = el('div', 'import-guide-column-heading');
-            heading.append(el('strong', '', name), el('span', name === 'Ürün Adı' ? 'import-guide-required' : 'import-guide-optional', name === 'Ürün Adı' ? 'Zorunlu' : 'İsteğe bağlı'));
+            heading.append(el('strong', '', name), el('span', required ? 'import-guide-required' : 'import-guide-optional', required ? 'Zorunlu' : 'İsteğe bağlı'));
             detail.append(heading, el('p', '', description));
             row.append(detail, el('code', 'import-guide-example', example));
             list.append(row);
@@ -1590,13 +1817,137 @@ async function importExcel(event) {
     const shelfCapacityInfo = new Map((window.data.shelves || [])
         .filter(s => s && s.depot === depo && typeof s.code === 'string')
         .map(s => [s.code, { capacity: s.capacity, usedSlots: s.usedSlots, active: s.active }]));
-    const res = I.buildStockRecords(rows, depo, { schema: window.Schema, makeId: window.makeId, now: Date.now(), shelfCapacityInfo });
+    const res = I.buildStockRecords(rows, depo, {
+        schema: window.Schema,
+        makeId: window.makeId,
+        now: Date.now(),
+        shelfCapacityInfo,
+        productTypes: typeof window.getActiveProductTypes === 'function'
+            ? window.getActiveProductTypes()
+            : ((window.data && window.data.productTypes) || []),
+    });
     if (res.errors.length) {
         const more = res.errors.length > 5 ? `\n… (+${res.errors.length - 5} hata)` : '';
         showAppAlert(`İçe aktarma durduruldu, hiçbir kayıt yazılmadı.\n${res.errors.slice(0, 5).join('\n')}${more}`, 'error');
         return;
     }
-    if (!res.records.length) { showAppAlert('Yüklenecek geçerli veri bulunamadı!', 'error'); return; }
+    const initialPreview = I.planShelfPlacement({
+        records: res.records, requests: res.shelfRequests, catalog: shelfCapacityInfo, depot: depo,
+    });
+    const baseWarnings = res.warnings.filter(w => !initialPreview.warnings.includes(w));
+    const filtered = I.filterExistingInventoryNumbers(res.records, res.shelfRequests, [
+        { depot: 'b1', records: window.data.b1 || [] },
+        { depot: 'b2', records: window.data.b2 || [] },
+    ], window.Schema);
+    res.skippedDuplicates = filtered.skipped;
+    res.shelfRequests = filtered.requests;
+    const filteredPreview = I.planShelfPlacement({
+        records: filtered.records, requests: filtered.requests, catalog: shelfCapacityInfo, depot: depo,
+    });
+    res.records = filteredPreview.records;
+    res.shelvesToCreate = filteredPreview.shelvesToCreate;
+    res.poolOverflowCount = filteredPreview.poolOverflowCount;
+    res.poolInactiveCount = filteredPreview.poolInactiveCount;
+    res.warnings = [...baseWarnings, ...filteredPreview.warnings];
+    res.shelfCorrections = I.findShelfCorrections(filtered.requests, shelfCapacityInfo);
+    const duplicateDetails = (list, limit = 5) => {
+        const lines = list.slice(0, limit).map(item =>
+            `${item.envanterNo}: ${item.incoming.ürün} → ${item.matches.map(match => `${match.depot.toUpperCase()} / ${match.ürün}`).join(', ')}` +
+            (item.differences.length ? ` (farklı alanlar: ${item.differences.join(', ')})` : '')
+        );
+        if (list.length > limit) lines.push(`… (+${list.length - limit} kayıt)`);
+        return lines.join('\n');
+    };
+    if (!res.records.length) {
+        if (res.skippedDuplicates.length) {
+            showAppAlert(`${res.skippedDuplicates.length} ürün Envanter No nedeniyle zaten kayıtlı; hiçbir ürün yeniden eklenmedi.\n${duplicateDetails(res.skippedDuplicates, Infinity)}`, 'info');
+        } else {
+            showAppAlert('Yüklenecek geçerli veri bulunamadı!', 'error');
+        }
+        return;
+    }
+
+    if (res.shelfCorrections.length) {
+        if (typeof window.showCustomConfirm !== 'function') {
+            showAppAlert('Raf eşleşme penceresi açılamadı; hiçbir kayıt içe aktarılmadı.', 'error');
+            return;
+        }
+        const content = document.createElement('div');
+        const intro = document.createElement('p');
+        intro.textContent = 'Dosyadaki raf kodu ile mevcut raf arasında yalnızca nokta, tire veya boşluk farkı bulundu. Her satır için kullanılacak rafı seçin. Seçim yalnızca bu içe aktarmada geçerlidir.';
+        content.appendChild(intro);
+        const table = document.createElement('table');
+        table.style.cssText = 'width:100%; border-collapse:collapse; margin:10px 0; font-size:13px; text-align:left;';
+        const header = document.createElement('tr');
+        ['Dosyadaki raf', 'Eşleşecek mevcut raf'].forEach(text => {
+            const cell = document.createElement('th');
+            cell.textContent = text;
+            cell.style.cssText = 'padding:6px; border-bottom:1px solid #cbd5e1;';
+            header.appendChild(cell);
+        });
+        table.appendChild(header);
+        res.shelfCorrections.forEach(correction => {
+            const row = document.createElement('tr');
+            const source = document.createElement('td');
+            source.textContent = correction.code;
+            source.style.cssText = 'padding:6px; border-bottom:1px solid #e2e8f0;';
+            const target = document.createElement('td');
+            target.style.cssText = 'padding:6px; border-bottom:1px solid #e2e8f0;';
+            const select = document.createElement('select');
+            select.dataset.importShelfCode = correction.code;
+            select.style.cssText = 'width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px;';
+            const newShelf = document.createElement('option');
+            newShelf.value = '';
+            newShelf.textContent = `Yeni raf oluştur: ${correction.code}`;
+            select.appendChild(newShelf);
+            correction.candidates.forEach(candidate => {
+                const option = document.createElement('option');
+                option.value = candidate;
+                option.textContent = candidate;
+                select.appendChild(option);
+            });
+            if (correction.candidates.length === 1) select.value = correction.candidates[0];
+            target.appendChild(select);
+            row.append(source, target);
+            table.appendChild(row);
+        });
+        content.appendChild(table);
+        if (res.shelfCorrections.some(c => c.candidates.length > 1)) {
+            const ambiguous = document.createElement('p');
+            ambiguous.textContent = 'Birden fazla eşleşme bulunan satırlarda seçim otomatik yapılmadı; listeden doğru rafı seçin veya yeni raf olarak bırakın.';
+            content.appendChild(ambiguous);
+        }
+        const accepted = await window.showCustomConfirm('Raf Eşleşmelerini Kontrol Et', content, {
+            confirmText: 'Seçimleri Uygula',
+            cancelText: 'İçe Aktarmayı İptal Et',
+        });
+        if (accepted !== true) return;
+
+        const choices = {};
+        content.querySelectorAll('select[data-import-shelf-code]').forEach(select => {
+            choices[select.dataset.importShelfCode] = select.value;
+        });
+        try {
+            const oldPreview = I.planShelfPlacement({
+                records: res.records, requests: res.shelfRequests, catalog: shelfCapacityInfo, depot: depo,
+            });
+            const baseWarnings = res.warnings.filter(w => !oldPreview.warnings.includes(w));
+            const corrected = I.applyShelfCorrections(res.records, res.shelfRequests, res.shelfCorrections, choices);
+            const preview = I.planShelfPlacement({
+                records: corrected.records, requests: corrected.requests, catalog: shelfCapacityInfo, depot: depo,
+            });
+            res.records = preview.records;
+            res.shelfRequests = corrected.requests;
+            res.shelvesToCreate = preview.shelvesToCreate;
+            res.poolOverflowCount = preview.poolOverflowCount;
+            res.poolInactiveCount = preview.poolInactiveCount;
+            res.warnings = [...baseWarnings, ...preview.warnings];
+        } catch (err) {
+            console.error('İçe aktarma: raf eşleşmesi uygulanamadı', err);
+            showAppAlert('Raf eşleşmesi uygulanamadı; hiçbir kayıt içe aktarılmadı.', 'error');
+            return;
+        }
+    }
 
     const demirbas = res.records.filter(r => r.isDemirbas).length;
     const overflowNote = (res.poolOverflowCount
@@ -1605,8 +1956,11 @@ async function importExcel(event) {
     const createNote = res.shelvesToCreate.length
         ? `\n\n🆕 ${res.shelvesToCreate.length} yeni raf otomatik oluşturulacak (varsayılan kapasite ${I.DEFAULT_SHELF_CAPACITY}): ${res.shelvesToCreate.slice(0, 5).join(', ')}${res.shelvesToCreate.length > 5 ? '…' : ''}`
         : '';
-    const question = `${res.records.length} ürün ${depo.toUpperCase()} deposuna eklenecek (${demirbas} demirbaş, ${res.records.length - demirbas} sarf). ` +
-        `Mevcut kayıtlara dokunulmaz.${createNote}${overflowNote}${res.warnings.length ? '\n\nUyarılar:\n' + res.warnings.slice(0, 5).join('\n') : ''}`;
+    const duplicateNote = res.skippedDuplicates.length
+        ? `\n\n${res.skippedDuplicates.length} ürün Envanter No zaten kayıtlı olduğu için atlanacak; mevcut kayıtlar değiştirilmez:\n${duplicateDetails(res.skippedDuplicates)}`
+        : '';
+    const question = `${res.records.length} yeni ürün ${depo.toUpperCase()} deposuna eklenecek (${demirbas} demirbaş, ${res.records.length - demirbas} sarf). ` +
+        `Mevcut kayıtlara dokunulmaz.${duplicateNote}${createNote}${overflowNote}${res.warnings.length ? '\n\nUyarılar:\n' + res.warnings.slice(0, 5).join('\n') : ''}`;
     const ok = typeof window.showCustomConfirm === 'function'
         ? await window.showCustomConfirm('Excel / CSV İçe Aktarma', question, { confirmText: 'İçe Aktar' })
         : window.confirm(question);
@@ -1629,7 +1983,10 @@ async function importExcel(event) {
 
     // Sonuç taze sunucu planından: önizlemeden farklıysa (bu arada raf dolduysa) gerçek sayılar bildirilir.
     const p = out.placement;
-    const parts = [`${out.records.length} ürün başarıyla depoya eklendi ve kaydedildi!`];
+    const parts = [`${out.records.length} yeni ürün başarıyla depoya eklendi ve kaydedildi!`];
+    if (out.skippedDuplicates.length) {
+        parts.push(`${out.skippedDuplicates.length} ürün aynı Envanter No ile zaten bulunduğu için atlandı; mevcut kayıtlar değiştirilmedi.\n${duplicateDetails(out.skippedDuplicates, Infinity)}`);
+    }
     if (p.created.length) parts.push(`${p.created.length} yeni raf oluşturuldu (${p.created.slice(0, 5).join(', ')}${p.created.length > 5 ? '…' : ''}).`);
     if (p.updated.length) parts.push(`${p.updated.length} rafın sayacı güncellendi.`);
     if (p.poolOverflowCount) parts.push(`${p.poolOverflowCount} adet ürün, hedef raf dolu olduğu için Havuz'a alındı.`);
@@ -1659,7 +2016,7 @@ window.exportToExcel = function (depo) {
         }));
         sheetName = "Envanter Çıkış Raporu";
     } else {
-        // v3.3 Saha Hotfix'i: B2 (Demirbaş) raporu Envanter No sütununu da taşır — B1/Sarf'ta bu sütun anlamsız, eklenmez.
+        // Envanter No hem B1 hem B2 raporuna dahil edilir; import tekrarlarını denetlemek için ortak kimlik alanıdır.
         excelData = items.map(item => {
             const row = {
                 "Sütun": item.sütun || "-",
@@ -1672,7 +2029,7 @@ window.exportToExcel = function (depo) {
                 "Kritik Limit": item.limit || 3,
                 "Son Güncelleme": tsToTurkiye(item.lastUpdate)
             };
-            if (depo === 'b2') row["Envanter No"] = item.envanterNo || "-";
+            row["Envanter No"] = item.envanterNo || "-";
             return row;
         });
         sheetName = depo.toUpperCase() + " Deposu";

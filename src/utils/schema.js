@@ -257,10 +257,9 @@
     //          limit           — kritik stok eşiği (Excel içe aktarma; panel ve Excel raporu okur). null = tanımsız.
     //          stokOncekiDurum — stok 0'a düşerken saklanan önceki durum (computeStockPatch); tam kayıt yazan yollar
     //                            (saveData / upsertItem / geri yükleme) kaydı bu alanla birlikte yeniden yazar.
-    //          envanterNo      — YALNIZ B2 (demirbaş kimliği). B1 sözleşmesi bu alanı REDDEDER; B1 Excel içe aktarması
-    //                            sütunu tanır ama değeri hiç yazmaz (stock-import.js).
-    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum']);
-    const B2_OPTIONAL_KEYS = Object.freeze([...B1_OPTIONAL_KEYS, 'envanterNo']);
+    //          envanterNo      — B1/B2 stok kaydı kimliği (benzersizlik kontrolü importta yapılır).
+    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo']);
+    const B2_OPTIONAL_KEYS = Object.freeze([...B1_OPTIONAL_KEYS]);
     const STOCK_STRING_KEYS = Object.freeze(['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status', 'envanterNo', 'stokOncekiDurum']);
 
     const B1_SPEC = Object.freeze({ required: B1_KEYS, optional: B1_OPTIONAL_KEYS, legacy: B1_LEGACY_KEYS, label: 'B1' });

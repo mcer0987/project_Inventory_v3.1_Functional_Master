@@ -1,0 +1,76 @@
+{
+  "date": "2026-11-04",
+  "branch": "feat/v3.4-ebys-asama-5",
+  "head": "8a61a7ad4b5c49e6c467510e7e9a1e79cf8ec26d",
+  "scope": "Current working tree; core audited rules and services unchanged from HEAD; unrelated pre-existing changes retained",
+  "decision": "NO-GO",
+  "score": 80,
+  "findings": [
+    {
+      "id": "A5-01",
+      "priority": "P1",
+      "reproduced": true
+    },
+    {
+      "id": "A5-02",
+      "priority": "P2",
+      "reproduced": true
+    },
+    {
+      "id": "A5-03",
+      "priority": "P2",
+      "reproduced": true
+    }
+  ],
+  "tests": {
+    "unit": {
+      "passed": 289,
+      "failed": 0
+    },
+    "rules": {
+      "passed": 261,
+      "failed": 0
+    },
+    "xss": {
+      "unauthorized": 0
+    },
+    "independentRules": {
+      "distinct": 7,
+      "securityAndBudgetChecks": 5,
+      "defectReproductions": 2,
+      "note": "REPRO passes prove the vulnerability, not secure behavior"
+    },
+    "lifecycle": {
+      "actualUI": true,
+      "stubbedServices": true,
+      "childrenAfterQueryError": 50,
+      "childrenAfterCleanup": 0,
+      "pageErrors": 0
+    }
+  },
+  "limits": {
+    "exactExpressionCountMeasured": false,
+    "liveDeploymentVerified": false,
+    "realAuthBrowserRoundTrip": false
+  },
+  "sha256": {
+    "firestore.rules": "b13b05883e35b6c35f360d3ad37b9246348125ba11b988278b33b3e474f99a11",
+    "src/services/ebys-process-service.js": "3d9f8bb3dda0c346be9ced854951c56a2508a16d591dce13ff1f38598fe12752",
+    "src/ui/ebys-process-ui.js": "b4f686cc9b6e11fb99cde1594093e85df1305f8e1e4c2c0728463cebe0610777",
+    "src/services/purchase-access.js": "8ab837c73bfc56fb4fcc29a8ae31654dad45101b87560180c5611121aec2c492",
+    "src/services/ebys-document-service.js": "252861682faa9090d138f4323b241e422434f3af732c6eb5c4ff48c2634d8183",
+    "src/services/firebase-handler.js": "08b4b9376836e2522836d21921380f60866485accafb1486d8ac029ec08bff1d",
+    "audits/audit-reports/2026-10-30_v3.4_EBYS_Genisleme_Is_Plani.md": "6b08707403be39375e049d92bb9ae7f69db31d1d025a27379fc91baf2fe0f528",
+    "audits/audit-reports/2026-11-03_EBYS_Asama_5_Uygulama_Raporu.md": "01ea8d17f9c0912147a2d4c957a32201cdfbd2b6d53e86e7e033e608fba875ff",
+    "audits/audit-reports/2026-11-04_EBYS_Asama_5_Bagimsiz_Butunluk_Denetimi.md": "e1b0cc8d93d2bf7066e058e7777d42610bd2bd157fd33333db7a29ef914739df",
+    "scratch/ebys-stage5-audit-xss.log": "e3b896df3283d0b663065378887899314edea0fbebc185698c63f3cc54fdda5e",
+    "scratch/ebys-stage5-audit-unit.log": "0898bdf9a959e935e1bbac923c78c2ed586ae571a1c0ab22a1ff336802dde991",
+    "scratch/ebys-stage5-audit-rules.log": "51cff6451034ebea38c992347268eee7dc703488cdb829569bdbe67cba746c28",
+    "scratch/ebys-stage5-audit-probes.log": "028ea39ff8253393c6509e5358dd7efcc060efb689df0db59654024c220677b1",
+    "scratch/ebys-stage5-audit-finance-probes.log": "81bf057361ae5b16fe46e6535fc2debc1a12b5340935a944202fd850e38e84f2",
+    "scratch/ebys-stage5-audit-lifecycle.log": "cd969ab4778831fac5753389a55b63427702671350f1e6b4cbd9b62a6d385d5c",
+    "scratch/ebys-stage5-audit-process.test.mjs": "27e6d16316457a72113affc5832ce41030c7aae07b5418d3719205fab683e74a",
+    "scratch/ebys-stage5-audit-finance.test.mjs": "33eb688ef90b75b0eb5f73e02f6a05e93b5c6b080818dbf466ba89feaa762448",
+    "scratch/ebys-stage5-audit-lifecycle.cjs": "f6577f847fcca056758016f2b8b981973e2703d4e6c562e2955bed5f7748099f"
+  }
+}

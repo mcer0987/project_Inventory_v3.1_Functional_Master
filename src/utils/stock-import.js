@@ -36,7 +36,7 @@
     const FIELD_ALIASES = {
         ürün: ['ürün', 'ürün adı', 'ürün ismi', 'malzeme', 'malzeme adı', 'name', 'product'],
         tür: ['tür', 'cihaz türü', 'ürün türü', 'kategori', 'type'],
-        raf: ['raf', 'raf no', 'raf numarası', 'rafNo', 'shelf', 'shelf no'],
+        raf: ['raf', 'raf no', 'raf numarası', 'rafNo', 'shelf', 'shelf no', 'raf/shelf'],
         sütun: ['sütun', 'kolon', 'column'],
         adet: ['adet', 'miktar', 'stok', 'qty', 'quantity'],
         marka: ['marka', 'brand'],
@@ -44,8 +44,7 @@
         açıklama: ['açıklama', 'not', 'notlar', 'description'],
         isDemirbas: ['demirbaş', 'demirbaş mı', 'isDemirbas', 'demirbas'],
         limit: ['limit', 'kritik stok', 'min stok', 'minimum stok'],
-        // v3.3 Saha Hotfix'i: yalnız B2 kaydına yazılır (bkz. buildStockRecords) — B1'de sütun TANINIR (uyarı basılmaz)
-        // ama değeri göz ardı edilir ("B1/Sarf için boş bırakılacak veya göz ardı edilecektir").
+        // Envanter No B1 ve B2 stok kayıtlarında saklanır ve tekrar importları ayırt etmek için kullanılır.
         envanterNo: ['envanter no', 'envanter numarası', 'envanter numarasi', 'envanterno', 'envanter', 'inventory no', 'asset no'],
     };
     const ALIAS_INDEX = new Map();
@@ -95,10 +94,108 @@
     }
 
     const cellText = v => (v === undefined || v === null) ? '' : String(v).trim();
-    const DEFAULT_SHELF_CAPACITY = 5;   // yeni (katalogda olmayan, otomatik yaratılacak) rafların varsayılan kapasitesi
+    const DEFAULT_SHELF_CAPACITY = 12;  // yalnız Excel/CSV içe aktarmada otomatik yaratılan raflar
     const MAX_IMPORT_ROWS = 200;        // sabit üst sınır — admin dahil hiç kimse aşamaz (bkz. dosya başı [WHY])
     const SHELF_COL = 'shelves';
-    const EMPTY_PLACEMENT = Object.freeze({ shelvesToCreate: [], poolOverflowCount: 0, poolInactiveCount: 0, shelfRequests: [] });
+    const EMPTY_PLACEMENT = Object.freeze({ shelvesToCreate: [], poolOverflowCount: 0, poolInactiveCount: 0, shelfRequests: [], shelfCorrections: [] });
+    const shelfMatchKey = code => String(code).replace(/[.\-\s]/g, '');
+
+    function findShelfCorrections(requests, catalog) {
+        const codes = new Set((requests || []).map(r => r.code));
+        const existingCodes = [...catalog.keys()];
+        return [...codes].flatMap(code => {
+            const key = shelfMatchKey(code);
+            const candidates = existingCodes.filter(existing => existing !== code && shelfMatchKey(existing) === key);
+            return candidates.length ? [{ code, candidates }] : [];
+        });
+    }
+
+    function applyShelfCorrections(records, requests, corrections, choices) {
+        const allowed = new Map((corrections || []).map(c => [c.code, new Set(c.candidates)]));
+        const selected = new Map();
+        Object.entries(choices || {}).forEach(([code, target]) => {
+            if (!target) return;
+            if (!allowed.has(code) || !allowed.get(code).has(target)) {
+                throw new Error(`Geçersiz raf eşleşmesi: "${code}" → "${target}".`);
+            }
+            selected.set(code, target);
+        });
+        const byId = new Map();
+        const correctedRequests = (requests || []).map(request => {
+            const code = selected.get(request.code) || request.code;
+            if (code !== request.code) byId.set(String(request.id), code);
+            return { ...request, code };
+        });
+        const correctedRecords = (records || []).map(record => {
+            const code = byId.get(String(record.id));
+            return code ? { ...record, raf: code } : record;
+        });
+        return { records: correctedRecords, requests: correctedRequests };
+    }
+
+    function inventoryNumberKey(value, schema) {
+        return schema && typeof schema.normDeviceId === 'function'
+            ? schema.normDeviceId(value)
+            : String(value ?? '').replace(/\s+/g, '').toLocaleUpperCase('en-US');
+    }
+
+    function validateImportInventoryNumbers(records, schema) {
+        const errors = [];
+        const seen = new Map();
+        (records || []).forEach((record, index) => {
+            const key = inventoryNumberKey(record && record.envanterNo, schema);
+            const row = index + 2;
+            if (!key) {
+                errors.push(`Satır ${row}: Envanter No boş; tekrarlı ürün kontrolü için her satırda benzersiz bir Envanter No gereklidir.`);
+            } else if (seen.has(key)) {
+                errors.push(`Satır ${row}: Envanter No "${record.envanterNo}" dosyada birden fazla kez kullanılmış (ilk kullanım satır ${seen.get(key)}).`);
+            } else {
+                seen.set(key, row);
+            }
+        });
+        return errors;
+    }
+
+    function filterExistingInventoryNumbers(records, requests, existingInventories, schema) {
+        const existingByKey = new Map();
+        (existingInventories || []).forEach(({ depot, records: items }) => {
+            (items || []).forEach(item => {
+                const key = inventoryNumberKey(item && item.envanterNo, schema);
+                if (!key) return;
+                if (!existingByKey.has(key)) existingByKey.set(key, []);
+                existingByKey.get(key).push({ depot, item });
+            });
+        });
+
+        const added = [];
+        const skipped = [];
+        (records || []).forEach(incoming => {
+            const key = inventoryNumberKey(incoming && incoming.envanterNo, schema);
+            const matches = existingByKey.get(key) || [];
+            if (!matches.length) {
+                added.push(incoming);
+                return;
+            }
+            const comparedFields = ['sütun', 'raf', 'tür', 'ürün', 'marka', 'adet', 'durumu', 'açıklama', 'limit'];
+            const differences = matches.length === 1
+                ? comparedFields.filter(field => String(matches[0].item[field] ?? '') !== String(incoming[field] ?? ''))
+                : [];
+            skipped.push({
+                envanterNo: incoming.envanterNo,
+                incoming: { id: incoming.id, ürün: incoming.ürün, tür: incoming.tür, raf: incoming.raf },
+                matches: matches.map(({ depot, item }) => ({
+                    depot, id: item.id, ürün: item.ürün || item.name || '', tür: item.tür || item.type || '',
+                })),
+                differences,
+            });
+        });
+        const addedIds = new Set(added.map(record => String(record.id)));
+        return {
+            records: added,
+            requests: (requests || []).filter(request => addedIds.has(String(request.id))),
+            skipped,
+        };
+    }
 
     /**
      * Raf yerleşim planı (v3.3 P1 düzeltmesi — saf; hem önizleme hem commit AYNI fonksiyonu kullanır).
@@ -190,17 +287,24 @@
      * Satırları kanonik b1/b2 kayıtlarına çevirir.
      * @param {object[]} rows  başlık adlı satır nesneleri (parseCsv / sheetRows)
      * @param {'b1'|'b2'} col
-     * @param {{schema:object, makeId:Function, now?:number, shelfCapacityInfo?:Map<string,{capacity:number,usedSlots:number,active?:boolean}>}} deps
+     * @param {{schema:object, makeId:Function, now?:number, shelfCapacityInfo?:Map<string,{capacity:number,usedSlots:number,active?:boolean}>, productTypes?:object[]}} deps
      *        shelfCapacityInfo: bu depoya ait raf kataloğunun KANONİK kod → {capacity, usedSlots, active} haritası.
      *        Verilmezse katalog denetimi YAPILMAZ — dosyadaki ham raf metni aynen yazılır (eski davranış).
      *        Verildiyse yerleşim planShelfPlacement ile ÖNİZLENİR (Auto-Create & Overflow; kapasite artırılmaz). Bu yalnız
      *        onay diyaloğu içindir: kesin karar commit anında taze sunucu verisiyle (planImportEntries) yeniden verilir.
-     * @returns {{records, errors, warnings, mapping, shelvesToCreate, poolOverflowCount, poolInactiveCount, shelfRequests}}
+     *        productTypes: tür sütununu doğrulamak için kullanılacak kayıtlı ürün türleri; verilmezse uygulama kataloğu okunur.
+     * @returns {{records, errors, warnings, mapping, shelvesToCreate, poolOverflowCount, poolInactiveCount, shelfRequests, shelfCorrections}}
      *          errors doluysa records BOŞTUR (kısmi içe aktarma yok). shelfRequests: commit planına aynen geçirilir.
      */
-    function buildStockRecords(rows, col, { schema, makeId, now = Date.now(), shelfCapacityInfo }) {
+    function buildStockRecords(rows, col, { schema, makeId, now = Date.now(), shelfCapacityInfo, productTypes }) {
         const errors = [], warnings = [];
         if (col !== 'b1' && col !== 'b2') return { records: [], errors: [`Geçersiz depo: ${col}`], warnings, mapping: {}, ...EMPTY_PLACEMENT };
+        const activeTypes = Array.isArray(productTypes)
+            ? productTypes
+            : (typeof window.getActiveProductTypes === 'function'
+                ? window.getActiveProductTypes()
+                : (window.data && window.data.productTypes));
+        const knownTypes = Array.isArray(activeTypes) ? activeTypes : [];
         if ((rows || []).length > MAX_IMPORT_ROWS) {
             return {
                 records: [], mapping: {}, ...EMPTY_PLACEMENT,
@@ -223,12 +327,30 @@
 
         const records = [];
         const requests = [];   // { id, code, occupying, line } — kanonik ve geçerli raf kodu isteyen satırlar
+        const seenInventoryNumbers = new Map();
         (rows || []).forEach((row, idx) => {
             const line = idx + 2;   // 1. satır başlık
             const v = {};
             Object.entries(mapping).forEach(([h, f]) => { v[f] = cellText(row[h]); });
             if (Object.values(v).every(x => x === '')) return;   // boş satır
             if (!v.ürün) { errors.push(`Satır ${line}: ürün adı boş.`); return; }
+            if (v.tür) {
+                const normalizedType = name => typeof schema.normName === 'function'
+                    ? schema.normName(name)
+                    : String(name ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('tr-TR');
+                const inputKey = normalizedType(v.tür);
+                const matches = knownTypes.filter(type => {
+                    if (!type || typeof type.name !== 'string') return false;
+                    return normalizedType(type.name) === inputKey;
+                });
+                if (matches.length !== 1) {
+                    errors.push(matches.length
+                        ? `Satır ${line}: ürün türü "${v.tür}" birden fazla kayıtla eşleşiyor; ürün türü tanımlarını kontrol edin.`
+                        : `Satır ${line}: ürün türü "${v.tür}" sistemde kayıtlı değil. Ürün türü tanımlarını kontrol edin.`);
+                    return;
+                }
+                v.tür = matches[0].name.trim();
+            }
 
             let adet = 0;
             if (v.adet !== undefined && v.adet !== '') {
@@ -236,6 +358,18 @@
                 if (!Number.isInteger(n) || n < 0) { errors.push(`Satır ${line}: geçersiz adet "${v.adet}" (0 veya pozitif tam sayı olmalı).`); return; }
                 adet = n;
             }
+            const envanterNo = v.envanterNo || '';
+            if (!envanterNo) {
+                errors.push(`Satır ${line}: Envanter No boş; tekrarlı ürün kontrolü için her satırda Envanter No zorunludur.`);
+                return;
+            }
+            const inventoryKey = inventoryNumberKey(envanterNo, schema);
+            if (seenInventoryNumbers.has(inventoryKey)) {
+                errors.push(`Satır ${line}: Envanter No "${envanterNo}" dosyada birden fazla kez kullanılmış (ilk kullanım satır ${seenInventoryNumbers.get(inventoryKey)}).`);
+                return;
+            }
+            seenInventoryNumbers.set(inventoryKey, line);
+
             let flag;
             if (v.isDemirbas !== undefined && v.isDemirbas !== '') {
                 const k = headerKey(v.isDemirbas);
@@ -271,9 +405,7 @@
             };
             // Demirbaş kararı tek kuraldan: ürün türü tanımı → dosyadaki bayrak → ad bir tür adı mı (Schema.isDemirbas).
             draft.isDemirbas = schema.isDemirbas({ ...draft, isDemirbas: flag });
-            // v3.3 Saha Hotfix'i: Envanter No yalnız B2'ye yazılır (B1/Sarf için göz ardı edilir — aşağıdaki mapping
-            // sütunu YİNE DE "tanınmadı" uyarısı basmadan kabul eder, yalnız değeri hiçbir yere kaydedilmez).
-            if (col === 'b2' && v.envanterNo) draft.envanterNo = v.envanterNo;
+            draft.envanterNo = envanterNo;
             if (v.limit !== undefined && v.limit !== '') {
                 const l = Number(v.limit);
                 if (!Number.isInteger(l) || l < 0) { errors.push(`Satır ${line}: geçersiz limit "${v.limit}".`); return; }
@@ -293,11 +425,14 @@
             records: preview.records, errors, warnings: [...warnings, ...preview.warnings], mapping,
             shelvesToCreate: preview.shelvesToCreate, poolOverflowCount: preview.poolOverflowCount,
             poolInactiveCount: preview.poolInactiveCount, shelfRequests: requests,
+            shelfCorrections: findShelfCorrections(requests, shelfCapacityInfo),
         };
     }
 
     const StockImport = {
         headerKey, decodeText, parseCsv, sheetRows, buildStockRecords, planShelfPlacement, planImportEntries,
+        findShelfCorrections, applyShelfCorrections, inventoryNumberKey, validateImportInventoryNumbers,
+        filterExistingInventoryNumbers,
         FIELD_ALIASES, DEFAULT_SHELF_CAPACITY, MAX_IMPORT_ROWS,
     };
     window.AppModules = window.AppModules || {};

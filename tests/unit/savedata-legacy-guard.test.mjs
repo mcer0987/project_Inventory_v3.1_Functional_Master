@@ -127,18 +127,19 @@ test('legacyStockPatch: eski alan "silinmiş gibi" boşaltılırsa (undefined/""
     assert.deepEqual(plain(S.legacyStockPatch('b1', prev, { ...prev, qty: '' })).frozen.map(f => f.key), ['qty']);
 });
 
-test('legacyStockPatch: kayıtta OLMAYAN yeni alan (B1\'e envanterNo) checked\'e girer — validateB1 reddeder', () => {
+test('legacyStockPatch: kayıtta OLMAYAN ortak alan (B1\'e envanterNo) checked\'e girer — validateB1 kabul eder', () => {
     const prev = legacyB1();
     const r = plain(S.legacyStockPatch('b1', prev, { ...prev, envanterNo: 'ENV-1' }));
     assert.deepEqual(r.frozen, []);
     assert.deepEqual(r.checked, { envanterNo: 'ENV-1' });
-    assert.ok(S.validateB1(r.checked, { partial: true }).some(e => e.includes('envanterNo yalnız B2')));
+    assert.deepEqual(S.validateB1(r.checked, { partial: true }), []);
 });
 
-test('legacyStockPatch: eski B1 kaydında ZATEN olan envanterNo\'nun değeri değişirse frozen (B1 için sözleşme dışı)', () => {
+test('legacyStockPatch: eski B1 kaydında ZATEN olan envanterNo\'nun değeri değişirse kanonik alan olarak kabul edilir', () => {
     const prev = { ...legacyB1(), envanterNo: 'ENV-OLD' };
     const r = plain(S.legacyStockPatch('b1', prev, { ...prev, envanterNo: 'ENV-NEW' }));
-    assert.deepEqual(r.frozen.map(f => f.key), ['envanterNo']);
+    assert.deepEqual(r.frozen, []);
+    assert.deepEqual(r.checked, { envanterNo: 'ENV-NEW' });
 });
 
 test('legacyStockPatch: nesne değerlerinde anahtar sırası değişikliği "değişiklik" sayılmaz', () => {
@@ -174,20 +175,18 @@ test('saveData: qty değişikliği MEŞRU bir değişiklikle (ürün adı) birli
     assert.equal(r.commits, 0);
 });
 
-test('saveData: eski B1 kaydına YENİ envanterNo REDDEDİLİR — commit yok', async () => {
+test('saveData: eski B1 kaydına yeni envanterNo eklenir', async () => {
     const r = await saveLegacy({ envanterNo: 'ENV-2026-001' });
-    assert.equal(r.error && r.error.code, 'schema-violation');
-    assert.match(r.error.message, /envanterNo yalnız B2/);
-    assert.equal(r.batches, 0);
-    assert.equal(r.commits, 0);
+    assert.equal(r.error, null, r.error && r.error.message);
+    assert.equal(r.commits, 1);
+    assert.equal(r.ops.find(o => o.kind === 'set').data.envanterNo, 'ENV-2026-001');
 });
 
-test('saveData: eski B1 kaydında zaten bulunan envanterNo DEĞİŞTİRİLİRSE REDDEDİLİR — commit yok', async () => {
+test('saveData: eski B1 kaydında zaten bulunan envanterNo değiştirilebilir', async () => {
     const r = await saveLegacy({ envanterNo: 'ENV-NEW' }, { ...legacyB1(), envanterNo: 'ENV-OLD' });
-    assert.equal(r.error && r.error.code, 'schema-violation');
-    assert.match(r.error.message, /eski alan değiştirilemez: envanterNo/);
-    assert.equal(r.batches, 0);
-    assert.equal(r.commits, 0);
+    assert.equal(r.error, null, r.error && r.error.message);
+    assert.equal(r.commits, 1);
+    assert.equal(r.ops.find(o => o.kind === 'set').data.envanterNo, 'ENV-NEW');
 });
 
 test('saveData: değişen KANONİK alanın yanlış tipi (adet: -3) eski kayıtta da reddedilir — commit yok', async () => {

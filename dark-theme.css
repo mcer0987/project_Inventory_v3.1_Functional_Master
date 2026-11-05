@@ -110,7 +110,8 @@ body *::after {
     width: 100%;
     border-radius: var(--radius-sm, 4px);
     height: 40px;
-    margin-top: 8px;
+    /* Genel button { margin: 0 4px } kuralı %100 genişliğe eklenip kenar çubuğunda yatay kaydırma açıyordu. */
+    margin: 8px 0 0;
     font-size: 13px;
     gap: 8px;
 }

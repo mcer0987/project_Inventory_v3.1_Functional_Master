@@ -197,12 +197,24 @@ export const saveProduct = async function (e) {
         tür:        document.getElementById('prodType')?.value || '',
         ürün:       (document.getElementById('prodName')?.value || '').trim(),
         marka:      document.getElementById('prodBrand')?.value || '',
+        envanterNo: (document.getElementById('prodInventoryNo')?.value || '').trim(),
         adet:       parseInt(document.getElementById('prodQty')?.value) || 0,
         durumu:     document.getElementById('prodStatus')?.value || '',
         açıklama:   document.getElementById('prodDesc')?.value || '',
         isDemirbas: document.getElementById('isDemirbas')?.checked || false,
         lastUpdate: new Date().getTime()
     };
+    const inventoryKey = window.Schema.normDeviceId(formFields.envanterNo);
+    if (inventoryKey) {
+        const duplicate = ['b1', 'b2'].some(depot => (window.data[depot] || []).some(item =>
+            item && window.Schema.normDeviceId(item.envanterNo) === inventoryKey
+            && !(isEdit && depot === editRepo && String(item.id) === String(editId))
+        ));
+        if (duplicate) {
+            if (typeof window.showAppAlert === 'function') window.showAppAlert(`"${formFields.envanterNo}" Envanter No başka bir üründe kayıtlı.`, 'warning');
+            return;
+        }
+    }
 
     // Düzenleme: yalnız formun alanları o dokümana yazılır (limit/takip gibi diğer alanlar ve eşzamanlı değişiklikler korunur).
     // Yeni kayıt: tek doküman eklenir. (H2: koleksiyonun tamamı gönderilmez.)

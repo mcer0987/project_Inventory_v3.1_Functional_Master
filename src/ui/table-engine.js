@@ -61,7 +61,8 @@ function _buildRowInnerHtml(depo, item, realIndex, qtyHtml) {
             <td>${escapeHtml(item.marka || '-')}</td>
             <td class="js-qty-cell">${qtyHtml}</td>
             <td class="js-status-cell">${escapeHtml(item.durumu || '-')}</td>
-            <td>${escapeHtml(itemType)}</td>`;
+            <td>${escapeHtml(itemType)}</td>
+            <td>${escapeHtml(item.envanterNo || '-')}</td>`;
     }
     return `
         <td><input type="checkbox" class="row-select"></td>
@@ -296,7 +297,7 @@ export const searchTable = function (depo) {
     const allData = getProcessedData(depo);
     const filteredResults = allData.filter(item => {
         return [
-            item.ürün, item.marka, item.açıklama, item.name, item.model, item.raf, item.tür
+            item.ürün, item.marka, item.açıklama, item.name, item.model, item.raf, item.tür, item.envanterNo
         ].some(val => (val || '').toLocaleLowerCase('tr-TR').includes(searchTerm));
     });
 
@@ -387,6 +388,7 @@ export const renderCardSearchResults = function (depo, results) {
                         <span class="pci-meta">
                             <span class="pci-meta-tag"><i class="fas fa-layer-group"></i> ${escapeHtml(turAdi)}</span>
                             <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(item.raf || '-')}</span>
+                            ${item.envanterNo ? `<span class="pci-meta-tag"><i class="fas fa-barcode"></i> ${escapeHtml(item.envanterNo)}</span>` : ''}
                             ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${escapeHtml(item.marka)}</span>` : ''}
                         </span>
                     </div>
@@ -478,6 +480,7 @@ export const renderMobileCards = function (depo) {
                             <span class="pci-name">${safeName}</span>
                             <span class="pci-meta">
                                 <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(item.raf || '-')}</span>
+                                ${item.envanterNo ? `<span class="pci-meta-tag"><i class="fas fa-barcode"></i> ${escapeHtml(item.envanterNo)}</span>` : ''}
                                 ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${escapeHtml(item.marka)}</span>` : ''}
                                 ${item.sütun ? `<span class="pci-meta-tag"><i class="fas fa-columns"></i> ${escapeHtml(item.sütun)}</span>` : ''}
                             </span>

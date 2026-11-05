@@ -106,21 +106,17 @@ for (const m of MODES) {
         assert.ok(has(S.validateB2(m.b2({ ürün: null }), m.opts), 'ürün string değil'));
     });
 
-    test(`[${m.name}] B2 envanterNo: yokken KABUL, string KABUL, sayı/nesne/null RET`, () => {
+    test(`[${m.name}] B1/B2 envanterNo: yokken KABUL, string KABUL, sayı/nesne/null RET`, () => {
         const S = loadSchema();
+        assert.deepEqual([...S.validateB1(m.b1({}), m.opts)], []);
+        assert.deepEqual([...S.validateB1(m.b1({ envanterNo: 'ENV-2026-001' }), m.opts)], []);
+        assert.ok(has(S.validateB1(m.b1({ envanterNo: 12345 }), m.opts), 'envanterNo string değil'));
         assert.deepEqual([...S.validateB2(m.b2({}), m.opts)], [], 'envanterNo olmadan geçerli');
         assert.deepEqual([...S.validateB2(m.b2({ envanterNo: 'ENV-2026-001' }), m.opts)], []);
         assert.deepEqual([...S.validateB2(m.b2({ envanterNo: '' }), m.opts)], [], 'boş metin de string');
         assert.ok(has(S.validateB2(m.b2({ envanterNo: 12345 }), m.opts), 'envanterNo string değil'));
         assert.ok(has(S.validateB2(m.b2({ envanterNo: { no: 'x' } }), m.opts), 'envanterNo string değil'));
         assert.ok(has(S.validateB2(m.b2({ envanterNo: null }), m.opts), 'envanterNo string değil'));
-    });
-
-    test(`[${m.name}] B1'e envanterNo yazılması REDDEDİLİR (değer tipi ne olursa olsun)`, () => {
-        const S = loadSchema();
-        for (const v of ['ENV-1', '', 7]) {
-            assert.ok(has(S.validateB1(m.b1({ envanterNo: v }), m.opts), 'envanterNo yalnız B2 (demirbaş) kaydında olabilir'), `değer: ${JSON.stringify(v)}`);
-        }
     });
 
     test(`[${m.name}] yanlış tipler reddedilir (string yerine sayı, boolean yerine metin, limit)`, () => {
@@ -153,11 +149,11 @@ test('[update] yalnız "eksik zorunlu alan" muafiyeti: set aynı kısmi kaydı e
     assert.ok(has(S.validateB2(patch), 'eksik alan: ürün'));
 });
 
-test('alan kümeleri AYRI ve açık: B1 ⊂ B2 değil — envanterNo ve status yalnız B2', () => {
+test('alan kümeleri açık: Envanter No B1/B2 ortak opsiyonel alanı; status yalnız B2', () => {
     const S = loadSchema();
-    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['isWatched', 'limit', 'stokOncekiDurum']);
+    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'stokOncekiDurum']);
     assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'stokOncekiDurum']);
-    assert.ok(!S.stockKnownKeys('b1').includes('envanterNo') && !S.stockKnownKeys('b1').includes('status'));
+    assert.ok(S.stockKnownKeys('b1').includes('envanterNo') && !S.stockKnownKeys('b1').includes('status'));
     assert.ok(S.stockKnownKeys('b2').includes('envanterNo') && S.stockKnownKeys('b2').includes('status'));
 });
 

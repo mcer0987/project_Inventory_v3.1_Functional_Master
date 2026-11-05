@@ -33,6 +33,7 @@
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="src/ui/purchase-print.css">
     <link rel="stylesheet" href="src/ui/ebys-documents.css">
+    <link rel="stylesheet" href="src/ui/ebys-showcase-modal.css">
     <link rel="stylesheet" href="dark-theme.css">
     <link rel="stylesheet" href="admin-dark-fix.css">
     <script src="dark-mode-toggle.js"></script>
@@ -294,14 +295,17 @@
              [HOW]: Sitemap butonu ve sürüm bilgisi sidebar'ın en altına
                     sabitlendi (margin-top: auto ile flex içinde aşağı itilir).
              ========================================================= -->
+        <!-- EBYS Rehberi: evrak, imza ve satın alma süreçlerini örneklerle anlatan modal (src/ui/ebys-showcase-modal.js) -->
+        <button type="button" class="nav-item ebys-guide-nav" data-ebys-showcase="books" aria-haspopup="dialog"
+            title="Evrak, imza ve satın alma süreçlerinin nasıl işlediğini örneklerle gösterir"
+            style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1);">
+            <span class="ebys-guide-spark" aria-hidden="true"><i class="fas fa-wand-magic-sparkles"></i></span>
+            <span class="ebys-guide-text">EBYS Rehberi</span>
+        </button>
         <div class="nav-item sitemap-nav-item" onclick="openSitemapModal()"
-            style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); border-bottom: none; color: var(--vip-matrix, #00ff88); font-weight: 600;">
+            style="border-bottom: none; color: var(--vip-matrix, #00ff88); font-weight: 600;">
             <i class="fas fa-project-diagram"></i>
             <span>Sistem Kılavuzu</span>
-        </div>
-        <div
-            style="font-size: 0.65rem; text-align: center; color: rgba(255,255,255,0.3); padding-bottom: 15px; letter-spacing: 1px;">
-            ITSM Envanter v2.0 <br> VIP Mode
         </div>
     </div>
 
@@ -593,8 +597,8 @@
                                     <thead class="bg-light">
                                         <tr>
                                             <th>Ürün</th>
-                                            <th class="text-center">Stok</th>
-                                            <th class="text-center">Durum</th>
+                                            <th class="text-center" style="width: 90px;">Stok</th>
+                                            <th class="text-center" style="width: 130px;">Durum</th>
                                             <th class="text-end px-3">İşlemler</th>
                                         </tr>
                                     </thead>
@@ -2787,6 +2791,7 @@
     <script src="src/utils/timer.js"></script>
     <script src="security.js"></script>
     <script type="module" src="src/modules/admin/admin-main.js"></script>
+    <script type="module" src="src/ui/ebys-showcase-modal.js"></script>
     <script src="script.js"></script>
     <script src="src/utils/admin-quick-unlock.js"></script>
     <script src="src/modules/admin/shelf-matrix.js"></script>

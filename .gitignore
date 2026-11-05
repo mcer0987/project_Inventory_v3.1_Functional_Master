@@ -68,8 +68,10 @@ node_modules/
 # dataconnect generated files
 .dataconnect
 
-# Faz 4 · J0: emülatör tohum kopyası (demo verisi, personel kodları içerir)
-scratch/emu-data/
+# Yerel test çıktıları, emülatör verisi ve geçici yayın kopyaları.
+# Git'te kayıtlı test ve yayın araçları izlenmeye devam eder.
+/scratch/
+/.tmp-config/
 
 # Faz 5 kapanışı: yerel repomix depo dökümleri (tüm kaynak kodu içerir)
 repomix-output*

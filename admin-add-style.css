@@ -2257,3 +2257,42 @@ input:checked+.slider::before {
 .sitemap-release-link-wrap { flex: 0 0 auto; padding: 0 20px 14px; border-top: 1px solid rgba(255,255,255,.08); }
 .sitemap-release-link { display: inline-flex; align-items: center; gap: 8px; padding-top: 12px; color: #7dd3fc; font-size: .82rem; text-decoration: none; }
 .sitemap-release-link:hover, .sitemap-release-link:focus-visible { color: #bae6fd; text-decoration: underline; outline-offset: 3px; }
+
+
+/* ── Kritik Stok Takibi Tablo Düzenlemeleri (Durum & İşlemler) ──────── */
+.status-badge.status-badge-compact {
+  min-width: 76px !important;
+  padding: 3px 8px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  border-radius: 12px !important;
+  letter-spacing: 0.4px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.2;
+}
+
+#criticalStockTable .action-buttons {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+#criticalStockTable th:last-child,
+#criticalStockTable td:last-child {
+  width: 270px;
+  min-width: 270px;
+}
+
+#criticalStockTable .action-buttons .btn-action {
+  flex: 0 0 34px;
+}
+
+#criticalStockTable td {
+  vertical-align: middle;
+}

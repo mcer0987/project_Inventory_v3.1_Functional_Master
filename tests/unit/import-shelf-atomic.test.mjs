@@ -73,23 +73,39 @@ const items = (s, col = 'b1') => [...s.db].filter(([k]) => k.startsWith(col + '/
 const shelfDoc = (code, capacity, usedSlots, extra = {}) => ({
     id: `b1_${code}`, code, depot: 'b1', capacity, usedSlots, active: true, updatedAt: 1700000000000, updatedBy: 'eski-admin', ...extra,
 });
-const rowsTo = (code, n, prefix = 'Ürün') => Array.from({ length: n }, (_, i) => ({ Ürün: `${prefix} ${i}`, Adet: '1', Raf: code }));
+let importNo = 0;
+const rowsTo = (code, n, prefix = 'Ürün') => Array.from({ length: n }, (_, i) => ({
+    Ürün: `${prefix} ${i}`, Adet: '1', Raf: code, 'Envanter No': `TEST-IMPORT-${importNo++}`,
+}));
 
 // firebase-handler.js atomicImportStock'un motor kısmı: önizleme yerel katalogla, kesin plan entries(store) içinde taze okumayla.
 async function importOnce(env, store, rows, { col = 'b1', limits, beforeCommit, retries = 2 } = {}) {
     const { S, I, W, makeId } = env;
+    const importRows = rows.map(row => {
+        const hasId = Object.keys(row).some(header =>
+            I.FIELD_ALIASES.envanterNo.some(alias => I.headerKey(alias) === I.headerKey(header))
+        );
+        return !hasId && String(row.Ürün || '').trim()
+            ? { ...row, 'Envanter No': `TEST-IMPORT-${importNo++}` }
+            : row;
+    });
     const cached = (await store.readCollection('shelves')).map(d => d.data).filter(d => d.depot === col);
-    const built = I.buildStockRecords(rows, col, {
+    const built = I.buildStockRecords(importRows, col, {
         schema: S, makeId, now: NOW,
         shelfCapacityInfo: new Map(cached.map(d => [d.code, { capacity: d.capacity, usedSlots: d.usedSlots, active: d.active }])),
     });
     assert.deepEqual(plain(built.errors), []);
-    let plan = null;
+    let plan = null, skipped = [];
     const res = await W.run({
         store, kind: 'atomicImportStock', collections: [col], uid: 'admin-uid', sleep: async () => {}, retries, limits,
         entries: async st => {
+            const existing = I.filterExistingInventoryNumbers(built.records, built.shelfRequests, [
+                { depot: 'b1', records: (await st.readCollection('b1')).map(d => d.data) },
+                { depot: 'b2', records: (await st.readCollection('b2')).map(d => d.data) },
+            ], S);
+            skipped = existing.skipped;
             const p = I.planImportEntries({
-                col, records: built.records, requests: built.shelfRequests,
+                col, records: existing.records, requests: existing.requests,
                 shelfDocs: (await st.readCollection('shelves')).map(d => d.data), uid: 'admin-uid', serverTime: W.SERVER_TIME,
             });
             plan = p.plan;
@@ -97,10 +113,27 @@ async function importOnce(env, store, rows, { col = 'b1', limits, beforeCommit, 
             return p.entries;
         },
     });
-    return { res: plain(res), plan: plain(plan), built: plain(built) };
+    return { res: plain(res), plan: plain(plan), built: plain(built), skipped: plain(skipped) };
 }
 
 const SMALL = { maxOps: 6, maxBytes: 8 * 1024 * 1024, partChars: 200 };   // 4 girdilik parçalar → günlüklü çok parçalı iş
+
+test('Envanter No: aynı numara yeniden import edilmez; farklı depodaki mevcut kayıt da korunur', async () => {
+    const env = load();
+    const store = memStore();
+    const row = [{ Ürün: 'İlk kayıt', 'Envanter No': 'ENV-UNIQUE-1', Adet: '1' }];
+    const first = await importOnce(env, store, row);
+    assert.equal(first.plan.records.length, 1);
+    const repeat = await importOnce(env, store, [{ Ürün: 'Yeni ad', 'Envanter No': ' env-unique-1 ', Adet: '5' }]);
+    assert.equal(repeat.plan.records.length, 0);
+    assert.equal(repeat.skipped.length, 1);
+    assert.equal(repeat.skipped[0].matches[0].ürün, 'İlk kayıt');
+    assert.deepEqual(repeat.skipped[0].differences, ['ürün', 'adet']);
+
+    const crossDepot = await importOnce(env, store, row, { col: 'b2' });
+    assert.equal(crossDepot.plan.records.length, 0);
+    assert.equal(crossDepot.skipped.length, 1);
+});
 
 // ─── Astra'nın kanıt senaryoları ─────────────────────────────────────────────────────────────────────────────────────
 test('capacity=5, usedSlots=4: 1. içe aktarma rafa girer ve sayaç 5 olur; 2. içe aktarma Havuz\'a gider, sayaç 5\'te kalır', async () => {
@@ -127,19 +160,19 @@ test('capacity=5, usedSlots=4: 1. içe aktarma rafa girer ve sayaç 5 olur; 2. i
     assert.deepEqual(items(store).map(x => x.raf).sort(), ['', 'RAF-A']);
 });
 
-test('yeni rafa 6 kayıt: 5\'i rafa, 1\'i Havuz\'a; raf belgesi ürünlerle AYNI işte usedSlots=5 ile yaratılır', async () => {
+test('import ile yeni raf 12 kapasiteyle yaratılır; kapasite aşımı ürünleri Havuz\'a alır', async () => {
     const env = load();
     const store = memStore({ shelves: [] });
-    const r = await importOnce(env, store, rowsTo('Yeni Raf', 6));
+    const r = await importOnce(env, store, rowsTo('Yeni Raf', 13));
     assert.equal(r.res.status, 'committed');
-    assert.equal(r.plan.records.filter(x => x.raf === 'YENI RAF').length, 5);
+    assert.equal(r.plan.records.filter(x => x.raf === 'YENI RAF').length, 12);
     assert.equal(r.plan.records.filter(x => x.raf === '').length, 1);
     assert.equal(r.plan.poolOverflowCount, 1);
     assert.deepEqual(r.plan.shelvesToCreate, ['YENI RAF']);
     const doc = shelf(store, 'b1_YENI RAF');
-    assert.deepEqual({ ...doc, updatedAt: 'T' }, { code: 'YENI RAF', depot: 'b1', capacity: 5, usedSlots: 5, active: true, updatedAt: 'T', updatedBy: 'admin-uid' });
+    assert.deepEqual({ ...doc, updatedAt: 'T' }, { code: 'YENI RAF', depot: 'b1', capacity: 12, usedSlots: 12, active: true, updatedAt: 'T', updatedBy: 'admin-uid' });
     assert.deepEqual(plain(env.S.validateShelfDoc({ ...doc, updatedAt: NOW }, { id: 'b1_YENI RAF' })), [], 'tam raf sözleşmesi');
-    assert.equal(items(store).length, 6);
+    assert.equal(items(store).length, 13);
     assert.equal(items(store).filter(x => x.raf === 'YENI RAF').length, doc.usedSlots, 'sayaç = rafa yerleşen gerçek ürün sayısı');
 });
 
