@@ -1152,6 +1152,50 @@
             <div class="d-flex flex-wrap gap-2 align-items-center mt-3"><button id="ebysDocumentFirst" type="button" class="btn btn-sm btn-outline-secondary">Başa dön</button><button id="ebysDocumentNext" type="button" class="btn btn-sm btn-outline-secondary">Sonraki 50</button><span id="ebysDocumentStatus" role="status" class="small text-muted"></span></div>
         </section>
 
+        <section id="ebysExecutionAdmin" class="modern-card mb-4" aria-labelledby="ebysExecutionAdminTitle">
+            <h3 id="ebysExecutionAdminTitle">İcra Takibi</h3>
+            <p>Evrak türlerine göre havale sorumlularını tanımlayın. Son onaydan sonra açılan işleri, gecikmeleri ve kapanışları buradan izleyin.</p>
+            <details class="ebys-process-panel mb-3">
+                <summary>Havale tanımları</summary>
+                <p class="ebys-process-help">Önce evrak türü ve bağlı birimi birlikte aranır. Birime özel tanım yoksa kaydettiğiniz tür varsayılanı kullanılır. Birimler ortak Birim Yönetimi listesinden gelir.</p>
+                <div id="ebysExecutionPolicies"></div>
+            </details>
+            <section id="ebysExecutionReturns" class="ebys-process-panel mb-3" aria-labelledby="ebysExecutionReturnsTitle">
+                <h4 id="ebysExecutionReturnsTitle" class="text-danger">Havale Bekleyen İadeler</h4>
+                <p>İadeler en eski bekleyenden başlayarak listelenir. İlk hedef ve yönetimde geçen süre ayrı gösterilir.</p>
+                <div class="table-responsive">
+                    <table class="modern-table">
+                        <thead><tr><th>Evrak / İş</th><th>Birim</th><th>Son sorumlu</th><th>Durum</th><th>İlk hedef / Bekleme</th><th>İşlem</th></tr></thead>
+                        <tbody data-execution-rows></tbody>
+                    </table>
+                </div>
+                <div class="ebys-process-actions">
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-execution-first>Başa dön</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-execution-next>Sonraki 50</button>
+                    <span role="status" data-execution-status></span>
+                </div>
+            </section>
+            <div id="ebysExecutionAll">
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    <select class="form-select" aria-label="Bu sayfadaki işleri birime göre filtrele" data-filter="unitId"></select>
+                    <select class="form-select" aria-label="Bu sayfadaki işleri sorumluya göre filtrele" data-filter="assigneeUid"></select>
+                    <select class="form-select" aria-label="Bu sayfadaki işleri duruma göre filtrele" data-filter="state"></select>
+                    <label><input type="checkbox" data-execution-late> Yalnız gecikenler</label>
+                </div>
+                <div class="table-responsive">
+                    <table class="modern-table">
+                        <thead><tr><th>Evrak / İş</th><th>Birim</th><th>Sorumlu</th><th>Durum</th><th>Hedef</th><th>İşlem</th></tr></thead>
+                        <tbody data-execution-rows></tbody>
+                    </table>
+                </div>
+                <div class="ebys-process-actions">
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-execution-first>Başa dön</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-execution-next>Sonraki 50</button>
+                    <span role="status" data-execution-status></span>
+                </div>
+            </div>
+        </section>
+
         <!-- MİNİMAL KPI BAR -->
         <div class="kpi-container">
             <div class="dashboard-card card-blue">

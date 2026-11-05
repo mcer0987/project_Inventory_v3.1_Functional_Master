@@ -819,13 +819,15 @@ service cloud.firestore {
             && getAfter(ebysPath(r, 'ebysRegistrationIds', d.registrationNo)).data.documentId == d.id && ebysCommand(r, d, 'registerDocument')));
     }
     match /{r}/ebysDocuments/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDocuments',id)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid || epAccess(r,resource.data.currentVersionId));
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDocuments',id)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid || epAccess(r,resource.data.currentVersionId) || ejVersionAccess(r,resource.data.currentVersionId));
       allow list: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.ownerUid == request.auth.uid);
       allow create: if ebysOwn(r, request.resource.data) && ebysHead(request.resource.data, id)
         && request.resource.data.state == 'draft' && request.resource.data.versionNo == 0 && request.resource.data.revision == 1 && request.resource.data.registrationNo == ''
         && request.resource.data.createdAt == request.time && ebysDraftHead(r, request.resource.data);
       allow update: if (ebysOwn(r, resource.data) && ebysHeadUpdate(r, resource.data, request.resource.data))
-        || (validRoot(r) && member(r) && epHeadTransition(r,resource.data,request.resource.data));
+        || (validRoot(r) && member(r) && (request.resource.data.state in ['closed','archived']
+          ? ejCloseOrArchive(r,resource.data,request.resource.data)
+          : epHeadTransition(r,resource.data,request.resource.data)));
       allow delete: if false;
     }
     function ebysDraftOk(r, id, d) {
@@ -854,6 +856,7 @@ service cloud.firestore {
     }
     match /{r}/ebysVersions/items/{id} {
       allow read: if ebysOwn(r,resource.data) || (validRoot(r) && member(r) && epAccess(r,id));
+      allow get: if validRoot(r) && member(r) && ejVersionAccess(r,id);
       allow create: if ebysVersionOk(r,id,request.resource.data);
       allow update, delete: if false;
     }
@@ -987,6 +990,155 @@ service cloud.firestore {
           : request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt','historyId']) && lpHistoryProof(r,request.resource.data));
       allow delete: if false;
     }
+    // Aşama 6 · Her sabit sürüme tek icra işi. Onay rotası ve imzacı görevleri ayrı kalır.
+    function ej(r,id) { return ebysPath(r,'ebysExecutionJobs',id); }
+    function ejEventId(id,revision) { return id+'__'+string(revision); }
+    function ejActive(d) { return d.state in ['pending_acceptance','in_progress']; }
+    function ejVersionAccess(r,id) {
+      let job = get(ej(r,id)).data;
+      return job.assigneeUid == request.auth.uid && ejActive(job);
+    }
+    function ejTarget(r,d) {
+      let p = get(ebysPath(r,'personel',d.personnelId)).data;
+      return d.assigneeUid is string && p.uid == d.assigneeUid && p.unitId == d.unitId && p.get('active',true) == true
+        && get(ebysPath(r,'units',d.unitId)).data.get('active',true) == true
+        && get(ebysPath(r,'staffAccounts',d.assigneeUid)).data.personelId == d.personnelId
+        && get(ebysPath(r,'staffAccounts',d.assigneeUid)).data.pri == p.pri
+        && d.dueHours is int && d.dueHours >= 1 && d.dueHours <= 720;
+    }
+    function ejDue(d) {
+      return d.dueAt is timestamp && d.dueAt > request.time
+        && d.dueAt <= request.time + duration.value(d.dueHours,'h') + duration.value(5,'m')
+        && d.dueAt >= request.time + duration.value(d.dueHours,'h') - duration.value(5,'m');
+    }
+    function ejPolicyPath(r,kind,unitId) {
+      return ebysPath(r,'ebysExecutionPolicies',unitId == '' ? kind : kind+'__'+unitId);
+    }
+    function ejPolicy(r,head,d) {
+      let specific = ejPolicyPath(r,head.kind,head.unitId);
+      let key = exists(specific) ? head.kind+'__'+head.unitId : head.kind;
+      let p = get(ebysPath(r,'ebysExecutionPolicies',key)).data;
+      return d.policyId == key && d.sourceUnitId == head.unitId && p.kind == head.kind
+        && d.unitId == p.unitId && d.personnelId == p.personnelId && d.assigneeUid == p.assigneeUid && d.dueHours == p.dueHours;
+    }
+    function ejCreate(r,id,d) {
+      let before = get(ep(r,id)).data;
+      let process = getAfter(ep(r,id)).data;
+      let head = getAfter(ebysPath(r,'ebysDocuments',process.documentId)).data;
+      return d.keys().hasOnly(['id','processId','versionId','documentId','ownerUid','kind','unitId','personnelId','assigneeUid','dueHours','sourceUnitId','policyId',
+                               'dueAt','originalDueAt','returnedAt','state','revision','lastAction','lastActorUid','note','evidenceRef','stockOperationId','createdAt','updatedAt'])
+        && before.state == 'active' && before.activeAssigneeUid == request.auth.uid && process.state == 'completed'
+        && process.revision == before.revision+1 && process.updatedAt == request.time
+        && head.state == 'internally_approved' && head.currentVersionId == id
+        && d.id == id && d.processId == id && d.versionId == id && d.documentId == process.documentId
+        && d.ownerUid == process.ownerUid && d.kind == head.kind && d.state == 'pending_acceptance' && d.revision == 1
+        && d.originalDueAt == d.dueAt && d.returnedAt == null && ejPolicy(r,head,d)
+        && d.lastAction == 'assign' && d.lastActorUid == request.auth.uid && d.createdAt == request.time && d.updatedAt == request.time
+        && d.note == '' && d.evidenceRef == '' && d.stockOperationId == '' && ejTarget(r,d) && ejDue(d);
+    }
+    function ejHeadChanged(old,d,state) {
+      return d.state == state && d.diff(old).affectedKeys().hasOnly(['state','revision','updatedAt'])
+        && d.revision == old.revision+1 && d.updatedAt == request.time;
+    }
+    function ejCloseOrArchive(r,old,d) {
+      let job = get(ej(r,old.currentVersionId)).data;
+      return job.documentId == old.id && (d.state == 'closed'
+        ? old.state == 'internally_approved' && job.state == 'in_progress' && job.assigneeUid == request.auth.uid
+          && getAfter(ej(r,old.currentVersionId)).data.state == 'completed' && ejHeadChanged(old,d,'closed')
+        : old.state == 'closed' && job.state == 'completed' && isAdmin(r) && ejHeadChanged(old,d,'archived'));
+    }
+    function ejEvidence(r,d) {
+      return ebysText(d.note,1000,true) && ebysText(d.evidenceRef,240,true)
+        && (d.stockOperationId == '' || (d.stockOperationId is string && d.stockOperationId.matches('[A-Za-z0-9_-]{8,80}')
+          && exists(ebysPath(r,'stockOperations',d.stockOperationId))
+          && get(ebysPath(r,'ebysExecutionStockLinks',d.stockOperationId)).data.processId == d.id));
+    }
+    function ejCompleted(r,d) {
+      let headPath = ebysPath(r,'ebysDocuments',d.documentId);
+      let notification = getAfter(ebysPath(r,'ebysNotifications',d.id)).data;
+      return ejHeadChanged(get(headPath).data,getAfter(headPath).data,'closed')
+        && notification.recipientUid == d.ownerUid && notification.createdAt == request.time;
+    }
+    function ejUpdate(r,old,d) {
+      let changes = d.diff(old).affectedKeys();
+      let e = getAfter(ebysPath(r,'ebysExecutionEvents',ejEventId(old.id,d.revision))).data;
+      return old.state != 'completed' && d.revision == old.revision+1 && d.updatedAt == request.time
+        && d.lastActorUid == request.auth.uid && e.revision == d.revision && e.createdAt == request.time
+        && d.returnedAt == (d.state == 'returned' ? request.time : null)
+        && (d.lastAction == 'reassign'
+          ? isAdmin(r) && d.state == 'pending_acceptance' && (old.state == 'returned' || d.assigneeUid != old.assigneeUid)
+            && changes.hasOnly(['unitId','personnelId','assigneeUid','dueHours','dueAt','state','revision','updatedAt','lastAction','lastActorUid','note','returnedAt'])
+            && ebysText(d.note,1000,true) && ejTarget(r,d) && ejDue(d)
+          : old.assigneeUid == request.auth.uid
+            && changes.hasOnly(['state','revision','updatedAt','lastAction','lastActorUid','note','evidenceRef','stockOperationId','returnedAt'])
+            && (d.lastAction == 'accept' && old.state == 'pending_acceptance' && d.state == 'in_progress'
+                && d.note == '' && d.evidenceRef == '' && d.stockOperationId == ''
+              || d.lastAction == 'return' && old.state == 'in_progress' && d.state == 'returned'
+                && ebysText(d.note,1000,true) && d.evidenceRef == '' && d.stockOperationId == ''
+              || d.lastAction == 'complete' && old.state == 'in_progress' && d.state == 'completed'
+                && ejEvidence(r,d) && ejCompleted(r,d)));
+    }
+    function ejPolicyWrite(r,id,d) {
+      return d.kind in ['incoming','outgoing','internal'] && definitionKey(d.sourceUnitId) && d.updatedAt == request.time
+        && id == (d.sourceUnitId == '' ? d.kind : d.kind+'__'+d.sourceUnitId)
+        && (d.sourceUnitId == '' || get(unitPath(r,d.sourceUnitId)).data.get('active',true) == true)
+        && d.keys().hasOnly(['kind','unitId','personnelId','assigneeUid','dueHours','sourceUnitId','updatedAt'])
+        && ejTarget(r,d);
+    }
+    match /{r}/ebysExecutionPolicies/items/{id} {
+      allow get: if validRoot(r) && member(r);
+      allow create, update: if validRoot(r) && isAdmin(r) && ejPolicyWrite(r,id,request.resource.data);
+      allow list, delete: if false;
+    }
+    function ejStockLink(r,id,d) {
+      return id.matches('[A-Za-z0-9_-]{8,80}') && ebysId(d.processId)
+        && d.operationId == id && d.actorUid == request.auth.uid && d.createdAt == request.time && ebysText(d.note,240,true)
+        && d.keys().hasOnly(['operationId','processId','actorUid','note','createdAt'])
+        && ejActive(get(ej(r,d.processId)).data) && exists(ebysPath(r,'stockOperations',id));
+    }
+    match /{r}/ebysExecutionStockLinks/items/{id} {
+      allow get: if validRoot(r) && isAdmin(r);
+      allow create: if validRoot(r) && isAdmin(r) && ejStockLink(r,id,request.resource.data);
+      allow list, update, delete: if false;
+    }
+    match /{r}/ebysExecutionJobs/items/{id} {
+      allow get, list: if validRoot(r) && member(r)
+        && (resource.data.assigneeUid == request.auth.uid || resource.data.ownerUid == request.auth.uid || isAdmin(r));
+      // Aynı yazımdaki süreç geçişi üyelik ve aktör yetkisini doğrular.
+      allow create: if validRoot(r) && signedIn() && ebysId(id) && ejCreate(r,id,request.resource.data);
+      allow update: if validRoot(r) && member(r) && ejUpdate(r,resource.data,request.resource.data);
+      allow delete: if false;
+    }
+    function ejEventOk(r,id,e) {
+      let old = get(ej(r,e.processId)).data;
+      let d = getAfter(ej(r,e.processId)).data;
+      return e == {'id':id,'processId':d.id,'ownerUid':d.ownerUid,'revision':d.revision,'from':old.state,'to':d.state,
+        'action':d.lastAction,'actorUid':request.auth.uid,'previousAssigneeUid':old.assigneeUid,'assigneeUid':d.assigneeUid,
+        'note':d.note,'returnedAt':old.get('returnedAt',null),'createdAt':request.time}
+        && id == ejEventId(d.id,d.revision) && d.revision == old.revision+1 && d.updatedAt == request.time;
+    }
+    match /{r}/ebysExecutionEvents/items/{id} {
+      allow read: if validRoot(r) && isAdmin(r);
+      allow create: if validRoot(r) && member(r) && ejEventOk(r,id,request.resource.data);
+      allow update, delete: if false;
+    }
+    function ejNotificationOk(r,id,n) {
+      let old = get(ej(r,id)).data;
+      let job = getAfter(ej(r,id)).data;
+      return old.state == 'in_progress' && old.assigneeUid == request.auth.uid && job.state == 'completed'
+        && job.revision == old.revision+1 && job.updatedAt == request.time
+        && n == {'id':id,'processId':id,'documentId':job.documentId,'recipientUid':job.ownerUid,'eventId':ejEventId(id,job.revision),
+                 'type':'execution_closed','emailState':'deferred','readAt':null,'createdAt':request.time};
+    }
+    match /{r}/ebysNotifications/items/{id} {
+      allow get, list: if validRoot(r) && member(r) && resource.data.recipientUid == request.auth.uid;
+      allow create: if validRoot(r) && member(r) && ejNotificationOk(r,id,request.resource.data);
+      allow update: if validRoot(r) && member(r) && resource.data.recipientUid == request.auth.uid && resource.data.readAt == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt']) && request.resource.data.readAt == request.time;
+      allow delete: if false;
+    }
+
+
     // Aşama 5: sahiplik ACL dizisi yerine doğrulanmış deterministik görev/karar.
     function ep(r,id) { return ebysPath(r,'ebysProcesses',id); }
     function epHeadTransition(r,old,d) {
@@ -1048,7 +1200,8 @@ service cloud.firestore {
       let path = ebysPath(r,'ebysDocuments',p.documentId);
       let after = getAfter(path).data;
       return after.currentVersionId == p.id && after.revision == get(path).data.revision+1
-        && after.state == (p.state == 'completed' ? 'internally_approved' : p.state);
+        && after.state == (p.state == 'completed' ? 'internally_approved' : p.state)
+        && (p.state != 'completed' || getAfter(ej(r,p.id)).data.createdAt == request.time);
     }
     function epUpdate(r,p,n) {
       let t = get(et(r,p.id,p.activeAssigneeUid)).data;

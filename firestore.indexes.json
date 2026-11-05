@@ -11,6 +11,18 @@
     ] },
     { "collectionGroup": "items", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "kind", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" }
+    ] },
+    { "collectionGroup": "items", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "recipientUid", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }
+    ] },
+    { "collectionGroup": "items", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "processId", "order": "ASCENDING" }, { "fieldPath": "revision", "order": "DESCENDING" }
+    ] },
+    { "collectionGroup": "items", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "ownerUid", "order": "ASCENDING" }, { "fieldPath": "state", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" }
+    ] },
+    { "collectionGroup": "items", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "state", "order": "ASCENDING" }, { "fieldPath": "returnedAt", "order": "ASCENDING" }
     ] }
   ],
   "fieldOverrides": []

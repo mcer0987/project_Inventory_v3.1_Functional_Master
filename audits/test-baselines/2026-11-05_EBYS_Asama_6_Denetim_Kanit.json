@@ -1,0 +1,71 @@
+{
+  "date": "2026-11-05",
+  "branch": "feat/v3.4-ebys-asama-6",
+  "baseCommit": "8350f917b653bc98c245c4415b2f7d67acb68c67",
+  "workingDirectory": "C:/Users/med3pol/Documents/project_Inventory/scratch/ebys-asama-6",
+  "auditedState": "uncommitted Stage 6 working tree",
+  "decision": "SARTLI GO",
+  "findings": [
+    {
+      "id": "A6-01",
+      "priority": "P2",
+      "type": "concurrent identical completion returns success and permission-denied; single commit retained"
+    },
+    {
+      "id": "A6-02",
+      "priority": "P2",
+      "type": "existing document export omits five execution/notification collections"
+    }
+  ],
+  "checks": {
+    "unit": {
+      "pass": 290,
+      "fail": 0
+    },
+    "rules": {
+      "pass": 271,
+      "fail": 0
+    },
+    "xssUnauthorized": 0,
+    "browser": "existing UI test passed using stubbed services",
+    "hostingFiles": 94,
+    "independentScenarios": 7,
+    "concurrentCompletionOutcomes": [
+      "completed",
+      "permission-denied"
+    ],
+    "reassignmentRaceWinner": "pending_acceptance"
+  },
+  "limits": {
+    "liveDeploymentVerified": false,
+    "liveUnitCatalogVerified": false,
+    "exactExpressionHeadroomMeasured": false,
+    "productionCodeModified": false,
+    "testSourceModified": false,
+    "commitOrDeploy": false
+  },
+  "sha256": {
+    "firestore.rules": "dce1a56c87cdcf06eb91dfaca64202fd88e2b67ff82c8066578828fea0451912",
+    "firestore.indexes.json": "1d7140e4b9f8fc6431f4cc47dcfdf5e5f703a7ff65c228bb2e72ed34bf9e66d6",
+    "src/services/ebys-execution-service.js": "76a8aabc22cd2a279eeccaab908834fa2b5874b47ebf574f52f22cef5540b259",
+    "src/services/ebys-process-service.js": "fbc8a9b4845ce04ecc98ea96a6442c3e57df9660a251dcc29e2aa1b23ac9f09f",
+    "src/services/ebys-document-service.js": "55d105ad2e2ed6bf9d64e0c0d985b8546ee3b7da8c1b6c49bede5ef1dd74313c",
+    "src/ui/ebys-execution-ui.js": "7c5c71802444a2d896994a32d96347f4068934776ec732c06a2b5a87cb5358bc",
+    "src/ui/ebys-process-ui.js": "9b8e652e88b264582a16f1236db35de126b91e71bca2e31a905bc19e0193a123",
+    "src/ui/ebys-documents-ui.js": "3db9da2f5fb43532dead64b3ead943f6770c50a2f2bc56fe79d5790631f289c9",
+    "src/utils/ebys-document-schema.js": "1cb8379d253e4659502d9e55653aa2027470054be26566cfa4a202c21c5df8eb",
+    "admin.html": "6f829bd54ebae532bfb882db975578256700da2bace357852f9614163c9bd633",
+    "index.html": "41f4458f5fd80c1d6b5e362766c7405afd9ee0eebcc71590e9f710b5cd3b46f2",
+    "todo-module.js": "a996e0a7698de170e717a3eab63adcd84c24360d44d140dc9818031c698075ac",
+    "tests/rules/ebys-processes.test.mjs": "44c46cdb8f4e3fc2806bc2d3ef710e690d7419af21154008559f5b6f437b21b7",
+    "audits/audit-reports/2026-11-05_EBYS_Asama_6_Uygulama_Raporu.md": "68f80f5e589ee8fa48d08b97ddd2b975d82b676c621771aa43727b002ffd0d8f",
+    "audits/audit-reports/2026-11-05_EBYS_Asama_6_Bagimsiz_Teknik_Guvenlik_Denetimi.md": "99634144f740f24b0d41b6dc1f8f987a9523d3e791a23a577ed72f207b18b3ba",
+    "scratch/asama6-audit-unit.log": "75af4f4d7d87c6c988ab4074000a88d2ed78af2b4765e3f78ec5eaa988389a11",
+    "scratch/asama6-audit-rules.log": "60a565970ff68a5ba52f7dcba34da3eca556d32eb90180ec50682f0686b8454f",
+    "scratch/asama6-audit-xss.log": "5f4f727302febb763c9c2b445564d5c0346bc7145f8ff50973f3c8237c80b4c7",
+    "scratch/asama6-audit-ui.log": "f34b87fcb1e3e23f89f2bd380047c2de45709cb3364edfbe1b884ef584149b38",
+    "scratch/asama6-audit-hosting.log": "061a7775ba6f6d0672af621c49452a40e96c88c5399eac4c9ceeb9dbdb8ec8ce",
+    "scratch/asama6-audit-probes.log": "4eb5594607910d071a669bbffc81525f5d260a615bbc55ae545393ad44bc25d9"
+  },
+  "independentProbeInvocation": "@'\nconst vm=require('node:vm'),assert=require('node:assert/strict'),{readFileSync}=require('node:fs'),{webcrypto}=require('node:crypto');\nprocess.env.FIRESTORE_EMULATOR_HOST='127.0.0.1:8180';\nconst sdk=require('firebase/firestore'),{initializeTestEnvironment,assertFails,assertSucceeds}=require('@firebase/rules-unit-testing');\nconst source=readFileSync('tests/rules/ebys-processes.test.mjs','utf8').replace(/^import .*;\\r?\\n/gm,'').replace(\"projectId:'demo-ebys-processes'\",\"projectId:'demo-asama6-independent'\");\nconst probes=[\n ['Pending access and policy isolation',async()=>{\n await start(['a']);await decide('a',1);\n await assertSucceeds(sdk.getDoc(ref(ctx('c'),'ebysVersions',id)));await assertFails(sdk.getDoc(ref(ctx('b'),'ebysVersions',id)));\n await assertSucceeds(sdk.getDoc(ref(ctx('b'),'ebysExecutionPolicies','internal')));await assertFails(sdk.getDocs(sdk.collection(ctx('b'),root,'ebysExecutionPolicies','items')));\n await assertFails(sdk.updateDoc(ref(ctx('b'),'ebysExecutionPolicies','internal'),{assigneeUid:'b'}));await assertFails(sdk.deleteDoc(ref(ctx('owner'),'ebysExecutionPolicies','internal')));\n await assertFails(sdk.getDoc(ref(env.unauthenticatedContext().firestore(),'ebysExecutionPolicies','internal')));\n }],\n ['Raw SDK unauthorized return and old/new assignee race',async()=>{\n await start(['a']);await decide('a',1);await api('c').execution.acceptExecutionJob(id,1);\n const db=ctx('b'),batch=sdk.writeBatch(db),eventId=id+'__3';\n batch.update(ref(db,'ebysExecutionJobs',id),{state:'returned',revision:3,lastAction:'return',lastActorUid:'b',note:'Forged return',returnedAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp()});\n batch.set(ref(db,'ebysExecutionEvents',eventId),{id:eventId,processId:id,ownerUid:'owner',revision:3,from:'in_progress',to:'returned',action:'return',actorUid:'b',previousAssigneeUid:'c',assigneeUid:'c',note:'Forged return',returnedAt:null,createdAt:sdk.serverTimestamp()});await assertFails(batch.commit());\n await api('c').execution.returnExecutionJob(id,2,'Reassign');await assertFails(sdk.getDoc(ref(ctx('c'),'ebysVersions',id)));\n await api('owner').execution.reassignExecutionJob(id,3,{unitId:'unit',personnelId:'b',dueHours:2,note:'New assignee'});await assertFails(sdk.getDoc(ref(ctx('c'),'ebysVersions',id)));\n const oldDb=ctx('c'),old=sdk.writeBatch(oldDb);old.update(ref(oldDb,'ebysExecutionJobs',id),{state:'in_progress',revision:5,lastAction:'accept',lastActorUid:'c',note:'',returnedAt:null,updatedAt:sdk.serverTimestamp()});\n old.set(ref(oldDb,'ebysExecutionEvents',id+'__5'),{id:id+'__5',processId:id,ownerUid:'owner',revision:5,from:'pending_acceptance',to:'in_progress',action:'accept',actorUid:'c',previousAssigneeUid:'b',assigneeUid:'b',note:'',returnedAt:null,createdAt:sdk.serverTimestamp()});\n await Promise.all([assertFails(old.commit()),api('b').execution.acceptExecutionJob(id,4)]);assert.equal((await sdk.getDoc(ref(ctx('owner'),'ebysExecutionJobs',id))).data().revision,5);\n }],\n ['Concurrent final approval is one execution job',async()=>{\n await start(['a']);const input={processId:id,expectedRevision:1,result:'approved',operationId:webcrypto.randomUUID()};await Promise.all([api('a').decideTask(input),api('a').decideTask(input)]);\n const jobs=await sdk.getDocs(sdk.collection(ctx('owner'),root,'ebysExecutionJobs','items'));assert.equal(jobs.size,1);assert.equal(jobs.docs[0].id,id);\n }],\n ['Closure atomicity and concurrent idempotency',async()=>{\n await start(['a']);await decide('a',1);await api('c').execution.acceptExecutionJob(id,1);const value={note:'Completed',evidenceRef:'Receipt 1',stockOperationId:''};\n for(const col of ['ebysNotifications','ebysDocuments','ebysExecutionEvents']){await assert.rejects(api('c',(r,v)=>r.path.includes('/'+col+'/')?null:v).execution.completeExecutionJob(id,2,value),e=>e.code==='permission-denied');assert.equal((await sdk.getDoc(ref(ctx('owner'),'ebysExecutionJobs',id))).data().state,'in_progress');}\n await assert.rejects(api('c',(r,v)=>r.path.includes('/ebysNotifications/')?{...v,recipientUid:'b'}:v).execution.completeExecutionJob(id,2,value),e=>e.code==='permission-denied');\n const results=await Promise.allSettled([api('c').execution.completeExecutionJob(id,2,value),api('c').execution.completeExecutionJob(id,2,value)]);console.log('COMPLETE outcomes:',results.map(x=>x.status==='fulfilled'?x.value:x.reason.code));assert.ok(results.some(x=>x.status==='fulfilled'));\n assert.equal((await sdk.getDocs(sdk.query(sdk.collection(ctx('owner'),root,'ebysNotifications','items'),sdk.where('recipientUid','==','owner')))).size,1);assert.equal((await sdk.getDoc(ref(ctx('owner'),'ebysExecutionJobs',id))).data().revision,3);\n }],\n ['Admin reassignment versus completion serializes',async()=>{\n await start(['a']);await decide('a',1);await api('c').execution.acceptExecutionJob(id,1);\n const outcomes=await Promise.allSettled([api('owner').execution.reassignExecutionJob(id,2,{unitId:'unit',personnelId:'b',dueHours:4,note:'New owner'}),api('c').execution.completeExecutionJob(id,2,{note:'Done',evidenceRef:'Receipt',stockOperationId:''})]);assert.equal(outcomes.filter(x=>x.status==='fulfilled').length,1);\n const job=(await sdk.getDoc(ref(ctx('owner'),'ebysExecutionJobs',id))).data();assert.equal(job.revision,3);assert.ok(['pending_acceptance','completed'].includes(job.state));if(job.state==='pending_acceptance')await assertFails(sdk.getDoc(ref(ctx('c'),'ebysVersions',id)));console.log('RACE winner state:',job.state);\n }],\n ['Return preserves independent approval permission only',async()=>{\n await api('owner').execution.saveExecutionPolicy('internal','',{unitId:'unit',personnelId:'a',dueHours:2});await start(['a']);await decide('a',1);await api('a').execution.acceptExecutionJob(id,1);await api('a').execution.returnExecutionJob(id,2,'Return');await assertSucceeds(sdk.getDoc(ref(ctx('a'),'ebysVersions',id)));await assert.rejects(api('a').execution.completeExecutionJob(id,3,{note:'No',evidenceRef:'No'}));\n }],\n ['Backup scope observation',async()=>{\n await start(['a']);await decide('a',1);await api('c').execution.acceptExecutionJob(id,1);await api('c').execution.completeExecutionJob(id,2,{note:'Done',evidenceRef:'Receipt'});const backup=await api('owner').documents.exportOwnDocuments();assert.equal(backup.data.ebysDocuments[0].state,'closed');const missing=['ebysExecutionPolicies','ebysExecutionJobs','ebysExecutionEvents','ebysExecutionStockLinks','ebysNotifications'].filter(k=>!(k in backup.data));assert.equal(missing.length,5);console.log('OBSERVATION backup missing:',missing.join(','));\n }]\n];\nconst AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;\nconst run=new AsyncFunction('vm','assert','readFileSync','webcrypto','sdk','initializeTestEnvironment','assertFails','assertSucceeds','probes',\n 'let setup,reset,cleanup;const before=f=>setup=f,after=f=>cleanup=f,beforeEach=f=>reset=f,test=()=>{};\\n'+source+\n '\\ntry{await setup();for(const [name,probe]of probes){await reset();await eval(\"(\"+probe.toString()+\")()\");console.log(\"PASS:\",name);}console.log(\"Independent scenarios:\",probes.length);}finally{await cleanup?.();}');\nrun(vm,assert,readFileSync,webcrypto,sdk,initializeTestEnvironment,assertFails,assertSucceeds,probes).catch(e=>{console.error(e);process.exitCode=1});\n'@ | node *> scratch/asama6-audit-probes.log\n$auditExit=$LASTEXITCODE; Get-Content scratch/asama6-audit-probes.log -Tail 30; exit $auditExit"
+}

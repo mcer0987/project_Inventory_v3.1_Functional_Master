@@ -912,7 +912,27 @@
         </div>
 
         <div id="myTasksTab" class="tab-content">
-            <!-- todo-module.js burayı dolduracak -->
+            <div id="personnelTodo"></div>
+            <section id="ebysExecutionPersonal" class="modern-card mb-4" aria-labelledby="ebysExecutionPersonalTitle">
+                <h3 id="ebysExecutionPersonalTitle">İcra İşlerim</h3>
+                <p>Onayı tamamlanan evraklar için size havale edilen işleri kabul edin, işleyin ve işlem kanıtıyla kapatın.</p>
+                <div data-execution-rows></div>
+                <div class="ebys-process-actions">
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-execution-first>Başa dön</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-execution-next>Sonraki 50</button>
+                    <span role="status" data-execution-status></span>
+                </div>
+            </section>
+            <section id="ebysExecutionNotifications" class="modern-card mb-4" aria-labelledby="ebysExecutionNotificationsTitle">
+                <h3 id="ebysExecutionNotificationsTitle">Evrak Bildirimlerim</h3>
+                <p>Oluşturduğunuz evraklar icra sonrası kapandığında burada bildirim alırsınız.</p>
+                <div data-execution-rows></div>
+                <div class="ebys-process-actions">
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-execution-first>Başa dön</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-execution-next>Sonraki 50</button>
+                    <span role="status" data-execution-status></span>
+                </div>
+            </section>
         </div>
 
         <!-- Satın Alma Talepleri Sekmesi (EBYS) -->

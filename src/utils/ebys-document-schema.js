@@ -1,7 +1,7 @@
 (function () {
     'use strict';
     const kinds = ['incoming', 'outgoing', 'internal'];
-    const states = ['draft', 'registered', 'in_review', 'internally_approved', 'pending_execution', 'archived'];
+    const states = ['draft', 'registered', 'in_review', 'internally_approved', 'pending_execution', 'closed', 'archived'];
     const uuid = () => crypto.randomUUID();
     const text = (value, max, label, required = true) => {
         const out = String(value ?? '').trim().replace(/\r\n/g, '\n');

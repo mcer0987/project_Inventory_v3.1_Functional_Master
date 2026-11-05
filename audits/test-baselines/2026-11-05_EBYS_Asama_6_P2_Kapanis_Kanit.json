@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-05",
+  "branch": "feat/v3.4-ebys-asama-6",
+  "baseCommit": "8350f917b653bc98c245c4415b2f7d67acb68c67",
+  "decision": "KESIN GO",
+  "findings": {
+    "A6-01": "CLOSED",
+    "A6-02": "CLOSED"
+  },
+  "technicalMergeCommitApproval": true,
+  "actualCommitMergeDeploy": false,
+  "rulesUnchangedFromPriorAudit": true,
+  "tests": {
+    "unit": {
+      "pass": 290,
+      "fail": 0
+    },
+    "rules": {
+      "pass": 274,
+      "fail": 0
+    },
+    "xssUnauthorized": 0
+  },
+  "sha256": {
+    "firestore.rules": "dce1a56c87cdcf06eb91dfaca64202fd88e2b67ff82c8066578828fea0451912",
+    "src/services/ebys-execution-service.js": "39eebf7f3ce8083fb7759db4baa2b60db475f52ad60b74fb70a6b9244046d609",
+    "src/services/ebys-document-service.js": "0c22e2a75373669147c1ca91961d1b698512983f07291d187fc91cd0577473db",
+    "tests/rules/ebys-processes.test.mjs": "7e248ced36ff1cef10853cec2a489c44d44597ef54a6a24980c043199c1734b5",
+    "audits/audit-reports/2026-11-05_EBYS_Asama_6_P2_Kapanis_Denetimi.md": "855de0e13ec8aa8fd73101229d53ab2137284c9365cd895de10894e7d4be8750",
+    "scratch/asama6-p2-audit-unit.log": "6e28de1229a7b17ee9b600167788a2133b8e82339b92748597c31f0c675389eb",
+    "scratch/asama6-p2-audit-rules.log": "c0c61bfaa58348eae950cdea740cc511198ed2146e6c460a85ac6dc084b474fd",
+    "scratch/asama6-p2-audit-xss.log": "5f4f727302febb763c9c2b445564d5c0346bc7145f8ff50973f3c8237c80b4c7"
+  }
+}

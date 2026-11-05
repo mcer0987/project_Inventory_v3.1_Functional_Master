@@ -24,7 +24,7 @@ async function open(versionId,documentId,allowStart=true) {
         const run=async(action,again=true)=>{const controls=[...d.querySelectorAll('button')],disabled=controls.map(b=>b.disabled);controls.forEach(b=>b.disabled=true);try{await action();if(d.isConnected){d.close();if(again)await open(versionId,documentId);}}catch(e){status.hidden=false;status.textContent=e.message;}finally{controls.forEach((b,i)=>b.disabled=disabled[i]);}};
         if(!p&&!allowStart){d.append(n("p","Onay rotası henüz yazar tarafından başlatılmadı."));}
         else if(!p){
-            d.append(n('p','Dondurulmuş sürüm için sıralı onay rotası seçin. Belge sahibi göreve atanamaz.'));
+            d.append(n('p','Dondurulmuş sürüm için sıralı onay rotası seçin. Son onayda bu evrak türü için yönetimin tanımladığı icra sorumlusuna iş açılır. Belge sahibi onay görevine atanamaz.'));
             const preset=n('select',null,'form-select mb-2'),manual=n('option','Manuel rota');manual.value='';preset.append(manual);preset.setAttribute('aria-label','Rota şablonu');d.append(preset);
             let templates=[];
             try{templates=await api().listRouteTemplates();}catch(e){status.hidden=false;status.textContent=e.message;}
@@ -56,6 +56,7 @@ async function open(versionId,documentId,allowStart=true) {
                 summary.append(n('p','Şu anda '+name+' tarafından '+(kinds[current.kind]||'karar')+' bekleniyor.'));
                 if(p.activeAssigneeUid!==current.assigneeUid)summary.append(n('small','Vekâleten işlem yapacak kişi atanmıştır. Asıl görevli: '+(current.name||current.assigneeUid)));
             }
+            if (p.state === 'completed') summary.append(n('p', 'İcra ve evrak kapanışı İcra Takibi bölümünde ayrı olarak izlenir.'));
             d.append(summary,n('h4','Onay rotası','ebys-process-heading'));
             const route=n('ol',null,'ebys-process-route');
             for(const [i,step]of p.routeSnapshot.entries()){
@@ -66,6 +67,7 @@ async function open(versionId,documentId,allowStart=true) {
                 row.append(n('span',String(i+1),'ebys-process-step'),info,n('span',stage,'ebys-process-step-state'));route.append(row);
             }
             d.append(route);
+            if (p.lastReason && ['returned', 'rejected', 'withdrawn'].includes(p.state)) d.append(n('p', 'Gerekçe · ' + p.lastReason, 'ebys-process-panel'));
             const label=(parent,text,input)=>{const wrap=n('label',null,'ebys-process-field');wrap.append(n('span',text),input);parent.append(wrap);return input;};
             const reasonField=(parent,text)=>{const reason=n('textarea',null,'form-control');reason.rows=2;reason.maxLength=1000;reason.setAttribute('aria-label',text);label(parent,text,reason);return reason;};
             if(p.state==='active'&&p.activeAssigneeUid===actor){
@@ -101,7 +103,7 @@ async function open(versionId,documentId,allowStart=true) {
                 form.onsubmit=e=>{e.preventDefault();if(form.reportValidity())run(()=>api().withdrawProcess({processId:p.id,expectedRevision:p.revision,reason:reason.value,operationId:crypto.randomUUID()}));};
                 box.append(form);d.append(box);
             }
-            if(p.ownerUid===actor&&['returned','rejected','withdrawn'].includes(p.state))d.append(btn('Yeni sürüm hazırla',()=>run(async()=>{const data=await window.AppModules.EBYSDocuments.readDocument(p.documentId);await window.AppModules.EBYSDocuments.reopenDraft({documentId:p.documentId,expectedRevision:data.head.revision,operationId:crypto.randomUUID()});window.AppModules.EBYSDocumentsUI?.open(p.documentId);},false)));
+            if(p.ownerUid===actor&&['returned','rejected','withdrawn'].includes(p.state))d.append(btn('Yeni sürüm hazırla',()=>run(async()=>{const data=await window.AppModules.EBYSDocuments.readDocument(p.documentId);if(data.head.currentVersionId!==p.id)throw new Error('Bu evrak için daha yeni bir sürüm hazırlanmış.');await window.AppModules.EBYSDocuments.reopenDraft({documentId:p.documentId,expectedRevision:data.head.revision,operationId:crypto.randomUUID()});window.AppModules.EBYSDocumentsUI?.open(p.documentId);},false)));
         }
         const footer=n('footer',null,'ebys-process-footer');footer.append(n('small',p?.state==='active'?'Bu pencereyi kapatmak süreci iptal etmez.':'Pencereyi kapatabilirsiniz.'),btn('Kapat',()=>d.close()));d.append(footer);
     }catch(error){window.showAppAlert?.(error.message,'error');}
@@ -193,11 +195,13 @@ function registerQueue(key, host, subscribe, render) {
     });
 }
 registerQueue('ebysMyTasks',document.getElementById('ebysMyTasks'),(...args)=>api().subscribeMyTasks(...args),renderTasks);
-registerQueue('ebysMyReturned',document.getElementById('ebysMyReturned'),(...args)=>api().subscribeMyProcesses(...args),(processes,host)=>{
+registerQueue('ebysMyReturned',document.getElementById('ebysMyReturned'),(...args)=>api().subscribeMyReturnedDocuments(...args),(documents,host)=>{
     host.replaceChildren();
-    for(const p of processes.filter(p=>['returned','rejected','withdrawn'].includes(p.state))){
-        const row=n('article',null,'modern-card mb-2');
-        row.append(n('p',states[p.state]+' · '+(p.lastReason||'')),btn('Süreç / Yeni sürüm',()=>open(p.id,p.documentId)));host.append(row);
+    for (const head of documents) {
+        const row = n('article', null, 'modern-card mb-2');
+        row.append(n('p', states[head.state] + ' · ' + (head.registrationNo || 'Evrak ' + head.id.slice(0, 8))),
+            btn('Gerekçe ve yeni sürüm', () => open(head.currentVersionId, head.id)));
+        host.append(row);
     }
     if(host.children.length===0)host.append(n('p','Bu sayfada geri dönen evrakınız yok.'));
 });

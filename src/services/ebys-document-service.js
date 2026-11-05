@@ -1,4 +1,4 @@
-import { doc, collection, query, where, getDocFromServer, getDocs, getCountFromServer, runTransaction, serverTimestamp, onSnapshot, orderBy, limit, startAfter } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+import { doc, collection, query, where, getDocFromServer, getDocsFromServer, getCountFromServer, runTransaction, serverTimestamp, onSnapshot, orderBy, limit, startAfter } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import { fireDb } from './firebase-handler.js';
 import '../utils/ebys-document-schema.js';
 
@@ -6,7 +6,16 @@ const S = () => window.AppModules.EBYSDocumentSchema;
 const root = () => window.AppEnv.COLLECTION_ROOT;
 const uid = () => { const id = window.userAuth?.uid; if (!id) throw new Error('Oturum açmalısınız.'); return id; };
 const ref = (col, id) => doc(fireDb, root(), col, 'items', id);
-export const EBYS_COLLECTION_REGISTRY = Object.freeze(['ebysDocuments', 'ebysDrafts', 'ebysVersions', 'ebysRegistrationIds', 'ebysOperations', 'ebysEvents', 'ebysProcesses', 'ebysTasks', 'ebysProcessOperations', 'ebysProcessEvents', 'ebysRouteTemplates']);
+const ownerCollections = ['ebysDocuments', 'ebysDrafts', 'ebysVersions', 'ebysRegistrationIds', 'ebysOperations', 'ebysEvents',
+    'ebysProcesses', 'ebysTasks', 'ebysProcessOperations', 'ebysProcessEvents', 'ebysRouteTemplates'];
+const executionAdminScopes = Object.freeze({
+    ebysExecutionPolicies: 'current-policies-referenced-by-exported-jobs',
+    ebysExecutionEvents: 'events-for-exported-jobs',
+    ebysExecutionStockLinks: 'stock-links-referenced-by-exported-jobs'
+});
+export const EBYS_COLLECTION_REGISTRY = Object.freeze([
+    ...ownerCollections, 'ebysExecutionJobs', 'ebysNotifications', ...Object.keys(executionAdminScopes)
+]);
 const check = (head, expected) => {
     if (!head || head.ownerUid !== uid()) throw new Error('Evrakın yazarı değilsiniz.');
     if (!Number.isInteger(expected) || head.revision !== expected) throw new Error('Evrak değişti; yeniden açın.');
@@ -139,13 +148,66 @@ export async function countDocuments() {
     return Object.fromEntries(['total', 'draft', 'registered', 'in_review'].map((key, i) => [key, counts[i].data().count]));
 }
 export async function exportOwnDocuments() {
-    const ownerUid = uid(), data = {};
-    for (const name of EBYS_COLLECTION_REGISTRY) {
-        const snapshot = await getDocs(query(collection(fireDb, root(), name, 'items'), where('ownerUid', '==', ownerUid)));
-        data[name] = snapshot.docs.map(d => d.data());
+    const ownerUid = uid(), exportRoot = root(), startedAt = new Date().toISOString();
+    const isAdmin = window.isDbAdmin?.() === true;
+    const data = {}, collections = {};
+    const assertSession = () => {
+        if (window.userAuth?.uid !== ownerUid || root() !== exportRoot) throw new Error('Oturum veya ortam değişti; yedeği yeniden alın.');
+    };
+    const read = async (name, condition) => {
+        assertSession();
+        return (await getDocsFromServer(query(collection(fireDb, exportRoot, name, 'items'), condition))).docs;
+    };
+    const add = (name, rows, scope, details = {}) => {
+        data[name] = rows;
+        collections[name] = { status: 'included', scope, count: rows.length, ...details };
+    };
+    const identified = d => ({ ...d.data(), id: d.id });
+
+    for (const name of ownerCollections) {
+        const docs = await read(name, where('ownerUid', '==', ownerUid));
+        add(name, docs.map(d => d.data()), 'owner');
     }
-    if (ownerUid !== uid()) throw new Error('Oturum değişti; yedeği yeniden alın.');
-    return { schemaVersion: 1, root: root(), ownerUid, exportedAt: new Date().toISOString(), consistency: 'sequential-reads', attachmentMode: 'none', data };
+
+    const ownJobs = await read('ebysExecutionJobs', where('ownerUid', '==', ownerUid));
+    const assignedJobs = await read('ebysExecutionJobs', where('assigneeUid', '==', ownerUid));
+    const jobs = [...new Map([...ownJobs, ...assignedJobs].map(d => [d.id, identified(d)])).values()];
+    add('ebysExecutionJobs', jobs, 'owner-or-assignee');
+    const notices = await read('ebysNotifications', where('recipientUid', '==', ownerUid));
+    add('ebysNotifications', notices.map(identified), 'recipient');
+
+    if (isAdmin) {
+        // Politika ve stok bağı listelenemez. Yalnız dışa aktarılan işlerdeki doğrudan referanslar okunur.
+        const readReferences = async (name, references) => {
+            const ids = new Set(references.filter(Boolean)), rows = [], missingReferences = [];
+            for (const id of ids) {
+                assertSession();
+                const snap = await getDocFromServer(doc(fireDb, exportRoot, name, 'items', id));
+                if (snap.exists()) rows.push(identified(snap));
+                else missingReferences.push(id);
+            }
+            add(name, rows, executionAdminScopes[name], { referenceCount: ids.size, missingReferences });
+        };
+        await readReferences('ebysExecutionPolicies', jobs.map(job => job.policyId));
+        const events = [], processIds = jobs.map(job => job.id);
+        for (let offset = 0; offset < processIds.length; offset += 20) {
+            const docs = await read('ebysExecutionEvents', where('processId', 'in', processIds.slice(offset, offset + 20)));
+            events.push(...docs.map(identified));
+        }
+        add('ebysExecutionEvents', events, executionAdminScopes.ebysExecutionEvents);
+        await readReferences('ebysExecutionStockLinks', jobs.map(job => job.stockOperationId));
+    } else {
+        for (const [name, scope] of Object.entries(executionAdminScopes)) {
+            add(name, [], scope, { status: 'excluded', reason: 'admin-required' });
+        }
+    }
+
+    assertSession();
+    const exportedAt = new Date().toISOString();
+    return {
+        schemaVersion: 1, root: exportRoot, ownerUid, exportedAt, consistency: 'sequential-reads', attachmentMode: 'none', data,
+        manifest: { version: 1, role: isAdmin ? 'admin' : 'member', startedAt, finishedAt: exportedAt, collections }
+    };
 }
 window.AppModules = window.AppModules || {};
 window.AppModules.EBYSDocuments = { saveDraft, freezeVersion, registerDocument, readDocument, listDocuments, countDocuments, exportOwnDocuments, reopenDraft };

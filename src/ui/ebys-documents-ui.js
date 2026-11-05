@@ -1,9 +1,10 @@
 import '../services/ebys-document-service.js';
 import './ebys-process-ui.js';
+import './ebys-execution-ui.js';
 const api = () => window.AppModules.EBYSDocuments;
 const schema = () => window.AppModules.EBYSDocumentSchema;
 const labels = { incoming: 'Gelen Evrak Defteri', outgoing: 'Giden Evrak Defteri', internal: 'İç Yazışmalar' };
-const states = { draft: 'Taslak', registered: 'Kayıtlı', in_review: 'İncelemede / rota bekliyor', internally_approved: 'Onaylandı', returned:'İade edildi',rejected:'Reddedildi',withdrawn:'Geri çekildi',pending_execution: 'İcrada', archived: 'Arşivde' };
+const states = { draft: 'Taslak', registered: 'Kayıtlı', in_review: 'İncelemede / rota bekliyor', internally_approved: 'Kurum içi onay tamamlandı', closed: 'Kapandı', returned:'İade edildi',rejected:'Reddedildi',withdrawn:'Geri çekildi',pending_execution: 'İcrada', archived: 'Arşivde' };
 const node = (tag, text, css) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (css) n.className = css; return n; };
 const button = (text, action, css = 'btn btn-sm btn-outline-primary') => { const b = node('button', text, css); b.type = 'button'; b.onclick = action; return b; };
 let kind = 'incoming', rows = [], cursor = null, unsubscribe = null, dialog = null, syncAllowed = false, countsRevision = 0;
@@ -142,7 +143,7 @@ async function open(id = null) {
             }, 'btn btn-outline-primary'));
         } else form.querySelectorAll('input,select,textarea').forEach(n => { n.disabled = true; });
         if (frozen) actions.append(button('Onay rotası / Süreç',()=>window.AppModules.EBYSProcessUI.open(head.currentVersionId,head.id)));
-        if (!head.registrationNo) actions.append(button('Kesin kayıt numarası al', () => act('register'), 'btn btn-outline-success'));
+        if (!head.registrationNo && ['draft', 'in_review'].includes(head.state)) actions.append(button('Kesin kayıt numarası al', () => act('register'), 'btn btn-outline-success'));
         actions.append(button('Çıktı önizleme', () => preview(head, frozen ? data : input())));
         actions.append(button('Kapat', () => dialog.close(), 'btn btn-secondary'));
         form.append(actions); form.onsubmit = e => e.preventDefault(); dialog.append(form); document.body.append(dialog); dialog.showModal();

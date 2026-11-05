@@ -1,5 +1,6 @@
 import { doc, collection, query, where, orderBy, limit, startAfter, getDocFromServer, getDocs, runTransaction, serverTimestamp, Timestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import { fireDb } from './firebase-handler.js';
+import './ebys-execution-service.js';
 import '../utils/ebys-document-schema.js';
 import '../utils/ebys-process-schema.js';
 const S = () => window.AppModules.EBYSDocumentSchema;
@@ -84,7 +85,9 @@ export async function decideTask(input) {
             nextTask = task(next, step, next.activeAssigneeUid, previous);
         } else { next.state = input.result === 'approved' ? 'completed' : input.result; next.activeAssigneeUid = ''; }
         const head = next.state !== 'active' ? (await tx.get(ref('ebysDocuments', p.documentId))).data() : null;
+        const job = next.state === 'completed' ? await window.AppModules.EBYSExecution.assignExecutionJob(tx, next, head) : null;
         tx.set(ref('ebysProcesses', p.id), next);
+        if (job) tx.set(ref('ebysExecutionJobs', job.id), job);
         if (head) tx.set(ref('ebysDocuments',p.documentId), { ...head, state: next.state === 'completed' ? 'internally_approved' : next.state, revision: head.revision+1, updatedAt: serverTimestamp() });
         tx.set(currentRef, nextTask?.id === current.id ? nextTask : closed);
         if (nextTask && nextTask.id !== current.id) tx.set(ref('ebysTasks', nextTask.id), nextTask);
@@ -177,8 +180,11 @@ export function subscribeMyTasks(callback, onError, cursor = null) {
     return onSnapshot(query(collection(fireDb, window.AppEnv.COLLECTION_ROOT, 'ebysTasks', 'items'), where('assigneeUid', '==', uid()), orderBy('updatedAt', 'desc'), ...(cursor ? [startAfter(cursor)] : []), limit(50)), snap => callback(snap.docs.map(d => ({ ...d.data(), _cursor:d }))), onError);
 }
 export async function listMyProcesses() { const s = await getDocs(query(collection(fireDb, window.AppEnv.COLLECTION_ROOT, 'ebysProcesses', 'items'), where('ownerUid', '==', uid()), limit(50))); return s.docs.map(d => d.data()); }
-export function subscribeMyProcesses(callback,onError,cursor=null) {
-    return onSnapshot(query(collection(fireDb,window.AppEnv.COLLECTION_ROOT,'ebysProcesses','items'),where('ownerUid','==',uid()),orderBy('updatedAt','desc'),...(cursor?[startAfter(cursor)]:[]),limit(50)),s=>callback(s.docs.map(d=>({...d.data(),_cursor:d}))),onError);
+export function subscribeMyReturnedDocuments(callback, onError, cursor = null) {
+    const documents = collection(fireDb, window.AppEnv.COLLECTION_ROOT, 'ebysDocuments', 'items');
+    return onSnapshot(query(documents, where('ownerUid', '==', uid()), where('state', 'in', ['returned', 'rejected', 'withdrawn']),
+        orderBy('updatedAt', 'desc'), ...(cursor ? [startAfter(cursor)] : []), limit(50)),
+        snap => callback(snap.docs.map(d => ({ ...d.data(), _cursor: d }))), onError);
 }
 window.AppModules = window.AppModules || {};
-window.AppModules.EBYSProcesses = { startProcess, decideTask, withdrawProcess, delegateTask, getProcess, getVersion, subscribeMyTasks, listMyProcesses, subscribeMyProcesses,createRouteTemplate,listRouteTemplates,watchTaskContext };
+window.AppModules.EBYSProcesses = { startProcess, decideTask, withdrawProcess, delegateTask, getProcess, getVersion, subscribeMyTasks, listMyProcesses, subscribeMyReturnedDocuments,createRouteTemplate,listRouteTemplates,watchTaskContext };

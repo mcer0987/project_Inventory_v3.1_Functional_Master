@@ -1,4 +1,4 @@
-// [WHY]: v3.4 EBYS (Aşama 1–5) yeniliklerini birim sorumlusu, imzacı ve personele uzun metin yerine görsel,
+// [WHY]: v3.4 EBYS (Aşama 1–6) yeniliklerini birim sorumlusu, imzacı ve personele uzun metin yerine görsel,
 //        adım adım bir rehberle anlatmak. Veri okumaz/yazmaz; yalnız statik içerik ve yerel simülasyon içerir.
 // [HOW]: Modal ilk açılışta kurulur. Tüm düğümler createElement + textContent ile üretilir (innerHTML yok).
 //        Erişilebilirlik: role=dialog, dikey tablist (ok tuşları), Escape ile kapanma, odak hapsi ve odağın geri dönüşü.
@@ -6,6 +6,7 @@
 const SECTIONS = [
     { id: 'books', icon: 'fa-book', title: 'Evrak Defterleri', tag: 'Aşama 4' },
     { id: 'sign', icon: 'fa-signature', title: 'İmza Süreci', tag: 'Aşama 5' },
+    { id: 'execution', icon: 'fa-clipboard-check', title: 'İcra ve Kapanış', tag: 'Aşama 6' },
     { id: 'purchase', icon: 'fa-cart-shopping', title: 'Satın Alma', tag: 'Aşama 3' },
     { id: 'org', icon: 'fa-sitemap', title: 'Kurumsal Yapı', tag: 'Aşama 2' },
     { id: 'faq', icon: 'fa-circle-question', title: 'SSS', tag: 'Yardım' },
@@ -36,9 +37,9 @@ const STEP_KINDS = [
 ];
 
 const DECISIONS = [
-    { tone: 'green', icon: 'fa-circle-check', title: 'Onayla', text: 'Evrak bir sonraki imzacıya geçer.' },
+    { tone: 'green', icon: 'fa-circle-check', title: 'Onayla', text: 'Evrak sıradaki imzacıya geçer. Son onayda icra işi açılır.' },
     { tone: 'amber', icon: 'fa-rotate-left', title: 'Yazara iade et', text: 'Gerekçe yazılması zorunludur; yazar düzeltip yeniden sunar.' },
-    { tone: 'red', icon: 'fa-ban', title: 'Reddet', text: 'Gerekçe yazılması zorunludur; süreç sona erer.' },
+    { tone: 'red', icon: 'fa-ban', title: 'Reddet', text: 'Gerekçeli red, bu sürümün onay sürecini kapatır. Yazar gerekçeyi görüp yeni sürüm hazırlayabilir.' },
 ];
 
 const INVOICE = [
@@ -65,7 +66,7 @@ const FAQ = [
     ['İzne çıkacağım; bekleyen onaylarım ne olacak?', 'Yönetici bekleyen görevinizi en çok 90 gün için başka bir personele devredebilir. Kayıtta asıl görevli olarak adınız görünmeye devam eder.'],
     ['Dövizli talebin tutarı kur değişince değişir mi?', 'Hayır. Kur, talebin ilk onayında belgeye sabitlenir; sonraki kur güncellemeleri o talebin TL karşılığını etkilemez.'],
     ['Kayıt numarası neden bu kadar uzun?', 'Numara kurum kodu, kayıt günü ve tahmin edilemeyen benzersiz bir ekten oluşur; iki evrak asla aynı numarayı almaz.'],
-    ['İade ile red arasındaki fark nedir?', 'İade düzeltme ister ve evrak yazara döner. Red süreci sonlandırır. İkisinde de gerekçe yazmak zorunludur.'],
+    ['İade ile red arasındaki fark nedir?', 'Onay iadesi yazardan düzeltme ister. Red, mevcut sürümün onayını kapatır. Yazar iki kararı da Bana Gelen Onaylar → Geri dönen evraklarım bölümünde gerekçesiyle görür. İcra iadesi ise onaydan sonra işi yeniden havale için yönetime gönderir.'],
 ];
 
 // ─── Güvenli DOM yardımcıları ──────────────────────────────────────────────────────────────────────────────────
@@ -189,7 +190,7 @@ function renderSign() {
             status.textContent = done ? 'İmzalandı' : returned ? 'İade etti' : active ? 'Sırada' : 'Görmüyor';
         });
         if (outcome === 'returned') live.textContent = `${CHAIN[step].who} evrakı gerekçesiyle yazara iade etti. Yazar düzeltip yeniden sunar.`;
-        else if (step >= CHAIN.length) live.textContent = 'Zincir tamamlandı: kurum içi onay alındı.';
+        else if (step >= CHAIN.length) live.textContent = 'Kurum içi onay tamamlandı. Evrakın kapatılması için icra sorumlusuna iş açılır.';
         else live.textContent = `Görev şu an yalnız ${CHAIN[step].who} için açık. Sonraki imzacılar evrakı henüz göremez.`;
         approve.disabled = step >= CHAIN.length || !!outcome;
         ret.disabled = step >= CHAIN.length || !!outcome;
@@ -303,6 +304,34 @@ function renderOrg() {
     return root;
 }
 
+function renderExecution() {
+    const root = el('div', { cls: 'ebys-sc-section' });
+    root.append(sectionHead('Aşama 6 · İcra ve Kapanış', 'Son onaydan evrakın kapanışına',
+        'Son onay evrakı sorumluya havale eder. İşin kabulü, uygulanması ve kanıtla tamamlanması ayrı adımlardır.'));
+
+    const cards = document.getElementById('ebysExecutionAdmin') ? [
+        { tone: 'indigo', icon: 'fa-sitemap', title: 'Havale tanımını hazırlayın',
+            text: 'Talep ve Süreçler → İcra Takibi → Havale tanımları. Önce evrak türü ve evrakın bağlı birimi birlikte aranır. Özel tanım yoksa kaydettiğiniz tür varsayılanı kullanılır. Geçerli bir sorumlu bulunamazsa son onay bekler.' },
+        { tone: 'amber', icon: 'fa-rotate-left', title: 'İadeyi yeniden havale edin',
+            text: 'Havale Bekleyen İadeler bölümünde gerekçeyi, ilk hedefi ve yönetimde geçen süreyi görün. Yeniden havale, sorumluya ayrı bir hedef verir.' },
+        { tone: 'sky', icon: 'fa-link', title: 'Stok işlemini doğrulayın',
+            text: 'İcra işi detayından defterdeki mevcut stok hareketini inceleyip gerekçeyle bu işe bağlayın. Stok hareketi depo işlemiyle kaydedilir.' },
+        { tone: 'green', icon: 'fa-box-archive', title: 'Kapanışı ve yedeği izleyin',
+            text: 'Tamamlanan evrakı İcra Takibi üzerinden arşivleyin. Evraklarımı yedekle, yetkili icra kayıtlarını ve bunların kapsam bilgisini dosyaya ekler.' },
+    ] : [
+        { tone: 'indigo', icon: 'fa-clipboard-check', title: 'Size atanan işi kabul edin',
+            text: 'Görevlerim → İcra İşlerim bölümünde evrakın onaylanmış sürümünü açın ve Kabul Et seçeneğini kullanın.' },
+        { tone: 'green', icon: 'fa-circle-check', title: 'Sonucu ve kanıtı kaydedin',
+            text: 'İşlem sonucunu ve tutanak gibi bir kanıt referansını girip Tamamla seçeneğini kullanın. Stok referansı gerekiyorsa yönetimin bu işe bağladığı hareket numarasını girin.' },
+        { tone: 'amber', icon: 'fa-rotate-left', title: 'Gerekçeyle iade edin',
+            text: 'İşi yürütemiyorsanız gerekçeyle iade edin. Yönetici işi yeniden havale etmek üzere İcra Takibi ekranında görür.' },
+        { tone: 'sky', icon: 'fa-bell', title: 'Evrakın kapanışını görün',
+            text: 'Evrak sahibi, iş tamamlandığında Görevlerim → Evrak Bildirimlerim bölümünde kapanış bildirimini görür.' },
+    ];
+    root.append(el('div', { cls: 'ebys-sc-bento cols-2' }, cards.map(miniCard)));
+    return root;
+}
+
 // ─── 5 · SSS ───────────────────────────────────────────────────────────────────────────────────────────────────
 function renderFaq() {
     const root = el('div', { cls: 'ebys-sc-section' });
@@ -313,7 +342,7 @@ function renderFaq() {
     return root;
 }
 
-const RENDERERS = { books: renderBooks, sign: renderSign, purchase: renderPurchase, org: renderOrg, faq: renderFaq };
+const RENDERERS = { books: renderBooks, sign: renderSign, execution: renderExecution, purchase: renderPurchase, org: renderOrg, faq: renderFaq };
 
 // ─── Modal kabuğu ──────────────────────────────────────────────────────────────────────────────────────────────
 let modal = null, lastFocus = null, currentPanel = null;
@@ -366,7 +395,7 @@ function build() {
                 el('span', { cls: 'ebys-sc-logo' }, icon('fa-wand-magic-sparkles')),
                 el('div', {}, [
                     el('h2', { cls: 'ebys-sc-heading', text: 'EBYS Rehberi', attrs: { id: 'ebysShowcaseTitle' } }),
-                    el('p', { cls: 'ebys-sc-sub', text: 'Evrak, imza ve satın alma süreçlerinin nasıl işlediğini örneklerle gösterir. Buradaki örnekler gerçek kayıtları değiştirmez.', attrs: { id: 'ebysShowcaseDesc' } }),
+                    el('p', { cls: 'ebys-sc-sub', text: 'Evrak, imza, icra ve satın alma süreçlerinin nasıl işlediğini örneklerle gösterir. Buradaki örnekler gerçek kayıtları değiştirmez.', attrs: { id: 'ebysShowcaseDesc' } }),
                 ]),
             ]),
             badge('v3.4', 'indigo'), close,
