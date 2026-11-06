@@ -19,6 +19,9 @@
         demirbas: 'Bu ürün demirbaştır. Demirbaş çıkışını yalnız yönetici yapar; "Envanter Talep Et" ile yöneticiye talep gönderin.',
         unknownType: 'Bu ürünün türü ürün türleri listesinde birebir bulunamadı; çıkışı yönetici yapabilir ya da "Envanter Talep Et" ile talep gönderebilirsiniz.',
         noProduct: 'Ürün bulunamadı; liste güncellenmiş olabilir.',
+        // Arayüz ürünü sarf bulduğu hâlde sunucu (firestore.rules) yazmayı reddettiyse: kurallar yayında güncel değil ya da ürün
+        // türü bu arada değişmiş olabilir. Personele hem nedeni hem talep yolunu söyler (önceki "yalnız sarf" mesajı yanıltıyordu).
+        serverDenied: 'Çıkış sunucuda kabul edilmedi; hiçbir değişiklik yapılmadı. Ürün sarf göründüğü hâlde bu mesajı alıyorsanız sunucu kuralları henüz güncellenmemiş ya da ürün türü bu arada değişmiş olabilir; yöneticiye bildirin. Ürüne hemen ihtiyacınız varsa "Envanter Talep Et" ile talep gönderebilirsiniz.',
     });
 
     function productTypeName(product) {

@@ -13,7 +13,7 @@ const ROUTES = [
     { cols: ['units'], renders: ['renderUnitManagement'] },
     { cols: ['tasks'], renders: ['renderTodoTab', 'checkPendingTasks'] },
 ];
-const INVENTORY_MGMT_COLS = ['b1', 'b2', 'b3', 'requests', 'assignments'];
+const INVENTORY_MGMT_COLS = ['b1', 'b2', 'b3', 'requests', 'assignments', 'returnRequests'];   // returnRequests: "İade Onayı Bekliyor" rozeti
 
 const dirty = new Set();
 let scheduled = false;

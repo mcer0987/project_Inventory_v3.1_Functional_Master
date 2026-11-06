@@ -20,6 +20,7 @@ window.inventoryManagementModule = {
     typeFilter: 'all',       // 'all' | 'Kalıcı Zimmet' | 'Geçici Zimmet' | 'Sarf Malzeme İhtiyacı'
     assignTypeFilter: 'all', // 'all' | 'request' | 'b3'
     priorityFilter: 'all',   // 'all' | 'Kritik' | 'Yüksek' | 'Orta' | 'Düşük'
+    stateFilter: 'all',      // 'all' | 'teslimBekliyor' | 'zimmetli' | 'iadeBekliyor' | 'iade'  (Faz 3 · B-3)
     sortOrder: 'newest'      // 'newest' | 'oldest'
   },
 
@@ -31,8 +32,10 @@ window.inventoryManagementModule = {
    * @returns {Array} Normalize edilmiş zimmet kayıtları
    */
   // [HOW] (3.7): Liste zimmet servisinden gelir (personelin Kişi Envanterim ekranıyla aynı kaynak ve kurallar).
+  // Faz 3 (B-3): durum zimmet servisinin tek kuralından (assignmentState) — onaylanıp teslim alınmamış zimmet "Teslim Bekliyor".
   getNormalizedAssignments: function () {
-    return window.AssignmentService.getAssignments().map(a => ({
+    const A = window.AssignmentService;
+    return A.getAssignments().map(a => ({
       _source: a._source,
       _id: a._id,
       personel: a.personel,
@@ -43,7 +46,9 @@ window.inventoryManagementModule = {
       not: a.not,
       sn: a.sn,
       envanterNo: a.envanterNo,
-      durum: a.iadeEdildi ? 'İade Edildi' : (a._source === 'request' ? (a.teslimAlindi ? 'Teslim Alındı' : 'Onaylandı') : 'Zimmetli'),
+      durumKey: A.assignmentState(a),
+      durum: A.STATE_LABELS[A.assignmentState(a)],
+      teslimAlindi: a.teslimAlindi,
       talepTuru: a.talepTuru,
       oncelik: a.oncelik,
       iadeTarihi: a.iadeTarihi,
@@ -57,7 +62,7 @@ window.inventoryManagementModule = {
   // 2. FİLTRE & ARAMA UYGULAMASI
   // ──────────────────────────────────────────
   applyFilters: function (assignments) {
-    const { searchTerm, typeFilter, assignTypeFilter, priorityFilter, sortOrder } = this.state;
+    const { searchTerm, typeFilter, assignTypeFilter, priorityFilter, stateFilter, sortOrder } = this.state;
     let result = [...assignments];
 
     if (searchTerm) {
@@ -72,6 +77,7 @@ window.inventoryManagementModule = {
     if (typeFilter !== 'all') result = result.filter(a => a.talepTuru === typeFilter);
     if (assignTypeFilter !== 'all') result = result.filter(a => a._source === assignTypeFilter);
     if (priorityFilter !== 'all') result = result.filter(a => a.oncelik === priorityFilter);
+    if (stateFilter && stateFilter !== 'all') result = result.filter(a => a.durumKey === stateFilter);
     if (sortOrder === 'oldest') result.reverse();
 
     return result;
@@ -85,6 +91,7 @@ window.inventoryManagementModule = {
     const temporary = assignments.filter(a => a.talepTuru === 'Geçici Zimmet' && !a.iadeEdildi).length;
     const permanent = assignments.filter(a => a.talepTuru === 'Kalıcı Zimmet' && !a.iadeEdildi).length;
     const returned = assignments.filter(a => a.iadeEdildi).length;
+    const awaiting = assignments.filter(a => a.durumKey === 'teslimBekliyor').length;
     const pending = (window.data?.requests || []).filter(r => {
       const d = (r.durum || '').toUpperCase();
       return d === 'BEKLEMEDE' || d === 'BEKLİYOR' || d === 'BEKLIYOR' || d === '';
@@ -96,6 +103,7 @@ window.inventoryManagementModule = {
     set('kpi-perm', permanent);
     set('kpi-returned', returned);
     set('kpi-pending', pending);
+    set('kpi-awaiting', awaiting);
   },
 
   // ──────────────────────────────────────────
@@ -137,6 +145,7 @@ window.inventoryManagementModule = {
         { id: 'kpi-perm', label: 'Kalıcı Zimmet', icon: 'fa-thumbtack', color: '#8e44ad', bg: 'rgba(142,68,173,0.1)' },
         { id: 'kpi-temp', label: 'Geçici / Ödünç', icon: 'fa-clock', color: '#e67e22', bg: 'rgba(230,126,34,0.1)' },
         { id: 'kpi-returned', label: 'İade Edildi', icon: 'fa-undo-alt', color: '#27ae60', bg: 'rgba(39,174,96,0.1)' },
+        { id: 'kpi-awaiting', label: 'Teslim Bekleyen', icon: 'fa-hourglass-start', color: '#d97706', bg: 'rgba(217,119,6,0.1)' },
         { id: 'kpi-pending', label: 'Bekleyen Talep', icon: 'fa-hourglass-half', color: '#e74c3c', bg: 'rgba(231,76,60,0.1)' }
       ].map(k => `
               <div style="background:${escapeHtml(k.bg)}; border:1px solid ${escapeHtml(k.color)}33; border-radius:14px; padding:16px; text-align:center; transition:0.2s;"
@@ -171,6 +180,14 @@ window.inventoryManagementModule = {
               <option value="Yüksek">🟠 Yüksek</option>
               <option value="Orta">🟡 Orta</option>
               <option value="Düşük">🟢 Düşük</option>
+            </select>
+            <select id="invStateFilter" aria-label="Zimmet durumu" onchange="window.inventoryManagementModule.state.stateFilter=this.value; window.inventoryManagementModule.renderTable();"
+              style="padding:10px 14px; border-radius:10px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px; cursor:pointer;">
+              <option value="all">📋 Tüm Durumlar</option>
+              <option value="teslimBekliyor">⏳ Teslim Bekliyor</option>
+              <option value="zimmetli">📌 Zimmetli</option>
+              <option value="iadeBekliyor">↩️ İade Onayı Bekliyor</option>
+              <option value="iade">✅ İade Edildi</option>
             </select>
             <select id="invSortOrder" onchange="window.inventoryManagementModule.state.sortOrder=this.value; window.inventoryManagementModule.renderTable();"
               style="padding:10px 14px; border-radius:10px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px; cursor:pointer;">
@@ -250,9 +267,8 @@ window.inventoryManagementModule = {
     tbody.innerHTML = filtered.map((a, i) => {
       const pColor = priorityColors[a.oncelik] || priorityColors['Orta'];
       const tColor = typeColors[a.talepTuru] || typeColors['Kalıcı Zimmet'];
-      const durumBadge = a.iadeEdildi
-        ? `<span style="background:#d1fae5; color:#065f46; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">✅ İade Edildi</span>`
-        : `<span style="background:#dbeafe; color:#1e40af; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">📌 Zimmetli</span>`;
+      // Faz 3 (B-3): dört durum, Kişi Envanteri ile aynı rozet (style.css .zim-state)
+      const durumBadge = window.zimmetStateBadge(a.durumKey);
 
       const returnDateInfo = a.talepTuru === 'Geçici Zimmet' && a.iadeTarihi
         ? `<br><small style="color:var(--color-warning); font-weight:600;">📅 İade: ${escapeHtml(a.iadeTarihi)}</small>`
@@ -714,66 +730,13 @@ window.inventoryManagementModule = {
       return;
     }
 
-    const item = (window.data.b3 || []).find(sameId);
-    if (!item) { alert('Kayıt bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-    if (item.iadeEdildi) { alert('Bu zimmet zaten iade edilmiş.', 'info'); return; }
-
-    const view = window.Schema.normalizeB3(item);
-    const qty = view.adet || 1;
-    const stockLinked = view.kaynakDepo === 'b1' || view.kaynakDepo === 'b2';
-    let target = null;
-    if (stockLinked) {
-      const choice = await window.showWarehousePromptModal({ allowNoReturn: true });
-      if (choice === null) { alert('İşlem iptal edildi.', 'info'); return; }
-      target = choice === 'none' ? null : choice;
-    } else {
-      const ok = await (typeof showCustomConfirm === 'function'
-        ? showCustomConfirm('Zimmetten Düş', 'Bu zimmetin stok bağlantısı yok; yalnız kayıt kapatılacak. Onaylıyor musunuz?')
-        : Promise.resolve(window.confirm('Zimmet kaydı kapatılsın mı?')));
-      if (!ok) return;
-    }
-
-    let product = null;
-    if (target) {
-      const list = window.data[target] || [];
-      product = item.productId != null ? list.find(p => String(p.id) === String(item.productId)) : null;
-      if (!product) {
-        const name = String(view.urunAciklama === '-' ? '' : view.urunAciklama).trim().toLocaleLowerCase('tr-TR');
-        const byName = list.filter(p => String(p.ürün || p.name || '').trim().toLocaleLowerCase('tr-TR') === name);
-        if (byName.length === 1) product = byName[0];
-      }
-      if (!product) { alert(`${target.toUpperCase()} deposunda bu ürün tek ve kesin olarak bulunamadı; iade yapılmadı.`, 'error'); return; }
-    }
-
-    // [WHY] (H3 · 3.4): stok iadesi, b3, assignments ve bağlı talep ayrı ayrı yazılıyordu; b3 başarısız olunca stok telafisi de
-    //        başarısız olabilirdi, assignments/talep güncellemesi başarısız olursa zimmet yarı kapalı kalırdı.
-    // [HOW]: Stok +adet (depoya iade varsa) + b3 + assignments + talep güncellemeleri TEK transaction: ya hepsi ya hiçbiri.
-    const closeFields = { iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today };
-    const writes = [{ op: 'update', col: 'b3', id: item.id, fields: closeFields }];
-    if ((window.data.assignments || []).some(sameId)) writes.push({ op: 'update', col: 'assignments', id: item.id, fields: closeFields });
-    // Talep, ona bağlı cihazların (3.9a: cihaz başına bir b3 kaydı) hepsi iade edilince kapanır.
-    const otherActiveUnits = item.requestId == null ? [] : (window.data.b3 || []).filter(b => String(b.requestId) === String(item.requestId)
-      && String(b.id) !== String(item.id) && !window.Schema.normalizeB3(b).iadeEdildi);
-    if (item.requestId != null && otherActiveUnits.length === 0 && (window.data.requests || []).some(r => String(r.id) === String(item.requestId))) {
-      writes.push({ op: 'update', col: 'requests', id: item.requestId, fields: { iadeEdildi: true, iadeEdildiTarihi: today } });
-    }
-    let stockChange = null;
-    try {
-      if (target) {
-        const res = await window.runStockOps({ stock: [{ col: target, id: product.id, delta: qty }], writes }, { forbiddenMessage: 'İade işlemi yalnızca sistem yöneticisi tarafından yapılabilir.' });
-        stockChange = res.stock[0];
-      } else {
-        await window.applyItemOps(writes);
-      }
-    } catch (e) {
-      alert(`İade kaydedilemedi; hiçbir değişiklik yapılmadı. ${e.message || ''}`, 'error');
-      return;
-    }
-
+    // [WHY]: feat/envanter-talep-iade · Faz 5 — "Zimmetten Düş" ile iade talebi onayı ayrı iki kapanış koduydu; yöneticinin
+    //        cihazı teslim alıp almadığı, cihaz durumu ve stoğa eklenip eklenmeyeceği kararı sorulmuyordu.
+    // [HOW]: b3 zimmetleri ReturnRequests.closeAssignment'a gider: bekleyen iade talebi varsa onu onaylar, yoksa aynı karar
+    //        penceresiyle talepsiz kapatır. Kapanış planı (stok + b3 + assignments + bağlı talep, tek işlem) AssignmentService.planClose.
+    if (!window.ReturnRequests) { alert('İade modülü (return-requests.js) yüklenmemiş; işlem yapılmadı.', 'error'); return; }
+    await window.ReturnRequests.closeAssignment(id);
     this.renderTable();
-    alert(target
-      ? `Zimmet düşüldü ve ${target.toUpperCase()} deposuna iade edildi.${stockChange ? ` Stok: ${stockChange.before} → ${stockChange.after}` : ''}`
-      : 'Zimmet kaydı kapatıldı (depo iadesi yapılmadı).', 'success');
   },
 
   // ──────────────────────────────────────────
@@ -803,7 +766,7 @@ window.inventoryManagementModule = {
       'Öncelik': a.oncelik,
       'Zimmet Tarihi': a.tarih,
       'Planlanan İade Tarihi': a.iadeTarihi || '-',
-      'Durum': a.iadeEdildi ? 'İade Edildi' : 'Zimmetli',
+      'Durum': a.durum,
       'Not': a.not,
       'Kaynak': a._source === 'request' ? 'Talep Onayı' : 'Doğrudan Çıkış'
     }));

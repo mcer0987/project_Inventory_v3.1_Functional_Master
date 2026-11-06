@@ -5056,6 +5056,13 @@ body,
     max-width: 760px;
 }
 
+.b3-panel-actions {
+    flex-shrink: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .b3-help-trigger {
     flex-shrink: 0;
     display: inline-flex;
@@ -5077,6 +5084,17 @@ body,
     outline: 2px solid var(--b3-navy-2);
     outline-offset: 2px;
 }
+
+/* Zimmet ve İade Rehberi düğmesi: EBYS Rehberi'yle aynı mor vurgu, "Nasıl kullanılır?" ile aynı ölçüde ayrı renk. */
+.b3-guide-trigger {
+    border-color: rgba(124, 58, 237, 0.3);
+    background: rgba(124, 58, 237, 0.08);
+    color: #7c3aed;
+}
+
+.b3-guide-trigger:focus-visible { outline-color: #7c3aed; }
+[data-theme="dark"] .b3-guide-trigger { border-color: rgba(183, 148, 255, 0.35); background: rgba(183, 148, 255, 0.12); color: #b794ff; }
+[data-theme="dark"] .b3-guide-trigger:focus-visible { outline-color: #b794ff; }
 
 .b3-help-panel {
     margin-bottom: 14px;
@@ -5613,4 +5631,324 @@ body.staff-readonly .uab-bar::before {
     font-size: 12px;
     font-weight: 700;
     white-space: nowrap;
+}
+
+/* =============================================================================
+   TALEP SÜRECİ · RED GEREKÇESİ VE TASLAK NOTU (feat/envanter-talep-iade · Faz 1)
+   [WHY]: Red gerekçesi personele iletilir; yönetici listelerinde taslaklar yerine yalnız sayıları görünür.
+   ============================================================================= */
+.req-panel-desc {
+    margin: 0 0 10px;
+    max-width: 860px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--color-text-muted);
+}
+
+.req-draft-note {
+    margin: 0 0 10px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px dashed var(--color-border-light);
+    background: var(--color-surface-alt);
+    color: var(--color-text-muted);
+    font-size: 12.5px;
+}
+
+.card > .req-draft-note { margin: 10px 16px 0; }
+.req-draft-note[hidden] { display: none; }
+
+.req-reject-reason {
+    margin-top: 6px;
+    max-width: 320px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--color-text-muted);
+    text-align: left;
+    word-break: break-word;
+}
+
+.req-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 11000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(15, 23, 42, 0.72);
+}
+
+.req-modal {
+    width: 520px;
+    max-width: 100%;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    padding: 24px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border-light);
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+}
+
+.req-modal h3 { margin: 0 0 6px; font-size: 1.2rem; }
+.req-modal-summary { margin: 0 0 4px; font-weight: 600; }
+.req-modal-help { margin: 0 0 14px; font-size: 13px; color: var(--color-text-muted); }
+.req-modal-label { display: block; margin: 12px 0 4px; font-size: 13px; font-weight: 600; }
+
+.req-reject-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 6px;
+}
+
+.req-reject-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border-light);
+    background: var(--color-surface-alt);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.req-reject-option:has(input:checked) { border-color: var(--color-danger, #e74c3c); }
+.req-reject-option input { margin: 0; accent-color: var(--color-danger, #e74c3c); }
+
+.req-modal textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+    font: inherit;
+    resize: vertical;
+}
+
+.req-reject-counter { display: block; text-align: right; font-size: 11px; color: var(--color-text-muted); }
+
+.req-modal-error {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--badge-rejected-bg);
+    color: var(--badge-rejected-text);
+    font-size: 13px;
+}
+
+.req-modal-error[hidden] { display: none; }
+
+.req-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+
+.req-modal-btn {
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--color-text);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.req-modal-btn.danger { border-color: transparent; background: var(--color-danger, #e74c3c); color: #fff; }
+
+.req-modal-btn:focus-visible,
+.req-reject-option:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+[data-theme="dark"] .req-modal-error { background: rgba(248, 113, 113, 0.14); color: #fca5a5; }
+
+/* Faz 2 · onay sonucunun açıklaması (tüketim çıkışı / zimmet) */
+.req-outcome-note {
+    margin: 4px 0 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--color-text-muted);
+}
+
+.req-outcome-note[hidden], .req-outcome-note:empty { display: none; }
+td .req-outcome-note { margin: 6px 0 0; }
+
+/* =============================================================================
+   Faz 3 · ZİMMET DURUM ROZETLERİ, TESLİM BEKLEYEN NOTU, TALEP ROZETLERİ
+   [WHY]: Onaylanıp teslim alınmamış zimmet "Zimmetli"den ayırt edilemiyordu; yeni talep tabloya gitmeden görünmüyordu.
+   ============================================================================= */
+.zim-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid transparent;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.zim-state-zimmetli { background: #dbeafe; color: #1e40af; }
+.zim-state-teslimBekliyor { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.zim-state-iadeBekliyor { background: #ffedd5; color: #9a3412; border-color: #fdba74; }
+.zim-state-iade { background: #d1fae5; color: #065f46; }
+
+[data-theme="dark"] .zim-state-zimmetli { background: rgba(59, 130, 246, 0.16); color: #93c5fd; }
+[data-theme="dark"] .zim-state-teslimBekliyor { background: rgba(245, 158, 11, 0.16); color: #fcd34d; border-color: rgba(252, 211, 77, 0.35); }
+[data-theme="dark"] .zim-state-iadeBekliyor { background: rgba(249, 115, 22, 0.16); color: #fdba74; border-color: rgba(253, 186, 116, 0.35); }
+[data-theme="dark"] .zim-state-iade { background: rgba(16, 185, 129, 0.16); color: #6ee7b7; }
+
+tr.zim-row-awaiting td { opacity: 0.85; }
+
+.zim-awaiting-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid #fcd34d;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 13px;
+}
+
+.zim-awaiting-note[hidden] { display: none; }
+
+.zim-awaiting-link {
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.zim-awaiting-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+[data-theme="dark"] .zim-awaiting-note { background: rgba(245, 158, 11, 0.1); border-color: rgba(252, 211, 77, 0.35); color: #fcd34d; }
+
+.req-count-pill {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--badge-pending-bg);
+    color: var(--badge-pending-text);
+    font-size: 11px;
+    font-weight: 700;
+    vertical-align: middle;
+}
+
+.req-count-pill[hidden] { display: none; }
+[data-theme="dark"] .req-count-pill { background: rgba(251, 146, 60, 0.16); color: #fdba74; }
+
+#adminRequestBadgeLive {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+#admin-nav-request-badge:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+/* =============================================================================
+   Faz 5 · İADE TALEPLERİ (src/modules/return-requests.js)
+   ============================================================================= */
+.ret-section { margin-top: 28px; }
+.ret-section-card { margin: 0; padding: 18px 16px 8px; border-top: 1px solid var(--color-border-light); }
+.ret-section h3, .ret-section h4 { margin: 0; font-weight: 700; }
+.ret-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.ret-filter { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--color-text-muted); }
+
+.ret-select {
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 13px;
+}
+
+.req-modal .ret-select, .req-modal input[type="text"] { width: 100%; box-sizing: border-box; padding: 9px 10px; }
+.req-modal input[type="text"] { border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface-alt); color: var(--color-text); font: inherit; }
+
+.ret-table td { vertical-align: top; }
+.ret-sub { margin-top: 3px; font-size: 12px; color: var(--color-text-muted); word-break: break-word; }
+.ret-empty { padding: 22px !important; text-align: center; color: var(--color-text-muted); font-size: 13px; line-height: 1.5; }
+.ret-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ret-action {
+    padding: 6px 11px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ret-action.primary { border-color: transparent; background: var(--color-primary); color: #fff; }
+.ret-action.success { border-color: transparent; background: #16a34a; color: #fff; }
+.ret-action.danger { border-color: #fca5a5; color: #b91c1c; background: transparent; }
+.ret-action:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+[data-theme="dark"] .ret-action.danger { border-color: rgba(248, 113, 113, 0.5); color: #fca5a5; }
+
+.ret-state { display: inline-flex; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.ret-state-pending { background: #fef3c7; color: #92400e; }
+.ret-state-approved { background: #d1fae5; color: #065f46; }
+.ret-state-rejected { background: #fee2e2; color: #991b1b; }
+.ret-state-withdrawn { background: #f1f5f9; color: #475569; }
+[data-theme="dark"] .ret-state-pending { background: rgba(245, 158, 11, 0.16); color: #fcd34d; }
+[data-theme="dark"] .ret-state-approved { background: rgba(16, 185, 129, 0.16); color: #6ee7b7; }
+[data-theme="dark"] .ret-state-rejected { background: rgba(248, 113, 113, 0.16); color: #fca5a5; }
+[data-theme="dark"] .ret-state-withdrawn { background: rgba(148, 163, 184, 0.16); color: #cbd5e1; }
+
+.req-modal-wide { width: 600px; }
+.req-modal-btn.primary { border-color: transparent; background: var(--color-primary); color: #fff; }
+.req-modal-btn.success { border-color: transparent; background: #16a34a; color: #fff; }
+.ret-field { margin-top: 10px; }
+.ret-hint { display: block; margin-top: 4px; font-size: 12px; color: var(--color-text-muted); line-height: 1.45; }
+.ret-hint:empty { display: none; }
+.ret-branch { margin-top: 6px; }
+.ret-branch[hidden] { display: none; }
+.ret-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ret-check input { width: 16px; height: 16px; margin: 0; }
+.ret-request-info { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: var(--color-surface-alt); font-size: 13px; line-height: 1.5; }
+
+.ret-detail { display: grid; grid-template-columns: 170px 1fr; gap: 6px 12px; margin: 0; font-size: 13px; }
+.ret-detail dt { color: var(--color-text-muted); font-weight: 600; }
+.ret-detail dd { margin: 0; word-break: break-word; }
+@media (max-width: 560px) { .ret-detail { grid-template-columns: 1fr; } .ret-detail dd { margin-bottom: 6px; } }
+
+/* Envanter talepleri kartının kendi göstergeleri (admin › Talep ve Süreçler) */
+/* style.css .kpi-container 3 sütunlu ızgara; envanter talebi kartında 4 gösterge var */
+.kpi-container.req-kpi-container { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .kpi-container.req-kpi-container { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 576px) { .kpi-container.req-kpi-container { grid-template-columns: 1fr; } }
+.dashboard-card.card-red { border-left: 4px solid #ef4444; }
+.dashboard-card.card-red i,
+.dashboard-card.card-red .dashboard-value { color: #b91c1c; }
+[data-theme="dark"] .dashboard-card.card-red i,
+[data-theme="dark"] .dashboard-card.card-red .dashboard-value { color: #f87171; }
+
+.request-badge-pulse { animation: requestBadgePulse 1.2s ease-out 2; }
+
+@keyframes requestBadgePulse {
+    0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.55); }
+    100% { box-shadow: 0 0 0 12px rgba(231, 76, 60, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .request-badge-pulse { animation: none; }
 }

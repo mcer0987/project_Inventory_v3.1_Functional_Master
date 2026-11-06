@@ -59,7 +59,9 @@ const expected = f => /^(index|admin|404|verify)\.html$/.test(f) || /^[^/]+\.(cs
 // EBYS Aşama 6: icra ve bildirim servisi ile arayüzü (2).
 // EBYS Aşama 7: açık doğrulama sayfası, iki servis/arayüz modülü ve iki yardımcı (5).
 // Personel (BT ekibi) çıkışı: çıkış politikası, alan kişi seçici, depo salt-okunur / sağ tık koruması (3).
-const EXPECTED_COUNT = 102;
+// feat/envanter-talep-iade · Faz 3: admin bekleyen talep rozeti (1). Faz 4: iade talebi şeması (1). Faz 5: iade arayüzü (1).
+// Faz 6: iade tutanağı PDF (pdf-generator.js'e eklendi, yeni dosya yok) ve Zimmet ve İade Rehberi modalı + stili (2).
+const EXPECTED_COUNT = 107;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

@@ -888,6 +888,79 @@
         }
     };
 
+    // ─── Sarf Zimmetlerini Tüketim Çıkışına Çevir (feat/envanter-talep-iade · Faz 2 · B-1) ───────────────────────
+    // [WHY]: Karar 05.11.2026 — sarf malzeme tüketimdir. Eskiden sarf talep onayı da zimmet yazıyordu; bu kayıtlar kişinin Kişi
+    //        Envanteri'nde ve zimmet tutanağında süresiz kalıyor, Zimmet ekranında "Zimmetten Düş" öneriyordu.
+    // [HOW]: Şema Göçü deseni: önizleme (AssignmentService.planSarfConsumption, YAZMAZ) → onay → b3 yedeği (JSON) → onaydan
+    //        sonra güncel veriden yeniden planlanır, yalnız önizlemede gösterilen kayıtların "tip" alanı 'cikis' yapılır
+    //        (400'lük atomik parçalar). Stok değişmez. İade edilmiş ve demirbaş olup olmadığı yazmayan kayıtlara dokunulmaz.
+    //        İkinci çalıştırmada dönüştürülecek kayıt kalmaz. Yalnız Firebase admin oturumu.
+    let _sarfMigrating = false;
+    window.vipMigrateSarfConsumption = async function (btn) {
+        if (_sarfMigrating) return;
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            _dupAlert('Bu işlem için yönetici (Firebase admin) oturumu gerekir.', 'error');
+            return;
+        }
+        _sarfMigrating = true;
+        if (btn) btn.disabled = true;
+        try {
+            const plan = window.AssignmentService.planSarfConsumption();
+            const extra = [
+                plan.returned.length ? `İade edilmiş ${plan.returned.length} sarf zimmetine dokunulmaz (stoğa dönmüş).` : '',
+                plan.unknown.length ? `Demirbaş olup olmadığı kayıtta yazmayan ${plan.unknown.length} eski zimmete dokunulmaz (konsola listelendi).` : '',
+            ].filter(Boolean).join(' ');
+            if (plan.unknown.length) console.warn('[Sarf Dönüşümü] belirsiz kayıtlar (dokunulmadı):', plan.unknown);
+            if (plan.convert.length === 0) {
+                _dupAlert(`Dönüştürülecek sarf zimmeti yok.${extra ? ' ' + extra : ''}`, 'info');
+                return;
+            }
+            const byPerson = new Map();
+            plan.convert.forEach(r => byPerson.set(r.personel, (byPerson.get(r.personel) || 0) + (Number(r.adet) || 1)));
+            const people = [...byPerson.entries()].sort((a, b) => b[1] - a[1]);
+            const message = [
+                `Ortam: ${window.COLLECTION_ROOT}. Zimmet kaydı: ${plan.total} · tüketim çıkışına çevrilecek sarf: ${plan.convert.length}.`,
+                extra, '',
+                'Kişi başına (adet):',
+                ...people.slice(0, 10).map(([p, n]) => `• ${p}: ${n}`),
+                people.length > 10 ? `… ve ${people.length - 10} kişi daha.` : '', '',
+                'Bu kayıtlar Kişi Envanteri, zimmet tutanağı ve Zimmet ekranından çıkar; Envanter Takibi\'nde çıkış olarak kalır.',
+                'Stok değişmez. Önce b3 yedeği (JSON) indirilecek. Devam edilsin mi?'
+            ].join('\n');
+            const ok = typeof showCustomConfirm === 'function'
+                ? await showCustomConfirm('Sarf Zimmetlerini Tüketime Çevir', message)
+                : confirm(`${plan.convert.length} sarf zimmeti tüketim çıkışına çevrilsin mi?`);
+            if (ok !== true) return;
+
+            const snapshot = { version: 1, root: window.COLLECTION_ROOT, collection: 'b3', timestamp: new Date().toISOString(), data: window.data.b3 || [] };
+            const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 1)], { type: 'application/json' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `b3-yedek-sarf-donusumu-${window.COLLECTION_ROOT}-${snapshot.timestamp.replace(/[:.]/g, '-')}.json`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+            const shown = new Set(plan.convert.map(r => String(r.id)));
+            const toWrite = window.AssignmentService.planSarfConsumption().convert.filter(r => shown.has(String(r.id)));
+            let written = 0;
+            for (let i = 0; i < toWrite.length; i += _MIGRATION_CHUNK) {
+                const chunk = toWrite.slice(i, i + _MIGRATION_CHUNK);
+                await window.applyItemOps(chunk.map(r => ({ op: 'update', col: 'b3', id: r.id, fields: { tip: 'cikis' } })));
+                written += chunk.length;
+            }
+            const skipped = plan.convert.length - toWrite.length;
+            const note = skipped ? ` (${skipped} kayıt bu arada değiştiği için atlandı.)` : '';
+            _dupAlert(`🧾 ${written} sarf zimmeti tüketim çıkışına çevrildi.${note}`, 'success');
+            _appendLog('success', [`🧾 SARF DÖNÜŞÜMÜ: ${written} b3 kaydı zimmet → çıkış · kök ${window.COLLECTION_ROOT} · yedek indirildi.${note}`]);
+        } catch (error) {
+            console.error('Sarf dönüşümü hatası:', error);
+            _dupAlert('Sarf dönüşümü yarıda kaldı; yazılan parçalar çıkış, kalanlar zimmet olarak duruyor (tekrar çalıştırmak güvenli). Yedek dosyası indirildi. ' + error.message, 'error');
+        } finally {
+            _sarfMigrating = false;
+            if (btn) btn.disabled = false;
+        }
+    };
+
     // ─── PRI / Hesap Göç Aracı (Faz 4B · J7 → J10 PRI revizyonu) ───
     // [WHY]: Giriş kurumsal kimlikle (PRI) yapılıyor; var olan personelin PRI'si yok, J7'de açılan hesaplar p<id>@ adresinde.
     // [HOW]: J9 aracının kuralları: önizleme planStaffAccounts (YAZMAZ) → kişi kişi atanacak PRI ve hesap işlemi (hesap aç /

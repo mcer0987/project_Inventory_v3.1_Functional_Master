@@ -370,6 +370,13 @@ window.renderPurchaseStats = function () {
     if (elPending) elPending.innerText = pending;
     if (elCompleted) elCompleted.innerText = completed;
     if (elService) elService.innerText = inService;
+
+    // Faz 3: "Satın Alma Talepleri" başlığındaki rozet — onay bekleyen sipariş varsa görünür
+    const badge = document.getElementById('purchasePendingBadge');
+    if (badge) {
+        badge.textContent = `${pending} onay bekliyor`;
+        badge.hidden = pending === 0;
+    }
 };
 
 // renderServicesModule içindeki tablo çizim kısmında düzeltme:
@@ -770,10 +777,10 @@ window.renderServicesModule = function () {
     }
 
     // Sayaç Güncellemeleri
-    const pCount = document.getElementById('totalPendingPurchase');
-    const sCount = document.getElementById('totalInService');
-    if (pCount) pCount.innerText = (window.data.purchaseOrders || []).length;
-    if (sCount) sCount.innerText = _openServices().length;
+    // [WHY]: "BEKLEYEN" kartı burada TÜM satın alma siparişlerinin sayısıyla eziliyordu; renderPurchaseStats aynı kartı
+    //        "Onay Bekliyor" sayısıyla dolduruyor, hangisi son çalışırsa o görünüyordu.
+    // [HOW]: Kartları tek kaynak (renderPurchaseStats) doldurur.
+    if (typeof window.renderPurchaseStats === 'function') window.renderPurchaseStats();
 };
 
 // 3. Servisten Geri Al
