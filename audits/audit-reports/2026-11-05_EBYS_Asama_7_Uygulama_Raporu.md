@@ -3,7 +3,7 @@
 **Tarih** 5 Kasım 2026  
 **Dal** `feat/v3.4-ebys-asama-7`  
 **Taban** Aşama 6 kapanış commit’i `4b01e94`  
-**Durum** Yerel uygulama ve test paketi incelemeye hazır.
+**Durum** Yerel uygulama ve canlı yayın tamamlandı.
 
 ## Uygulama
 
@@ -24,10 +24,16 @@
 
 ## Doğrulama
 
-- 293 birim testi, 276 Firestore kural testi ve XSS denetimi geçti. Hosting denetimi 99 beklenen dosyayı doğruladı.
+- Aşama 7 commit’i öncesi 293 birim testi, 276 Firestore kural testi ve XSS denetimi geçti. Ardından Aşama 6 dalındaki `424f529` ve `9199844` commit’leri birleştirildi. Birleşik sürümde 301 birim testi, 306 Firestore kural testi ve XSS denetimi geçti; Hosting denetimi 102 beklenen dosyayı doğruladı.
 - Emülatörde anonim REST ve SDK okuması beş alana sınırlandı. Testler, özel okuma ve listeleme reddi, sahte projeksiyon reddi, token çakışması, eşzamanlı rezervasyon, arşiv olayının zorunlu oluşu, iptal ve arşiv içeriği değişmezliğini kapsadı.
 - Tarayıcı kontrolü geçerli, bulunamayan ve bozuk doğrulama yanıtlarını, fazladan alanın ekrana taşınmamasını ve yazdırma şablonundaki QR’ı doğruladı. QR matrisi canlı ve emülatör adresleri ile kapasite sınırında referans kodlayıcıyla birebir karşılaştırıldı. [QR boyutları](https://www.qrcode.com/en/about/version.html) · [Referans kodlayıcı](https://www.nayuki.io/page/qr-code-generator-library)
 - Yerel kanıtlar `scratch/asama7-test-all.log` ve `scratch/asama7-browser.log` dosyalarındadır.
+
+## Canlı yayın
+
+- 6 Kasım 2026’da `medipol-inventory-v3` projesine önce Firestore indeksleri, sonra kurallar, en son Hosting yayınlandı. Yayın adresi `https://medipol-inventory-v3.web.app`.
+- Kural release kimliği `3851ea1f-fc7a-47d2-8e35-a4326c57b4b4`, Hosting sürümü `2ace8fea61e61c58`. Canlı kural dosyası yerel dosyayla aynı hash’i verdi; 102 uygulama dosyasının tamamı canlı içerikle birebir eşleşti.
+- Sekiz indeksin tamamı yayın sonrası `READY` durumuna geçti.
 
 ## Manuel kabul
 
