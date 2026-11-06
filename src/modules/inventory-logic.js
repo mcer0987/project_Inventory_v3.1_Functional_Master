@@ -74,7 +74,7 @@ async function _performExit(requestedQty) {
     try {
         res = await window.runExitTransaction({ repo, productId: product.id, qty: requestedQty, b3Entry: entries[0],
             extraWrites: entries.slice(1).map(item => ({ op: 'set', col: 'b3', item })) },
-            isAdmin ? undefined : { staffExit: true, forbiddenMessage: 'Çıkış reddedildi: personel yalnız sarf malzeme çıkışı yapabilir. Demirbaş için "Envanter Talep Et" kullanın.' });
+            isAdmin ? undefined : { staffExit: true, forbiddenMessage: window.ExitPolicy.MESSAGES.serverDenied });
     } catch (e) {
         _alert(e.message || 'Çıkış kaydedilemedi.', 'error');   // hiçbir şey yazılmadı
         return;

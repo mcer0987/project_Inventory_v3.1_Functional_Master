@@ -1419,7 +1419,7 @@ window.sendDraftInventoryRequest = async function (id) {
         let res;
         try {
             res = await window.runStockOps({ stock, writes }, isAdmin ? undefined
-                : { staffExit: true, forbiddenMessage: 'Toplu çıkış reddedildi: personel yalnız sarf malzeme çıkışı yapabilir.' });
+                : { staffExit: true, forbiddenMessage: window.ExitPolicy.MESSAGES.serverDenied });
         } catch (e) {
             showAppAlert(`Toplu çıkış yapılamadı; hiçbir kalem kaydedilmedi. ${e.message || ''}`, 'error');
             return;
