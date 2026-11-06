@@ -198,11 +198,15 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
 
         // ── 2) Sarf talebinin onayı ──
         await approve(page, 'r_sarf', { stockKey: 'b1|p_mouse', sn: 'ITSM-778' });
+        assert.match(await page.$eval('#raOutcome', e => e.textContent), /tüketim çıkışı \(sarf\)/);
+        await page.screenshot({ path: path.join(OUT, 'request-approve-sarf-outcome.png') });
         await okApproval(page);
         s = await page.evaluate(() => ({ durum: window.data.requests.find(x => x.id === 'r_sarf').durum, stock: window.data.b1.find(p => p.id === 'p_mouse').adet,
-            z: window.data.b3.filter(b => b.requestId === 'r_sarf').map(b => [b.tip, b.adet, b.sn, b.isDemirbas]) }));
-        assert.deepEqual(s, { durum: 'approved', stock: 17, z: [['zimmet', 3, 'ITSM-778', false]] });
-        ok('Sarf onayı: stok 20 → 17; TEK zimmet kaydı (adet 3, isDemirbas false)', 'BULGU-1: sarf da "zimmet" olarak yazılıyor');
+            z: window.data.b3.filter(b => b.requestId === 'r_sarf').map(b => [b.tip, b.adet, b.sn, b.isDemirbas, b.personelId, b.talepTuru]),
+            alert: window.alerts.at(-1)[1] }));
+        assert.deepEqual([s.durum, s.stock, s.z], ['approved', 17, [['cikis', 3, 'ITSM-778', false, 's1', null]]]);
+        assert.match(s.alert, /Tüketim çıkışı olarak kaydedildi/);
+        ok('B-1: Sarf onayı penceresi sonucu söylüyor ("tüketim çıkışı"); kayıt tip cikis (adet 3, talebe ve kişiye bağlı), stok 20 → 17');
 
         // ── 3) Red: zorunlu gerekçe penceresi (B-2) ──
         await page.evaluate(() => { window._reject = window.rejectRequest('r_rej'); });
@@ -267,10 +271,10 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         // ── 4) Yönetici Zimmet ekranı (admin) ──
         await page.evaluate(() => window.inventoryManagementModule.renderTable());
         let z = await page.evaluate(() => window.inventoryManagementModule.getNormalizedAssignments().map(a => [a.ürün, a.sn, a.durum, a.personelId]));
-        assert.deepEqual(z.map(x => x[2]), ['Zimmetli', 'Zimmetli', 'Zimmetli']);
-        assert.equal(await page.$$eval('#invTableBody tr', t => t.length), 3);
-        assert.ok(!z.some(x => /Monitör/.test(x[0])));
-        ok('Zimmet ekranı: onay anında 3 satır (2 laptop + 1 sarf) "Zimmetli"; reddedilen talep yok');
+        assert.deepEqual(z.map(x => x[2]), ['Zimmetli', 'Zimmetli']);
+        assert.equal(await page.$$eval('#invTableBody tr', t => t.length), 2);
+        assert.ok(!z.some(x => /Monitör|Mouse/.test(x[0])));
+        ok('Zimmet ekranı: onay anında yalnız 2 laptop "Zimmetli"; sarf (tüketim) ve reddedilen talep yok');
 
         // ── 5) Personel: Taleplerim + Kişi Envanteri (teslim almadan önce) ──
         await page.evaluate(() => { window.mode = 'staff'; window.renderMyRequestsTable(); window.renderPersonnelInventoryTable(); });
@@ -279,25 +283,27 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         assert.equal(r.filter(x => /REDDEDİLDİ/.test(x[2]) && /Talep Reddedildi/.test(x[4])).length, 1);
         assert.ok(r.some(x => /Gerekçe: Stokta yok — 27" monitör Q1'de gelecek/.test(x[2])));
         ok('B-2: Personel Taleplerim\'de red gerekçesini görüyor');
+        assert.ok(r.some(x => /Lenovo Mouse/.test(x[1]) && /Tüketim çıkışı — envanterinize eklenmez/.test(x[2])));
+        ok('B-1: Taleplerim\'de onaylanan sarf talebinde "Tüketim çıkışı — envanterinize eklenmez" notu');
         await page.evaluate(() => document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'myRequests')));
         await page.screenshot({ path: path.join(OUT, 'request-my-requests-reason.png') });
         let inv = await rows(page, '#tablePersonnelInventory');
         assert.match(inv[0][0], /kayıtlı envanter bulunmamaktadır/);
         s = await page.evaluate(() => window.AssignmentService.generatePersonnelZimmetData('s1').ozet);
-        assert.equal(s.kalemSayisi, 0); assert.equal(s.teslimBekleyen, 3);
-        ok('Personel: Taleplerim\'de 2 "Teslim Aldım" + 1 "Reddedildi"; Kişi Envanteri BOŞ, tutanakta 3 teslim bekleyen', 'BULGU-3: teslim alınana kadar Kişi Envanteri\'ne düşmüyor');
+        assert.equal(s.kalemSayisi, 0); assert.equal(s.teslimBekleyen, 2);
+        ok('Personel: Taleplerim\'de 2 "Teslim Aldım" + 1 "Reddedildi"; Kişi Envanteri BOŞ, tutanakta 2 teslim bekleyen (yalnız demirbaş)', 'B-3 (Faz 3): teslim alınana kadar Kişi Envanteri\'ne düşmüyor');
 
         // ── 6) Teslim alma ──
         await page.evaluate(async () => { await window.receiveProduct('r_dem'); await window.receiveProduct('r_sarf'); window.renderPersonnelInventoryTable(); });
         inv = await rows(page, '#tablePersonnelInventory');
-        assert.equal(inv.length, 3);
-        assert.deepEqual(inv.map(x => x[4]).sort(), ['Demirbaş', 'Demirbaş', 'Sarf Malzeme']);
+        assert.equal(inv.length, 2);
+        assert.deepEqual(inv.map(x => x[4]), ['Demirbaş', 'Demirbaş']);
         assert.ok(inv.some(x => /SN-LAT-001/.test(x[2]) && /ENV-501/.test(x[2])));
-        s = await page.evaluate(() => window.AssignmentService.generatePersonnelZimmetData('s1').ozet);
-        assert.deepEqual([s.kalemSayisi, s.demirbasAdet, s.sarfAdet, s.teslimBekleyen], [3, 2, 3, 0]);
+        s = await page.evaluate(() => ({ o: window.AssignmentService.generatePersonnelZimmetData('s1').ozet, sarf: window.data.requests.find(x => x.id === 'r_sarf').durum }));
+        assert.deepEqual([s.o.kalemSayisi, s.o.demirbasAdet, s.o.sarfAdet, s.o.teslimBekleyen, s.sarf], [2, 2, 0, 0, 'completed']);
         await page.evaluate(() => window.switchTab && document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'personnelInventoryTab')));
         await page.screenshot({ path: path.join(OUT, 'request-person-inventory.png') });
-        ok('Teslim Aldım: talepler completed; Kişi Envanteri 3 satır (2 demirbaş SN/Env.No ile + 1 sarf); zimmet tutanağı 3 kalem');
+        ok('Teslim Aldım: iki talep de completed; Kişi Envanteri yalnız 2 demirbaş (SN/Env.No ile); zimmet tutanağı 2 kalem, sarf 0');
 
         // personel kendi talebini onaylayamaz (arayüz)
         await page.evaluate(async () => { window.alerts = []; window.data.requests.push({ id: 'r_self', ürün: 'X', adet: 1, durum: 'Beklemede', personel: 'Ayşe Yılmaz', personelId: 's1', personelUid: 'uid-s1' }); await window.confirmRequest('r_self'); });
@@ -316,8 +322,36 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
             return { stock: window.data.b1.find(p => p.id === 'p_lap').adet, inv: window.AssignmentService.getPersonInventory(window.getActiveUser()).length,
                 req: window.data.requests.find(x => x.id === 'r_dem').iadeEdildi ?? null };
         });
-        assert.deepEqual(s, { stock: 4, inv: 2, req: null });
-        ok('Zimmetten Düş (1 laptop → B1): stok 3 → 4, Kişi Envanteri 3 → 2; talep, ikinci cihaz iade edilene kadar açık kalır');
+        assert.deepEqual(s, { stock: 4, inv: 1, req: null });
+        ok('Zimmetten Düş (1 laptop → B1): stok 3 → 4, Kişi Envanteri 2 → 1; talep, ikinci cihaz iade edilene kadar açık kalır');
+
+        // ── 8) Sarf dönüşüm aracı (Sistem Kontrol) — eski sarf zimmetleri ──
+        await page.addScriptTag({ url: 'http://127.0.0.1/src/modules/admin/admin-system-control.js' });
+        s = await page.evaluate(async () => {
+            window.mode = 'admin';
+            const old = (id, extra) => ({ id, sema: 2, tip: 'zimmet', kaynakDepo: 'b1', productId: 'p_mouse', requestId: null, rafNo: 'Raf-B 1', sutun: 'B1 -B',
+                urunTuru: 'Sarf Malzeme', urunAciklama: 'Eski Mouse', marka: 'Lenovo', adet: 2, sn: '-', envanterNo: '-', not: '-', alanKisi: 'Ayşe Yılmaz',
+                personelId: 's1', tarih: '01.10.2026', ts: 1, isDemirbas: false, talepTuru: 'Kalıcı Zimmet', oncelik: 'Orta', iadeTarihi: null,
+                iadeEdildi: false, iadeEdildiTarihi: null, iadeDepo: null, onaylayan: 'Admin', ...extra });
+            window.data.b3.push(old('old_sarf'), old('old_ret', { iadeEdildi: true, iadeEdildiTarihi: '02.10.2026', iadeDepo: 'b1' }), old('old_unk', { isDemirbas: null }));
+            window.writeLog.push(...['old_sarf', 'old_ret', 'old_unk'].map(id => ({ actor: 'seed', kind: 'seed', col: 'b3', id, data: window.data.b3.find(b => b.id === id) })));
+            const invBefore = window.AssignmentService.getPersonInventory({ id: 's1', name: 'Ayşe Yılmaz' }).length;
+            window.alerts = [];
+            window.COLLECTION_ROOT = 'lifeserver_master';
+            await window.vipMigrateSarfConsumption();
+            const tip = id => window.data.b3.find(b => b.id === id).tip;
+            const out = { tips: [tip('old_sarf'), tip('old_ret'), tip('old_unk')], alert: window.alerts.at(-1)[1],
+                invBefore, invAfter: window.AssignmentService.getPersonInventory({ id: 's1', name: 'Ayşe Yılmaz' }).length };
+            window.alerts = [];
+            await window.vipMigrateSarfConsumption();
+            out.second = window.alerts.at(-1)[1];
+            return out;
+        });
+        assert.deepEqual(s.tips, ['cikis', 'zimmet', 'zimmet']);
+        assert.match(s.alert, /1 sarf zimmeti tüketim çıkışına çevrildi/);
+        assert.deepEqual([s.invBefore, s.invAfter], [3, 2]);
+        assert.match(s.second, /Dönüştürülecek sarf zimmeti yok/);
+        ok('B-1: Sarf dönüşüm aracı — yalnız açık sarf zimmeti çevrilir; iade edilmiş ve belirsiz kayda dokunulmaz; Kişi Envanteri 3 → 2; ikinci çalıştırma boş');
         assert.deepEqual(errors, []);
         log = await page.evaluate(() => window.writeLog);
     } finally { await browser.close(); }
@@ -347,6 +381,8 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         // yazma günlüğünü commit gruplarına böl ve sırayla, yapanın kimliğiyle oynat
         let group = [], replayed = 0;
         for (const w of log) {
+            // Testin kendi kurduğu eski veri (seed): kurallar kapalıyken yazılır, yazma sayılmaz
+            if (w.kind === 'seed') { await env.withSecurityRulesDisabled(c => setDoc(ref(c.firestore(), w.col, w.id), w.data)); continue; }
             if (w.kind !== 'commit') { group.push(w); continue; }
             if (!group.length) continue;
             const db = dbs[group[0].actor](), batch = writeBatch(db);

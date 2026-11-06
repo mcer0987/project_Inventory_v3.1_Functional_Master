@@ -69,6 +69,9 @@
             const st = S().requestStatus(r);
             if (st !== 'approved' && st !== 'completed') return;
             const n = S().normalizeRequest(r);
+            // Faz 2 (B-1): sarf tüketimdir, zimmet değil. Kayıtta açıkça sarf işaretli (isDemirbas false) eski talepler listelenmez;
+            // bayrağı olmayan (belirsiz) eski talepler güvenli tarafta kalır.
+            if (n.isDemirbas === false) return;
             list.push({
                 _source: 'request', _id: r.id, id: r.id,
                 personel: n.personel, personelId: n.personelId, personelKodu: r.personelKodu,
@@ -84,6 +87,28 @@
         });
 
         return list.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    }
+
+    /**
+     * Faz 2 (B-1) · Sarf zimmetlerini tüketim çıkışına çevirme planı (YAZMAZ).
+     * Dönüşür: tip 'zimmet', kayıtta AÇIKÇA isDemirbas false (boolean ya da 'false'), iade edilmemiş b3 kaydı.
+     * Dokunulmaz: iade edilmiş sarf zimmeti (stoğa dönmüş; çıkış saymak yanlış olur), demirbaş, demirbaş olup olmadığı kayıtta
+     * yazmayan eski kayıt (belirsiz — listelenir). Aynı veriyle ikinci çalıştırma boş plan döndürür (idempotent).
+     * @returns {{ total:number, convert:object[], returned:object[], unknown:object[] }} öğe: { id, personel, urun, adet, tarih }
+     */
+    function planSarfConsumption(items = (window.data && window.data.b3) || []) {
+        const plan = { total: 0, convert: [], returned: [], unknown: [] };
+        items.forEach(item => {
+            const n = item && S().normalizeB3(item);
+            if (!n || n.tip !== 'zimmet') return;
+            plan.total++;
+            const flag = item.isDemirbas;
+            const row = { id: item.id, personel: n.alanKisi, urun: n.urunAciklama, adet: n.adet, tarih: n.tarih };
+            if (flag === undefined || flag === null || flag === '') { plan.unknown.push(row); return; }
+            if (!(flag === false || flag === 'false')) return;
+            (n.iadeEdildi ? plan.returned : plan.convert).push(row);
+        });
+        return plan;
     }
 
     // Kişi Envanterim: kullanıcının üzerindeki (iade edilmemiş, teslim alınmış) zimmetler.
@@ -381,7 +406,7 @@
     }
 
     const AssignmentService = {
-        getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId,
+        getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId, planSarfConsumption,
         activeDeviceUses, checkDeviceIds, isOpenService, serviceRecordsFor, getDeviceHistory,
         invalidateDeviceUses, usesStats,
         generatePersonnelZimmetData, generateB3MovementData, ZIMMET_BELGE_SEMA, ZIMMET_KALEM_KEYS,

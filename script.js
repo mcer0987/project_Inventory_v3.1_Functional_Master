@@ -729,6 +729,10 @@ function renderMyRequestsTable() {
         else if (isCompleted) statusHTML = `<div class="status-badge-pill status-completed-pill">TESLİM ALINDI</div>`;
         else if (isDraft) statusHTML = `<div class="status-badge-pill" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;">TASLAK</div>`;
         else statusHTML = `<div class="status-badge-pill status-pending-pill">${escapeHtml(req.durum || '-')}</div>`;
+        // Faz 2 (B-1): onaylanan sarf talebi tüketim çıkışıdır — personele envanterine eklenmeyeceği söylenir.
+        if ((isApproved || isCompleted) && (window.data.b3 || []).some(b => String(b.requestId) === String(req.id) && window.Schema.normalizeB3(b).tip === 'cikis')) {
+            statusHTML += '<div class="req-outcome-note">Tüketim çıkışı — envanterinize eklenmez</div>';
+        }
 
         row.innerHTML = `
             <td>${escapeHtml(req.tarih)}</td>
@@ -918,6 +922,17 @@ const _stockLabel = p => `${p.marka || ''} ${p.ürün || p.name || ''}`.replace(
 const _stockQty = p => Number(p.adet ?? p.qty ?? 0) || 0;
 const NO_STOCK = '__none__';
 
+// [WHY]: Faz 2 (B-1, karar 05.11.2026) — sarf talebi onaylanınca da zimmet yazılıyordu; tükenen sarf kişinin Kişi Envanteri'nde
+//        ve zimmet tutanağında süresiz kalıyordu.
+// [HOW]: Onayın hareket türü: stok kalemi seçildiyse ürün türüne göre (Schema.isDemirbas) — sarf → 'cikis', demirbaş →
+//        'zimmet'. Stok dışı onayda ürün türü bilinmez; yalnız talep türü "Sarf Malzeme İhtiyacı" ve ad bir demirbaş türü
+//        değilse 'cikis', aksi hâlde güvenli taraf 'zimmet'.
+window.requestOutcome = function (request, product) {
+    if (product) return window.Schema.isDemirbas(product) ? 'zimmet' : 'cikis';
+    const sarfTalebi = String((request && request.talepTuru) || '').trim() === 'Sarf Malzeme İhtiyacı';
+    return sarfTalebi && !window.Schema.isDemirbas({ ürün: request.ürün, isDemirbas: request.isDemirbas }) ? 'cikis' : 'zimmet';
+};
+
 window.showRequestApprovalModal = function (request) {
     return new Promise(resolve => {
         const want = Number(request.adet) || 1;
@@ -951,6 +966,7 @@ window.showRequestApprovalModal = function (request) {
             <label id="raSnLabel" style="font-weight:600; font-size:13px;">Seri numarası / zimmet bilgisi</label>
             <input id="raSn" type="text" placeholder="Yoksa boş bırakın" autocomplete="off" style="${field}">
             <div id="raDevIds" hidden></div>
+            <p id="raOutcome" class="req-outcome-note" role="status"></p>
             <div id="raError" style="display:none; color:var(--color-danger,#e74c3c); font-size:13px; margin-bottom:10px;"></div>
             <div style="display:flex; justify-content:flex-end; gap:10px;">
               <button id="raCancel" type="button" style="padding:10px 18px; border:1px solid var(--color-border,#bdc3c7); background:transparent; color:var(--color-text,#2c3e50); border-radius:8px; cursor:pointer;">Vazgeç</button>
@@ -978,11 +994,19 @@ window.showRequestApprovalModal = function (request) {
             const c = candidates.find(x => x.key === selected);
             return !!c && window.Schema.isDemirbas(c.p);
         };
+        const outcomeEl = overlay.querySelector('#raOutcome');
         const syncDev = () => {
             const dem = isDemSelection();
             overlay.querySelector('#raSn').style.display = dem ? 'none' : '';
             overlay.querySelector('#raSnLabel').style.display = dem ? 'none' : '';
             if (dem) window.DeviceIds.render(devBox, want); else window.DeviceIds.hide(devBox);
+            // Faz 2 (B-1): onayın sonucu önceden söylenir — sarf tüketim çıkışıdır, kişinin envanterine girmez.
+            const c = selected && selected !== NO_STOCK ? candidates.find(x => x.key === selected) : null;
+            const tip = selected ? window.requestOutcome(request, c ? c.p : null) : null;
+            outcomeEl.textContent = !tip ? ''
+                : tip === 'cikis' ? 'Sonuç: tüketim çıkışı (sarf). Stok düşer; ürün kişinin envanterine ve zimmet tutanağına girmez.'
+                : 'Sonuç: zimmet. Personel "Teslim Aldım" dediğinde ürün Kişi Envanteri\'ne geçer.';
+            outcomeEl.hidden = !tip;
         };
         renderOptions();
         syncDev();
@@ -1068,8 +1092,10 @@ window.confirmRequest = async function (requestId) {
         // 'stok-disi' (tabloda Raf No "Stok dışı" — eskiden "TALEP" basılıyordu).
         // Demirbaş (3.9a): cihaz başına bir b3 zimmet kaydı (adet 1, kendi Seri No / Envanter No'su), hepsi aynı transaction'da.
         // (Talebe bağlı kayıt zaten varsa onay yukarıda durdurulur — B-6.)
+        // Faz 2 (B-1): sarf onayı tüketim çıkışıdır (tip 'cikis'); talebe bağlı kalır, Kişi Envanteri'ne / tutanağa girmez.
+        const tip = window.requestOutcome(live, product);
         const base = {
-            tip: 'zimmet', requestId: live.id,
+            tip, requestId: live.id,
             ...(product ? { product, col: repo } : { urunAciklama: live.ürün, isDemirbas: choice.demirbas === true }),
             not: [live.not, `Onaylayan: ${approver}`].filter(s => s && String(s).trim() && s !== '-').join(' · '),
             alanKisi: live.personel,
@@ -1098,7 +1124,8 @@ window.confirmRequest = async function (requestId) {
         }
         await window.SecurityConfig.logSelfApproval(guard, true);
         const stockText = stockChange ? ` ${repo.toUpperCase()} stok: ${stockChange.before} → ${stockChange.after}.` : ' Stoktan düşülmedi.';
-        showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.${stockText}`, "success");
+        const tipText = tip === 'cikis' ? ' Tüketim çıkışı olarak kaydedildi.' : ' Zimmet kaydı oluşturuldu.';
+        showAppAlert(`${live.personel} isimli personelin talebi ONAYLANDI.${stockText}${tipText}`, "success");
         _refreshRequestTables();
     } finally {
         _requestActionsInFlight.delete(lockKey);

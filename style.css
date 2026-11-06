@@ -5743,3 +5743,14 @@ body.staff-readonly .uab-bar::before {
 .req-reject-option:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 [data-theme="dark"] .req-modal-error { background: rgba(248, 113, 113, 0.14); color: #fca5a5; }
+
+/* Faz 2 · onay sonucunun açıklaması (tüketim çıkışı / zimmet) */
+.req-outcome-note {
+    margin: 4px 0 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--color-text-muted);
+}
+
+.req-outcome-note[hidden], .req-outcome-note:empty { display: none; }
+td .req-outcome-note { margin: 6px 0 0; }
