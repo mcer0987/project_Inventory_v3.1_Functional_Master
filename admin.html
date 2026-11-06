@@ -1208,36 +1208,42 @@
             </div>
         </section>
 
-        <!-- MİNİMAL KPI BAR -->
-        <div class="kpi-container">
-            <div class="dashboard-card card-blue">
-                <i class="fas fa-clock"></i>
-                <div class="dashboard-info">
-                    <span class="dashboard-title">BEKLEYEN</span>
-                    <span id="totalPendingPurchase" class="dashboard-value">4</span>
-                </div>
-            </div>
-            <div class="dashboard-card card-yellow">
-                <i class="fas fa-tools"></i>
-                <div class="dashboard-info">
-                    <span class="dashboard-title">SERVİSTE</span>
-                    <span id="totalInService" class="dashboard-value">0</span>
-                </div>
-            </div>
-            <div class="dashboard-card card-green">
-                <i class="fas fa-check-circle"></i>
-                <div class="dashboard-info">
-                    <span class="dashboard-title">TAMAMLANAN</span>
-                    <span id="totalCompletedAction" class="dashboard-value">12</span>
-                </div>
-            </div>
-        </div>
-
         <!-- Faz 6 · UI-01: Operasyon Merkezi'nden buraya taşındı — ait olduğu doğal yer burası. -->
         <div class="card shadow-sm border-0 mb-4" id="pendingRequestsCard">
             <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                 <h3 class="m-0 font-weight-bold text-danger">📨 Bekleyen Envanter Talepleri</h3>
                 <!-- Bekleyen sayısı üst çubuktaki 📨 rozetinde (src/ui/request-badge.js); karttaki ayrı sayaç kaldırıldı. -->
+            </div>
+            <!-- Envanter talebi göstergeleri (admin-dashboard.renderAdminRequestTable doldurur; taslaklar sayılmaz) -->
+            <div class="kpi-container req-kpi-container" aria-label="Envanter talebi özeti">
+                <div class="dashboard-card card-blue">
+                    <i class="fas fa-clock" aria-hidden="true"></i>
+                    <div class="dashboard-info">
+                        <span class="dashboard-title">BEKLEYEN</span>
+                        <span id="reqKpiPending" class="dashboard-value">0</span>
+                    </div>
+                </div>
+                <div class="dashboard-card card-yellow">
+                    <i class="fas fa-hourglass-half" aria-hidden="true"></i>
+                    <div class="dashboard-info">
+                        <span class="dashboard-title">TESLİM BEKLİYOR</span>
+                        <span id="reqKpiApproved" class="dashboard-value">0</span>
+                    </div>
+                </div>
+                <div class="dashboard-card card-green">
+                    <i class="fas fa-check-double" aria-hidden="true"></i>
+                    <div class="dashboard-info">
+                        <span class="dashboard-title">TESLİM ALINDI</span>
+                        <span id="reqKpiCompleted" class="dashboard-value">0</span>
+                    </div>
+                </div>
+                <div class="dashboard-card card-red">
+                    <i class="fas fa-times-circle" aria-hidden="true"></i>
+                    <div class="dashboard-info">
+                        <span class="dashboard-title">REDDEDİLEN</span>
+                        <span id="reqKpiRejected" class="dashboard-value">0</span>
+                    </div>
+                </div>
             </div>
             <p class="req-draft-note" id="adminDraftRequestNote" hidden></p>
             <div class="card-body p-0">
@@ -1259,6 +1265,31 @@
                         <tbody id="adminPendingRequestsBody">
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SATIN ALMA & SERVİS GÖSTERGELERİ — ait oldukları tabloların hemen üstünde (renderPurchaseStats doldurur) -->
+        <div class="kpi-container mt-2" aria-label="Satın alma ve servis özeti">
+            <div class="dashboard-card card-blue">
+                <i class="fas fa-clock" aria-hidden="true"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">BEKLEYEN SATIN ALMA</span>
+                    <span id="totalPendingPurchase" class="dashboard-value">0</span>
+                </div>
+            </div>
+            <div class="dashboard-card card-yellow">
+                <i class="fas fa-tools" aria-hidden="true"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">SERVİSTE</span>
+                    <span id="totalInService" class="dashboard-value">0</span>
+                </div>
+            </div>
+            <div class="dashboard-card card-green">
+                <i class="fas fa-check-circle" aria-hidden="true"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">TAMAMLANAN SATIN ALMA</span>
+                    <span id="totalCompletedAction" class="dashboard-value">0</span>
                 </div>
             </div>
         </div>

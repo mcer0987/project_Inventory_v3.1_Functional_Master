@@ -168,15 +168,17 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         // admin paneli "Bekleyen Envanter Talepleri" (admin-dashboard.renderAdminRequestTable — gerçek fonksiyon kaynağı)
         await page.evaluate(src => {
             const card = document.createElement('div'); card.className = 'card';
-            card.innerHTML = '<span id="pendingRequestCount"></span><p class="req-draft-note" id="adminDraftRequestNote" hidden></p><table><tbody id="adminPendingRequestsBody"></tbody></table>';
+            card.innerHTML = '<span id="reqKpiPending"></span><span id="reqKpiApproved"></span><span id="reqKpiCompleted"></span><span id="reqKpiRejected"></span><p class="req-draft-note" id="adminDraftRequestNote" hidden></p><table><tbody id="adminPendingRequestsBody"></tbody></table>';
             document.body.append(card);
             (0, eval)(src);
             window.renderAdminRequestTable();
         }, ADMIN_TABLE_SRC);
-        s0 = await page.evaluate(() => ({ rows: document.querySelectorAll('#adminPendingRequestsBody tr').length, count: document.getElementById('pendingRequestCount').innerText,
+        const kpis = () => page.evaluate(() => ['reqKpiPending', 'reqKpiApproved', 'reqKpiCompleted', 'reqKpiRejected'].map(id => document.getElementById(id).textContent));
+        s0 = await page.evaluate(() => ({ rows: document.querySelectorAll('#adminPendingRequestsBody tr').length,
             note: document.getElementById('adminDraftRequestNote').textContent, draft: document.getElementById('adminPendingRequestsBody').textContent.includes('Kulaklık') }));
-        assert.deepEqual(s0, { rows: 3, count: '3', note: s0.note, draft: false }); assert.match(s0.note, /1 taslak/);
-        ok('B-4: Admin "Bekleyen Envanter Talepleri" de taslağı listelemiyor; sayaç 3, taslak notu görünür');
+        assert.deepEqual(s0, { rows: 3, note: s0.note, draft: false }); assert.match(s0.note, /1 taslak/);
+        assert.deepEqual(await kpis(), ['3', '0', '0', '0']);
+        ok('B-4: Admin "Bekleyen Envanter Talepleri" taslağı listelemiyor; kart göstergeleri Bekleyen 3 / Teslim Bekliyor 0 / Teslim Alındı 0 / Reddedilen 0');
 
         // ── 1) Demirbaş talebinin onayı: cihaz kimlikleri zorunlu ──
         await approve(page, 'r_dem', { stockKey: 'b1|p_lap', devices: [{ sn: '', env: '' }, { sn: '', env: '' }] });
@@ -267,6 +269,9 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         assert.match(r[2][6], /Stokta yok — 27" monitör/);
         assert.ok(r.every(x => /İşlem Yapıldı/.test(x[7])));
         ok('Gelen Talepler: durumlar Onaylandı / Onaylandı / Reddedildi; reddedilen satırda gerekçe görünür');
+        await page.evaluate(() => window.renderAdminRequestTable());
+        assert.deepEqual(await kpis(), ['0', '2', '0', '1']);
+        ok('Admin kart göstergeleri karardan sonra: Bekleyen 0 / Teslim Bekliyor 2 / Teslim Alındı 0 / Reddedilen 1');
 
         // ── 4) Yönetici Zimmet ekranı (admin) ──
         await page.evaluate(() => window.inventoryManagementModule.renderTable());

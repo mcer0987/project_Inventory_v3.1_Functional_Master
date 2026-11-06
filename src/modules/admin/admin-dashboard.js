@@ -265,6 +265,7 @@ window.renderAdminRequestTable = function () {
     }
     tableBody.innerHTML = '';
     let pendingCount = 0;
+    const kpi = { approved: 0, completed: 0, rejected: 0 };   // kartın kendi göstergeleri (taslaklar zaten listede yok)
 
     allRequests.forEach((req, index) => {
         const rawDurum = req.durum || "BEKLEMEDE";
@@ -282,6 +283,9 @@ window.renderAdminRequestTable = function () {
         const isPending = !isApproved && !isRejected && !isCompleted && !isDraft;
 
         if (isPending) pendingCount++;
+        if (isApproved) kpi.approved++;
+        if (isCompleted) kpi.completed++;
+        if (isRejected) kpi.rejected++;
 
         let badgeHTML = '';
         if (isApproved) {
@@ -345,6 +349,9 @@ window.renderAdminRequestTable = function () {
         countBadge.innerText = pendingCount;
         countBadge.className = pendingCount > 0 ? "badge rounded-pill bg-danger shadow-sm" : "badge rounded-pill bg-secondary shadow-sm";
     }
+    // Faz 3: kartın kendi göstergeleri — Bekleyen / Teslim Bekliyor (onaylı) / Teslim Alındı / Reddedilen
+    [['reqKpiPending', pendingCount], ['reqKpiApproved', kpi.approved], ['reqKpiCompleted', kpi.completed], ['reqKpiRejected', kpi.rejected]]
+        .forEach(([id, n]) => { const el = document.getElementById(id); if (el) el.textContent = String(n); });
 
     if (allRequests.length === 0) {
         tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-5">✅ Talep bulunmuyor.</td></tr>';
