@@ -617,6 +617,77 @@ service cloud.firestore {
       allow delete: if validRoot(root) && isAdmin(root);
     }
 
+    // ─── İade talepleri (feat/envanter-talep-iade · Faz 4) — ${root}/returnRequests/items/ret_<zimmetId> ─────────────────
+    // [WHY]: Personel üzerindeki demirbaşı iade etmek için talep gönderir; yönetici cihazı teslim alıp depo/cihaz durumu kararıyla
+    //        onaylar ya da gerekçeyle reddeder. knownCol'a BİLEREK eklenmedi: genel blok tüm personele okuma verirdi.
+    // [HOW]: İstemci sözleşmesi src/utils/return-request-schema.js ile aynı alan / seçenek / sınırlar.
+    //        Personel: yalnız KENDİ aktif (iade edilmemiş, açıkça sarf olmayan) zimmeti için, kendi adıyla, 'Beklemede' oluşturur;
+    //        bekleyeni geri çeker (withdrawn); reddedilen / geri çekileni yeniden gönderir. Okuma yalnız kendi talepleri.
+    //        Yönetici: yalnız bekleyen talebe karar verir — onayda zimmet AYNI commit'te kapanmış olmalı (getAfter), redde gerekçe
+    //        zorunlu. Silme yalnız karara bağlanmış / geri çekilmiş talepte (bekleyen silinemez).
+    function retTxt(v, max, required) { return v is string && v.size() <= max && (!required || v.trim().size() > 0) && noTag(v); }
+    function retStaffFieldsOk(d) {
+      return d.get('gerekce', '') in ['Ayrılış / görev değişikliği', 'Arıza', 'İhtiyaç kalmadı', 'Değişim', 'Diğer']
+        && d.get('bildirilenDurum', '') in ['Çalışır', 'Arızalı', 'Hasarlı', 'Eksik parça']
+        && retTxt(d.get('aciklama', ''), 1000, d.get('gerekce', '') == 'Diğer')
+        && retTxt(d.get('tarih', ''), 60, false) && d.get('ts', null) is int;
+    }
+    function retZimmetActive(r, zid) {
+      let z = get(b3Doc(r, zid)).data;
+      return (z.get('tip', null) == 'zimmet' || (z.get('tip', null) == null && z.get('talepTuru', null) != null))
+        && string(z.get('personelId', '')) == staffPid(r)
+        && z.get('iadeEdildi', false) != true
+        && z.get('isDemirbas', null) != false && z.get('isDemirbas', null) != 'false';
+    }
+    function retStaffCreateOk(r, id, d) {
+      return d.keys().hasOnly(['id', 'zimmetId', 'personelId', 'personel', 'personelUid', 'urun', 'sn', 'envanterNo',
+               'kaynakDepo', 'productId', 'gerekce', 'aciklama', 'bildirilenDurum', 'durum', 'tarih', 'ts'])
+        && d.keys().hasAll(['id', 'zimmetId', 'personelId', 'personel', 'personelUid', 'gerekce', 'aciklama', 'bildirilenDurum',
+               'durum', 'tarih', 'ts'])
+        && d.zimmetId is string && d.zimmetId.size() > 0 && d.zimmetId.size() <= 80
+        && id == 'ret_' + d.zimmetId && d.id == id
+        && d.durum == 'Beklemede'
+        && d.personelUid == request.auth.uid && d.personelId == staffPid(r) && d.personel == staffName(r)
+        && retTxt(d.get('urun', '-'), 240, false) && retTxt(d.get('sn', '-'), 120, false) && retTxt(d.get('envanterNo', '-'), 120, false)
+        && d.get('kaynakDepo', null) in [null, 'b1', 'b2']
+        && retStaffFieldsOk(d)
+        && retZimmetActive(r, d.zimmetId);
+    }
+    function retStaffUpdateOk(r, old, d) {
+      let keys = d.diff(old).affectedKeys();
+      return old.get('personelUid', '') == request.auth.uid
+        && ((old.durum == 'Beklemede' && d.durum == 'withdrawn' && keys.hasOnly(['durum', 'tarih', 'ts']))
+          || (old.durum in ['rejected', 'withdrawn'] && d.durum == 'Beklemede'
+              && keys.hasOnly(['durum', 'gerekce', 'aciklama', 'bildirilenDurum', 'tarih', 'ts'])
+              && retStaffFieldsOk(d) && retZimmetActive(r, old.zimmetId)));
+    }
+    function retAdminDecisionOk(r, old, d) {
+      let keys = d.diff(old).affectedKeys();
+      let base = ['durum', 'teslimAlindi', 'iadeDepo', 'stogaEklendi', 'adminCihazDurumu', 'adminNotu', 'kapanisAciklamasi',
+                  'onaylayan', 'onayTarihi', 'redGerekcesi', 'reddeden', 'redTarihi'];
+      return old.durum == 'Beklemede' && keys.hasOnly(base)
+        && ((d.durum == 'approved'
+              && d.get('teslimAlindi', null) is bool && d.get('stogaEklendi', null) is bool
+              && d.get('adminCihazDurumu', '') in ['Sağlam', 'Arızalı', 'Hasarlı', 'Eksik parça']
+              && (d.teslimAlindi ? d.get('iadeDepo', null) in ['b1', 'b2']
+                                 : (d.get('iadeDepo', null) == null && d.stogaEklendi == false
+                                    && retTxt(d.get('kapanisAciklamasi', ''), 1000, true)))
+              && retTxt(d.get('adminNotu', ''), 1000, false) && retTxt(d.get('onaylayan', ''), 160, true)
+              && getAfter(b3Doc(r, old.zimmetId)).data.get('iadeEdildi', false) == true)
+          || (d.durum == 'rejected' && retTxt(d.get('redGerekcesi', ''), 1000, true) && retTxt(d.get('reddeden', ''), 160, true)));
+    }
+    match /{root}/returnRequests/items/{id} {
+      allow read: if validRoot(root) && (isAdmin(root) || (isStaff(root) && resource.data.get('personelUid', '') == request.auth.uid));
+      allow create: if validRoot(root) && regularStaff(root) && !maintenanceOn(root)
+        && retStaffCreateOk(root, id, request.resource.data);
+      allow update: if validRoot(root) && regularStaff(root) && !maintenanceOn(root)
+        && request.resource.data.personelUid == resource.data.personelUid
+        && request.resource.data.zimmetId == resource.data.zimmetId
+        && retStaffUpdateOk(root, resource.data, request.resource.data);
+      allow update: if validRoot(root) && isAdmin(root) && retAdminDecisionOk(root, resource.data, request.resource.data);
+      allow delete: if validRoot(root) && isAdmin(root) && resource.data.get('durum', '') in ['approved', 'rejected', 'withdrawn'];
+    }
+
     match /{root}/{col}/items/{docId} {
       // Ek D "Ziyaretçi ✗": oturumsuz / anonim / personele bağlı olmayan hesap hiçbir şey okuyamaz.
       allow read: if validRoot(root) && knownCol(col) && member(root)

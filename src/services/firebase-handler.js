@@ -30,6 +30,7 @@ import {
     deleteField,
     getDocs,
     query,
+    where,
     orderBy,
     limit,
     serverTimestamp,
@@ -271,7 +272,8 @@ const _bumpDataRevision = () => { _dataRevision++; };
 
 export const COLLECTIONS = window.COLLECTIONS = Object.freeze([
     'b1', 'b2', 'b3', 'manualExits', 'personel', 'productTypes', 'purchaseOrders', 'serviceRecords',
-    'staff', 'units', 'locations', 'tasks', 'requests', 'assignments'
+    'staff', 'units', 'locations', 'tasks', 'requests', 'assignments',
+    'returnRequests'   // feat/envanter-talep-iade · Faz 4 — iade talepleri (personel yalnız kendininkini dinler)
 ]);
 
 // ─── Dinleyici yönetimi (Faz 3.8 · DATA-11, EBYS-18) ─────────────────────────────────────────────
@@ -412,6 +414,19 @@ window.startRealtimeSync = function () {
                 window.LoadingCoordinator?.markLoaded('purchaseOrders');
                 window.dispatchEvent(new CustomEvent('onInventoryDataUpdated',{detail:{collection:'purchaseOrders',isPatch:false}}));
             },error=>reportListenerError('purchaseOrders',error)));
+            return;
+        }
+        // Faz 4: kurallar personele yalnız KENDİ iade taleplerini okutur; koleksiyonun tamamını dinlemek reddedilirdi.
+        if (colName === 'returnRequests' && !window.isDbAdmin()) {
+            const own = query(collection(fireDb, COLLECTION_ROOT, 'returnRequests', 'items'), where('personelUid', '==', window.userAuth.uid));
+            _syncUnsubscribers.push(onSnapshot(own, snapshot => {
+                const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                window.data.returnRequests = items;
+                window._dbMirror.returnRequests = typeof structuredClone === 'function' ? structuredClone(items) : JSON.parse(JSON.stringify(items));
+                _bumpDataRevision(); _markListenerHealthy('returnRequests');
+                window.LoadingCoordinator?.markLoaded('returnRequests');
+                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'returnRequests', isPatch: false } }));
+            }, error => reportListenerError('returnRequests', error)));
             return;
         }
         _syncUnsubscribers.push(onSnapshot(collection(fireDb, COLLECTION_ROOT, colName, "items"), (snapshot) => {

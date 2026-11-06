@@ -49,7 +49,7 @@ export const writeBatch = () => {
 };
 export const runTransaction = async () => { sdk.commits++; };
 export const deleteField = () => ({ __delete: true });
-export const query = (...a) => a, orderBy = (...a) => a, limit = (...a) => a;
+export const query = (...a) => a, where = (...a) => a, orderBy = (...a) => a, limit = (...a) => a;
 export const serverTimestamp = () => ({ __serverTime: true });
 export class Timestamp { constructor(s, n) { this.seconds = s; this.nanoseconds = n; } }
 `;
