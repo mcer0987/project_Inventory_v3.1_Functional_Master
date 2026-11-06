@@ -1101,16 +1101,21 @@ window.sendDraftInventoryRequest = async function (id) {
     //        iki cihaz aynı anda çıkınca biri diğerinin düşümünü eziyor, sıfıra inen "Pasif"/"Hurda" ürünün durumu
     //        "Tükendi" oluyordu; yetersiz kalemler sessizce atlanıp kalanlar "başarılı" kaydediliyordu.
     // [HOW]: Kalemler ürün id'siyle tutulur; tüm kalemlerin stok düşümü + b3 kayıtları TEK transaction (runStockOps):
-    //        bir kalem bile yetmezse hiçbir şey yazılmaz ve hangi ürün olduğu söylenir. Yalnız yönetici (karar 3).
+    //        bir kalem bile yetmezse hiçbir şey yazılmaz ve hangi ürün olduğu söylenir.
+    //        v3.4: yönetici her ürün için (alan kişiyi seçerek); personel hesabı yalnız sarf kalemleri, alan kişi kendisi.
+    const _isAdmin = () => typeof window.isDbAdmin === 'function' && window.isDbAdmin();
     window.openCartModal = function () {
-        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
+        if (!(typeof window.canExitStock === 'function' && window.canExitStock())) { showAppAlert(window.EXIT_STAFF_MESSAGE || window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
         cartItems = [];
         document.getElementById('cartSearch').value = "";
         document.getElementById('cartProductList').style.display = 'none';
         document.getElementById('cartNote').value = "";
-        document.getElementById('cartPerson').value = "";
-        const activeUser = window.getActiveUser();
-        if (activeUser) document.getElementById('cartPerson').value = activeUser.name;
+        document.getElementById('cartSn').value = "";
+        if (window.ExitReceiver) window.ExitReceiver.setup('cart', _isAdmin());
+        const roleNote = document.getElementById('cartRoleNote');
+        if (roleNote) roleNote.textContent = _isAdmin()
+            ? 'Sepetteki tüm ürünlerin stoğu tek seferde düşer; çıkışlar "Alan Kişi" olarak seçtiğiniz personele yazılır. Bir kalemde stok yetmezse hiçbiri kaydedilmez.'
+            : 'Yalnız sarf malzemeleri sepete ekleyebilirsiniz; çıkışlar sizin adınıza kaydedilir. Demirbaş için "Envanter Talep Et" kullanın.';
         renderCartItems();
         const modal = document.getElementById('cartModal');
         if (modal) modal.style.display = 'block';
@@ -1153,9 +1158,9 @@ window.sendDraftInventoryRequest = async function (id) {
                 }
                 div.onclick = function () {
                     const isAdmin = window.isDbAdmin();   // J3: adminVizesi bayrağı elle yazılabiliyordu
-                    if (res.isDemirbasStrict && !isAdmin) {
-                        showAppAlert(`🛡️ GÜVENLİK: Bu ürün demirbaştır. Sadece yöneticiler çıkış yapabilir!`, "warning");
-                        return;
+                    if (!isAdmin) {
+                        const ok = window.ExitPolicy.eligibility(res.item, window.data.productTypes);
+                        if (!ok.ok) { showAppAlert(ok.message, "warning"); return; }
                     }
                     addToCart(res);
                     document.getElementById('cartSearch').value = "";
@@ -1173,6 +1178,11 @@ window.sendDraftInventoryRequest = async function (id) {
             if (exists.exitQty < res.qty) { exists.exitQty++; renderCartItems(); }
             else showAppAlert("Stokta daha fazla yok!", "warning");
         } else {
+            const max = window.ExitPolicy?.STAFF_MAX_ITEMS;
+            if (!_isAdmin() && max && cartItems.length >= max) {
+                showAppAlert(`Toplu çıkışta tek seferde en fazla ${max} farklı ürün ekleyebilirsiniz; kalanları ikinci bir çıkışla yapın.`, 'warning');
+                return;
+            }
             cartItems.push({ ...res, exitQty: 1 });
             renderCartItems();
         }
@@ -1228,14 +1238,18 @@ window.sendDraftInventoryRequest = async function (id) {
     window.saveCartExit = async function (event) {
         if (event) { event.preventDefault(); event.stopPropagation(); }
         if (cartItems.length === 0) { showAppAlert("Sepette çıkış yapılacak ürün yok!", "warning"); return; }
-        const alanKisi = document.getElementById('cartPerson').value || "-";
+        if (!(typeof window.canExitStock === 'function' && window.canExitStock())) { showAppAlert(window.EXIT_STAFF_MESSAGE || window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
+        const isAdmin = _isAdmin();
+        const receiver = window.ExitReceiver ? window.ExitReceiver.resolve('cart', isAdmin) : null;
+        if (!receiver) return;
+        const alanKisi = receiver.name;
+        const personelId = receiver.id;
+        const islemYapanUid = window.userAuth?.uid;
         const not = document.getElementById('cartNote').value || "-";
         const sn = document.getElementById('cartSn').value || "-";
         const tarih = getTurkiyeSaati();
-        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE, 'error'); return; }
 
         const stock = [], writes = [], allDeviceIds = [];
-        const personelId = window.getActiveUser?.()?.id;
         const snGiven = sn !== '-' && sn.trim() !== '';
         for (const cartItem of cartItems) {
             const product = (window.data[cartItem.repo] || []).find(x => x && String(x.id) === String(cartItem.item.id));
@@ -1243,6 +1257,12 @@ window.sendDraftInventoryRequest = async function (id) {
             if (!product) { showAppAlert(`"${name}" artık listede yok; sepetten çıkarın.`, 'error'); return; }
             const qty = Number(cartItem.exitQty);
             if (!Number.isInteger(qty) || qty < 1) { showAppAlert('Adetler en az 1 olan tam sayı olmalıdır.', 'warning'); return; }
+            let staffType = null;
+            if (!isAdmin) {
+                const ok = window.ExitPolicy.eligibility(product, window.data.productTypes);
+                if (!ok.ok) { showAppAlert(`"${name}": ${ok.message}`, 'warning'); return; }
+                staffType = ok.typeId;
+            }
             stock.push({ col: cartItem.repo, id: product.id, delta: -qty });
             // Kanonik b3 kaydı (3.6) — tekil çıkışla aynı kurucu, aynı alanlar.
             // Demirbaş (3.9a): kalem başına adet kadar kimlik, her cihaz ayrı kayıt; ortak SN/ITSM alanı nota "Ref" olarak eklenir.
@@ -1253,12 +1273,13 @@ window.sendDraftInventoryRequest = async function (id) {
                 allDeviceIds.push(...chk.ids);
                 const refNot = snGiven ? `${not === '-' ? '' : not + ' · '}Ref: ${sn}` : not;
                 chk.ids.forEach(d => writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
-                    tip: 'cikis', product, col: cartItem.repo, adet: 1, sn: d.sn, envanterNo: d.envanterNo, not: refNot, alanKisi, tarih, personelId,
+                    tip: 'cikis', product, col: cartItem.repo, adet: 1, sn: d.sn, envanterNo: d.envanterNo, not: refNot, alanKisi, tarih, personelId, islemYapanUid,
                 }) }));
             } else {
-                if (!snGiven) { showAppAlert(`"${name}" (sarf) için "SN / BioPro / Itsm" alanını doldurun.`, 'warning'); return; }
+                if (!snGiven) { showAppAlert(`"${name}" (sarf) için "ITSM / Gerekçe" alanını doldurun.`, 'warning'); return; }
                 writes.push({ op: 'set', col: 'b3', item: window.Schema.buildB3Entry({
-                    tip: 'cikis', product, col: cartItem.repo, adet: qty, sn, not, alanKisi, tarih, personelId,
+                    tip: 'cikis', product, col: cartItem.repo, adet: qty, sn, not, alanKisi, tarih, personelId, islemYapanUid,
+                    ...(staffType ? { urunTuruId: staffType, isDemirbas: false } : {}),
                 }) });
             }
         }
@@ -1268,7 +1289,8 @@ window.sendDraftInventoryRequest = async function (id) {
 
         let res;
         try {
-            res = await window.runStockOps({ stock, writes });
+            res = await window.runStockOps({ stock, writes }, isAdmin ? undefined
+                : { staffExit: true, forbiddenMessage: 'Toplu çıkış reddedildi: personel yalnız sarf malzeme çıkışı yapabilir.' });
         } catch (e) {
             showAppAlert(`Toplu çıkış yapılamadı; hiçbir kalem kaydedilmedi. ${e.message || ''}`, 'error');
             return;
@@ -1336,6 +1358,8 @@ window.searchForExit = function () {
         ((item.açıklama || '')?.toLocaleLowerCase('tr-TR').includes(filter))
     ).slice(0, 10);
 
+    // v3.4: personel için demirbaş / türü belirsiz ürünler listede görünür ama seçilemez (neden yazılır)
+    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
     results.forEach(item => {
         const div = document.createElement('div');
         div.className = 'product-item';
@@ -1343,8 +1367,16 @@ window.searchForExit = function () {
         div.style.borderBottom = '1px solid #eee';
         div.style.cursor = 'pointer';
         const stock = item.adet !== undefined ? item.adet : (item.qty || 0);
-        div.innerHTML = `<strong>${escapeHtml(item.ürün || item.name || '-')}</strong> <small>(${escapeHtml(item.marka || item.tür || '-')})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${escapeHtml(item.raf || item.shelf || '-')} | Stok: ${stock} | Depo: ${escapeHtml(item._repo.toUpperCase())}</span>`;
-        if (stock > 0) {
+        div.innerHTML = `<strong>${escapeHtml(item.ürün || item.name || '-')}</strong> <small>(${escapeHtml(item.marka || item.tür || '-')})</small><br><span style="font-size: 0.85em; color: #666;">Raf: ${escapeHtml(item.raf || item.shelf || '-')} | Stok: ${escapeHtml(stock)} | Depo: ${escapeHtml(item._repo.toUpperCase())}</span>`;
+        const policy = !isAdmin && window.ExitPolicy ? window.ExitPolicy.eligibility(item, window.data.productTypes) : { ok: true };
+        if (!policy.ok) {
+            const note = document.createElement('div');
+            note.className = 'exit-item-locked';
+            note.textContent = policy.reason === 'demirbas' ? '🛡️ Demirbaş — yalnız yönetici çıkış yapar; "Envanter Talep Et" kullanın.' : '🔒 Türü listede birebir bulunamadı — çıkışı yönetici yapar.';
+            div.append(note);
+            div.style.opacity = '0.6';
+            div.onclick = () => showAppAlert(policy.message, 'warning');
+        } else if (stock > 0) {
             div.onclick = () => window.selectProduct(item.ürün || item.name, item.tür || item.type || item.marka, item.raf || item.shelf, stock, item._repo, item._index, item.id);
         } else {
             div.style.opacity = '0.5'; div.style.pointerEvents = 'none'; div.innerHTML += ' <b style="color:red;">(STOK YOK)</b>';
@@ -1541,7 +1573,7 @@ function _renderB3Cards(rows) {
                     <summary><span>Detaylar</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
                     <dl>
                         ${detail('Raf / Konum', row.rafNo) /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
-                        ${detail('SN / BioPro / Itsm', row.sn, 'b3-mono') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                        ${detail('ITSM / Gerekçe', row.sn, 'b3-mono') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
                         ${detail('Tarih', row.tarih) /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
                         ${detail('Açıklama / Not', row.not, 'b3-note') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
                     </dl>
@@ -2005,7 +2037,7 @@ window.exportToExcel = function (depo) {
                 "Raf No": n.rafNo,
                 "Ürün Türü": n.urunTuru,
                 "Ürün Açıklama": n.urunAciklama,
-                "SN / BioPro / Itsm": n.sn,
+                "ITSM / Gerekçe": n.sn,
                 "Envanter No": n.envanterNo,
                 "Adet": n.adet,
                 "Not/Gerekçe": n.not,

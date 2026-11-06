@@ -5519,3 +5519,98 @@ body,
         transition: none;
     }
 }
+
+/* =============================================================================
+   v3.4 · PERSONEL ÇIKIŞI VE SALT-OKUNUR DEPO
+   [WHY]: BT ekibi sarf çıkışı yapabilir; yönetici alan kişiyi listeden seçer; depolar personelde yalnız görüntülenir.
+   [HOW]: Rol notu (modal başı), aranabilir kişi listesi (person-picker.js), kilitli ürün satırı ve
+          body.staff-readonly altında pasif depo çubuğu (staff-guards.js tıklamayı ayrıca engeller).
+   ============================================================================= */
+.exit-role-note {
+    margin: -4px 0 12px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border-left: 3px solid var(--color-primary);
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.exit-role-note:empty { display: none; }
+
+.person-picker { position: relative; }
+
+.person-picker-list {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    max-height: 240px;
+    margin: 0;
+    padding: 4px;
+    overflow-y: auto;
+    list-style: none;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.12));
+}
+
+.person-picker-list li {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--color-text);
+}
+
+.person-picker-list li small { color: var(--color-text-muted); font-size: 11.5px; }
+.person-picker-list li[aria-selected="true"] { background: var(--color-surface-alt); outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.person-picker-list .person-picker-empty { cursor: default; color: var(--color-text-muted); }
+
+#exitPerson[readonly],
+#cartPerson[readonly] { background: var(--color-surface-alt); cursor: not-allowed; }
+
+.exit-item-locked {
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.fab-readonly-note {
+    margin: 0;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: inherit;
+}
+
+body.staff-readonly .uab-bar .uab-btn,
+body.staff-readonly .uab-bar .uab-checkbox-wrap {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(0.4);
+    box-shadow: none;
+    transform: none;
+}
+
+body.staff-readonly .uab-bar::before {
+    content: '🔒 Yalnız görüntüleme';
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 12px;
+    margin-right: 4px;
+    border-radius: 999px;
+    border: 1px solid var(--color-border-light);
+    background: var(--color-surface-alt);
+    color: var(--color-text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}

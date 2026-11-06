@@ -38,6 +38,10 @@
         'not', 'alanKisi', 'personelId', 'tarih', 'ts', 'isDemirbas',
         'talepTuru', 'oncelik', 'iadeTarihi', 'iadeEdildi', 'iadeEdildiTarihi', 'iadeDepo', 'onaylayan'
     ]);
+    // v3.4 · personel çıkışı (exit-policy.js): kurallar personel çıkışında ikisini de zorunlu tutar; yönetici yazmalarında isteğe bağlı.
+    //   urunTuruId    — ürünün türünün katalog kimliği (productTypes/items/{id}); kural türün demirbaş OLMADIĞINI buradan doğrular.
+    //   islemYapanUid — çıkışı yapan oturumun uid'si (alan kişi ile aynı olmak zorunda değil; denetim izi).
+    const B3_OPTIONAL_KEYS = Object.freeze(['urunTuruId', 'islemYapanUid']);
     // Eski şemaların kanonik karşılığı olan alanları (göçte kaldırılır; kanonik kayıtta bulunmamalı).
     const B3_LEGACY_KEYS = Object.freeze([
         'shelfNo', 'productType', 'sarfAdet', 'note', 'date', 'person', 'personel', 'sourceRepo', 'approvedBy',
@@ -149,6 +153,8 @@
             iadeEdildiTarihi: null,
             iadeDepo: null,
             onaylayan: pick(o.onaylayan) ?? null,
+            ...(isBlank(o.urunTuruId) ? {} : { urunTuruId: String(o.urunTuruId) }),
+            ...(isBlank(o.islemYapanUid) ? {} : { islemYapanUid: String(o.islemYapanUid) }),
         };
     }
 
@@ -258,7 +264,9 @@
     //          stokOncekiDurum — stok 0'a düşerken saklanan önceki durum (computeStockPatch); tam kayıt yazan yollar
     //                            (saveData / upsertItem / geri yükleme) kaydı bu alanla birlikte yeniden yazar.
     //          envanterNo      — B1/B2 stok kaydı kimliği (benzersizlik kontrolü importta yapılır).
-    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo']);
+    //          sonCikisId      — v3.4: personel çıkışında stok düşümünü aynı commit'teki b3 kaydına bağlar (firestore.rules
+    //                            staffExitStockOk); yalnız runStockOps personel çıkışı yazar.
+    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo', 'sonCikisId']);
     const B2_OPTIONAL_KEYS = Object.freeze([...B1_OPTIONAL_KEYS]);
     const STOCK_STRING_KEYS = Object.freeze(['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status', 'envanterNo', 'stokOncekiDurum']);
 
@@ -639,7 +647,7 @@
 
     const Schema = {
         makeId, normName, idToTs, isDemirbas, normalizeStock, findStock, isSelfApproval,
-        B3_SCHEMA_VERSION, B3_KEYS, B3_LEGACY_KEYS, B3_TIP, STOK_DISI,
+        B3_SCHEMA_VERSION, B3_KEYS, B3_OPTIONAL_KEYS, B3_LEGACY_KEYS, B3_TIP, STOK_DISI,
         buildB3Entry, normalizeB3, toCanonicalB3, validateB3,
         B1_KEYS, B1_LEGACY_KEYS, B2_KEYS, B2_LEGACY_KEYS, B1_OPTIONAL_KEYS, B2_OPTIONAL_KEYS, stockKnownKeys, legacyStockPatch,
         validateB1, validateB2, toCanonicalStock,

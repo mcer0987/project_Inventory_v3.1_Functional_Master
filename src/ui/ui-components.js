@@ -112,6 +112,12 @@ export const UIComponents = {
             ? repoItems.find(x => x && String(x.id) === String(id)) || null
             : (repoItems[index] || null);
 
+        // v3.4: personel demirbaşı ya da türü katalogda birebir bulunmayan ürünü seçemez (ExitPolicy · kurallarla aynı ölçüt)
+        if (item && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin()) && window.ExitPolicy) {
+            const ok = window.ExitPolicy.eligibility(item, window.data.productTypes);
+            if (!ok.ok) { if (typeof showAppAlert === 'function') showAppAlert(ok.message, 'warning'); return; }
+        }
+
         div.dataset.name  = name;
         div.dataset.type  = type;
         div.dataset.shelf = shelf;
@@ -662,33 +668,26 @@ export const UIComponents = {
     // =========================================================================
     // Satırdan açılırsa ikinci argüman ürün id'sidir (DATA-06).
     openExitModal(repoName, productId) {
-        // Karar 3: Faz 4 yetki matrisine kadar stok çıkışı yalnız yönetici (Firestore kuralları da personele b1/b2/b3 yazdırmaz);
-        // personel formu doldurup sonra reddedilmek yerine baştan net mesaj görür.
-        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
-            if (typeof showAppAlert === 'function') showAppAlert(window.EXIT_ADMIN_ONLY_MESSAGE || 'Çıkış işlemi yalnızca sistem yöneticisi tarafından yapılabilir.', 'error');
+        // v3.4: yönetici ve personel hesabı (BT ekibi) açabilir; personel yalnız sarf çıkışı yapar (ExitPolicy + firestore.rules).
+        if (!(typeof window.canExitStock === 'function' && window.canExitStock())) {
+            if (typeof showAppAlert === 'function') showAppAlert(window.EXIT_STAFF_MESSAGE || window.EXIT_ADMIN_ONLY_MESSAGE, 'error');
             return;
         }
+        // J3: yetki Firebase admin oturumundan; adminVizesi (sessionStorage) elle yazılarak muhafız atlanabiliyordu.
+        const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
         window.currentExitRepo  = repoName || (document.querySelector('.tab-content.active')?.id || 'b1');
         window.currentExitIndex = null;
         const hasRow = productId !== undefined && productId !== null && productId !== '';
         const findRow = () => (window.data[window.currentExitRepo] || []).find(x => x && String(x.id) === String(productId)) || null;
 
-        // Demirbaş Koruması
+        // Demirbaş Koruması (tek kural: Schema.isDemirbas; personel için ExitPolicy)
         if (hasRow) {
             const item = findRow();
-
-            if (item && (item.isDemirbas === true || item.isDemirbas === 'true')) {
-                // J3: yetki Firebase admin oturumundan; adminVizesi (sessionStorage) elle yazılarak muhafız atlanabiliyordu.
-                const isAdmin = window.isDbAdmin();
-
-                if (!isAdmin) {
-                    if (typeof showAppAlert === 'function') {
-                        showAppAlert(`🛡️ GÜVENLİK: "${item.ürün || item.name}" demirbaştır. Sadece yöneticiler çıkış yapabilir!`, 'warning');
-                    }
-                    return;
-                } else {
-                    if (typeof showAppAlert === 'function') showAppAlert('BİLGİ: Demirbaş ürününden çıkış yapıyorsunuz.', 'info');
-                }
+            if (item && !isAdmin) {
+                const ok = window.ExitPolicy.eligibility(item, window.data.productTypes);
+                if (!ok.ok) { if (typeof showAppAlert === 'function') showAppAlert(ok.message, 'warning'); return; }
+            } else if (item && window.Schema.isDemirbas(item) && typeof showAppAlert === 'function') {
+                showAppAlert('BİLGİ: Demirbaş ürününden çıkış yapıyorsunuz.', 'info');
             }
         }
 
@@ -714,10 +713,12 @@ export const UIComponents = {
                 rowItem.raf || rowItem.shelf, rowItem.adet ?? rowItem.qty ?? 0, rowRepo, null, rowItem.id);
         }
 
-        // Aktif kullanıcı adını forma yaz
-        const activeUser  = window.getActiveUser();
-        const personInput = document.getElementById('exitPerson');
-        if (personInput && activeUser) personInput.value = activeUser.name;
+        // Alan kişi: yönetici listeden seçer (varsayılan kendisi), personelde kendisi ve kilitli (v3.4 · person-picker.js)
+        if (window.ExitReceiver) window.ExitReceiver.setup('exit', isAdmin);
+        const roleNote = document.getElementById('exitRoleNote');
+        if (roleNote) roleNote.textContent = isAdmin
+            ? 'Seçtiğiniz ürünün stoğu düşer ve çıkış, "Alan Kişi" olarak seçtiğiniz personelin envanterine yazılır.'
+            : 'Sarf malzeme çıkışı yapabilirsiniz; stok düşer ve çıkış sizin adınıza kaydedilir. Demirbaş ürünler için "Envanter Talep Et" ile yöneticiye talep gönderin.';
 
         modal.style.display = 'block';
 
@@ -898,6 +899,20 @@ export const UIComponents = {
 
         let buttonsHtml = '';
 
+        // v3.4: depolar personel için yalnız görüntülenebilir — stok/düzenleme düğmeleri yerine açıklama (staff-guards.js)
+        if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            const fabBtns = _dom.fabBtns();
+            if (fabBtns) {
+                fabBtns.replaceChildren();
+                const note = document.createElement('span');
+                note.className = 'fab-readonly-note';
+                note.textContent = '🔒 Yalnız görüntüleme — çıkış için Envanter Takibi › Envanter Çıkışı Yap';
+                fabBtns.append(note);
+            }
+            fab.classList.add('fab-visible');
+            return;
+        }
+
         if (count === 1) {
             // TEKİL MOD: Tüm işlemler
             const item      = (window.data[first.depo] || []).find(x => x && String(x.id) === String(first.id)) || {};
@@ -961,7 +976,13 @@ export const UIComponents = {
         const bsBtns    = _dom.bsBtns();
 
         if (bsName) bsName.textContent = itemData.name || 'Ürün';
-        if (bsBtns) bsBtns.innerHTML = `
+        if (bsBtns && !(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) {
+            bsBtns.replaceChildren();
+            const note = document.createElement('p');
+            note.className = 'fab-readonly-note';
+            note.textContent = '🔒 Depolar personel için yalnız görüntülenebilir. Sarf malzeme çıkışı için Envanter Takibi › Envanter Çıkışı Yap.';
+            bsBtns.append(note);
+        } else if (bsBtns) bsBtns.innerHTML = `
             <button class="bs-action-btn bs-btn-inc" data-action="increaseStock" data-depo="${d}" data-id="${i}">
                 <i class="fas fa-plus"></i> Artır
             </button>

@@ -1,0 +1,160 @@
+Personel (BT ekibi) envanter çıkışı ve salt-okunur depo — test kanıtları
+Tarih: 05.11.2026 11:40 · Dal: feat/v3.4-ebys-asama-5 · HEAD: 8350f91 (değişiklikler commit edilmedi)
+
+=== 1) Kural testleri — tests/rules/staff-exit.test.mjs (Firestore emülatörü) ===
+  ✔ stok düşümü + bağlı b3 kaydı tek batch'te geçer
+  ✔ stok 0'a inince Tükendi durumu ve önceki durum yazılabilir
+  ✔ B2 (durumu + status) ürününde çıkış geçer
+  ✔ toplu çıkış: 3 farklı sarf kalemi tek batch'te geçer
+✔ İzin verilen: personel sarf çıkışı
+  ✔ demirbaş türündeki ürün (urunTuruId demirbaş tür) çıkamaz
+  ✔ KÖTÜ NİYET: demirbaş ürüne sarf türünün id'siyle çıkış (ad eşleşmez) reddedilir
+  ✔ KÖTÜ NİYET: kayıtta isDemirbas:false olsa da türü demirbaş olan ürün çıkamaz
+  ✔ b3 kaydında isDemirbas true ise reddedilir
+  ✔ olmayan tür id'si reddedilir
+✔ Reddedilen: demirbaş ve tür
+  ✔ b3 kaydı olmadan stok düşümü reddedilir
+  ✔ stok düşmeden b3 kaydı reddedilir
+  ✔ düşülen adet ile kayıt adedi farklıysa reddedilir
+  ✔ stok artırma reddedilir
+  ✔ KÖTÜ NİYET: var olan b3 kaydına bağlanarak stok düşümü reddedilir
+  ✔ KÖTÜ NİYET: çıkışla birlikte ürün adı değiştirilemez
+  ✔ KÖTÜ NİYET: durum Tükendi dışında bir değere çekilemez
+  ✔ KÖTÜ NİYET: sonCikisId olmadan doğrudan adet düşümü reddedilir
+✔ Reddedilen: bağ ve adet
+  ✔ başka personel adına (personelId) çıkış reddedilir
+  ✔ başkasının uid'siyle (islemYapanUid) reddedilir
+  ✔ zimmet tipi reddedilir
+  ✔ talebe bağlı (requestId) kayıt reddedilir
+  ✔ etiketli metin (XSS) reddedilir
+  ✔ bilinmeyen alan reddedilir
+  ✔ bakım modunda reddedilir
+  ✔ erişim kilidi kapalıyken reddedilir
+  ✔ personel kaydına bağlı olmayan hesap reddedilir
+  ✔ personel b3 kaydını silemez / güncelleyemez
+✔ Reddedilen: kimlik ve kayıt türü
+  ✔ yönetici demirbaş çıkışını eskisi gibi yapar
+✔ Yönetici etkilenmez
+  ✔ istemci sınırı (6 kalem) geçer
+  ✔ 8 kalem belge erişimi sınırına takılır
+✔ Toplu çıkışta kalem sınırı
+ℹ tests 30
+ℹ pass 30
+ℹ fail 0
+
+=== 2) Uçtan uca: arayüz (Chrome) + arayüzün ürettiği kaydın kurallara karşı tekrarı — scratch/staff-exit-ui.cjs ===
+Kural tekrarı: arayüzün ürettiği personel tekil + toplu çıkışı GEÇTİ; başka kişi adına, demirbaş ve yönetici biçimli kayıt REDDEDİLDİ.
+Personel çıkışı UI: rol notu, ITSM / Gerekçe, demirbaş kilidi, alan kişi (personel kilitli / yönetici aranabilir), toplu çıkış, depo salt-okunur, sağ tık + F12/Ctrl+Shift+I/Ctrl+U engeli. pageerror=0
+
+=== 3) Birim testleri — npm run test:unit ===
+ℹ tests 298
+ℹ pass 298
+ℹ fail 0
+✔ planRestore: değişmeyen yazılmaz, değişen/yeni tam değiştirilir, yedekte olmayan silinir
+✔ planRestore: yedekte aynı id iki kez → duplicate-id (hiçbir şey planlanmaz)
+✔ Firestore bağdaştırıcısı: Timestamp günlüğe kodlanır ve geri alma için aynen çözülür; bilinmeyen tür reddedilir
+✔ personel bağlantısı ID üzerinden çözülür; eski birim metni bağlantısızken korunur
+✔ belge türü ürün türünden ayrıdır; satın alma yalnız kendi şablonunu listeler
+✔ rota adımları kalıcı ID ve desteklenen görev türleriyle doğrulanır
+✔ sarf türündeki ürün uygun; tür id'si döner
+✔ demirbaş türü reddedilir; kayıttaki isDemirbas:false türü ezmez
+✔ tür kataloğda birebir yoksa (büyük/küçük harf dahil) karar yöneticiye kalır
+✔ B2 eski "type" alanı da okunur; boolean olmayan bayrak demirbaş sayılır (güvenli taraf)
+✔ geçerli plan: ürün başına tek b3 kaydı, bağ haritası döner
+✔ stok artırma, eksik/fazla kayıt, adet uyumsuzluğu ve demirbaş reddedilir
+✔ eşzamanlılık (tek batch): plan ile commit arasında raf sayacı değişirse ÇAKIŞMA — hiçbir şey yazılmaz
+✔ plan: raf girdileri ÖNCE gelir, cas:true taşır; prev = sunucudaki tam belge (yeni rafta null)
+✔ plan: kapasitesi zaten aşılmış raf otomatik büyütülmez; pasif raf Havuz; başka depodaki aynı kod sayılmaz
+✔ plan: slot işgal etmeyen satır, aynı içe aktarmada yaratılan rafa yazılabilir ama sayaca eklenmez
+✔ demirbaş kaydında envanter numarası zorunludur; demirbaş değilse boş olabilir
+✔ resolveOwner: iki personelde aynı ad (Türkçe katlama dahil) → ambiguous, OTOMATİK EŞLEME YOK
+✔ planDoc: talep (id / eski kod / ad), satın alma (createdBy id / kod / ad + akış adımları), görev, şablon
+✔ planDoc: dolu uid ASLA değiştirilmez; çözüm farklıysa mismatch raporlanır
+✔ planMigration (önizleme): girdiyi değiştirmez, giriş kodunu rapora çıkarmaz, sayıları doğru
+✔ applyMigration: yalnız uid alanlarını yazar; ikinci koşu hiçbir şey planlamaz (idempotent); tx başına ≤ parça boyutu
+✔ applyMigration: personel listesi önizlemeden sonra değiştiyse HİÇ yazmadan durur (yeni aynı adlı personel belirsizlik yaratır)
+✔ applyMigration: transaction içinde dayanılan personel kaydı değişirse parça yazılmaz (personel-changed)
+✔ planCodeCleanse: hesabı olmayan personel, bekleyen sahiplik göçü ve ÇÖZÜLEMEYEN createdBy ENGEL; adlar / id dokunulmaz
+✔ planCodeCleanse: aynı kod birden fazla personelde ortaksa (göç öncesi eski veri) createdBy engeldir, "ortak" olarak raporlanır
+✔ J11.5 · planCodeCleanse: biçimine bakılmaksızın ÇÖZÜLEMEYEN her createdBy engeldir (tireli / özel karakterli / kısa / uzun eski kod)
+✔ J11.5 · planCodeCleanse: özel karakterli kod BUGÜN tekil bir personelde duruyorsa o personelin id'sine çözülür
+✔ J11.5 · planCodeCleanse: meşru oluşturan değerleri (personel id'si, sayısal id, bilinen ad, sistem / rol / havuz değeri) engel DEĞİL
+✔ J11.6 · planCodeCleanse: sistem değeri ("admin") bir personelin geçerli koduysa engel — "sistem" diye geçilmez, otomatik çözülmez
+✔ J11.6 · planCodeCleanse: bir personelin kodu BAŞKA bir personelin id'siyle aynıysa engel
+✔ J11.6 · planCodeCleanse: bir personelin kodu BAŞKA bir personelin adıyla aynıysa engel
+✔ J11.7 · planCodeCleanse: kod = kendi id'si ve createdBy bu değer → ENGEL (plan hazır değil, kodlar silinmez)
+✔ J11.7 · planCodeCleanse: kod = kendi adı ve createdBy bu değer → ENGEL (plan hazır değil, kodlar silinmez)
+✔ J11.7 · planStaffAccessClosure: kod = kendi id'si çakışması kapanışı engeller (purchaseOrderCodes), kilit açılamaz
+✔ J11.6 · planCodeCleanse: kodlar DURURKEN çakışmasız meşru değerler (id, ad, sistem değeri) engel değil; kod tekil personele çözülür
+✔ J11.6 · planStaffAccessClosure: kod / sistem değeri çakışması çözülmeden kapanış TEMİZ değil — kilit açılamaz
+✔ J11.5 · planStaffAccessClosure: tireli eski kod (sahibinin kodu silinmiş) kapanışı ENGELLER — kilit açılamaz
+✔ planCodeCleanse.fingerprint: kodun KENDİSİNİ içermez (plan çıktısı kuralı fingerprint için de geçerli); ilgili değişiklik iz bırakır, kodun değeri bırakmaz
+✔ planStaffAccessClosure: sekiz denetim kural şemasıyla aynı; temiz veri ready; her kusur kendi sayacına düşer
+✔ Roboto-Regular.js: Türkçe harfler (ş,ğ,ı,İ,ö,ü,ç ve büyükleri) cmap'te var
+✔ Roboto-Bold.js: Türkçe harfler (ş,ğ,ı,İ,ö,ü,ç ve büyükleri) cmap'te var
+✔ kanonik tür güncellenir; başarı yalnız bütün yazmalar bitince bildirilir
+✔ yalnız type taşıyan kayda tür eklenir, alias korunur
+✔ yalnız prodType taşıyan kayda tür eklenir, alias korunur
+✔ gölgelenen alias eşleşmesi kanonik türü değiştirmez; type prodType öncesindedir
+✔ kanonik tür eşleşirse çelişen eski alias aynen korunur
+✔ B2 ön kontrol hatası B1 ve tür tanımı dahil bütün yazmaları engeller
+✔ tür tanımı yazılamazsa ürün yazmaları başlamaz
+✔ legacy talep sanal kalem gösterir, bütçeden sahte fiyat türetmez
+✔ form sayıları bozuk metin ve aşırı ondalıkla hesaplanmaz
+✔ normShelfCode: Türkçe i/ı/İ tek harfe katlanır; tam genişlik ve tire varyantları ASCII olur
+✔ foldTr / normalizePri: Türkçe harfler arındırılır, küçük harf ("İ".toLowerCase() tuzağı yok)
+✔ PRI deseni firestore.rules isStaff deseniyle aynı (istemci geçerli saydığını kural da personel sayar, tersi de)
+✔ provisionOne: kota / kapalı sign-up / ağ ProvisioningStop; diğer hatalar error (türüyle)
+✔ planAccounts: PRI atama (bağlı olanınki korunur, çakışana numara) ve işlem türleri; plan kod içermez
+✔ applyAccounts: plan uygulanır; ikinci plan yalnız "ok" (eşleme yenileme) çıkarır — idempotent
+✔ KABUL (P1): Auth taşıması başarılı + Firestore bağı düştü → ikinci çalıştırma AYNI uid'yi aynı personele bağlar (move-resumed)
+✔ P1: kurtarmada PRI adresindeki hesabın uid'si personeldekiyle aynı değilse HİÇBİR bağ yazılmaz (conflict)
+✔ P1: bağ çakışması (eşleme başka personeli / kayıt başka uid'yi gösteriyor) link-failed değil conflict
+✔ createFirestoreLinker: eşleme + personel bağı TEK transaction; commit düşerse ikisi de yazılmaz; yeniden çalıştırma idempotent
+✔ createFirestoreLinker: kayıt başka uid'ye bağlıysa / eşleme başka personeli gösteriyorsa / kayıt yoksa hiçbir şey yazılmaz
+✔ toCanonicalStock: b2 durumu/status birbirinden tamamlanır; isDemirbas tür tanımından
+✔ decodeText: UTF-8 BOM atılır; geçersiz UTF-8 → Windows-1254 (Excel Türkçe CSV)
+✔ içe aktarma: kayıtlı tür boşluk/büyük-küçük harf farkıyla eşleşir ve katalog adıyla yazılır
+✔ içe aktarma: sistemde kayıtlı olmayan ürün türü dosyanın tamamını durdurur
+✔ içe aktarma: boş ürün türü mevcut davranışla kabul edilir
+✔ hedef raf dolu → shelf-full (yazma planı oluşmaz)
+✔ planShelfSave: yeni raf kanonik belge, kullanım altında kapasite reddi; mevcut rafta kapasite kullanımın altına inemez
+✔ planShelfCounterWrites: requireCatalog varsayılan true — katalogda olmayan raf ARTIŞTA shelf-missing fırlatır
+✔ planShelfCounterWrites: requireCatalog:false — katalogda olmayan raf ARTIŞTA sessizce atlanır (yazma/hata yok)
+✔ planShelfCounterWrites: requireCatalog:false — katalogda OLAN rafta kapasite/aktiflik yine de uygulanır
+✔ planShelfCounterWrites: AZALIŞ her zaman serbest; katalogda olmayan raf için düşülecek sayaç yoksayılır (her iki modda)
+✔ planShelfCounterWrites: delta 0 veya shelfId yoksa yoksayılır; birden çok rafı tek seferde işler
+✔ planProductSave: yeni kayıt — hedef raf katalogda olmasa da yazılır (geçiş dönemi, requireCatalog:false)
+✔ planProductSave: yeni kayıt — hedef raf katalogda VE doluysa shelf-full (hiçbir şey yazılmaz)
+✔ planProductSave: yeni kayıt — hedef raf katalogda VE müsaitse sayaç +1 yazılır
+✔ planProductSave: yeni kayıt — pasif/stok dışı ürün slot istemez; şema ihlali reddedilir; aynı id çakışması conflict
+✔ planProductSave: düzenleme — yalnız fields yazılır (diğer alanlar korunur); kayıt yoksa not-found
+✔ planProductSave: düzenleme — raf değişimi (taşıma) kaynaktan −1, hedefe +1 yazar; kaynak kaydı aynen korunur
+✔ planProductSave: düzenleme — occupancy hesabı reads.existing (TAZE okuma) üzerindendir; fields adedi değiştirmezse önceki adet geçerlidir
+✔ planProductSave: düzenleme — aynı rafta kalıp durum Pasif olunca kaynak rafı −1 olur (katalogda ise)
+✔ planProductSave: düzenleme — bilinmeyen/eski alan reddedilir (applyItemOps update guard ile aynı kural); isWatched serbest
+✔ planProductSave: katı şema — B1/B2 envanterNo alanını destekler, yanlış tipleri reddeder
+✔ planShelfSync: sayım kataloktaki usedSlots ile ZATEN aynıysa hiçbir şey yazılmaz (unchanged)
+✔ planShelfSync: sayım farklıysa (kapasite içinde) usedSlots güncellenir
+✔ planShelfSync: tamamen boşalmış raf (kullanım 0, usedSlots eski kalmış) DA düzeltilir — usage objesinde hiç anahtar olarak geçmez
+✔ planShelfSync: gerçek sayım kapasiteyi aşıyorsa kapasite sayıma YÜKSELTİLİR ve ayrıca raporlanır (durdurmaz)
+✔ planShelfSync: raf koduna sahip ürün var ama katalogda YOKSA — unregistered listelenir, yazma yapılmaz, işlem durmaz
+✔ planShelfSync: rafsız (Havuz) ürünler ayrı sayılır — hiçbir raf belgesine yazılmaz, unregistered'a da düşmez
+✔ planShelfSync: pasif/stok dışı ürünler hiçbir sayıma (ne raf ne havuz) girmez
+✔ planShelfSync: her iki depo bağımsız işlenir; farklı depoda AYNI kod farklı belgeye karşılık gelir
+✔ planShelfSync: katalogda depot/code alanı bozuk ya da eksik olan belgeler yok sayılır (çökmeden atlanır)
+✔ alan kümeleri açık: Envanter No B1/B2 ortak opsiyonel alanı; status yalnız B2
+✔ bilinmeyen / boş personelId → null
+✔ zimmeti olmayan personel: boş kalem listesi, geçerli belge
+
+=== 4) XSS kapısı — npm run lint:xss ===
+xss-lint · 73 dosya · 208 sink · 277 HTML şablonu · 979 dinamik ifade
+  güvenli 960 · izinli (xss-ok) 19 · İZİNSİZ 0
+
+=== 5) Yayın dosya listesi — node scratch/hosting-files.js ===
+Yayınlanacak dosya: 95 (kök: 22, src/: 62, pdf-fonts/: 3) · beklenen: 95
+✔ Yalnız uygulama dosyaları yayınlanacak.
+
+=== 6) Gerileme: önceki tarayıcı kontrolleri ===
+B3 responsive: telefon kart+gün grubu+arama+seçim, tablet sticky uçlar, masaüstü tablo. pageerror=0
+EBYS Rehberi: iki sayfada düğme, sekmeler+ok tuşu, defter akışı, imza ve kur simülasyonu, Esc/odak dönüşü, koyu tema, telefon tek kolon. pageerror=0

@@ -256,12 +256,18 @@
     </style>
 
     <div class="sidebar admin-content-hidden">
-        <div class="sidebar-header">🛡️ Admin Panel</div>
+        <div class="sidebar-header"><i class="fas fa-shield-halved" aria-hidden="true"></i><span>Admin Panel</span></div>
         <button class="theme-toggle-btn" onclick="toggleTheme()" title="Koyu Temaya Geç" id="themeToggleAdmin">
             <i class="fas fa-moon"></i> <span>Tema</span>
         </button>
-        <div class="nav-item active" id="nav-dashboard" onclick="showAdminTab('dashboard-content')">📊 Dashboard</div>
-        <div class="nav-item" onclick="showAdminTab('productTypeSettings')">🎛️ Operasyon Merkezi</div>
+        <div class="nav-item active" id="nav-dashboard" onclick="showAdminTab('dashboard-content')">
+            <i class="fas fa-gauge-high"></i>
+            <span>Dashboard</span>
+        </div>
+        <div class="nav-item" onclick="showAdminTab('productTypeSettings')">
+            <i class="fas fa-sliders"></i>
+            <span>Operasyon Merkezi</span>
+        </div>
         <!-- <div class="nav-item" onclick="window.location.href='index.html'">⬅️ Depoya Dön</div> -->
         <div class="nav-item" onclick="showAdminTab('purchaseTab')">
             <i class="fas fa-shopping-cart"></i>
@@ -282,7 +288,8 @@
             <span>Envanter Yönetimi</span>
         </div>
         <div class="nav-item" id="nav-shelfMatrix" onclick="showAdminTab('shelfMatrixTab')">
-            <span>🧱 Depo Raf Haritası (WMS)</span>
+            <i class="fas fa-warehouse"></i>
+            <span>Depo Raf Haritası (WMS)</span>
         </div>
         <div class="nav-item vip-nav-item" id="nav-systemControl" onclick="showAdminTab('systemControlTab')">
             <i class="fas fa-shield-alt"></i>

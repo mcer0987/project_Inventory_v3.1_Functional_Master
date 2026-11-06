@@ -513,6 +513,58 @@ service cloud.firestore {
         || restoreLockOn(r);
     }
 
+    // ─── v3.4 · Personel (BT ekibi) SARF çıkışı ──────────────────────────────────────────────────────────────
+    // [WHY]: Envanter çıkışı yalnız yöneticideydi; 10 kişilik BT ekibi sarf malzeme çıkışı yapacak. Demirbaş çıkışı yine yalnız
+    //        yöneticide (personel "Envanter Talep Et" ile ister). İstemci kontrolü tek başına yetmez: personel konsoldan doğrudan
+    //        stok düşebilir ya da demirbaş için kayıt yazabilirdi.
+    // [HOW]: İki yazma AYNI commit'te ve birbirine bağlı (istemci: runStockOps staffExit · ExitPolicy.checkStaffPlan):
+    //        - b1/b2 güncellemesi yalnız stok DÜŞÜMÜ (+ computeStockPatch'in durum alanları) ve yeni sonCikisId; bu id commit
+    //          öncesinde OLMAYAN, commit sonrasında bu ürünü, bu depoyu, düşülen adedi ve oturumun uid'sini taşıyan b3 kaydı.
+    //        - b3 oluşturma yalnız 'cikis', isDemirbas false; ürünün türü katalogdaki (urunTuruId) türle KIRPILMIŞ adla birebir
+    //          aynı ve o türün isDemirbas alanı false (istemcideki Schema.isDemirbas'ta da tür tanımı önceliklidir); ürün
+    //          commit sonrasında bu kayda bağlı ve aradaki adet farkı kayıttaki adet. Alan kişi oturumdaki personelin kendisi.
+    //        Raf sayaçları personele yazdırılmaz (shelves bloğu); bkz. firebase-handler runStockOps notu.
+    function b3Doc(r, id) { return /databases/$(database)/documents/$(r)/b3/items/$(id); }
+    function staffExitStockOk(r, c, pid, old, d) {
+      let exitId = d.get('sonCikisId', '');
+      let keys = d.diff(old).affectedKeys();
+      let e = getAfter(b3Doc(r, exitId)).data;
+      return c in ['b1', 'b2'] && exitId is string && exitId.size() > 0 && exitId.size() <= 80
+        && exitId != old.get('sonCikisId', '')
+        && keys.hasOnly(['adet', 'qty', 'lastUpdate', 'durumu', 'status', 'stokOncekiDurum', 'sonCikisId'])
+        && keys.hasAll(['adet', 'sonCikisId'])
+        && old.get('adet', null) is int && stockQtyOk(d) && d.adet < old.adet
+        && (!keys.hasAny(['qty']) || d.get('qty', null) == d.adet)
+        && (!keys.hasAny(['durumu', 'status', 'stokOncekiDurum'])
+            || (d.adet == 0 && d.get('durumu', 'Tükendi') == 'Tükendi' && d.get('status', 'Tükendi') == 'Tükendi'
+                && d.get('stokOncekiDurum', '') is string && d.get('stokOncekiDurum', '').size() <= 60))
+        && !exists(b3Doc(r, exitId))
+        && string(e.get('productId', '')) == pid && e.get('kaynakDepo', '') == c
+        && e.get('adet', 0) == old.adet - d.adet && e.get('islemYapanUid', '') == request.auth.uid;
+    }
+    function staffExitB3Ok(r, id, d) {
+      let c = d.get('kaynakDepo', '');
+      let pid = string(d.get('productId', ''));
+      let before = get(stockDoc(r, c, pid)).data;
+      let after = getAfter(stockDoc(r, c, pid)).data;
+      let t = get(/databases/$(database)/documents/$(r)/productTypes/items/$(string(d.get('urunTuruId', '-')))).data;
+      let tur = before.get('tür', '') is string && before.get('tür', '').trim() != '' ? before.get('tür', '') : before.get('type', '');
+      return c in ['b1', 'b2'] && string(d.get('id', '')) == id
+        && d.keys().hasOnly(['id', 'sema', 'tip', 'kaynakDepo', 'productId', 'requestId', 'rafNo', 'sutun', 'urunTuruId', 'urunTuru',
+             'urunAciklama', 'marka', 'adet', 'sn', 'envanterNo', 'not', 'alanKisi', 'personelId', 'tarih', 'ts', 'isDemirbas',
+             'talepTuru', 'oncelik', 'iadeTarihi', 'iadeEdildi', 'iadeEdildiTarihi', 'iadeDepo', 'onaylayan', 'islemYapanUid'])
+        && d.get('sema', 0) == 2 && d.get('tip', '') == 'cikis' && d.get('isDemirbas', null) == false
+        && d.get('adet', 0) is int && d.adet >= 1
+        && d.get('requestId', null) == null && d.get('talepTuru', null) == null && d.get('iadeEdildi', null) == false
+        && d.get('islemYapanUid', '') == request.auth.uid
+        && string(d.get('personelId', '')) == staffPid(r)
+        && noTag(d.get('not', '')) && noTag(d.get('sn', '')) && noTag(d.get('alanKisi', '')) && noTag(d.get('envanterNo', ''))
+        && after.get('sonCikisId', '') == id
+        && before.get('adet', 0) - after.get('adet', 0) == d.adet
+        && t.get('isDemirbas', true) == false
+        && tur is string && t.get('name', '') is string && t.name.trim() == tur.trim();
+    }
+
     // [WHY]: Tanımlarda ID ve hiyerarşi istemci dışından da korunur; silme yerine pasifleştirme.
     // [HOW]: En fazla dört üst birim getAfter ile doğrulanır; aynı batch'teki döngüler de reddedilir.
     function definitionKey(v) { return v is string && v.size() <= 120 && !v.matches('.*[<>/].*'); }
@@ -630,6 +682,12 @@ service cloud.firestore {
                   && poOwnerUpdateOk(root,docId,resource.data,request.resource.data)
                 : poApprovalOk(root, docId, resource.data, request.resource.data))
             : textOk(col, request.resource.data) && taskUpdateOk(resource.data, request.resource.data));
+
+      // v3.4 · personel (BT ekibi) SARF çıkışı: stok düşümü + bağlı b3 kaydı aynı commit'te (staffExitStockOk / staffExitB3Ok).
+      allow update: if validRoot(root) && col in ['b1', 'b2'] && regularStaff(root) && !maintenanceOn(root)
+        && staffExitStockOk(root, col, docId, resource.data, request.resource.data);
+      allow create: if validRoot(root) && col == 'b3' && regularStaff(root) && !maintenanceOn(root)
+        && staffExitB3Ok(root, docId, request.resource.data);
 
       // Silme: personel yalnız KENDİ oluşturduğu görevi; talepler, satın almalar, zimmet ve servis kayıtları admin'e ait.
       allow delete: if validRoot(root) && regularStaff(root) && col == 'tasks' && !maintenanceOn(root)

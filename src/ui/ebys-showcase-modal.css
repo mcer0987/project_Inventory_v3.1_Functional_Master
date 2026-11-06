@@ -80,10 +80,58 @@ html.ebys-sc-locked body {
 
 .ebys-guide-link i { color: #7c3aed; }
 .ebys-guide-link:hover { color: #6d28d9; }
-.ebys-guide-link:hover span { text-decoration: underline; text-underline-offset: 3px; }
+.ebys-guide-link:hover .ebys-guide-text { text-decoration: underline; text-underline-offset: 3px; }
 .ebys-guide-link:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 2px; border-radius: 4px; }
 [data-theme="dark"] .ebys-guide-link i { color: #b794ff; }
 [data-theme="dark"] .ebys-guide-link:hover { color: #d8c8ff; }
+
+/* Personel paneli bağlantısı: admin kenar çubuğundakiyle aynı ışıltı mantığı,
+   sadece renkler açık temaya göre ayarlı (ikonla aynı mor ton). */
+.ebys-guide-link .ebys-guide-spark {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 14px;
+}
+
+.ebys-guide-link .ebys-guide-spark i {
+    transform-origin: 30% 70%;
+    animation: ebysWandTwinkle 3.2s ease-in-out infinite;
+}
+
+.ebys-guide-link .ebys-guide-spark::before,
+.ebys-guide-link .ebys-guide-spark::after {
+    content: '';
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    background: #c4a5ff;
+    clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.ebys-guide-link .ebys-guide-spark::before { top: -5px; right: -5px; animation: ebysStarPop 3.2s ease-in-out infinite; }
+.ebys-guide-link .ebys-guide-spark::after { bottom: -3px; left: -4px; width: 3px; height: 3px; animation: ebysStarPop 3.2s ease-in-out 1.1s infinite; }
+
+.ebys-guide-link .ebys-guide-text {
+    color: #7c3aed;
+    background: linear-gradient(100deg, #7c3aed 0%, #7c3aed 40%, #c4a5ff 50%, #7c3aed 60%, #7c3aed 100%);
+    background-size: 250% 100%;
+    background-position: 100% 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: ebysTextShimmer 3.2s ease-in-out infinite;
+}
+
+[data-theme="dark"] .ebys-guide-link .ebys-guide-spark::before,
+[data-theme="dark"] .ebys-guide-link .ebys-guide-spark::after { background: #f5e9ff; }
+
+[data-theme="dark"] .ebys-guide-link .ebys-guide-text {
+    color: #b794ff;
+    background-image: linear-gradient(100deg, #b794ff 0%, #b794ff 40%, #f5e9ff 50%, #b794ff 60%, #b794ff 100%);
+}
 
 /* Admin kenar çubuğu · Sistem Kılavuzu'nun üstünde, diğer menü satırlarıyla aynı görünüm */
 /* border-box ve yan boşluk 0: width:100% + iç boşluk ya da genel button { margin: 0 4px } kenar çubuğunu taşırıp
@@ -106,23 +154,31 @@ html.ebys-sc-locked body {
 .sidebar .nav-item.ebys-guide-nav:hover,
 .sidebar.vip-active .nav-item.ebys-guide-nav:hover {
     background: none !important;
-    padding-left: 20px !important;
+    padding-left: 14px !important;
     border-left: 0 !important;
     color: inherit;
 }
 
 .sidebar .nav-item.ebys-guide-nav:focus-visible { outline: 2px solid #b794ff; outline-offset: -2px; }
 
-/* İkon: yavaşça parlayan, hafifçe salınan sihirli değnek + yanında beliren küçük yıldız. */
+/* İkon: yavaşça parlayan, hafifçe salınan sihirli değnek + yanında beliren küçük yıldız.
+   Kutu boyutu (30x30) sidebar'daki diğer .nav-item ikon chip'leriyle (admin-add-style.css
+   .nav-item > i) birebir aynı: aksi halde EBYS Rehberi'nin metni, Sistem Kılavuzu gibi
+   chip'li satırlara göre hizasız kayıyordu. */
 .ebys-guide-nav .ebys-guide-spark {
     position: relative;
     display: inline-grid;
     place-items: center;
-    width: 16px;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: rgba(183, 148, 255, 0.12);
+    flex-shrink: 0;
 }
 
 .ebys-guide-nav .ebys-guide-spark i {
     color: #b794ff;
+    font-size: 14px;
     transform-origin: 30% 70%;
     animation: ebysWandTwinkle 3.2s ease-in-out infinite;
 }
@@ -139,12 +195,15 @@ html.ebys-sc-locked body {
     pointer-events: none;
 }
 
-.ebys-guide-nav .ebys-guide-spark::before { top: -5px; right: -6px; animation: ebysStarPop 3.2s ease-in-out infinite; }
-.ebys-guide-nav .ebys-guide-spark::after { bottom: -3px; left: -5px; width: 4px; height: 4px; animation: ebysStarPop 3.2s ease-in-out 1.1s infinite; }
+.ebys-guide-nav .ebys-guide-spark::before { top: 2px; right: 4px; animation: ebysStarPop 3.2s ease-in-out infinite; }
+.ebys-guide-nav .ebys-guide-spark::after { bottom: 4px; left: 4px; width: 4px; height: 4px; animation: ebysStarPop 3.2s ease-in-out 1.1s infinite; }
 
-/* Metin: ikonla aynı ritimde soldan sağa geçen yumuşak bir parıltı. */
+/* Metin: ikonla aynı renk (#b794ff), ikonla aynı ritimde soldan sağa geçen parıltı.
+   color: #b794ff satırı, background-clip: text desteklemeyen/engellenen durumlarda
+   (ör. sıkı CSP, eski tarayıcı) metnin siyaha değil ikonla aynı mor tona düşmesini sağlar. */
 .ebys-guide-nav .ebys-guide-text {
-    background: linear-gradient(100deg, #e2e8f0 0%, #e2e8f0 40%, #e9d5ff 50%, #e2e8f0 60%, #e2e8f0 100%);
+    color: #b794ff;
+    background: linear-gradient(100deg, #b794ff 0%, #b794ff 40%, #f5e9ff 50%, #b794ff 60%, #b794ff 100%);
     background-size: 250% 100%;
     background-position: 100% 0;
     -webkit-background-clip: text;
@@ -171,12 +230,9 @@ html.ebys-sc-locked body {
     90%, 100% { background-position: 0 0; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .ebys-guide-nav .ebys-guide-spark i,
-    .ebys-guide-nav .ebys-guide-spark::before,
-    .ebys-guide-nav .ebys-guide-spark::after,
-    .ebys-guide-nav .ebys-guide-text { animation: none; }
-}
+/* [KARAR]: EBYS Rehberi düğmesinin parıltı animasyonu, kullanıcı isteğiyle
+   prefers-reduced-motion'dan bağımsız olarak her zaman gösterilir; bu düğme
+   dekoratif bir vurgu olup işlevsel bir hareket/geçiş içermez. */
 
 /* ---- Kaplama ve diyalog ---- */
 .ebys-sc-overlay {
