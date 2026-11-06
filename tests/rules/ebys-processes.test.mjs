@@ -9,10 +9,10 @@ sdk.setLogLevel('silent');let env,id;const root='inventory_demo';
 const ref=(db,c,key)=>sdk.doc(db,root,c,'items',key);
 const ctx=uid=>env.authenticatedContext(uid,{email:uid==='owner'?'admin@medipol.local':`${uid}.test@staff.medipol.local`,firebase:{sign_in_provider:'password'}}).firestore();
 const plain=v=>Array.isArray(v)?Array.from(v,plain):v&&v.constructor?.name==='Object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,plain(x)])):v;
-function api(uid, transform = (_ref, value) => value, wrapTransaction = run => run()) {
+function api(uid, transform = (_ref, value) => value, wrapTransaction = run => run(), cryptoProvider = webcrypto) {
     const window = { userAuth: { uid }, AppEnv: { COLLECTION_ROOT: root }, AppModules: {}, isDbAdmin: () => uid === 'owner' };
     const context = vm.createContext({
-        window, console, TextEncoder, crypto: webcrypto, fireDb: ctx(uid), ...sdk,
+        window, console, TextEncoder, crypto: cryptoProvider, fireDb: ctx(uid), ...sdk,
         where: (field, operator, value) => sdk.where(field, operator, plain(value)),
         updateDoc: (path, data) => sdk.updateDoc(path, plain(data)),
         runTransaction: (db, callback) => wrapTransaction(() => sdk.runTransaction(db, tx => callback({
@@ -22,12 +22,13 @@ function api(uid, transform = (_ref, value) => value, wrapTransaction = run => r
         })))
     });
     const sources = ['src/utils/ebys-document-schema.js', 'src/utils/ebys-process-schema.js', 'src/services/ebys-document-service.js',
+        'src/utils/ebys-verification-schema.js', 'src/services/ebys-verification-service.js',
         'src/services/ebys-execution-service.js', 'src/services/ebys-process-service.js'];
     for (const source of sources) {
         const code = readFileSync(source, 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/export /g, '');
-        vm.runInContext('{' + code + '}', context);
+        vm.runInContext(source.endsWith('ebys-verification-schema.js') ? code : '{' + code + '}', context);
     }
-    return { ...window.AppModules.EBYSProcesses, execution: window.AppModules.EBYSExecution, documents: window.AppModules.EBYSDocuments };
+    return { ...window.AppModules.EBYSProcesses, execution: window.AppModules.EBYSExecution, verification: window.AppModules.EBYSVerification, documents: window.AppModules.EBYSDocuments };
 }
 const start=async(route=['a','b','a'])=>api('owner').startProcess({documentId:'doc',versionId:id,route:route.map(personnelId=>({personnelId,kind:'approval',dueHours:72})),operationId:webcrypto.randomUUID()});
 const decide=(uid,revision,result='approved',reason='')=>api(uid).decideTask({processId:id,expectedRevision:revision,result,reason,operationId:webcrypto.randomUUID()});
@@ -395,4 +396,105 @@ test('A6-02 kapalı evrak yedeği yetkili Aşama 6 ilişkilerini ve kapsam manif
         assert.equal(member.manifest.collections[name].reason, 'admin-required');
     }
     assert.deepEqual(plain((await api('b').documents.exportOwnDocuments()).data.ebysNotifications).map(notification => notification.id), [foreign]);
+});
+
+async function closedVerificationFixture() {
+    const owner = api('owner');
+    const documentId = webcrypto.randomUUID();
+    const draft = await owner.documents.saveDraft({
+        id: documentId, expectedRevision: 0, kind: 'internal', unitId: 'unit', organizationCode: 'MED',
+        content: 'Gizli içerik ve kişisel veri', metadata: {
+            subject: 'Kişiye özel konu', correspondent: 'Kişi adı', date: '2026-11-05',
+            filePlanCode: '100', confidentiality: 'Gizli', distribution: '', externalRegistrationNo: ''
+        }
+    });
+    const registration = await owner.documents.registerDocument({ documentId, expectedRevision: draft.revision });
+    const version = await owner.documents.freezeVersion({ documentId, expectedRevision: registration.revision });
+    id = version.versionId;
+    await owner.startProcess({ documentId, versionId: id, route: [{ personnelId: 'a', kind: 'approval', dueHours: 72 }] });
+    await decide('a', 1);
+    const worker = api('c').execution;
+    await worker.acceptExecutionJob(id, 1);
+    await worker.completeExecutionJob(id, 2, { note: 'İşlendi', evidenceRef: 'Tutanak 34' });
+    return { owner, documentId, registration };
+}
+
+test('A7 anonim doğrulama yalnız token ile beş alan döndürür ve arşiv olayı atomiktir', async () => {
+    const { owner, documentId, registration } = await closedVerificationFixture();
+    const [first, retry] = await Promise.all([
+        owner.verification.issueVerification(documentId), api('owner').verification.issueVerification(documentId)
+    ]);
+    assert.match(first, /^[a-f0-9]{32}$/);
+    assert.equal(first, retry);
+    const anon = env.unauthenticatedContext().firestore();
+    const publicRef = ref(anon, 'ebysVerifications', first);
+    const record = (await sdk.getDoc(publicRef)).data();
+    const source = await owner.documents.readDocument(documentId);
+    assert.deepEqual(Object.keys(record).sort(), ['contentDigest','registeredAt','registrationNo','status','subjectSummary']);
+    assert.equal(record.subjectSummary, 'Kurum içi yazışma');
+    assert.equal(record.registrationNo, registration.registrationNo);
+    assert.equal(record.contentDigest, source.body.contentDigest);
+    assert.equal(record.status, 'valid');
+    const base = 'http://' + process.env.FIRESTORE_EMULATOR_HOST + '/v1/projects/demo-ebys-processes/databases/(default)/documents/' + root;
+    const rest = await fetch(base + '/ebysVerifications/items/' + first);
+    assert.equal(rest.status, 200);
+    assert.deepEqual(Object.keys((await rest.json()).fields).sort(), Object.keys(record).sort());
+    assert.equal((await fetch(base + '/ebysDocuments/items/' + documentId)).status, 403);
+    await assertFails(sdk.getDocs(sdk.collection(anon, root, 'ebysVerifications', 'items')));
+    await assertFails(sdk.getDoc(ref(anon, 'ebysDocuments', documentId)));
+    await assertFails(sdk.getDoc(ref(anon, 'ebysVersions', id)));
+    await assertFails(sdk.getDoc(ref(anon, 'ebysVerificationTokens', first)));
+    await assertFails(sdk.getDoc(ref(ctx('owner'), 'ebysVerificationTokens', first)));
+    await assertFails(sdk.updateDoc(ref(ctx('b'), 'ebysVerifications', first), { status: 'revoked' }));
+
+    const eventRef = ref(ctx('owner'), 'ebysExecutionEvents', id + '__archive');
+    const withoutEvent = api('owner', (ref, data) => ref.path.endsWith('__archive') ? null : data);
+    await assert.rejects(withoutEvent.verification.archiveExecutionDocument(id));
+    assert.equal((await sdk.getDoc(publicRef)).data().status, 'valid');
+    const withoutProjection = api('owner', (ref, data) => ref.path.includes('/ebysVerifications/') ? null : data);
+    await assert.rejects(withoutProjection.verification.archiveExecutionDocument(id));
+    assert.equal((await sdk.getDoc(eventRef)).exists(), false);
+    await assert.rejects(api('c').verification.archiveExecutionDocument(id));
+    await owner.verification.archiveExecutionDocument(id);
+    await owner.verification.archiveExecutionDocument(id);
+    assert.equal((await sdk.getDoc(publicRef)).data().status, 'archived');
+    const event = (await sdk.getDoc(eventRef)).data();
+    assert.equal(event.action, 'archive');
+    assert.equal(event.actorUid, 'owner');
+    assert.equal(event.documentRevision, (await owner.documents.readDocument(documentId)).head.revision);
+    await assertFails(sdk.deleteDoc(ref(ctx('owner'), 'ebysDocuments', documentId)));
+    await assertFails(sdk.updateDoc(ref(ctx('owner'), 'ebysVersions', id), { content: 'Sahte sürüm' }));
+    await assertFails(sdk.deleteDoc(eventRef));
+    await assertFails(sdk.deleteDoc(ref(ctx('owner'), 'ebysVerifications', first)));
+});
+
+test('A7 kamusal projeksiyona metin enjekte edilemez ve iptal aynı token üzerinde kalır', async () => {
+    const { owner, documentId } = await closedVerificationFixture();
+    const altered = api('owner', (ref, data) => ref.path.includes('/ebysVerifications/')
+        ? { ...data, subjectSummary: 'Kişiye özel konu', documentId, content: 'Gizli metin' } : data);
+    await assert.rejects(altered.verification.issueVerification(documentId));
+    assert.equal((await owner.documents.readDocument(documentId)).head.verificationToken, undefined);
+    const occupied = 'ab'.repeat(16);
+    const collision = {
+        registrationNo: 'EBYS-MED-261105-' + 'A'.repeat(32), registeredAt: sdk.Timestamp.fromMillis(1),
+        subjectSummary: 'Kurum içi yazışma', status: 'valid', contentDigest: 'f'.repeat(64)
+    };
+    await env.withSecurityRulesDisabled(c => sdk.setDoc(ref(c.firestore(), 'ebysVerifications', occupied), collision));
+    let attempts = 0;
+    const generator = { getRandomValues: bytes => ++attempts === 1 ? bytes.fill(0xab) : webcrypto.getRandomValues(bytes) };
+    const retrying = api('owner', undefined, undefined, generator);
+    const token = await retrying.verification.issueVerification(documentId);
+    assert.equal(attempts, 2);
+    assert.notEqual(token, occupied);
+    assert.deepEqual((await sdk.getDoc(ref(ctx('owner'), 'ebysVerifications', occupied))).data(), collision);
+    const publicRef = ref(ctx('owner'), 'ebysVerifications', token);
+    await assertFails(sdk.updateDoc(publicRef, { status: 'revoked' }));
+    await owner.verification.revokeVerification(documentId);
+    await owner.verification.archiveExecutionDocument(id);
+    assert.equal(await owner.verification.issueVerification(documentId), token);
+    assert.equal((await sdk.getDoc(publicRef)).data().status, 'revoked');
+    await assertFails(sdk.updateDoc(publicRef, { status: 'valid' }));
+    await assertFails(sdk.setDoc(ref(ctx('owner'), 'ebysVerifications', 'ab'.repeat(16)), {
+        registrationNo: 'sahte', contentDigest: 'a'.repeat(64), status: 'valid'
+    }));
 });

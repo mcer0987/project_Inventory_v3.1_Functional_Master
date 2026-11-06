@@ -334,7 +334,7 @@ function getStatusBadge(item) {
     }
 
     // 1. Başlangıç durumu
-    if (currentState === window.WorkflowEngine?.states?.INITIATION || !item.workflow?.started) {
+    if (!item.workflow.started) {
         return `<span class="badge-soft badge-secondary"><i class="fas fa-file-alt me-1"></i> Başlatılmadı</span>`;
     }
 

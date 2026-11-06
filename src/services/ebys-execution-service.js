@@ -1,5 +1,6 @@
 import { collection, doc, getDocFromServer, getDocs, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, startAfter, Timestamp, updateDoc, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import { fireDb } from './firebase-handler.js';
+import './ebys-verification-service.js';
 
 const root = () => window.AppEnv.COLLECTION_ROOT;
 const ref = (col, id) => doc(fireDb, root(), col, 'items', id);
@@ -152,18 +153,7 @@ export async function completeExecutionJob(id, revision, input) {
         throw error;
     }
 }
-export async function archiveExecutionDocument(id) {
-    requireAdmin();
-    return runTransaction(fireDb, async tx => {
-        const job = (await tx.get(ref('ebysExecutionJobs', id))).data();
-        if (job?.state !== 'completed') throw new Error('İcra tamamlanmadan arşivlenemez.');
-        const path = ref('ebysDocuments', job.documentId);
-        const head = (await tx.get(path)).data();
-        if (head?.state === 'archived') return;
-        if (head?.state !== 'closed' || head.currentVersionId !== id) throw new Error('Evrak arşivlemeye uygun değil.');
-        tx.update(path, { state: 'archived', revision: head.revision + 1, updatedAt: serverTimestamp() });
-    });
-}
+export const archiveExecutionDocument = id => window.AppModules.EBYSVerification.archiveExecutionDocument(id);
 
 export async function saveExecutionPolicy(kind, sourceUnitId, input) {
     requireAdmin();

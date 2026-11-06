@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="no-referrer">
+    <title>EBYS Belge Doğrulama</title>
+    <style>
+        body { margin: 0; background: #eef3f8; color: #18263b; font: 1rem/1.55 system-ui, sans-serif; }
+        main { max-width: 42rem; margin: 8vh auto; padding: 1.5rem; box-sizing: border-box; }
+        section { background: white; border: 1px solid #d1dce8; border-radius: 1rem; padding: 1.5rem; }
+        h1 { margin: 0 0 .5rem; font-size: clamp(1.5rem, 4vw, 2rem); }
+        dt { font-weight: 700; margin-top: .75rem; }
+        dd { margin: 0; overflow-wrap: anywhere; }
+        .notice { border-top: 1px solid #d1dce8; margin-bottom: 0; padding-top: .75rem; }
+    </style>
+    <script type="module" src="src/ui/ebys-verification-ui.js"></script>
+</head>
+<body>
+    <main>
+        <section aria-labelledby="verificationTitle">
+            <h1 id="verificationTitle">EBYS Belge Doğrulama</h1>
+            <p>Belgedeki QR kodunu okutarak evrak kaydını ve güncel durumunu teyit edebilirsiniz.</p>
+            <p id="verificationStatus" role="status">Doğrulama kaydı sorgulanıyor…</p>
+            <dl id="verificationResult" hidden></dl>
+            <p id="verificationNotice" class="notice">Bu belge kurum içi teyit amaçlıdır; nitelikli e-imza veya e-Devlet resmi onayı yerine geçmez.</p>
+        </section>
+    </main>
+</body>
+</html>

@@ -6,7 +6,7 @@ const personalPanel = document.getElementById('ebysExecutionPersonal');
 const notificationsPanel = document.getElementById('ebysExecutionNotifications');
 const stateLabels = { pending_acceptance: 'Kabul bekliyor', in_progress: 'İcrada', returned: 'İcra iadesi', completed: 'Tamamlandı' };
 const kindLabels = { incoming: 'Gelen evrak', outgoing: 'Giden evrak', internal: 'İç yazışma' };
-const actionLabels = { accept: 'Kabul edildi', return: 'İade edildi', reassign: 'Yeniden havale', complete: 'Tamamlandı' };
+const actionLabels = { accept: 'Kabul edildi', return: 'İade edildi', reassign: 'Yeniden havale', complete: 'Tamamlandı', archive: 'Arşivlendi' };
 const units = () => window.data?.units || [];
 const people = () => window.data?.personel || [];
 const unitName = id => units().find(u => String(u.id) === id)?.name || id;
@@ -65,9 +65,17 @@ function targetFields(form, existing = {}) {
     const person = field(row, 'İcra sorumlusu', node('select', null, 'form-select'));
     unit.required = person.required = true;
     options(unit, 'Birim seçin', units().filter(u => u.active !== false).map(u => [String(u.id), u.name || u.id]), existing.unitId);
-    const setPeople = value => options(person, 'Personel seçin', people()
-        .filter(p => p.active !== false && p.uid && p.unitId === unit.value)
-        .map(p => [String(p.id), (p.name || p.adSoyad || p.id) + ' · ' + (p.pri || p.id)]), value);
+    const help = node('small');
+    help.setAttribute('role', 'status');
+    person.parentElement.append(help);
+    const setPeople = value => {
+        const eligible = unit.value ? people().filter(p => p.active !== false && p.uid && p.unitId === unit.value) : [];
+        options(person, 'Personel seçin', eligible
+            .map(p => [String(p.id), (p.name || p.adSoyad || p.id) + ' · ' + (p.pri || p.id)]), value);
+        help.textContent = unit.value && !eligible.length
+            ? 'Bu birimde giriş hesabı bağlı, aktif personel bulunamadı. Tanımlar → Personel Tanımları üzerinden Bağlı birim (ID) alanını kontrol edin.'
+            : '';
+    };
     unit.onchange = () => setPeople('');
     setPeople(existing.personnelId);
     const hours = field(row, 'Hedef süre (saat)', node('input', null, 'form-control'));
@@ -149,6 +157,19 @@ async function openJob(job, admin) {
                     + ' · ' + date(e.createdAt) + (e.returnedAt ? ' · Yönetimde ' + waitLabel(e.returnedAt, e.createdAt.toMillis()) : '') + (e.note ? ' · ' + e.note : '')));
                 d.append(node('h4', 'Son 50 işlem'), list);
             }
+            if (head?.verificationToken) {
+                const verification = window.AppModules.EBYSVerification;
+                const current = await verification.readVerificationStatus(head.verificationToken);
+                if (!d.isConnected) return;
+                const form = node('form', null, 'ebys-process-panel');
+                form.append(node('h4', 'Doğrulama kaydı'),
+                    node('p', current === 'revoked' ? 'Doğrulama iptal edildi.'
+                        : 'İptalden sonra aynı bağlantı “İptal” durumunu gösterir.'));
+                if (current && current !== 'revoked') {
+                    submit(form, 'Doğrulamayı iptal et', () => verification.revokeVerification(head.id), () => d.close());
+                }
+                d.append(form);
+            }
             if (head?.state === 'closed') {
                 const form = node('form');
                 submit(form, 'Arşivle', () => api().archiveExecutionDocument(job.id), () => d.close());
@@ -172,7 +193,10 @@ async function openJob(job, admin) {
     }
     if (job.state === 'pending_acceptance') {
         const form = node('form');
-        submit(form, 'Kabul Et', () => api().acceptExecutionJob(job.id, job.revision), () => d.close());
+        submit(form, 'Kabul Et', () => api().acceptExecutionJob(job.id, job.revision), () => {
+            d.close();
+            window.showAppAlert?.('İcra işi kabul edildi. Durumu İcrada olarak güncellendi.', 'success');
+        });
         d.append(form);
     }
     if (job.state === 'in_progress') {
@@ -181,14 +205,27 @@ async function openJob(job, admin) {
         const result = textField(done, 'İşlem sonucu', 1000, true, true);
         const evidence = textField(done, 'Kanıt referansı', 240);
         const stock = textField(done, 'Yönetimin bu işe bağladığı stok işlem numarası (isteğe bağlı)', 80, false);
-        submit(done, 'Tamamla', () => api().completeExecutionJob(job.id, job.revision, {
-            note: result.value, evidenceRef: evidence.value, stockOperationId: stock.value
-        }), () => d.close());
+        submit(done, 'Tamamla', async () => {
+            const stockOperationId = stock.value.trim();
+            try {
+                await api().completeExecutionJob(job.id, job.revision, {
+                    note: result.value, evidenceRef: evidence.value, stockOperationId
+                });
+            } catch (error) {
+                if (error.code !== 'permission-denied') throw error;
+                throw new Error(stockOperationId
+                    ? 'Kapanış reddedildi. Stok işlem numarasının yönetici tarafından bu işe bağlandığını kontrol edin.'
+                    : 'Kapanışa izin verilmedi. Görevi yeniden açıp atama ve durumunu kontrol edin.');
+            }
+        }, () => d.close());
         const back = node('details', null, 'ebys-process-panel');
         back.append(node('summary', 'İade Et'), node('p', 'İş, yeniden havale edilmek üzere yönetime döner.'));
         const form = node('form');
         const reason = textField(form, 'İade gerekçesi', 1000, true, true);
-        submit(form, 'Gerekçeyle İade Et', () => api().returnExecutionJob(job.id, job.revision, reason.value), () => d.close());
+        submit(form, 'Gerekçeyle İade Et', () => api().returnExecutionJob(job.id, job.revision, reason.value), () => {
+            d.close();
+            window.showAppAlert?.('İcra işi yeniden havale edilmek üzere yönetime iade edildi.', 'success');
+        });
         back.append(form);
         d.append(done, back);
     }

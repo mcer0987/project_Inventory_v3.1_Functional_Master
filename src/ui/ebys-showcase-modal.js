@@ -1,4 +1,4 @@
-// [WHY]: v3.4 EBYS (Aşama 1–6) yeniliklerini birim sorumlusu, imzacı ve personele uzun metin yerine görsel,
+// [WHY]: v3.4 EBYS (Aşama 1–7) yeniliklerini birim sorumlusu, imzacı ve personele uzun metin yerine görsel,
 //        adım adım bir rehberle anlatmak. Veri okumaz/yazmaz; yalnız statik içerik ve yerel simülasyon içerir.
 // [HOW]: Modal ilk açılışta kurulur. Tüm düğümler createElement + textContent ile üretilir (innerHTML yok).
 //        Erişilebilirlik: role=dialog, dikey tablist (ok tuşları), Escape ile kapanma, odak hapsi ve odağın geri dönüşü.
@@ -7,6 +7,7 @@ const SECTIONS = [
     { id: 'books', icon: 'fa-book', title: 'Evrak Defterleri', tag: 'Aşama 4' },
     { id: 'sign', icon: 'fa-signature', title: 'İmza Süreci', tag: 'Aşama 5' },
     { id: 'execution', icon: 'fa-clipboard-check', title: 'İcra ve Kapanış', tag: 'Aşama 6' },
+    { id: 'verification', icon: 'fa-qrcode', title: 'QR ve Doğrulama', tag: 'Aşama 7' },
     { id: 'purchase', icon: 'fa-cart-shopping', title: 'Satın Alma', tag: 'Aşama 3' },
     { id: 'org', icon: 'fa-sitemap', title: 'Kurumsal Yapı', tag: 'Aşama 2' },
     { id: 'faq', icon: 'fa-circle-question', title: 'SSS', tag: 'Yardım' },
@@ -38,7 +39,7 @@ const STEP_KINDS = [
 
 const DECISIONS = [
     { tone: 'green', icon: 'fa-circle-check', title: 'Onayla', text: 'Evrak sıradaki imzacıya geçer. Son onayda icra işi açılır.' },
-    { tone: 'amber', icon: 'fa-rotate-left', title: 'Yazara iade et', text: 'Gerekçe yazılması zorunludur; yazar düzeltip yeniden sunar.' },
+    { tone: 'amber', icon: 'fa-rotate-left', title: 'Yazara iade et', text: 'Neyin düzeltilmesi gerektiğini yazın. Yazar, Geri dönen evraklarım bölümünden gerekçeyi açıp yeni sürümü hazırlayabilir.' },
     { tone: 'red', icon: 'fa-ban', title: 'Reddet', text: 'Gerekçeli red, bu sürümün onay sürecini kapatır. Yazar gerekçeyi görüp yeni sürüm hazırlayabilir.' },
 ];
 
@@ -66,6 +67,7 @@ const FAQ = [
     ['İzne çıkacağım; bekleyen onaylarım ne olacak?', 'Yönetici bekleyen görevinizi en çok 90 gün için başka bir personele devredebilir. Kayıtta asıl görevli olarak adınız görünmeye devam eder.'],
     ['Dövizli talebin tutarı kur değişince değişir mi?', 'Hayır. Kur, talebin ilk onayında belgeye sabitlenir; sonraki kur güncellemeleri o talebin TL karşılığını etkilemez.'],
     ['Kayıt numarası neden bu kadar uzun?', 'Numara kurum kodu, kayıt günü ve tahmin edilemeyen benzersiz bir ekten oluşur; iki evrak asla aynı numarayı almaz.'],
+    ['Doğrulama QR’ı düğmesi ne zaman görünür?', 'Evrakın yazarıysanız, iş tamamlanıp evrak kapandığında ve evrakın kesin kayıt numarası varsa düğme görünür. QR daha önce oluşturulduysa Çıktı önizleme bölümünden açabilirsiniz.'],
     ['İade ile red arasındaki fark nedir?', 'Onay iadesi yazardan düzeltme ister. Red, mevcut sürümün onayını kapatır. Yazar iki kararı da Bana Gelen Onaylar → Geri dönen evraklarım bölümünde gerekçesiyle görür. İcra iadesi ise onaydan sonra işi yeniden havale için yönetime gönderir.'],
 ];
 
@@ -169,7 +171,7 @@ function renderBooks() {
 function renderSign() {
     const root = el('div', { cls: 'ebys-sc-section' });
     root.append(sectionHead('Aşama 5 · Kişisel Görevler', 'Sırası gelen imzalar',
-        'Evrak, tanımlı onay rotasında sırayla ilerler. Her imzacı görevini "Bana Gelen Onaylar" ekranında görür.'));
+        'Sıranız geldiğinde Bana Gelen Onaylar → Evrak görevlerim bölümünden Görev / Karar seçeneğini açın ve evrakı inceleyin.'));
 
     const chain = el('ol', { cls: 'ebys-sc-chain', attrs: { 'aria-label': 'Örnek onay zinciri' } });
     const nodes = CHAIN.map(c => {
@@ -210,9 +212,9 @@ function renderSign() {
         el('div', { cls: 'ebys-sc-bento cols-3' }, DECISIONS.map(miniCard)),
         el('div', { cls: 'ebys-sc-bento cols-2' }, [
             el('div', { cls: 'ebys-sc-feature' }, [
-                badge('Kişisel gizlilik', 'indigo'),
-                el('strong', { text: 'Sıranız gelmeden kimse görmez' }),
-                el('p', { text: 'Görev yalnız sırası gelen kişiye açılır. Sonraki imzacılar, önceki adım tamamlanana kadar evrakı listelerinde görmez.' }),
+                badge('Karar geçmişi', 'indigo'),
+                el('strong', { text: 'Karar verdiğiniz sürüme dönün' }),
+                el('p', { text: 'Karar geçmişinden paraf verdiğiniz, onayladığınız veya reddettiğiniz sürümü açabilirsiniz. Yeni sürüm, o sürümde size görev geldiğinde görünür.' }),
             ]),
             el('div', { cls: 'ebys-sc-feature' }, [
                 badge('Süreli vekâlet', 'amber'),
@@ -307,22 +309,22 @@ function renderOrg() {
 function renderExecution() {
     const root = el('div', { cls: 'ebys-sc-section' });
     root.append(sectionHead('Aşama 6 · İcra ve Kapanış', 'Son onaydan evrakın kapanışına',
-        'Son onay evrakı sorumluya havale eder. İşin kabulü, uygulanması ve kanıtla tamamlanması ayrı adımlardır.'));
+        'Son onayla sorumluya bir iş açılır. Sorumlu işi kabul edip tamamladığında evrak kapanır ve yazara bildirim gider.'));
 
     const cards = document.getElementById('ebysExecutionAdmin') ? [
         { tone: 'indigo', icon: 'fa-sitemap', title: 'Havale tanımını hazırlayın',
-            text: 'Talep ve Süreçler → İcra Takibi → Havale tanımları. Önce evrak türü ve evrakın bağlı birimi birlikte aranır. Özel tanım yoksa kaydettiğiniz tür varsayılanı kullanılır. Geçerli bir sorumlu bulunamazsa son onay bekler.' },
-        { tone: 'amber', icon: 'fa-rotate-left', title: 'İadeyi yeniden havale edin',
-            text: 'Havale Bekleyen İadeler bölümünde gerekçeyi, ilk hedefi ve yönetimde geçen süreyi görün. Yeniden havale, sorumluya ayrı bir hedef verir.' },
+            text: 'Talep ve Süreçler → İcra Takibi → Havale tanımları bölümünde evrak türü ve bağlı birim için icra birimini ve sorumluyu seçin. Sorumlu, seçtiğiniz icra birimine bağlı ve giriş hesabı aktif olmalıdır.' },
+        { tone: 'amber', icon: 'fa-rotate-left', title: 'İşleri ve iadeleri izleyin',
+            text: 'Yeni iş genel icra tablosunda Kabul bekliyor olarak görünür. İade gelirse Havale Bekleyen İadeler → Detay → Yeniden Havale Et yoluyla gerekçeyi okuyup işi uygun sorumluya aktarın.' },
         { tone: 'sky', icon: 'fa-link', title: 'Stok işlemini doğrulayın',
-            text: 'İcra işi detayından defterdeki mevcut stok hareketini inceleyip gerekçeyle bu işe bağlayın. Stok hareketi depo işlemiyle kaydedilir.' },
+            text: 'Teslim için stok kaydı gerekiyorsa işin Detay ekranından Stok işlemini doğrula ve bağla seçeneğini kullanın. Sorumlu, bağladığınız işlem numarasını kapanışta girebilir.' },
         { tone: 'green', icon: 'fa-box-archive', title: 'Kapanışı ve yedeği izleyin',
-            text: 'Tamamlanan evrakı İcra Takibi üzerinden arşivleyin. Evraklarımı yedekle, yetkili icra kayıtlarını ve bunların kapsam bilgisini dosyaya ekler.' },
+            text: 'İcra Takibi tablosundan tamamlanan işleri görün. Evraklarımı yedekle ile erişebildiğiniz evrak ve ilgili icra kayıtlarını dışa aktarabilirsiniz.' },
     ] : [
         { tone: 'indigo', icon: 'fa-clipboard-check', title: 'Size atanan işi kabul edin',
-            text: 'Görevlerim → İcra İşlerim bölümünde evrakın onaylanmış sürümünü açın ve Kabul Et seçeneğini kullanın.' },
+            text: 'Görevlerim → İcra İşlerim → Görevi aç yolunu izleyin. Evrakı inceleyip Kabul Et dediğinizde iş İcrada durumuna geçer.' },
         { tone: 'green', icon: 'fa-circle-check', title: 'Sonucu ve kanıtı kaydedin',
-            text: 'İşlem sonucunu ve tutanak gibi bir kanıt referansını girip Tamamla seçeneğini kullanın. Stok referansı gerekiyorsa yönetimin bu işe bağladığı hareket numarasını girin.' },
+            text: 'Sonucu ve tutanak numarası gibi bir kanıt referansını yazıp Tamamla seçin. İş stok hareketi gerektiriyorsa yönetimin bu işe bağladığı işlem numarasını girin. Stok alanı isteğe bağlıdır.' },
         { tone: 'amber', icon: 'fa-rotate-left', title: 'Gerekçeyle iade edin',
             text: 'İşi yürütemiyorsanız gerekçeyle iade edin. Yönetici işi yeniden havale etmek üzere İcra Takibi ekranında görür.' },
         { tone: 'sky', icon: 'fa-bell', title: 'Evrakın kapanışını görün',
@@ -332,7 +334,28 @@ function renderExecution() {
     return root;
 }
 
-// ─── 5 · SSS ───────────────────────────────────────────────────────────────────────────────────────────────────
+function renderVerification() {
+    const root = el('div', { cls: 'ebys-sc-section' });
+    const adminPage = !!document.getElementById('ebysExecutionAdmin');
+    root.append(sectionHead('Aşama 7 · QR ve Doğrulama', 'Evrakı QR ile teyit edin',
+        'QR kodunu okutan kişi, evrakın kayıt bilgilerini ve güncel durumunu görebilir.'));
+    const cards = [
+        { tone: 'indigo', icon: 'fa-qrcode', title: 'QR oluşturun',
+            text: (adminPage ? 'Evrak Kayıt Defteri’nden' : 'Görevlerim → Evrak Bildirimlerim bölümünden')
+                + ' yazarı olduğunuz kapanmış evrakı açın. Kesin kayıt numarası varsa Doğrulama QR’ı oluştur seçeneğini kullanın. QR, Çıktı önizleme ve yazdırma çıktısında görünür.' },
+        { tone: 'sky', icon: 'fa-circle-check', title: 'Kayıt bilgilerini kontrol edin',
+            text: 'QR’ı okutun veya bağlantıyı açın. Oturum açmadan evrak numarasını, kayıt tarihini, kısa konu özetini ve durumu görebilirsiniz.' },
+        adminPage
+            ? { tone: 'amber', icon: 'fa-box-archive', title: 'Arşivleyin veya doğrulamayı iptal edin',
+                text: 'İcra Takibi → Detay üzerinden Arşivle veya Doğrulamayı iptal et seçeneğini kullanın. Aynı QR bağlantısı güncel durumu gösterir.' }
+            : { tone: 'amber', icon: 'fa-box-archive', title: 'Belgenin durumunu okuyun',
+                text: 'Doğrulama sayfasında Geçerli, Arşivde veya İptal durumu görünür. Aynı bağlantıyı tekrar açarak güncel durumu kontrol edebilirsiniz.' }
+    ];
+    root.append(el('div', { cls: 'ebys-sc-bento cols-3' }, cards.map(miniCard)),
+        el('p', { cls: 'ebys-sc-sim-log', text: 'Bu belge kurum içi teyit amaçlıdır; nitelikli e-imza veya e-Devlet resmi onayı yerine geçmez.' }));
+    return root;
+}
+
 function renderFaq() {
     const root = el('div', { cls: 'ebys-sc-section' });
     root.append(sectionHead('Sık sorulanlar', 'Kısa cevaplar', 'En çok merak edilen konular. Başlığa dokunarak cevabı açın.'));
@@ -342,7 +365,7 @@ function renderFaq() {
     return root;
 }
 
-const RENDERERS = { books: renderBooks, sign: renderSign, execution: renderExecution, purchase: renderPurchase, org: renderOrg, faq: renderFaq };
+const RENDERERS = { books: renderBooks, sign: renderSign, execution: renderExecution, verification: renderVerification, purchase: renderPurchase, org: renderOrg, faq: renderFaq };
 
 // ─── Modal kabuğu ──────────────────────────────────────────────────────────────────────────────────────────────
 let modal = null, lastFocus = null, currentPanel = null;
@@ -395,7 +418,7 @@ function build() {
                 el('span', { cls: 'ebys-sc-logo' }, icon('fa-wand-magic-sparkles')),
                 el('div', {}, [
                     el('h2', { cls: 'ebys-sc-heading', text: 'EBYS Rehberi', attrs: { id: 'ebysShowcaseTitle' } }),
-                    el('p', { cls: 'ebys-sc-sub', text: 'Evrak, imza, icra ve satın alma süreçlerinin nasıl işlediğini örneklerle gösterir. Buradaki örnekler gerçek kayıtları değiştirmez.', attrs: { id: 'ebysShowcaseDesc' } }),
+                    el('p', { cls: 'ebys-sc-sub', text: 'Evrak, imza, icra, doğrulama ve satın alma süreçlerinin nasıl işlediğini örneklerle gösterir. Buradaki örnekler gerçek kayıtları değiştirmez.', attrs: { id: 'ebysShowcaseDesc' } }),
                 ]),
             ]),
             badge('v3.4', 'indigo'), close,

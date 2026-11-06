@@ -34,7 +34,7 @@ const iconAssets = new Set([
     'assets/fontawesome/webfonts/fa-solid-900.woff2',
     'assets/fontawesome/webfonts/fa-v4compatibility.woff2',
 ]);
-const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/.test(f) || /^manifest\.json$/.test(f)
+const expected = f => /^(index|admin|404|verify)\.html$/.test(f) || /^[^/]+\.(css|js)$/.test(f) || /^manifest\.json$/.test(f)
     || /^src\/.+\.(js|css)$/.test(f) || /^pdf-fonts\/(Roboto-[A-Za-z]+\.js|OFL\.txt)$/.test(f) || iconAssets.has(f)
     || ['release-journal/index.html', 'release-journal/journal.js', 'release-journal/style.css'].includes(f);
 // [WHY]: Faz 5 kapanışı — desen tek başına "fazladan meşru görünen" bir dosyayı (ör. kökte unutulan bir .js dökümü) yakalamaz.
@@ -57,7 +57,8 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
 // Aşama 5: süreç şeması/servisi/arayüzü ve legacy özel sorgu adaptörü (4).
 // EBYS Rehberi: tanıtım modalı ve stili (2).
 // EBYS Aşama 6: icra ve bildirim servisi ile arayüzü (2).
-const EXPECTED_COUNT = 94;
+// EBYS Aşama 7: açık doğrulama sayfası, iki servis/arayüz modülü ve iki yardımcı (5).
+const EXPECTED_COUNT = 99;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

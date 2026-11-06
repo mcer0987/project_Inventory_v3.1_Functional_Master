@@ -818,6 +818,83 @@ service cloud.firestore {
             && d.unitId == old.unitId && d.currentVersionId == old.currentVersionId && d.versionNo == old.versionNo
             && getAfter(ebysPath(r, 'ebysRegistrationIds', d.registrationNo)).data.documentId == d.id && ebysCommand(r, d, 'registerDocument')));
     }
+    // Aşama 7 · Belge yolu özel kalır. Açık koleksiyondan yalnız bilinen token ile tek kayıt okunur.
+    function evToken(id) { return id is string && id.matches('[a-f0-9]{32}'); }
+    function evPublic(r,id) { return ebysPath(r,'ebysVerifications',id); }
+    function evPrivate(r,id) { return ebysPath(r,'ebysVerificationTokens',id); }
+    function evHead(r,id) { return ebysPath(r,'ebysDocuments',id); }
+    function evEligible(h) {
+      return h.state in ['closed','archived'] && ebysId(h.currentVersionId)
+        && h.registrationNo.matches('EBYS-[A-Z0-9]{2,12}-[0-9]{6}-[A-F0-9]{32}');
+    }
+    function evIssuing(old,h,id) {
+      return evEligible(old) && evToken(id) && old.get('verificationToken','') == ''
+        && h.verificationToken == id && h.updatedAt == request.time && h.revision == old.revision+1
+        && h.diff(old).affectedKeys().hasOnly(['verificationToken','revision','updatedAt']);
+    }
+    function evIssueHead(r,old,h) {
+      let id = h.verificationToken;
+      let token = getAfter(evPrivate(r,id)).data;
+      return old.ownerUid == request.auth.uid && evIssuing(old,h,id)
+        && token.documentId == old.id && token.versionId == old.currentVersionId && token.createdAt == request.time
+        && getAfter(evPublic(r,id)).data.registrationNo == old.registrationNo;
+    }
+    function evProjection(r,id,p) {
+      let token = getAfter(evPrivate(r,id)).data;
+      let path = evHead(r,token.documentId);
+      let head = get(path).data;
+      let version = get(ebysPath(r,'ebysVersions',token.versionId)).data;
+      let registration = get(ebysPath(r,'ebysRegistrationIds',head.registrationNo)).data;
+      let summary = {'internal':'Kurum içi yazışma','incoming':'Kurum dışından gelen evrak','outgoing':'Kurum dışına giden evrak'}[head.kind];
+      return evIssuing(head,getAfter(path).data,id) && head.ownerUid == request.auth.uid
+        && token.createdAt == request.time && token.versionId == head.currentVersionId
+        && version.documentId == head.id && version.ownerUid == head.ownerUid
+        && version.contentDigest.matches('[a-f0-9]{64}') && registration.documentId == head.id
+        && registration.ownerUid == head.ownerUid && registration.createdAt is timestamp
+        && p == {'registrationNo':head.registrationNo,'registeredAt':registration.createdAt,'subjectSummary':summary,
+                 'status':head.state == 'archived' ? 'archived' : 'valid','contentDigest':version.contentDigest};
+    }
+    function evReserve(r,id,t) {
+      let path = evHead(r,t.documentId);
+      let head = get(path).data;
+      return ebysId(t.documentId) && evIssuing(head,getAfter(path).data,id)
+        && head.ownerUid == request.auth.uid && !exists(evPublic(r,id))
+        && t == {'documentId':head.id,'versionId':head.currentVersionId,'createdAt':request.time,'revokedAt':null,'revokedBy':''}
+        && getAfter(evPublic(r,id)).data.registrationNo == head.registrationNo;
+    }
+    function evArchiveProjection(r,old) {
+      let id = old.get('verificationToken','');
+      return id == '' || (get(evPublic(r,id)).data.status == 'revoked'
+        ? getAfter(evPublic(r,id)).data.status == 'revoked'
+        : get(evPublic(r,id)).data.status == 'valid' && getAfter(evPublic(r,id)).data.status == 'archived');
+    }
+    function evPublicUpdate(r,id,old,d) {
+      let token = get(evPrivate(r,id)).data;
+      let path = evHead(r,token.documentId);
+      return d.diff(old).affectedKeys().hasOnly(['status']) && (d.status == 'revoked'
+        ? old.status in ['valid','archived'] && token.revokedAt == null
+          && getAfter(evPrivate(r,id)).data.revokedAt == request.time
+          && getAfter(evPrivate(r,id)).data.revokedBy == request.auth.uid
+        : old.status == 'valid' && d.status == 'archived' && get(path).data.verificationToken == id
+          && get(path).data.state == 'closed' && getAfter(path).data.state == 'archived');
+    }
+    match /{r}/ebysVerifications/items/{id} {
+      allow get: if validRoot(r) && evToken(id) && (resource == null
+        || resource.data.keys().hasOnly(['registrationNo','registeredAt','subjectSummary','status','contentDigest']));
+      allow create: if validRoot(r) && signedIn() && evToken(id) && evProjection(r,id,request.resource.data);
+      allow update: if validRoot(r) && isAdmin(r) && evPublicUpdate(r,id,resource.data,request.resource.data);
+      allow list, delete: if false;
+    }
+    match /{r}/ebysVerificationTokens/items/{id} {
+      allow read, delete: if false;
+      allow create: if validRoot(r) && signedIn() && evToken(id) && evReserve(r,id,request.resource.data);
+      allow update: if validRoot(r) && isAdmin(r) && resource.data.revokedAt == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revokedAt','revokedBy'])
+        && request.resource.data.revokedAt == request.time && request.resource.data.revokedBy == request.auth.uid
+        && get(evPublic(r,id)).data.status in ['valid','archived'] && getAfter(evPublic(r,id)).data.status == 'revoked';
+    }
+
+
     match /{r}/ebysDocuments/items/{id} {
       allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDocuments',id)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid || epAccess(r,resource.data.currentVersionId) || ejVersionAccess(r,resource.data.currentVersionId));
       allow list: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.ownerUid == request.auth.uid);
@@ -825,9 +902,11 @@ service cloud.firestore {
         && request.resource.data.state == 'draft' && request.resource.data.versionNo == 0 && request.resource.data.revision == 1 && request.resource.data.registrationNo == ''
         && request.resource.data.createdAt == request.time && ebysDraftHead(r, request.resource.data);
       allow update: if (ebysOwn(r, resource.data) && ebysHeadUpdate(r, resource.data, request.resource.data))
-        || (validRoot(r) && member(r) && (request.resource.data.state in ['closed','archived']
-          ? ejCloseOrArchive(r,resource.data,request.resource.data)
-          : epHeadTransition(r,resource.data,request.resource.data)));
+        || (validRoot(r) && member(r) && (request.resource.data.get('verificationToken','') != resource.data.get('verificationToken','')
+          ? evIssueHead(r,resource.data,request.resource.data)
+          : request.resource.data.state in ['closed','archived']
+            ? ejCloseOrArchive(r,resource.data,request.resource.data)
+            : epHeadTransition(r,resource.data,request.resource.data)));
       allow delete: if false;
     }
     function ebysDraftOk(r, id, d) {
@@ -1045,7 +1124,9 @@ service cloud.firestore {
       return job.documentId == old.id && (d.state == 'closed'
         ? old.state == 'internally_approved' && job.state == 'in_progress' && job.assigneeUid == request.auth.uid
           && getAfter(ej(r,old.currentVersionId)).data.state == 'completed' && ejHeadChanged(old,d,'closed')
-        : old.state == 'closed' && job.state == 'completed' && isAdmin(r) && ejHeadChanged(old,d,'archived'));
+        : old.state == 'closed' && job.state == 'completed' && isAdmin(r) && ejHeadChanged(old,d,'archived')
+          && getAfter(ebysPath(r,'ebysExecutionEvents',job.id+'__archive')).data.createdAt == request.time
+          && evArchiveProjection(r,old));
     }
     function ejEvidence(r,d) {
       return ebysText(d.note,1000,true) && ebysText(d.evidenceRef,240,true)
@@ -1117,9 +1198,22 @@ service cloud.firestore {
         'note':d.note,'returnedAt':old.get('returnedAt',null),'createdAt':request.time}
         && id == ejEventId(d.id,d.revision) && d.revision == old.revision+1 && d.updatedAt == request.time;
     }
+    function ejArchiveEvent(r,id,e) {
+      let job = get(ej(r,e.processId)).data;
+      let path = evHead(r,job.documentId);
+      let old = get(path).data;
+      let next = getAfter(path).data;
+      return job.state == 'completed' && old.currentVersionId == job.id && old.state == 'closed'
+        && ejHeadChanged(old,next,'archived') && id == job.id+'__archive'
+        && e == {'id':id,'processId':job.id,'ownerUid':job.ownerUid,'revision':job.revision+1,
+                 'documentRevision':next.revision,'from':'closed','to':'archived','action':'archive',
+                 'actorUid':request.auth.uid,'createdAt':request.time};
+    }
     match /{r}/ebysExecutionEvents/items/{id} {
       allow read: if validRoot(r) && isAdmin(r);
-      allow create: if validRoot(r) && member(r) && ejEventOk(r,id,request.resource.data);
+      allow create: if validRoot(r) && (request.resource.data.action == 'archive'
+        ? isAdmin(r) && ejArchiveEvent(r,id,request.resource.data)
+        : member(r) && ejEventOk(r,id,request.resource.data));
       allow update, delete: if false;
     }
     function ejNotificationOk(r,id,n) {

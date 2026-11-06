@@ -83,7 +83,8 @@ try {
                 throw new Error(`${person.pri}: mevcut hesap eşlemesi başka personele ait; işlem durduruldu.`);
             }
             await setDoc(personRef, {
-                id: person.id, name: person.name, birim: 'Test', unitId: 'ft_unit', pri: person.pri,
+                id: person.id, name: person.name, pri: person.pri,
+                ...(existing.data()?.unitId ? {} : { birim: 'Test', unitId: 'ft_unit' }),
                 uid: person.uid, authEmail: person.email, authProvisionedAt: Date.now(), active: true,
             }, { merge: true });
             await setDoc(accountRef, {

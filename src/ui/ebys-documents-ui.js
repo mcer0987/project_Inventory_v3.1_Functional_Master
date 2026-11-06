@@ -1,4 +1,7 @@
 import '../services/ebys-document-service.js';
+import '../services/ebys-verification-service.js';
+import { verificationNotice, verificationUrl } from '../utils/ebys-verification-schema.js';
+import { verificationQr } from '../utils/ebys-verification-qr.js';
 import './ebys-process-ui.js';
 import './ebys-execution-ui.js';
 const api = () => window.AppModules.EBYSDocuments;
@@ -121,6 +124,7 @@ async function open(id = null) {
                     await api().freezeVersion({ documentId: head.id, expectedRevision: head.revision, operationId: pendingFreeze });
                     pendingFreeze = null;
                 }
+                if (action === 'issueVerification') await window.AppModules.EBYSVerification.issueVerification(head.id);
                 status.textContent = action === 'freeze' ? 'İçerik donduruldu ve incelemeye hazır.' : 'Evrak kaydedildi.';
                 if (action === 'save') { editor.close(); cursor = null; subscribe(); message('Taslak kaydedildi.'); }
                 else if (editor.isConnected) await open(head.id);
@@ -144,6 +148,12 @@ async function open(id = null) {
         } else form.querySelectorAll('input,select,textarea').forEach(n => { n.disabled = true; });
         if (frozen) actions.append(button('Onay rotası / Süreç',()=>window.AppModules.EBYSProcessUI.open(head.currentVersionId,head.id)));
         if (!head.registrationNo && ['draft', 'in_review'].includes(head.state)) actions.append(button('Kesin kayıt numarası al', () => act('register'), 'btn btn-outline-success'));
+        if (!head.verificationToken && ['closed', 'archived'].includes(head.state) && head.ownerUid === actor) {
+            form.append(node('p', head.registrationNo
+                ? 'Doğrulama QR’ı, bağlantıyı bilen kişilere kayıt numarası, kayıt tarihi, evrak türü özeti, durum ve içerik özetini gösterir.'
+                : 'Doğrulama QR’ı için evrakın kesin kayıt numarası bulunmalıdır.', 'small text-muted ebys-wide'));
+            if (head.registrationNo) actions.append(button('Doğrulama QR’ı oluştur', () => act('issueVerification')));
+        }
         actions.append(button('Çıktı önizleme', () => preview(head, frozen ? data : input())));
         actions.append(button('Kapat', () => dialog.close(), 'btn btn-secondary'));
         form.append(actions); form.onsubmit = e => e.preventDefault(); dialog.append(form); document.body.append(dialog); dialog.showModal();
@@ -156,6 +166,20 @@ function preview(head, data) {
     body.append(node('h2', meta.subject || 'Üst yazı'), node('p', `Sayı: ${head.registrationNo || 'TASLAK'} · Tarih: ${meta.date || ''}`),
         node('p', `Muhatap: ${meta.correspondent || ''}`), node('p', `Dosya planı: ${meta.filePlanCode || ''} · Gizlilik: ${meta.confidentiality || ''}`),
         node('div', data.content || '', 'ebys-preview-content'), node('p', `Dağıtım:\n${meta.distribution || '—'}`, 'ebys-preview-content'));
+    if (head.verificationToken) {
+        const url = verificationUrl(head.verificationToken, window.location.href, window.AppEnv?.EMULATOR === true);
+        const box = node('figure', null, 'ebys-preview-verification');
+        const link = node('a', url);
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const caption = node('figcaption');
+        caption.append(node('strong', 'Evrak doğrulama'), node('p', verificationNotice), link);
+        try { box.append(verificationQr(url)); }
+        catch { caption.prepend(node('p', 'Doğrulama adresini aşağıdaki bağlantıdan açın.')); }
+        box.append(caption);
+        body.append(box);
+    }
     const actions = node('div', null, 'd-flex gap-2 ebys-preview-actions');
     actions.append(button('Yazdır', () => { document.body.classList.add('printing-ebys'); window.print(); document.body.classList.remove('printing-ebys'); }), button('Kapat', () => { modal.close(); modal.remove(); }));
     modal.append(body, actions); document.body.append(modal); modal.showModal();
