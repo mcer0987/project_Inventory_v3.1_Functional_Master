@@ -33,6 +33,7 @@
     <link rel="stylesheet" href="src/ui/purchase-print.css">
     <link rel="stylesheet" href="src/ui/ebys-documents.css">
     <link rel="stylesheet" href="src/ui/ebys-showcase-modal.css">
+    <link rel="stylesheet" href="src/ui/zim-showcase-modal.css">
     <link rel="stylesheet" href="dark-theme.css">
     <link rel="stylesheet" href="mobile-responsive.css">
     <link rel="stylesheet" href="login-redesign.css">
@@ -617,10 +618,18 @@
         <div id="b3" class="tab-content">
             <div class="b3-panel-intro">
                 <p class="b3-panel-desc">Depodan çıkan ve personele zimmetlenen ürünlerin kaydı: kime, ne zaman, hangi envanter numarasıyla verildiğini buradan izleyebilir, zimmet tutanağı alabilirsiniz.</p>
-                <button type="button" class="b3-help-trigger" id="b3HelpToggle" aria-expanded="false" aria-controls="b3HelpPanel"
-                    onclick="window.toggleB3Help()" title="Kullanım bilgisi">
-                    <i class="fas fa-circle-info" aria-hidden="true"></i><span>Nasıl kullanılır?</span>
-                </button>
+                <div class="b3-panel-actions">
+                    <button type="button" class="b3-help-trigger" id="b3HelpToggle" aria-expanded="false" aria-controls="b3HelpPanel"
+                        onclick="window.toggleB3Help()" title="Kullanım bilgisi">
+                        <i class="fas fa-circle-info" aria-hidden="true"></i><span>Nasıl kullanılır?</span>
+                    </button>
+                    <!-- Zimmet ve İade Rehberi: çıkış, talep/onay, zimmet ve iade süreçlerini örneklerle anlatan modal
+                         (EBYS Rehberi örnek alınarak — src/ui/zim-showcase-modal.js) -->
+                    <button type="button" class="b3-help-trigger b3-guide-trigger" data-zim-showcase="cikis" aria-haspopup="dialog"
+                        title="Envanter çıkışı, talep/onay, zimmet ve iade süreçlerinin nasıl işlediğini örneklerle gösterir">
+                        <i class="fas fa-book-open" aria-hidden="true"></i><span>Zimmet ve İade Rehberi</span>
+                    </button>
+                </div>
             </div>
             <div class="b3-help-panel" id="b3HelpPanel" role="region" aria-label="Envanter çıkışları kullanım bilgisi" hidden>
                 <ul>
@@ -1701,6 +1710,7 @@
     <script type="module" src="src/services/ebys-rates.js"></script>
     <script type="module" src="src/ui/ebys-documents-ui.js"></script>
     <script type="module" src="src/ui/ebys-showcase-modal.js"></script>
+    <script type="module" src="src/ui/zim-showcase-modal.js"></script>
     <script src="src/utils/ebys-document-types.js"></script>
     <script src="src/utils/purchase-money.js"></script>
     <script src="src/ui/purchase-items-ui.js"></script>

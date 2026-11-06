@@ -486,12 +486,51 @@
         return doc;
     }
 
+    /**
+     * Faz 6 · Onaylanmış bir iade talebinin resmi tutanak verisi. Yön, zimmet tutanağının tersidir: personel teslim
+     * eden, yönetici teslim alandır. Cihaz kalemi önce returnRequests kaydının kendi alanlarından, eksikse zimmetId
+     * ile bulunan b3 kaydından (hâlâ varsa) tamamlanır; b3 silinmiş olsa da belge üretilir. Yalnız durum 'approved'
+     * için üretilir (bekleyen/reddedilen/geri çekilen talepte tutanağın bir karşılığı yoktur).
+     * @param {string|number} returnId  returnRequests kaydının id'si ("ret_<zimmetId>")
+     * @param {{now?: Date|number, duzenleyen?: string}} [opts]
+     * @returns {null | object} kayıt yoksa ya da henüz karara bağlanmamışsa null; ek alan doc.iade (karar özeti)
+     */
+    function generateReturnData(returnId, opts = {}) {
+        const r = ((window.data && window.data.returnRequests) || []).find(x => x && String(x.id) === String(returnId));
+        if (!r || r.durum !== 'approved') return null;
+        const b3 = ((window.data && window.data.b3) || []).find(x => x && String(x.id) === String(r.zimmetId));
+        const n = b3 && S().normalizeB3(b3);
+        const person = findPerson(r.personelId) || (n && findPerson(n.personelId));
+        const kararTarihi = txt(r.onayTarihi, r.tarih);
+        const row = belgeRow({
+            id: r.zimmetId, kaynak: 'return', sn: txt(r.sn, n && n.sn), envanterNo: txt(r.envanterNo, n && n.envanterNo),
+            urunTuru: n && n.urunTuru, urunAciklama: txt(r.urun, n && n.urunAciklama), marka: n && n.marka,
+            adet: n ? n.adet : 1, isDemirbas: true,
+            tarih: n && n.tarih, teslimTarihi: r.teslimAlindi ? kararTarihi : r.tarih,
+            talepTuru: n && n.talepTuru, oncelik: n && n.oncelik, iadeTarihi: r.tarih,
+            requestId: n && n.requestId, productId: txt(r.productId, n && n.productId), depo: r.iadeDepo, not: r.adminNotu,
+            iadeEdildi: true, iadeEdildiTarihi: kararTarihi, durum: 'iade',
+            raw: b3 || {}, req: null,
+        }, 1);
+        const doc = envelope({
+            tur: 'iade', prefix: 'IT', person, fallbackName: r.personel, rows: [row],
+            now: opts.now, duzenleyen: txt(opts.duzenleyen, r.onaylayan),
+        });
+        doc.iade = {
+            gerekce: txt(r.gerekce), aciklama: txt(r.aciklama), bildirilenDurum: txt(r.bildirilenDurum), talepTarihi: txt(r.tarih),
+            teslimAlindi: !!r.teslimAlindi, iadeDepo: txt(r.iadeDepo), stogaEklendi: !!r.stogaEklendi,
+            adminCihazDurumu: txt(r.adminCihazDurumu), adminNotu: txt(r.adminNotu), kapanisAciklamasi: txt(r.kapanisAciklamasi),
+            onaylayan: txt(r.onaylayan), onayTarihi: txt(r.onayTarihi),
+        };
+        return doc;
+    }
+
     const AssignmentService = {
         getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId, planSarfConsumption,
         assignmentState, getPendingDeliveries, stateBadgeHtml, STATE_LABELS, planClose, findReturnProduct,
         activeDeviceUses, checkDeviceIds, isOpenService, serviceRecordsFor, getDeviceHistory,
         invalidateDeviceUses, usesStats,
-        generatePersonnelZimmetData, generateB3MovementData, ZIMMET_BELGE_SEMA, ZIMMET_KALEM_KEYS,
+        generatePersonnelZimmetData, generateB3MovementData, generateReturnData, ZIMMET_BELGE_SEMA, ZIMMET_KALEM_KEYS,
     };
     window.AppModules = window.AppModules || {};
     window.AppModules.Assignments = AssignmentService;

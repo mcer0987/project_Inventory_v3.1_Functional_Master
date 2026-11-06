@@ -5056,6 +5056,13 @@ body,
     max-width: 760px;
 }
 
+.b3-panel-actions {
+    flex-shrink: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .b3-help-trigger {
     flex-shrink: 0;
     display: inline-flex;
@@ -5077,6 +5084,17 @@ body,
     outline: 2px solid var(--b3-navy-2);
     outline-offset: 2px;
 }
+
+/* Zimmet ve İade Rehberi düğmesi: EBYS Rehberi'yle aynı mor vurgu, "Nasıl kullanılır?" ile aynı ölçüde ayrı renk. */
+.b3-guide-trigger {
+    border-color: rgba(124, 58, 237, 0.3);
+    background: rgba(124, 58, 237, 0.08);
+    color: #7c3aed;
+}
+
+.b3-guide-trigger:focus-visible { outline-color: #7c3aed; }
+[data-theme="dark"] .b3-guide-trigger { border-color: rgba(183, 148, 255, 0.35); background: rgba(183, 148, 255, 0.12); color: #b794ff; }
+[data-theme="dark"] .b3-guide-trigger:focus-visible { outline-color: #b794ff; }
 
 .b3-help-panel {
     margin-bottom: 14px;

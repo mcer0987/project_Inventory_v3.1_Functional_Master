@@ -1129,18 +1129,17 @@
         </script>
     </div>
 
-    <!-- 📦 Satın Alma Yönetimi -->
+    <!-- 📦 Satın Alma & EBYS Yönetimi -->
     <div id="purchaseTab" class="admin-tab-content">
 
-        <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+        <!-- Sekme dört ayrı alan barındırır (EBYS evrak/icra, envanter talepleri, iade talepleri, satın alma); her
+             alanın başlığı ve göstergeleri (badge) kendi içeriğinin hemen üstünde durur — tek bir üst başlık tüm
+             alanları kapsamaz. -->
+        <div class="admin-section-header mb-4">
             <div>
-                <h2 class="fw-bold mb-0">📦 Satın Alma & Servis</h2>
-                <small class="text-muted">Operasyonel Takip Paneli</small>
+                <h2 class="fw-bold mb-0">📄 EBYS — Evrak ve İcra Takibi</h2>
+                <small class="text-muted">Evrak kayıt defteri, havale ve icra sürecinin yönetim görünümü</small>
             </div>
-            <button onclick="window.openNewPurchaseModal()"
-                class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
-                <i class="fas fa-plus me-2"></i>Yeni Talep
-            </button>
         </div>
 
         <section id="ebysDocumentRegistry" class="modern-card mb-4" aria-label="Evrak kayıt defteri">
@@ -1291,6 +1290,17 @@
                     </div>
                 </section>
             </div>
+        </div>
+
+        <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+            <div>
+                <h2 class="fw-bold mb-0">📦 Satın Alma & Servis</h2>
+                <small class="text-muted">Operasyonel Takip Paneli</small>
+            </div>
+            <button onclick="window.openNewPurchaseModal()"
+                class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                <i class="fas fa-plus me-2"></i>Yeni Talep
+            </button>
         </div>
 
         <!-- SATIN ALMA & SERVİS GÖSTERGELERİ — ait oldukları tabloların hemen üstünde (renderPurchaseStats doldurur) -->

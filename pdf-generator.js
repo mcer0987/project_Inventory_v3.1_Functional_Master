@@ -31,6 +31,7 @@
 
     const safeFileName = s => String(s ?? '-').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() || '-';
     const dash = v => (v === undefined || v === null || String(v).trim() === '' ? '-' : String(v));
+    const blank = v => v === undefined || v === null || String(v).trim() === '' || String(v).trim() === '-';
 
     // ─── Sayfa başlığı: logo metni, kurumsal unvan, belge türü ───
     function drawHeader(doc, title) {
@@ -153,16 +154,117 @@
     }
 
     // ─── Sayfa numarası: toplam sayfa sayısı yalnız tüm sayfalar çizildikten sonra bilinir ───
-    function stampPageNumbers(doc) {
+    function stampPageNumbers(doc, footerLabel = 'Medipol Sağlık Grubu · Demirbaş ve Malzeme Zimmet Tutanağı') {
         const total = doc.internal.getNumberOfPages();
         for (let p = 1; p <= total; p++) {
             doc.setPage(p);
             doc.setDrawColor(...BRAND.line); doc.setLineWidth(0.2);
             doc.line(PAGE.margin, PAGE.h - 12, PAGE.w - PAGE.margin, PAGE.h - 12);
             doc.setFont('Roboto', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...BRAND.gray);
-            doc.text('Medipol Sağlık Grubu · Demirbaş ve Malzeme Zimmet Tutanağı', PAGE.margin, PAGE.h - 7);
+            doc.text(footerLabel, PAGE.margin, PAGE.h - 7);
             doc.text(`Sayfa ${p} / ${total}`, PAGE.w - PAGE.margin, PAGE.h - 7, { align: 'right' });
         }
+    }
+
+    // ─── Faz 6 · İade kararı özeti (personelin gerekçesi + yöneticinin kararı) ───
+    function drawReturnDecision(doc, iade, y) {
+        const w = PAGE.w - PAGE.margin * 2;
+        doc.setFont('Roboto', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...BRAND.blueDark);
+        doc.text('İADE KARARI', PAGE.margin, y);
+        y += 4;
+        doc.setDrawColor(...BRAND.blue); doc.setLineWidth(0.4);
+        doc.line(PAGE.margin, y, PAGE.margin + 38, y);
+        y += 6;
+
+        const rows = [
+            ['Personelin gerekçesi', iade.gerekce + (iade.aciklama ? ` — ${iade.aciklama}` : '')],
+            ['Beyan edilen cihaz durumu', iade.bildirilenDurum],
+            ['Cihaz teslim alındı mı', iade.teslimAlindi ? 'Evet' : 'Hayır (teslim alınmadan kapatıldı)'],
+        ];
+        if (iade.teslimAlindi) {
+            rows.push(['Yönetici değerlendirmesi (cihaz durumu)', iade.adminCihazDurumu]);
+            rows.push(['Teslim alınan depo', iade.iadeDepo ? iade.iadeDepo.toUpperCase() : '-']);
+            rows.push(['Stoğa eklendi mi', iade.stogaEklendi ? 'Evet' : 'Hayır']);
+        } else {
+            rows.push(['Kapanış açıklaması', iade.kapanisAciklamasi]);
+        }
+        if (!blank(iade.adminNotu)) rows.push(['Yönetici notu', iade.adminNotu]);
+        rows.push(['Onaylayan', `${dash(iade.onaylayan)}  ·  ${dash(iade.onayTarihi)}`]);
+
+        doc.setFontSize(9);
+        rows.forEach(([label, value]) => {
+            doc.setFont('Roboto', 'bold'); doc.setTextColor(...BRAND.gray);
+            doc.text(`${label}:`, PAGE.margin, y);
+            const labelW = doc.getTextWidth(`${label}: `) + 1;
+            doc.setFont('Roboto', 'normal'); doc.setTextColor(...BRAND.navy);
+            const lines = doc.splitTextToSize(dash(value), w - labelW);
+            doc.text(lines, PAGE.margin + labelW, y);
+            y += lines.length * 4.3 + 2.4;
+        });
+        return y + 2;
+    }
+
+    // ─── Faz 6 · Taahhüt metni ve imza kutuları (iade yönü zimmetin tersi: personel teslim eden, yetkili teslim alan).
+    //            Cihaz fiziken teslim alınmadıysa (kayıp, personel ayrıldı vb.) yalnız onaylayan yetkilinin imzası basılır. ───
+    function drawReturnSignatures(doc, docData, y) {
+        const iade = docData.iade;
+        doc.setFont('Roboto', 'normal'); doc.setFontSize(8.3); doc.setTextColor(...BRAND.navy);
+        const taahhut = iade.teslimAlindi
+            ? 'İşbu tutanak ile yukarıda bilgileri yer alan demirbaş/malzemeyi kurum yetkilisine eksiksiz olarak iade ettiğimi; yetkilinin bu cihazı teslim aldığını ve zimmetimin kapatıldığını kabul ederim.'
+            : 'İşbu tutanak ile yukarıda bilgileri yer alan demirbaş/malzemenin, yukarıdaki kapanış açıklaması uyarınca fiziken teslim alınmadan zimmetimden düşüldüğünü bildiğimi beyan ederim.';
+        const lines = doc.splitTextToSize(taahhut, PAGE.w - PAGE.margin * 2);
+        doc.text(lines, PAGE.margin, y);
+        y += lines.length * 4 + 10;
+        const lineY = y + 20;
+
+        doc.setDrawColor(...BRAND.navy); doc.setLineWidth(0.3);
+        doc.setFont('Roboto', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...BRAND.gray);
+
+        if (!iade.teslimAlindi) {
+            doc.text('ONAYLAYAN (Yetkili)', PAGE.margin, y);
+            doc.line(PAGE.margin, lineY, PAGE.margin + (PAGE.w - PAGE.margin * 2 - 10) / 2, lineY);
+            doc.setFont('Roboto', 'normal'); doc.setFontSize(9); doc.setTextColor(...BRAND.navy);
+            doc.text(dash(iade.onaylayan), PAGE.margin, lineY + 5);
+            doc.setFont('Roboto', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...BRAND.gray);
+            doc.text('İmza', PAGE.margin, lineY + 10);
+            return lineY + 10;
+        }
+
+        const boxW = (PAGE.w - PAGE.margin * 2 - 10) / 2;
+        const leftX = PAGE.margin, rightX = PAGE.margin + boxW + 10;
+        doc.text('TESLİM EDEN (Personel)', leftX, y);
+        doc.text('TESLİM ALAN (Yetkili)', rightX, y);
+        doc.line(leftX, lineY, leftX + boxW, lineY);
+        doc.line(rightX, lineY, rightX + boxW, lineY);
+
+        doc.setFont('Roboto', 'normal'); doc.setFontSize(9); doc.setTextColor(...BRAND.navy);
+        doc.text(dash(docData.personel.adSoyad), leftX, lineY + 5);
+        doc.text(dash(iade.onaylayan), rightX, lineY + 5);
+        doc.setFont('Roboto', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...BRAND.gray);
+        doc.text('İmza', leftX, lineY + 10);
+        doc.text('İmza', rightX, lineY + 10);
+        return lineY + 10;
+    }
+
+    // ─── Faz 6 · İade tutanağı: zimmet tutanağıyla aynı başlık/kalem tablosu/özet; karar ve imza bölümü kendine özgü ───
+    function renderIadeTutanagi(docData) {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+        doc.setFont('Roboto', 'normal');
+        const title = docData.iade.teslimAlindi ? 'DEMİRBAŞ İADE TUTANAĞI' : 'ZİMMET KAPANIŞ TUTANAĞI (Teslim Alınmadı)';
+
+        drawHeader(doc, title);
+        let y = drawInfoBoxes(doc, docData, 32);
+        y = drawItemsTable(doc, docData.kalemler, y);
+        y = drawSummary(doc, docData.ozet, y + 7);
+        y = drawReturnDecision(doc, docData.iade, y + 4);
+
+        const SIGNATURE_H = docData.iade.teslimAlindi ? 62 : 40;
+        if (y + SIGNATURE_H > PAGE.h - 16) { doc.addPage(); y = 20; }
+        drawReturnSignatures(doc, docData, y);
+
+        stampPageNumbers(doc, 'Medipol Sağlık Grubu · Demirbaş İade Tutanağı');
+        return doc;
     }
 
     // ─── Ortak çizim: hem toplu (personel) hem tekil (b3 hareketi) belge aynı düzeni kullanır ───
@@ -232,10 +334,32 @@
         }
     };
 
+    /**
+     * Onaylanmış bir iade talebinin resmi tutanağı. Argüman returnRequests kaydının id'sidir ("ret_<zimmetId>");
+     * bekleyen/reddedilen/geri çekilen talepte buton zaten görünmez (src/modules/return-requests.js), yine de
+     * burada da durum doğrulanır.
+     * @param {string|number} returnId
+     */
+    window.generateReturnPDF = async function (returnId) {
+        try {
+            if (!window.AssignmentService || typeof window.AssignmentService.generateReturnData !== 'function') {
+                alertErr('Zimmet veri servisi yüklenmedi.'); return;
+            }
+            const docData = window.AssignmentService.generateReturnData(returnId);
+            if (!docData) { alertErr('Bu iade için tutanak oluşturulamadı; talep onaylanmış olmalı.'); return; }
+            await ensureZimmetFonts();
+            const doc = renderIadeTutanagi(docData);
+            doc.save(`Iade_Tutanagi_${safeFileName(docData.personel.adSoyad)}_${safeFileName(docData.belge.belgeNo)}.pdf`);
+        } catch (err) {
+            console.error('İade tutanağı PDF hatası:', err);
+            alertErr('İade tutanağı oluşturulamadı. ' + (err && err.message || ''));
+        }
+    };
+
     // Test/iç erişim: flow-tests.js jsPDF'in doc.save() tetiklediği dosya indirmesini tarayıcıda taklit etmeden,
     // sayfalama/font/sözleşme eşlemesini doğrudan doğrular.
     window.AppModules = window.AppModules || {};
-    window.AppModules.ZimmetPdf = { renderZimmetTutanagi, ensureZimmetFonts };
+    window.AppModules.ZimmetPdf = { renderZimmetTutanagi, renderIadeTutanagi, ensureZimmetFonts };
 })();
 
 window.exportPDF=function (depo) {
