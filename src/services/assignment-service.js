@@ -89,6 +89,36 @@
         return list.sort((a, b) => (b.ts || 0) - (a.ts || 0));
     }
 
+    // Faz 3 (B-3) · Zimmetin görünen durumu — admin Zimmet ekranı ve Kişi Envanteri aynı kuralı kullanır.
+    //   'iade'          iade edildi
+    //   'iadeBekliyor'  personel iade talebi gönderdi, yönetici onayı bekleniyor (returnRequests · Faz 4; koleksiyon yoksa hiç çıkmaz)
+    //   'teslimBekliyor' talep onaylandı, personel henüz "Teslim Aldım" demedi
+    //   'zimmetli'      teslim alındı / doğrudan zimmet
+    const STATE_LABELS = Object.freeze({ iade: 'İade Edildi', iadeBekliyor: 'İade Onayı Bekliyor', teslimBekliyor: 'Teslim Bekliyor', zimmetli: 'Zimmetli' });
+    function assignmentState(a) {
+        if (!a) return null;
+        if (a.iadeEdildi) return 'iade';
+        const open = ((window.data && window.data.returnRequests) || []).some(r => r && String(r.zimmetId) === String(a.id)
+            && String(r.durum || '') === 'Beklemede');
+        if (open) return 'iadeBekliyor';
+        return a.teslimAlindi ? 'zimmetli' : 'teslimBekliyor';
+    }
+
+    // Durum rozeti (HTML). Yalnız sabit anahtar ve etiketlerden kurulur; kayıt verisi içermez. Stil: style.css .zim-state
+    const STATE_ICONS = Object.freeze({ iade: '✅', iadeBekliyor: '↩️', teslimBekliyor: '⏳', zimmetli: '📌' });
+    function stateBadgeHtml(key) {
+        const k = STATE_LABELS[key] ? key : 'zimmetli';
+        const esc = typeof window.escapeHtml === 'function' ? window.escapeHtml : s => String(s);
+        return `<span class="zim-state zim-state-${esc(k)}">${esc(STATE_ICONS[k])} ${esc(STATE_LABELS[k])}</span>`;
+    }
+    window.zimmetStateBadge = stateBadgeHtml;
+
+    // Kişinin teslim almayı beklediği (onaylanmış, iade edilmemiş) zimmetleri.
+    function getPendingDeliveries(user) {
+        if (!user) return [];
+        return getAssignments().filter(a => !a.iadeEdildi && !a.teslimAlindi && matchesPerson(a, user));
+    }
+
     /**
      * Faz 2 (B-1) · Sarf zimmetlerini tüketim çıkışına çevirme planı (YAZMAZ).
      * Dönüşür: tip 'zimmet', kayıtta AÇIKÇA isDemirbas false (boolean ya da 'false'), iade edilmemiş b3 kaydı.
@@ -407,6 +437,7 @@
 
     const AssignmentService = {
         getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId, planSarfConsumption,
+        assignmentState, getPendingDeliveries, stateBadgeHtml, STATE_LABELS,
         activeDeviceUses, checkDeviceIds, isOpenService, serviceRecordsFor, getDeviceHistory,
         invalidateDeviceUses, usesStats,
         generatePersonnelZimmetData, generateB3MovementData, ZIMMET_BELGE_SEMA, ZIMMET_KALEM_KEYS,

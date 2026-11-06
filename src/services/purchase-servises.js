@@ -370,6 +370,13 @@ window.renderPurchaseStats = function () {
     if (elPending) elPending.innerText = pending;
     if (elCompleted) elCompleted.innerText = completed;
     if (elService) elService.innerText = inService;
+
+    // Faz 3: "Satın Alma Talepleri" başlığındaki rozet — onay bekleyen sipariş varsa görünür
+    const badge = document.getElementById('purchasePendingBadge');
+    if (badge) {
+        badge.textContent = `${pending} onay bekliyor`;
+        badge.hidden = pending === 0;
+    }
 };
 
 // renderServicesModule içindeki tablo çizim kısmında düzeltme:

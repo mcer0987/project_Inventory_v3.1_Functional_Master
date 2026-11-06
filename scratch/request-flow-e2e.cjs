@@ -271,10 +271,45 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         // ── 4) Yönetici Zimmet ekranı (admin) ──
         await page.evaluate(() => window.inventoryManagementModule.renderTable());
         let z = await page.evaluate(() => window.inventoryManagementModule.getNormalizedAssignments().map(a => [a.ürün, a.sn, a.durum, a.personelId]));
-        assert.deepEqual(z.map(x => x[2]), ['Zimmetli', 'Zimmetli']);
+        assert.deepEqual(z.map(x => x[2]), ['Teslim Bekliyor', 'Teslim Bekliyor']);
         assert.equal(await page.$$eval('#invTableBody tr', t => t.length), 2);
+        assert.equal(await page.$$eval('#invTableBody .zim-state-teslimBekliyor', t => t.length), 2);
         assert.ok(!z.some(x => /Monitör|Mouse/.test(x[0])));
-        ok('Zimmet ekranı: onay anında yalnız 2 laptop "Zimmetli"; sarf (tüketim) ve reddedilen talep yok');
+        ok('B-3: Zimmet ekranı — onaylanan 2 laptop "⏳ Teslim Bekliyor" rozetiyle; sarf (tüketim) ve reddedilen talep yok');
+        s = await page.evaluate(() => { const m = window.inventoryManagementModule; m.state.stateFilter = 'zimmetli'; m.renderTable();
+            const n = document.querySelectorAll('#invTableBody .zim-state').length; m.state.stateFilter = 'teslimBekliyor'; m.renderTable();
+            const n2 = document.querySelectorAll('#invTableBody .zim-state').length; m.state.stateFilter = 'all'; m.renderTable(); return [n, n2]; });
+        assert.deepEqual(s, [0, 2]);
+        ok('B-3: Zimmet ekranı durum filtresi — "Zimmetli" 0, "Teslim Bekliyor" 2');
+
+        // ── Admin üst çubuğu bekleyen talep rozeti (request-badge.js) ──
+        await page.evaluate(() => {
+            const bar = document.createElement('div');
+            bar.innerHTML = '<div class="todo-nav-badge-container is-passive" id="admin-nav-request-badge"><span class="todo-nav-badge badge-hidden" id="admin-nav-request-count">0</span></div><span id="adminRequestBadgeLive"></span><div id="pendingRequestsCard"></div>';
+            document.body.prepend(bar);
+            window.showAdminTab = tab => { window._shownTab = tab; };
+        });
+        await page.addScriptTag({ url: 'http://127.0.0.1/src/ui/request-badge.js' });
+        s = await page.evaluate(async () => {
+            const read = () => ({ n: document.getElementById('admin-nav-request-count').textContent, hidden: document.getElementById('admin-nav-request-count').classList.contains('badge-hidden'),
+                passive: document.getElementById('admin-nav-request-badge').classList.contains('is-passive'), pulse: document.getElementById('admin-nav-request-badge').classList.contains('request-badge-pulse'),
+                live: document.getElementById('adminRequestBadgeLive').textContent });
+            window.RequestBadge.update();
+            const zero = read();
+            window.data.requests.push({ id: 'r_live', ürün: 'Klavye', adet: 1, durum: 'Beklemede', personel: 'Ayşe Yılmaz', personelId: 's1', personelUid: 'uid-s1' });
+            window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'requests' } }));
+            const one = read();
+            window.RequestBadge.goToPending();
+            await new Promise(r => setTimeout(r, 120));
+            window.data.requests = window.data.requests.filter(r => r.id !== 'r_live');
+            window.RequestBadge.update();
+            return { zero, one, tab: window._shownTab, focused: document.activeElement && document.activeElement.id, after: read() };
+        });
+        assert.deepEqual([s.zero.n, s.zero.hidden, s.zero.passive], ['0', true, true]);
+        assert.deepEqual([s.one.n, s.one.hidden, s.one.passive, s.one.pulse], ['1', false, false, true]);
+        assert.match(s.one.live, /Yeni talep geldi\. 1 envanter talebi bekliyor/);
+        assert.deepEqual([s.tab, s.focused, s.after.n, s.after.hidden], ['purchaseTab', 'pendingRequestsCard', '0', true]);
+        ok('Rozet: 0 iken gizli/pasif; yeni talep gelince 1, nabız + ekran okuyucu duyurusu; tıklayınca Talep ve Süreçler kartına gider; taslak sayılmaz');
 
         // ── 5) Personel: Taleplerim + Kişi Envanteri (teslim almadan önce) ──
         await page.evaluate(() => { window.mode = 'staff'; window.renderMyRequestsTable(); window.renderPersonnelInventoryTable(); });
@@ -288,16 +323,23 @@ const rows = (page, sel) => page.$$eval(`${sel} tbody tr`, trs => trs.map(tr => 
         await page.evaluate(() => document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'myRequests')));
         await page.screenshot({ path: path.join(OUT, 'request-my-requests-reason.png') });
         let inv = await rows(page, '#tablePersonnelInventory');
-        assert.match(inv[0][0], /kayıtlı envanter bulunmamaktadır/);
+        assert.equal(inv.length, 2);
+        assert.ok(inv.every(x => /Teslim Bekliyor/.test(x[5])));
+        s0 = await page.$eval('#personnelAwaitingNote', n => ({ hidden: n.hidden, text: n.textContent }));
+        assert.equal(s0.hidden, false); assert.match(s0.text, /Onaylanan 2 kalem teslim almanızı bekliyor/);
         s = await page.evaluate(() => window.AssignmentService.generatePersonnelZimmetData('s1').ozet);
         assert.equal(s.kalemSayisi, 0); assert.equal(s.teslimBekleyen, 2);
-        ok('Personel: Taleplerim\'de 2 "Teslim Aldım" + 1 "Reddedildi"; Kişi Envanteri BOŞ, tutanakta 2 teslim bekleyen (yalnız demirbaş)', 'B-3 (Faz 3): teslim alınana kadar Kişi Envanteri\'ne düşmüyor');
+        await page.evaluate(() => document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'personnelInventoryTab')));
+        await page.screenshot({ path: path.join(OUT, 'request-person-inventory-awaiting.png') });
+        ok('B-3: Kişi Envanteri — 2 laptop "⏳ Teslim Bekliyor" rozetiyle listenin başında; üstte "Taleplerim\'e git" notu; tutanakta 0 kalem, 2 teslim bekleyen');
 
         // ── 6) Teslim alma ──
         await page.evaluate(async () => { await window.receiveProduct('r_dem'); await window.receiveProduct('r_sarf'); window.renderPersonnelInventoryTable(); });
         inv = await rows(page, '#tablePersonnelInventory');
         assert.equal(inv.length, 2);
         assert.deepEqual(inv.map(x => x[4]), ['Demirbaş', 'Demirbaş']);
+        assert.deepEqual(inv.map(x => x[5]), ['📌 Zimmetli', '📌 Zimmetli']);
+        assert.equal(await page.$eval('#personnelAwaitingNote', n => n.hidden), true);
         assert.ok(inv.some(x => /SN-LAT-001/.test(x[2]) && /ENV-501/.test(x[2])));
         s = await page.evaluate(() => ({ o: window.AssignmentService.generatePersonnelZimmetData('s1').ozet, sarf: window.data.requests.find(x => x.id === 'r_sarf').durum }));
         assert.deepEqual([s.o.kalemSayisi, s.o.demirbasAdet, s.o.sarfAdet, s.o.teslimBekleyen, s.sarf], [2, 2, 0, 0, 'completed']);

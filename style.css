@@ -5754,3 +5754,100 @@ body.staff-readonly .uab-bar::before {
 
 .req-outcome-note[hidden], .req-outcome-note:empty { display: none; }
 td .req-outcome-note { margin: 6px 0 0; }
+
+/* =============================================================================
+   Faz 3 · ZİMMET DURUM ROZETLERİ, TESLİM BEKLEYEN NOTU, TALEP ROZETLERİ
+   [WHY]: Onaylanıp teslim alınmamış zimmet "Zimmetli"den ayırt edilemiyordu; yeni talep tabloya gitmeden görünmüyordu.
+   ============================================================================= */
+.zim-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid transparent;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.zim-state-zimmetli { background: #dbeafe; color: #1e40af; }
+.zim-state-teslimBekliyor { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.zim-state-iadeBekliyor { background: #ffedd5; color: #9a3412; border-color: #fdba74; }
+.zim-state-iade { background: #d1fae5; color: #065f46; }
+
+[data-theme="dark"] .zim-state-zimmetli { background: rgba(59, 130, 246, 0.16); color: #93c5fd; }
+[data-theme="dark"] .zim-state-teslimBekliyor { background: rgba(245, 158, 11, 0.16); color: #fcd34d; border-color: rgba(252, 211, 77, 0.35); }
+[data-theme="dark"] .zim-state-iadeBekliyor { background: rgba(249, 115, 22, 0.16); color: #fdba74; border-color: rgba(253, 186, 116, 0.35); }
+[data-theme="dark"] .zim-state-iade { background: rgba(16, 185, 129, 0.16); color: #6ee7b7; }
+
+tr.zim-row-awaiting td { opacity: 0.85; }
+
+.zim-awaiting-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid #fcd34d;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 13px;
+}
+
+.zim-awaiting-note[hidden] { display: none; }
+
+.zim-awaiting-link {
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.zim-awaiting-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+[data-theme="dark"] .zim-awaiting-note { background: rgba(245, 158, 11, 0.1); border-color: rgba(252, 211, 77, 0.35); color: #fcd34d; }
+
+.req-count-pill {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--badge-pending-bg);
+    color: var(--badge-pending-text);
+    font-size: 11px;
+    font-weight: 700;
+    vertical-align: middle;
+}
+
+.req-count-pill[hidden] { display: none; }
+[data-theme="dark"] .req-count-pill { background: rgba(251, 146, 60, 0.16); color: #fdba74; }
+
+#adminRequestBadgeLive {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+#admin-nav-request-badge:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+.request-badge-pulse { animation: requestBadgePulse 1.2s ease-out 2; }
+
+@keyframes requestBadgePulse {
+    0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.55); }
+    100% { box-shadow: 0 0 0 12px rgba(231, 76, 60, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .request-badge-pulse { animation: none; }
+}

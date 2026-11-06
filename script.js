@@ -771,7 +771,10 @@ window.renderPersonnelInventoryTable = function () {
     // [WHY]: Yalnız teslim alınmış talepler taranıyordu; admin'in "Zimmet Yap" ile verdiği zimmetler hiç görünmüyor, iade
     //        edilenler listede kalıyordu (ITSM-04, saha notu 29.09 #1).
     // [HOW] (3.7): Zimmet servisi — admin Zimmet ekranıyla aynı liste; kullanıcının aktif ve teslim alınmış zimmetleri.
-    const myInventory = window.AssignmentService.getPersonInventory(currentUser).map(a => ({
+    // Faz 3 (B-3): onaylanıp henüz teslim alınmamış kalemler de listenin başında "Teslim Bekliyor" rozetiyle görünür (zimmet
+    // tutanağına girmez); varsa üstte Taleplerim'e yönlendiren bilgi satırı çıkar.
+    const A = window.AssignmentService;
+    const toRow = a => ({
         tarih: a.teslimTarihi || a.tarih,
         ürün: a.urun,
         sn: a.sn,
@@ -779,9 +782,18 @@ window.renderPersonnelInventoryTable = function () {
         adet: a.adet,
         isDemirbas: a.isDemirbas,
         not: a.not,
-    }));
+        state: A.assignmentState(a),
+    });
+    const awaiting = A.getPendingDeliveries(currentUser).map(toRow);
+    const myInventory = [...awaiting, ...A.getPersonInventory(currentUser).map(toRow)];
+    const note = document.getElementById('personnelAwaitingNote');
+    if (note) {
+        note.hidden = awaiting.length === 0;
+        const text = note.querySelector('[data-role="text"]');
+        if (text) text.textContent = `Onaylanan ${awaiting.length} kalem teslim almanızı bekliyor. Teslim aldığınızda "Taleplerim" ekranında "Teslim Aldım" deyin; kalem zimmetinize ve tutanağınıza o zaman geçer.`;
+    }
     if (myInventory.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 24px; color: var(--color-text-muted);">Üzerinize kayıtlı envanter bulunmamaktadır.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 24px; color: var(--color-text-muted);">Üzerinize kayıtlı envanter bulunmamaktadır.</td></tr>';
         return;
     }
 
@@ -799,8 +811,10 @@ window.renderPersonnelInventoryTable = function () {
             <td style="font-weight:bold; color: var(--color-text);">${escapeHtml(req.sn || "-")}${req.envanterNo && req.envanterNo !== '-' ? `<div style="font-weight:normal; font-size:11px; color:var(--color-text-muted);">Env. No: ${escapeHtml(req.envanterNo)}</div>` : ''}</td>
             <td>${escapeHtml(req.adet || 1)} Adet</td>
             <td><span class="status-badge-pill" style="min-width: 100px; padding: 6px 12px; font-size: 11px; ${typeBadgeStyle}">${typeText}</span></td>
+            <td>${A.stateBadgeHtml(req.state) /* xss-ok: sabit durum anahtarı ve etiketi (AssignmentService.STATE_LABELS) */}</td>
             <td style="color: var(--color-text-muted);">${escapeHtml(req.not || "-")}</td>
         `;
+        if (req.state === 'teslimBekliyor') row.classList.add('zim-row-awaiting');
     });
 };
 
