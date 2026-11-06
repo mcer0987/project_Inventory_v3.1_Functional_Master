@@ -5841,6 +5841,78 @@ tr.zim-row-awaiting td { opacity: 0.85; }
 
 #admin-nav-request-badge:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
+/* =============================================================================
+   Faz 5 · İADE TALEPLERİ (src/modules/return-requests.js)
+   ============================================================================= */
+.ret-section { margin-top: 28px; }
+.ret-section-card { margin: 0; padding: 18px 16px 8px; border-top: 1px solid var(--color-border-light); }
+.ret-section h3, .ret-section h4 { margin: 0; font-weight: 700; }
+.ret-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.ret-filter { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--color-text-muted); }
+
+.ret-select {
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 13px;
+}
+
+.req-modal .ret-select, .req-modal input[type="text"] { width: 100%; box-sizing: border-box; padding: 9px 10px; }
+.req-modal input[type="text"] { border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-surface-alt); color: var(--color-text); font: inherit; }
+
+.ret-table td { vertical-align: top; }
+.ret-sub { margin-top: 3px; font-size: 12px; color: var(--color-text-muted); word-break: break-word; }
+.ret-empty { padding: 22px !important; text-align: center; color: var(--color-text-muted); font-size: 13px; line-height: 1.5; }
+.ret-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ret-action {
+    padding: 6px 11px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ret-action.primary { border-color: transparent; background: var(--color-primary); color: #fff; }
+.ret-action.success { border-color: transparent; background: #16a34a; color: #fff; }
+.ret-action.danger { border-color: #fca5a5; color: #b91c1c; background: transparent; }
+.ret-action:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+[data-theme="dark"] .ret-action.danger { border-color: rgba(248, 113, 113, 0.5); color: #fca5a5; }
+
+.ret-state { display: inline-flex; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.ret-state-pending { background: #fef3c7; color: #92400e; }
+.ret-state-approved { background: #d1fae5; color: #065f46; }
+.ret-state-rejected { background: #fee2e2; color: #991b1b; }
+.ret-state-withdrawn { background: #f1f5f9; color: #475569; }
+[data-theme="dark"] .ret-state-pending { background: rgba(245, 158, 11, 0.16); color: #fcd34d; }
+[data-theme="dark"] .ret-state-approved { background: rgba(16, 185, 129, 0.16); color: #6ee7b7; }
+[data-theme="dark"] .ret-state-rejected { background: rgba(248, 113, 113, 0.16); color: #fca5a5; }
+[data-theme="dark"] .ret-state-withdrawn { background: rgba(148, 163, 184, 0.16); color: #cbd5e1; }
+
+.req-modal-wide { width: 600px; }
+.req-modal-btn.primary { border-color: transparent; background: var(--color-primary); color: #fff; }
+.req-modal-btn.success { border-color: transparent; background: #16a34a; color: #fff; }
+.ret-field { margin-top: 10px; }
+.ret-hint { display: block; margin-top: 4px; font-size: 12px; color: var(--color-text-muted); line-height: 1.45; }
+.ret-hint:empty { display: none; }
+.ret-branch { margin-top: 6px; }
+.ret-branch[hidden] { display: none; }
+.ret-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ret-check input { width: 16px; height: 16px; margin: 0; }
+.ret-request-info { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: var(--color-surface-alt); font-size: 13px; line-height: 1.5; }
+
+.ret-detail { display: grid; grid-template-columns: 170px 1fr; gap: 6px 12px; margin: 0; font-size: 13px; }
+.ret-detail dt { color: var(--color-text-muted); font-weight: 600; }
+.ret-detail dd { margin: 0; word-break: break-word; }
+@media (max-width: 560px) { .ret-detail { grid-template-columns: 1fr; } .ret-detail dd { margin-bottom: 6px; } }
+
 /* Envanter talepleri kartının kendi göstergeleri (admin › Talep ve Süreçler) */
 /* style.css .kpi-container 3 sütunlu ızgara; envanter talebi kartında 4 gösterge var */
 .kpi-container.req-kpi-container { grid-template-columns: repeat(4, minmax(0, 1fr)); }

@@ -783,6 +783,7 @@ window.renderPersonnelInventoryTable = function () {
         isDemirbas: a.isDemirbas,
         not: a.not,
         state: A.assignmentState(a),
+        asg: a,   // Faz 5: "İade Talebi" düğmesi (ReturnRequests.staffActionCell)
     });
     const awaiting = A.getPendingDeliveries(currentUser).map(toRow);
     const myInventory = [...awaiting, ...A.getPersonInventory(currentUser).map(toRow)];
@@ -793,7 +794,7 @@ window.renderPersonnelInventoryTable = function () {
         if (text) text.textContent = `Onaylanan ${awaiting.length} kalem teslim almanızı bekliyor. Teslim aldığınızda "Taleplerim" ekranında "Teslim Aldım" deyin; kalem zimmetinize ve tutanağınıza o zaman geçer.`;
     }
     if (myInventory.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 24px; color: var(--color-text-muted);">Üzerinize kayıtlı envanter bulunmamaktadır.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 24px; color: var(--color-text-muted);">Üzerinize kayıtlı envanter bulunmamaktadır.</td></tr>';
         return;
     }
 
@@ -815,7 +816,9 @@ window.renderPersonnelInventoryTable = function () {
             <td style="color: var(--color-text-muted);">${escapeHtml(req.not || "-")}</td>
         `;
         if (req.state === 'teslimBekliyor') row.classList.add('zim-row-awaiting');
+        row.append(window.ReturnRequests ? window.ReturnRequests.staffActionCell(req.asg) : document.createElement('td'));
     });
+    if (window.ReturnRequests) window.ReturnRequests.renderMine();
 };
 
 // [WHY]: Admin talep işlemleri dizi indeksiyle çalışıyordu; snapshot sonrası yanlış talep hedefleniyordu. Tablo yenilenmediği için
@@ -854,9 +857,9 @@ const REJECT_MAX = 1000;
 window.REQUEST_REJECT_REASONS = REJECT_REASONS;
 
 // Seçim + açıklama → { reason } | { error }. Saf; testten de çağrılır.
-window.composeRejectReason = function (preset, text) {
+window.composeRejectReason = function (preset, text, presets = REJECT_REASONS) {
     const p = String(preset || '').trim(), t = String(text || '').replace(/\s+/g, ' ').trim();
-    if (!REJECT_REASONS.includes(p)) return { error: 'Bir red gerekçesi seçin.' };
+    if (!presets.includes(p)) return { error: 'Bir red gerekçesi seçin.' };
     if (p === 'Diğer' && !t) return { error: '"Diğer" seçildiğinde açıklama zorunludur.' };
     const reason = p === 'Diğer' ? t : (t ? `${p} — ${t}` : p);
     if (reason.length > REJECT_MAX) return { error: `Gerekçe en fazla ${REJECT_MAX} karakter olabilir.` };
@@ -865,7 +868,9 @@ window.composeRejectReason = function (preset, text) {
 };
 
 // Red gerekçesi penceresi → gerekçe metni | null (Vazgeç / Esc)
-window.showRequestRejectModal = function (request) {
+// opts (Faz 5 · iade talebi reddi de kullanır): { title, summary, help, presets, okText }
+window.showRequestRejectModal = function (request, opts = {}) {
+    const presets = opts.presets || REJECT_REASONS;
     return new Promise(resolve => {
         const el = (tag, props = {}, children = []) => {
             const n = Object.assign(document.createElement(tag), props);
@@ -883,7 +888,7 @@ window.showRequestRejectModal = function (request) {
         const options = el('div', { className: 'req-reject-options' });
         options.setAttribute('role', 'radiogroup');
         options.setAttribute('aria-label', 'Red gerekçesi');
-        REJECT_REASONS.forEach((label, i) => {
+        presets.forEach((label, i) => {
             const input = el('input', { type: 'radio', name: 'reqRejectPreset', value: label, id: `reqRejectPreset${i}` });
             options.append(el('label', { className: 'req-reject-option', htmlFor: input.id }, [input, el('span', { textContent: label })]));
         });
@@ -892,12 +897,12 @@ window.showRequestRejectModal = function (request) {
         const error = el('div', { className: 'req-modal-error', hidden: true });
         error.setAttribute('role', 'alert');
         const cancel = el('button', { type: 'button', className: 'req-modal-btn', textContent: 'Vazgeç' });
-        const ok = el('button', { type: 'button', className: 'req-modal-btn danger', id: 'reqRejectOk', textContent: 'Talebi Reddet' });
+        const ok = el('button', { type: 'button', className: 'req-modal-btn danger', id: 'reqRejectOk', textContent: opts.okText || 'Talebi Reddet' });
 
         dialog.append(
-            el('h3', { id: titleId, textContent: 'Talebi Reddet' }),
-            el('p', { className: 'req-modal-summary', textContent: `${request.personel || '-'} · ${request.ürün || '-'} · ${Number(request.adet) || 1} adet` }),
-            el('p', { className: 'req-modal-help', textContent: 'Gerekçe, talep sahibine "Taleplerim" ekranında gösterilir.' }),
+            el('h3', { id: titleId, textContent: opts.title || 'Talebi Reddet' }),
+            el('p', { className: 'req-modal-summary', textContent: opts.summary || `${request.personel || '-'} · ${request.ürün || '-'} · ${Number(request.adet) || 1} adet` }),
+            el('p', { className: 'req-modal-help', textContent: opts.help || 'Gerekçe, talep sahibine "Taleplerim" ekranında gösterilir.' }),
             options,
             el('label', { className: 'req-modal-label', htmlFor: text.id, textContent: 'Açıklama' }), text, counter,
             error,
@@ -919,7 +924,7 @@ window.showRequestRejectModal = function (request) {
         cancel.addEventListener('click', () => close(null));
         ok.addEventListener('click', () => {
             const preset = (dialog.querySelector('input[name="reqRejectPreset"]:checked') || {}).value;
-            const res = window.composeRejectReason(preset, text.value);
+            const res = window.composeRejectReason(preset, text.value, presets);
             if (res.error) { error.textContent = res.error; error.hidden = false; return; }
             close(res.reason);
         });

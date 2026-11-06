@@ -54,6 +54,7 @@
     <script src="src/ui/device-ids.js"></script>
     <script src="src/utils/exit-policy.js"></script>
     <script src="src/utils/return-request-schema.js"></script>
+    <script src="src/modules/return-requests.js"></script>
     <script src="src/ui/person-picker.js"></script>
     <script src="src/ui/staff-guards.js"></script>
     <link rel="stylesheet" href="todo-module.css">
@@ -783,6 +784,29 @@
                     <tbody></tbody>
                 </table>
             </div>
+
+            <!-- Faz 5 · İade talepleri (src/modules/return-requests.js) -->
+            <section class="ret-section" aria-labelledby="returnRequestsTitle">
+                <div class="ret-section-head">
+                    <h3 id="returnRequestsTitle">↩️ Gelen İade Talepleri</h3>
+                    <label class="ret-filter">Göster
+                        <select id="returnRequestsFilter" class="ret-select">
+                            <option value="pending" selected>Bekleyenler</option>
+                            <option value="done">Karara bağlananlar</option>
+                            <option value="all">Tümü</option>
+                        </select>
+                    </label>
+                </div>
+                <p class="req-panel-desc">Personelin üzerindeki demirbaşı iade etmek için gönderdiği talepler. Onaylarken cihazı teslim alıp almadığınızı, cihazın durumunu ve stoğa eklenip eklenmeyeceğini siz seçersiniz; karara bağlanan iadeler listede kalır.</p>
+                <div class="table-responsive-wrapper">
+                    <table id="tableReturnRequests" class="ret-table">
+                        <thead>
+                            <tr><th>Tarih</th><th>Personel</th><th>Ürün / Cihaz</th><th>Gerekçe</th><th>Beyan / Karar</th><th>Durum</th><th>İşlem</th></tr>
+                        </thead>
+                        <tbody id="returnRequestsBody"></tbody>
+                    </table>
+                </div>
+            </section>
         </div>
 
         <div id="myRequests" class="tab-content">
@@ -846,11 +870,26 @@
                             <th>Tür</th>
                             <th>Durum</th>
                             <th>Not / Açıklama</th>
+                            <th>İşlem</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
                 </table>
             </div>
+
+            <!-- Faz 5 · İade Taleplerim (src/modules/return-requests.js) -->
+            <section class="ret-section" aria-labelledby="myReturnRequestsTitle">
+                <h3 id="myReturnRequestsTitle">↩️ İade Taleplerim</h3>
+                <p class="req-panel-desc">Üzerinizdeki bir demirbaşı iade etmek için yukarıdaki tabloda "İade Talebi"ne basın. Yönetici cihazı teslim aldığında cihaz üzerinizden düşer; reddedilen ya da geri çektiğiniz talebi yeniden gönderebilirsiniz.</p>
+                <div class="table-container">
+                    <table id="tableMyReturnRequests" class="ret-table">
+                        <thead>
+                            <tr><th>Tarih</th><th>Ürün / Cihaz</th><th>Gerekçe</th><th>Durum</th><th>İşlem</th></tr>
+                        </thead>
+                        <tbody id="myReturnRequestsBody"></tbody>
+                    </table>
+                </div>
+            </section>
         </div>
 
         <div id="myApprovals" class="tab-content">

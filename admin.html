@@ -1268,6 +1268,28 @@
                         </tbody>
                     </table>
                 </div>
+                <!-- Faz 5 · İade talepleri — aynı kartta ikinci tablo (src/modules/return-requests.js) -->
+                <section class="ret-section ret-section-card" aria-labelledby="adminReturnRequestsTitle">
+                    <div class="ret-section-head">
+                        <h4 id="adminReturnRequestsTitle">↩️ İade Talepleri</h4>
+                        <label class="ret-filter">Göster
+                            <select id="adminReturnRequestsFilter" class="ret-select">
+                                <option value="pending" selected>Bekleyenler</option>
+                                <option value="done">Karara bağlananlar</option>
+                                <option value="all">Tümü</option>
+                            </select>
+                        </label>
+                    </div>
+                    <p class="req-panel-desc">Personelin iade etmek istediği demirbaşlar. Onaylarken cihazı teslim alıp almadığınızı, cihaz durumunu ve stoğa eklenip eklenmeyeceğini seçersiniz; karara bağlanan iadeler listede kalır.</p>
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 align-middle ret-table" style="table-layout: auto;">
+                            <thead class="bg-light">
+                                <tr><th class="ps-3">Tarih</th><th>Personel</th><th>Ürün / Cihaz</th><th>Gerekçe</th><th>Beyan / Karar</th><th>Durum</th><th class="pe-3">İşlem</th></tr>
+                            </thead>
+                            <tbody id="adminReturnRequestsBody"></tbody>
+                        </table>
+                    </div>
+                </section>
             </div>
         </div>
 
@@ -2905,6 +2927,7 @@
     <script src="src/ui/purchase-items-ui.js"></script>
     <script src="src/modules/admin/admin-system-control.js"></script>
     <script src="src/utils/return-request-schema.js"></script>
+    <script src="src/modules/return-requests.js"></script>
     <script src="src/ui/request-badge.js"></script>
     <script src="src/modules/admin/admin-sitemap.js"></script>
 

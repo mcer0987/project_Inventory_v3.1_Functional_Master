@@ -113,6 +113,57 @@
     }
     window.zimmetStateBadge = stateBadgeHtml;
 
+    // ─── Faz 5 · Zimmet kapanış planı — "Zimmetten Düş" ve iade talebi onayı AYNI kodu kullanır (YAZMAZ) ─────────────
+    // Depoya dönecek ürün: önce kayıttaki productId, yoksa hedef depoda adı birebir (kırpılmış, küçük harf) tek eşleşen kalem.
+    function findReturnProduct(item, view, depo) {
+        const list = ((window.data && window.data[depo]) || []);
+        if (item.productId != null && item.productId !== '') {
+            const byId = list.find(p => p && String(p.id) === String(item.productId));
+            if (byId) return byId;
+        }
+        const name = String(view.urunAciklama === '-' ? '' : view.urunAciklama).trim().toLocaleLowerCase('tr-TR');
+        const byName = name ? list.filter(p => p && String(p.ürün || p.name || '').trim().toLocaleLowerCase('tr-TR') === name) : [];
+        return byName.length === 1 ? byName[0] : null;
+    }
+
+    /**
+     * @param {string|number} zimmetId  b3 zimmet kaydı
+     * @param {{teslimAlindi:boolean, depo?:'b1'|'b2', stogaEkle?:boolean, tarih:string}} o
+     *        teslimAlindi: cihaz fiziken teslim alındı mı (alındıysa depo zorunlu; kayıtta iadeDepo olur)
+     *        stogaEkle: ürün kalemine +adet (yalnız teslim alındıysa; hasarlı cihazda yönetici kararı)
+     * @returns {{ok:true, qty:number, product:object|null, stock:object[], writes:object[]} | {ok:false, error:string}}
+     */
+    function planClose(zimmetId, { teslimAlindi, depo, stogaEkle, tarih } = {}) {
+        const fail = error => ({ ok: false, error });
+        const data = window.data || {};
+        const item = (data.b3 || []).find(x => x && String(x.id) === String(zimmetId));
+        if (!item) return fail('Zimmet kaydı bulunamadı; liste güncellenmiş olabilir.');
+        const view = S().normalizeB3(item);
+        if (view.tip !== 'zimmet') return fail('Bu kayıt bir zimmet değil.');
+        if (view.iadeEdildi) return fail('Bu zimmet zaten iade edilmiş.');
+        if (teslimAlindi && !['b1', 'b2'].includes(depo)) return fail('Teslim alınan cihaz için depo seçin.');
+        if (stogaEkle && !teslimAlindi) return fail('Teslim alınmayan cihaz stoğa eklenemez.');
+        const qty = Number(view.adet) || 1;
+        let product = null;
+        if (stogaEkle) {
+            product = findReturnProduct(item, view, depo);
+            if (!product) return fail(`${String(depo).toUpperCase()} deposunda bu ürün tek ve kesin olarak bulunamadı. Stoğa eklemeden kapatabilir ya da ürünü depoda tanımlayabilirsiniz.`);
+        }
+        const fields = { iadeEdildi: true, iadeDepo: teslimAlindi ? depo : null, iadeEdildiTarihi: tarih };
+        const writes = [{ op: 'update', col: 'b3', id: item.id, fields }];
+        if ((data.assignments || []).some(a => a && String(a.id) === String(item.id))) writes.push({ op: 'update', col: 'assignments', id: item.id, fields });
+        // Talep, ona bağlı cihazların (3.9a: cihaz başına bir b3 kaydı) hepsi iade edilince kapanır.
+        if (item.requestId != null) {
+            const others = (data.b3 || []).filter(b => b && String(b.requestId) === String(item.requestId) && String(b.id) !== String(item.id)
+                && !S().normalizeB3(b).iadeEdildi);
+            if (others.length === 0 && (data.requests || []).some(r => r && String(r.id) === String(item.requestId))) {
+                writes.push({ op: 'update', col: 'requests', id: item.requestId, fields: { iadeEdildi: true, iadeEdildiTarihi: tarih } });
+            }
+        }
+        const stock = product ? [{ col: depo, id: product.id, delta: qty }] : [];
+        return { ok: true, qty, product, stock, writes, view };
+    }
+
     // Kişinin teslim almayı beklediği (onaylanmış, iade edilmemiş) zimmetleri.
     function getPendingDeliveries(user) {
         if (!user) return [];
@@ -437,7 +488,7 @@
 
     const AssignmentService = {
         getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId, planSarfConsumption,
-        assignmentState, getPendingDeliveries, stateBadgeHtml, STATE_LABELS,
+        assignmentState, getPendingDeliveries, stateBadgeHtml, STATE_LABELS, planClose, findReturnProduct,
         activeDeviceUses, checkDeviceIds, isOpenService, serviceRecordsFor, getDeviceHistory,
         invalidateDeviceUses, usesStats,
         generatePersonnelZimmetData, generateB3MovementData, ZIMMET_BELGE_SEMA, ZIMMET_KALEM_KEYS,

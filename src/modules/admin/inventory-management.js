@@ -730,66 +730,13 @@ window.inventoryManagementModule = {
       return;
     }
 
-    const item = (window.data.b3 || []).find(sameId);
-    if (!item) { alert('Kayıt bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-    if (item.iadeEdildi) { alert('Bu zimmet zaten iade edilmiş.', 'info'); return; }
-
-    const view = window.Schema.normalizeB3(item);
-    const qty = view.adet || 1;
-    const stockLinked = view.kaynakDepo === 'b1' || view.kaynakDepo === 'b2';
-    let target = null;
-    if (stockLinked) {
-      const choice = await window.showWarehousePromptModal({ allowNoReturn: true });
-      if (choice === null) { alert('İşlem iptal edildi.', 'info'); return; }
-      target = choice === 'none' ? null : choice;
-    } else {
-      const ok = await (typeof showCustomConfirm === 'function'
-        ? showCustomConfirm('Zimmetten Düş', 'Bu zimmetin stok bağlantısı yok; yalnız kayıt kapatılacak. Onaylıyor musunuz?')
-        : Promise.resolve(window.confirm('Zimmet kaydı kapatılsın mı?')));
-      if (!ok) return;
-    }
-
-    let product = null;
-    if (target) {
-      const list = window.data[target] || [];
-      product = item.productId != null ? list.find(p => String(p.id) === String(item.productId)) : null;
-      if (!product) {
-        const name = String(view.urunAciklama === '-' ? '' : view.urunAciklama).trim().toLocaleLowerCase('tr-TR');
-        const byName = list.filter(p => String(p.ürün || p.name || '').trim().toLocaleLowerCase('tr-TR') === name);
-        if (byName.length === 1) product = byName[0];
-      }
-      if (!product) { alert(`${target.toUpperCase()} deposunda bu ürün tek ve kesin olarak bulunamadı; iade yapılmadı.`, 'error'); return; }
-    }
-
-    // [WHY] (H3 · 3.4): stok iadesi, b3, assignments ve bağlı talep ayrı ayrı yazılıyordu; b3 başarısız olunca stok telafisi de
-    //        başarısız olabilirdi, assignments/talep güncellemesi başarısız olursa zimmet yarı kapalı kalırdı.
-    // [HOW]: Stok +adet (depoya iade varsa) + b3 + assignments + talep güncellemeleri TEK transaction: ya hepsi ya hiçbiri.
-    const closeFields = { iadeEdildi: true, iadeDepo: target, iadeEdildiTarihi: today };
-    const writes = [{ op: 'update', col: 'b3', id: item.id, fields: closeFields }];
-    if ((window.data.assignments || []).some(sameId)) writes.push({ op: 'update', col: 'assignments', id: item.id, fields: closeFields });
-    // Talep, ona bağlı cihazların (3.9a: cihaz başına bir b3 kaydı) hepsi iade edilince kapanır.
-    const otherActiveUnits = item.requestId == null ? [] : (window.data.b3 || []).filter(b => String(b.requestId) === String(item.requestId)
-      && String(b.id) !== String(item.id) && !window.Schema.normalizeB3(b).iadeEdildi);
-    if (item.requestId != null && otherActiveUnits.length === 0 && (window.data.requests || []).some(r => String(r.id) === String(item.requestId))) {
-      writes.push({ op: 'update', col: 'requests', id: item.requestId, fields: { iadeEdildi: true, iadeEdildiTarihi: today } });
-    }
-    let stockChange = null;
-    try {
-      if (target) {
-        const res = await window.runStockOps({ stock: [{ col: target, id: product.id, delta: qty }], writes }, { forbiddenMessage: 'İade işlemi yalnızca sistem yöneticisi tarafından yapılabilir.' });
-        stockChange = res.stock[0];
-      } else {
-        await window.applyItemOps(writes);
-      }
-    } catch (e) {
-      alert(`İade kaydedilemedi; hiçbir değişiklik yapılmadı. ${e.message || ''}`, 'error');
-      return;
-    }
-
+    // [WHY]: feat/envanter-talep-iade · Faz 5 — "Zimmetten Düş" ile iade talebi onayı ayrı iki kapanış koduydu; yöneticinin
+    //        cihazı teslim alıp almadığı, cihaz durumu ve stoğa eklenip eklenmeyeceği kararı sorulmuyordu.
+    // [HOW]: b3 zimmetleri ReturnRequests.closeAssignment'a gider: bekleyen iade talebi varsa onu onaylar, yoksa aynı karar
+    //        penceresiyle talepsiz kapatır. Kapanış planı (stok + b3 + assignments + bağlı talep, tek işlem) AssignmentService.planClose.
+    if (!window.ReturnRequests) { alert('İade modülü (return-requests.js) yüklenmemiş; işlem yapılmadı.', 'error'); return; }
+    await window.ReturnRequests.closeAssignment(id);
     this.renderTable();
-    alert(target
-      ? `Zimmet düşüldü ve ${target.toUpperCase()} deposuna iade edildi.${stockChange ? ` Stok: ${stockChange.before} → ${stockChange.after}` : ''}`
-      : 'Zimmet kaydı kapatıldı (depo iadesi yapılmadı).', 'success');
   },
 
   // ──────────────────────────────────────────

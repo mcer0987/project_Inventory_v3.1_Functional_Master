@@ -58,8 +58,8 @@ const expected = f => /^(index|admin|404)\.html$/.test(f) || /^[^/]+\.(css|js)$/
 // EBYS Rehberi: tanıtım modalı ve stili (2).
 // EBYS Aşama 6: icra ve bildirim servisi ile arayüzü (2).
 // Personel (BT ekibi) çıkışı: çıkış politikası, alan kişi seçici, depo salt-okunur / sağ tık koruması (3).
-// feat/envanter-talep-iade · Faz 3: admin bekleyen talep rozeti (1). Faz 4: iade talebi şeması (1).
-const EXPECTED_COUNT = 99;
+// feat/envanter-talep-iade · Faz 3: admin bekleyen talep rozeti (1). Faz 4: iade talebi şeması (1). Faz 5: iade arayüzü (1).
+const EXPECTED_COUNT = 100;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {
