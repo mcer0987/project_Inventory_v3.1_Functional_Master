@@ -770,10 +770,10 @@ window.renderServicesModule = function () {
     }
 
     // Sayaç Güncellemeleri
-    const pCount = document.getElementById('totalPendingPurchase');
-    const sCount = document.getElementById('totalInService');
-    if (pCount) pCount.innerText = (window.data.purchaseOrders || []).length;
-    if (sCount) sCount.innerText = _openServices().length;
+    // [WHY]: "BEKLEYEN" kartı burada TÜM satın alma siparişlerinin sayısıyla eziliyordu; renderPurchaseStats aynı kartı
+    //        "Onay Bekliyor" sayısıyla dolduruyor, hangisi son çalışırsa o görünüyordu.
+    // [HOW]: Kartları tek kaynak (renderPurchaseStats) doldurur.
+    if (typeof window.renderPurchaseStats === 'function') window.renderPurchaseStats();
 };
 
 // 3. Servisten Geri Al
