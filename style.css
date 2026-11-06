@@ -5843,7 +5843,7 @@ tr.zim-row-awaiting td { opacity: 0.85; }
 
 /* Envanter talepleri kartının kendi göstergeleri (admin › Talep ve Süreçler) */
 /* style.css .kpi-container 3 sütunlu ızgara; envanter talebi kartında 4 gösterge var */
-.kpi-container.req-kpi-container { margin: 14px 16px 4px; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.kpi-container.req-kpi-container { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .kpi-container.req-kpi-container { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 576px) { .kpi-container.req-kpi-container { grid-template-columns: 1fr; } }
 .dashboard-card.card-red { border-left: 4px solid #ef4444; }

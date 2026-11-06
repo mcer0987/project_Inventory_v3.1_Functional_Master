@@ -1208,42 +1208,44 @@
             </div>
         </section>
 
+        <!-- ENVANTER TALEBİ GÖSTERGELERİ — kartın hemen üstünde, satın alma göstergeleriyle aynı düzen
+             (admin-dashboard.renderAdminRequestTable doldurur; taslaklar sayılmaz) -->
+        <div class="kpi-container req-kpi-container" aria-label="Envanter talebi özeti">
+            <div class="dashboard-card card-blue">
+                <i class="fas fa-clock" aria-hidden="true"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">BEKLEYEN TALEP</span>
+                    <span id="reqKpiPending" class="dashboard-value">0</span>
+                </div>
+            </div>
+            <div class="dashboard-card card-yellow">
+                <i class="fas fa-hourglass-half" aria-hidden="true"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">TESLİM BEKLİYOR</span>
+                    <span id="reqKpiApproved" class="dashboard-value">0</span>
+                </div>
+            </div>
+            <div class="dashboard-card card-green">
+                <i class="fas fa-check-double" aria-hidden="true"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">TESLİM ALINDI</span>
+                    <span id="reqKpiCompleted" class="dashboard-value">0</span>
+                </div>
+            </div>
+            <div class="dashboard-card card-red">
+                <i class="fas fa-times-circle" aria-hidden="true"></i>
+                <div class="dashboard-info">
+                    <span class="dashboard-title">REDDEDİLEN TALEP</span>
+                    <span id="reqKpiRejected" class="dashboard-value">0</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Faz 6 · UI-01: Operasyon Merkezi'nden buraya taşındı — ait olduğu doğal yer burası. -->
         <div class="card shadow-sm border-0 mb-4" id="pendingRequestsCard">
             <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                 <h3 class="m-0 font-weight-bold text-danger">📨 Bekleyen Envanter Talepleri</h3>
                 <!-- Bekleyen sayısı üst çubuktaki 📨 rozetinde (src/ui/request-badge.js); karttaki ayrı sayaç kaldırıldı. -->
-            </div>
-            <!-- Envanter talebi göstergeleri (admin-dashboard.renderAdminRequestTable doldurur; taslaklar sayılmaz) -->
-            <div class="kpi-container req-kpi-container" aria-label="Envanter talebi özeti">
-                <div class="dashboard-card card-blue">
-                    <i class="fas fa-clock" aria-hidden="true"></i>
-                    <div class="dashboard-info">
-                        <span class="dashboard-title">BEKLEYEN</span>
-                        <span id="reqKpiPending" class="dashboard-value">0</span>
-                    </div>
-                </div>
-                <div class="dashboard-card card-yellow">
-                    <i class="fas fa-hourglass-half" aria-hidden="true"></i>
-                    <div class="dashboard-info">
-                        <span class="dashboard-title">TESLİM BEKLİYOR</span>
-                        <span id="reqKpiApproved" class="dashboard-value">0</span>
-                    </div>
-                </div>
-                <div class="dashboard-card card-green">
-                    <i class="fas fa-check-double" aria-hidden="true"></i>
-                    <div class="dashboard-info">
-                        <span class="dashboard-title">TESLİM ALINDI</span>
-                        <span id="reqKpiCompleted" class="dashboard-value">0</span>
-                    </div>
-                </div>
-                <div class="dashboard-card card-red">
-                    <i class="fas fa-times-circle" aria-hidden="true"></i>
-                    <div class="dashboard-info">
-                        <span class="dashboard-title">REDDEDİLEN</span>
-                        <span id="reqKpiRejected" class="dashboard-value">0</span>
-                    </div>
-                </div>
             </div>
             <p class="req-draft-note" id="adminDraftRequestNote" hidden></p>
             <div class="card-body p-0">
