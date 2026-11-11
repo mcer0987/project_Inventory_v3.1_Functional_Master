@@ -1282,7 +1282,7 @@ window.sendDraftInventoryRequest = async function (id) {
                 const isDem = window.checkIsDemirbas ? window.checkIsDemirbas(item) : (item.isDemirbas === true);
                 const qty = parseInt(item.adet || item.qty || 0);
                 if (qty > 0 && !window.Schema?.isRowCountLocked?.(item)) {
-                    const searchStr = `${item.ürün || ''} ${item.marka || ''} ${item.name || ''} ${item.raf || ''} ${item.sütun || ''} ${item.tür || ''} ${item.açıklama || ''}`.toLocaleLowerCase('tr-TR');
+                    const searchStr = `${item.ürün || ''} ${item.marka || ''} ${item.name || ''} ${item.raf || ''} ${item.sütun || ''} ${item.tür || ''} ${item.açıklama || ''} ${item.envanterNo || ''}`.toLocaleLowerCase('tr-TR');
                     if (searchStr.includes(searchTerm)) {
                         results.push({ item, index, repo, isDemirbasStrict: isDem, qty });
                     }
@@ -1464,7 +1464,8 @@ window.searchForRequest = function () {
         (item.model || "").toLocaleLowerCase('tr-TR').includes(filter) ||
         (item.raf || "").toLocaleLowerCase('tr-TR').includes(filter) ||
         (item.tür || "").toLocaleLowerCase('tr-TR').includes(filter) ||
-        (item.açıklama || "").toLocaleLowerCase('tr-TR').includes(filter)
+        (item.açıklama || "").toLocaleLowerCase('tr-TR').includes(filter) ||
+        (item.envanterNo || "").toLocaleLowerCase('tr-TR').includes(filter)
     ).slice(0, 8);
 
     if (results.length > 0) {
@@ -1503,7 +1504,8 @@ window.searchForExit = function () {
         ((item.ürün || item.name || '')?.toLocaleLowerCase('tr-TR').includes(filter)) ||
         ((item.marka || item.tür || item.type || '')?.toLocaleLowerCase('tr-TR').includes(filter)) ||
         ((item.raf || item.shelf || '')?.toLocaleLowerCase('tr-TR').includes(filter)) ||
-        ((item.açıklama || '')?.toLocaleLowerCase('tr-TR').includes(filter))
+        ((item.açıklama || '')?.toLocaleLowerCase('tr-TR').includes(filter)) ||
+        ((item.envanterNo || '')?.toLocaleLowerCase('tr-TR').includes(filter))
     ).slice(0, 10);
 
     // v3.4: personel için demirbaş / türü belirsiz ürünler listede görünür ama seçilemez (neden yazılır)
