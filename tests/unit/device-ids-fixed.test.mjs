@@ -25,6 +25,8 @@ test('demirbaş no ürün kaydından 1. cihaz satırına gelir ve kilitlidir; Se
             const out = {
                 none: D.fixedFor({ envanterNo: '-' }), blank: D.fixedFor({ envanterNo: '  ' }), missing: D.fixedFor(null),
                 fixed: D.fixedFor({ envanterNo: 'ENV-007', sn: 'SN9' }),
+                single: D.fixedFor({ envanterNo: 'ENV-1', adet: 1 }),
+                multi: D.fixedFor({ envanterNo: 'IMP-32', adet: 32 }), multiB2: D.fixedFor({ envanterNo: 'IMP-2', qty: '2' }),
             };
             const box = document.getElementById('box');
             D.render(box, 2, { fixed: out.fixed });
@@ -44,6 +46,8 @@ test('demirbaş no ürün kaydından 1. cihaz satırına gelir ve kilitlidir; Se
         });
         assert.deepEqual([r.none, r.blank, r.missing], [null, null, null]);
         assert.deepEqual(r.fixed, { envanterNo: 'ENV-007', sn: 'SN9' });
+        assert.deepEqual(r.single, { envanterNo: 'ENV-1', sn: '' });
+        assert.deepEqual([r.multi, r.multiB2], [null, null], 'çok adetli satırın numarası bir cihaza ait değildir; otomatik dolmaz');
         assert.deepEqual([r.firstEnv, r.firstRo, r.firstSn], ['ENV-007', true, 'SN9']);
         assert.deepEqual([r.secondEnv, r.secondRo], ['', false], 'diğer cihazlar elle girilir');
         assert.equal(r.hint, true);

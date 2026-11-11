@@ -27,8 +27,8 @@
                              border: 1px solid var(--color-border, #cbd5e1); background: var(--color-surface, #fff); color: var(--color-text, #1f2937); margin: 0; }
             .dev-ids-hint { font-size: 11px; color: var(--color-text-muted, #64748b); margin-top: 6px; }
             .dev-ids-warn { font-size: 12px; color: var(--color-danger, #e74c3c); margin-top: 6px; }
-            .dev-ids input.dev-env-fixed { border-color: #c9a227; background: #fbf7e8; color: #3b2f0b; font-weight: 700; cursor: default; }
-            [data-theme="dark"] .dev-ids input.dev-env-fixed { background: #2a2412; color: #f6e7b0; }`;
+            .dev-ids input.dev-env-fixed { background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b);
+                                           font-weight: 700; cursor: default; }`;
         document.head.appendChild(st);
     }
 
@@ -36,9 +36,12 @@
         MAX_UNITS,
 
         // v3.6: ürün kaydında geçerli Envanter No varsa o cihazın kimliğidir → { envanterNo, sn } (yoksa null).
+        //       Yalnız tek cihazlık satırda (adet ≤ 1): çok adetli satırdaki numara (ör. Excel importunun satır kimliği) bir
+        //       cihaza ait değildir; otomatik dolsaydı her çıkışta aynı numara başka bir cihaza yazılırdı.
         fixedFor(item) {
             const S = window.Schema;
             if (!item || !S || typeof S.normDeviceId !== 'function') return null;
+            if ((Number.parseFloat(item.adet ?? item.qty ?? 0) || 0) > 1) return null;
             const env = String(item.envanterNo ?? '').trim();
             if (!S.normDeviceId(env) || env === '-') return null;
             const sn = String(item.sn ?? '').trim();

@@ -90,7 +90,7 @@ async function staffLoginPage(page, staff) {
         const wait = async (fn, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 150)); } return false; };
         if (!(await wait(async () => !!document.getElementById('login-pri') && typeof window.handleLogin === 'function' && !!window.StaffProvisioning, 20000))) return 'page';
         document.getElementById('login-pri').value = staff.pri;
-        window._dx._b['access-val-node'] = staff.code;
+        window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = staff.code;
         await window.handleLogin();
         return (await wait(async () => document.body.classList.contains('logged-in') && window.isFirebaseLoaded === true
             && !!window.getActiveUser() && (window.data.personel || []).length > 0, 25000)) ? 'ok' : 'login';
@@ -124,7 +124,7 @@ async function ensureMainSession(page) {
 // J10 PRI: gerçek giriş ekranıyla personel girişi (kurumsal kimlik + kod → handleLogin). Sonuç: giriş oldu mu + durum mesajı.
 const staffLoginVia = (p, staff) => p.evaluate(async staff => {
     document.getElementById('login-pri').value = staff.pri;
-    window._dx._b['access-val-node'] = staff.code;
+    window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = staff.code;
     await window.handleLogin();
     const u = window.getActiveUser(), st = document.getElementById('loginStatus');
     return { ok: document.body.classList.contains('logged-in') && !!u && !!window.userAuth && window.userAuth.email === `${staff.pri}@staff.medipol.local`
@@ -168,7 +168,7 @@ async function installHelpers(page) {
                 if (window.userAuth) { await window.SecurityConfig.logout(); await this.waitFor(async () => !window.userAuth, 8000); }
                 window.clearSession();
                 document.getElementById('login-pri').value = staff.pri;
-                window._dx._b['access-val-node'] = staff.code;
+                window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = staff.code;
                 await window.handleLogin();
                 return this.waitFor(async () => !!window.userAuth && !window.isDbAdmin() && window.isFirebaseLoaded === true
                     && window.userAuth.email === `${staff.pri}@staff.medipol.local` && !!window.getActiveUser()
@@ -3746,7 +3746,7 @@ const SCENARIOS = {
         const ctx = await browser.createBrowserContext();
         const open = async url => { const p = await ctx.newPage(); p.on('pageerror', x => ctxErrors.push(x.message)); p.on('dialog', d => d.dismiss()); await p.goto(url, { waitUntil: 'domcontentloaded' }); return p; };
         const unlock = (p, pass) => p.evaluate(async pass => {
-            window._dx._b['lock-val-node'] = pass; await window.unlockAdmin();
+            window._dx._b['lock-val-node'] = document.getElementById('lock-val-node').value = pass; await window.unlockAdmin();
             const err = document.getElementById('lockErrorMsg');
             return { error: err.style.display !== 'none' ? err.textContent : null };
         }, pass);
@@ -3763,7 +3763,7 @@ const SCENARIOS = {
             a = await open(`${base}/index.html?emu=1`);
             await indexIdle(a);
             const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
-            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await a.evaluate(code => { window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
             await nav;
             await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true);
             emu.login = { path: await a.evaluate(() => location.pathname), ...(await lockState(a)) };
@@ -4016,7 +4016,7 @@ const SCENARIOS = {
             await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
             await indexIdle(a);
             const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
-            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await a.evaluate(code => { window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
             await nav;
             await a.waitForFunction(() => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && window.approveStep, { timeout: 20000 });
             emu.adminPage = await a.evaluate(TOKEN => {
@@ -4110,7 +4110,7 @@ const SCENARIOS = {
         const T = FT_STAFF2 || FT_STAFF;
         const staffOnce = (p, staff) => p.evaluate(async staff => {
             document.getElementById('login-pri').value = staff.pri;
-            window._dx._b['access-val-node'] = staff.code;
+            window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = staff.code;
             const t = Date.now(); let sawWaiting = false;
             const watch = setInterval(() => { const el = document.getElementById('loginStatus'); if (el && /yükleniyor|hazırlanıyor/.test(el.innerText) && getComputedStyle(el).display !== 'none') sawWaiting = true; }, 50);
             await window.handleLogin();   // TEK tıklama
@@ -4124,10 +4124,10 @@ const SCENARIOS = {
             const p = await open(ctx, `${base}/index.html${q}`);
             await indexIdle(p);
             await sleep(4800);   // ilk mesajların gizlendiği an geçti
-            out.wrongCodeAfter4s = await p.evaluate(async pri => { document.getElementById('login-pri').value = pri; window._dx._b['access-val-node'] = '00000x'; await window.handleLogin(); return null; }, T.pri).then(() => statusVisible(p));
+            out.wrongCodeAfter4s = await p.evaluate(async pri => { document.getElementById('login-pri').value = pri; window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = '00000x'; await window.handleLogin(); return null; }, T.pri).then(() => statusVisible(p));
             out.doubleClick = await p.evaluate(async staff => {
                 document.getElementById('login-pri').value = staff.pri;
-                window._dx._b['access-val-node'] = staff.code; let n = 0; const real = window.setActiveUser; window.setActiveUser = u => { n++; return real(u); };
+                window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = staff.code; let n = 0; const real = window.setActiveUser; window.setActiveUser = u => { n++; return real(u); };
                 await Promise.all([window.handleLogin(), window.handleLogin()]); window.setActiveUser = real; return { setActiveUserCalls: n, loggedIn: !!window.getActiveUser() };
             }, T);
             await slow(p);
@@ -4135,7 +4135,7 @@ const SCENARIOS = {
             out.staffRelogin = await staffOnce(p, T);   // çıkışın hemen ardından, F5'siz, tek tıklama
             out.staffRelogin.afterVisible = await statusVisible(p);
             await p.evaluate(() => window.handleLogout('manual'));
-            out.oldFiveDigitAdminCode = await p.evaluate(async () => { window._dx._b['access-val-node'] = '12345'; const a = []; const r = window.showAppAlert; window.showAppAlert = (m, t) => a.push(m); await window.checkAdminAndGo(); window.showAppAlert = r; return { alert: a.join(' | '), isDbAdmin: window.isDbAdmin() }; });
+            out.oldFiveDigitAdminCode = await p.evaluate(async () => { window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = '12345'; const a = []; const r = window.showAppAlert; window.showAppAlert = (m, t) => a.push(m); await window.checkAdminAndGo(); window.showAppAlert = r; return { alert: a.join(' | '), isDbAdmin: window.isDbAdmin() }; });
         } finally { await ctx.close(); }
 
         const staffOk = () => out.wrongCodeAfter4s.visible && /giriş kodu hatalı/i.test(out.wrongCodeAfter4s.text || '')
@@ -4152,7 +4152,7 @@ const SCENARIOS = {
             const a = await open(adminCtx, `${base}/index.html?emu=1`);
             const adminFromIndex = async (label) => {
                 const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).then(() => true, () => false);
-                await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);   // TEK tıklama, beklemeden
+                await a.evaluate(code => { window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);   // TEK tıklama, beklemeden
                 const navigated = await nav;
                 const admin = navigated && await settle(a, () => location.pathname.endsWith('admin.html') && window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true, 25000);
                 const st = await a.evaluate(() => ({ path: location.pathname, isDbAdmin: window.isDbAdmin(), anon: !!(window.userAuth && window.userAuth.isAnonymous), locked: document.getElementById('adminLockModal')?.style.display === 'flex' })).catch(e => ({ err: e.message }));
@@ -4170,7 +4170,7 @@ const SCENARIOS = {
             // (b) kilit ("Güvenli Çıkış") → hemen kilit açma
             await a.evaluate(() => { window.showCustomConfirm = async () => true; window.adminLogout(); });
             await settle(a, () => document.getElementById('adminLockModal').style.display === 'flex', 15000);
-            out.lockImmediateUnlock = await a.evaluate(async code => { window._dx._b['lock-val-node'] = code; await window.unlockAdmin(); return null; }, EMU_ADMIN_CODE)
+            out.lockImmediateUnlock = await a.evaluate(async code => { window._dx._b['lock-val-node'] = document.getElementById('lock-val-node').value = code; await window.unlockAdmin(); return null; }, EMU_ADMIN_CODE)
                 .then(() => settle(a, () => window.isDbAdmin() && document.getElementById('adminLockModal').style.display !== 'flex', 20000))
                 .then(async ok => ({ ok, ...(await a.evaluate(() => ({ isDbAdmin: window.isDbAdmin(), anon: !!window.userAuth?.isAnonymous, sync: window.getSyncHealth() }))) }));
             // (c) index'te admin iken navbar "Çıkış Yap" (yumuşak sıfırlama) → hemen admin girişi
@@ -4310,7 +4310,7 @@ const SCENARIOS = {
             await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
             await indexIdle(a);
             const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
-            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await a.evaluate(code => { window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
             await nav;
             out.adminReady = await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && (window.data.personel || []).length > 0);
             out.vip = await a.evaluate(async (APP, AUTH, KEEP) => {
@@ -4447,7 +4447,7 @@ const SCENARIOS = {
             // 2 · reddedilen girişler (oturum açılmaz)
             const attempt = (pri, code) => s.evaluate(async (pri, code) => {
                 document.getElementById('login-pri').value = pri;
-                window._dx._b['access-val-node'] = code;
+                window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = code;
                 await window.handleLogin();
                 const st = document.getElementById('loginStatus'), u = window.getActiveUser();
                 return { status: st ? st.innerText.trim() : '', loggedIn: document.body.classList.contains('logged-in'), signedIn: !!window.userAuth,
@@ -4467,7 +4467,7 @@ const SCENARIOS = {
                     for (const c of ['auth/too-many-requests', 'auth/user-disabled', 'auth/network-request-failed', 'auth/internal-error']) {
                         window.signInStaffAccount = async () => { throw Object.assign(new Error(c), { code: c }); };
                         document.getElementById('login-pri').value = pri;
-                        window._dx._b['access-val-node'] = 'kod12';
+                        window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = 'kod12';
                         await window.handleLogin();
                         r[c.replace('auth/', '')] = document.getElementById('loginStatus').innerText.trim();
                     }
@@ -4591,7 +4591,7 @@ const SCENARIOS = {
                 await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
                 await indexIdle(a);
                 const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
-                await a.evaluate(c => { window._dx._b['access-val-node'] = c; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+                await a.evaluate(c => { window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = c; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
                 await nav;
             } else {
                 await a.evaluateOnNewDocument(() => localStorage.setItem('admin_auth', JSON.stringify({ expiry: Date.now() + 600000 })));
@@ -4810,7 +4810,7 @@ const SCENARIOS = {
                 const a = await open(actx, `${base}/index.html?emu=1`);
                 await indexIdle(a);
                 const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
-                await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+                await a.evaluate(code => { window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
                 await nav;
                 await settle(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true && typeof window.vipToggleKillSwitch === 'function');
                 const target = { id: staff.id, name: out.staff, demo: false };
@@ -4901,7 +4901,7 @@ const SCENARIOS = {
             await a.goto(`${base}/index.html?emu=1`, { waitUntil: 'domcontentloaded' });
             await indexIdle(a);
             const nav = a.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
-            await a.evaluate(code => { window._dx._b['access-val-node'] = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
+            await a.evaluate(code => { window._dx._b['access-val-node'] = document.getElementById('access-val-node').value = code; window.checkAdminAndGo(); }, EMU_ADMIN_CODE);
             await nav;
             out.adminReady = await waitFn(a, () => window.isDbAdmin && window.isDbAdmin() && window.isFirebaseLoaded === true
                 && (window.data.personel || []).length > 0 && typeof window.vipCodeCleanse === 'function');

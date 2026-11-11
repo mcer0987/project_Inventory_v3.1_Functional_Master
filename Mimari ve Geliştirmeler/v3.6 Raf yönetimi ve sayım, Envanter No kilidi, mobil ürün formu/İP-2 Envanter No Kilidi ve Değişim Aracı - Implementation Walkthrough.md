@@ -209,4 +209,42 @@ Geri bildirim: plaka büyüktü ve renk temasına uymuyordu; pencereyi genişlet
 | Kurallar ve defter | Değişmedi. Dolu numara yine yalnız Operasyon Merkezi'nden ve denetim kaydıyla değişir. |
 | Test | Emülatörde tarayıcı 7/7: çok adetli demirbaşta alan devre dışı; numaralı demirbaşta kilit; adet 1 ↔ 32 geçişi; 32 adetlik üründen çıkışta boş ve yazılabilir cihaz satırları; sayfa hatası yok. `npm run test:unit` 386/386, `lint:xss` 0 izinsiz. Masaüstü ve mobil ekran görüntüleri kontrol edildi. |
 
+## 12. Ek (11.11.2026) — bütünlük doğrulaması ve "demirbaş tekrar girilemez" kuralı
+
+**Bulgu ve düzeltme.** Excel importunda Envanter No cihaz numarası değil, **stok satırının kimliğidir**: her satırda zorunludur ve adet 32 olabilir. §10'daki otomatik doldurma bu tür çok adetli satırda numarayı her çıkışta 1. cihaza yazardı. Sonuçta aynı numara farklı cihazların hareket kaydına geçer ve cihaz geçmişi karışırdı. `DeviceIds.fixedFor` artık yalnız tek cihazlık satırda (adet ≤ 1) numara döner. Çok adetli satırda cihaz satırları boş ve elle yazılır; tekillik denetimi her satırda çalışır. Kilitli cihaz satırının altın rengi tema renkleriyle değiştirildi.
+
+**Tekrar giriş kuralının katmanları (değişmedi, doğrulandı):**
+
+| Yol | Koruma | Sonuç |
+|---|---|---|
+| Ürün Ekle / Numara ata | B1+B2'de aynı numara (büyük/küçük harf ve boşluk farkı yok sayılır) varsa kayıt yapılmaz. Sayımdaki raf ürünleri de denetlenir (gizleme yalnız tabloda). | ✔ |
+| Kayıtlı ürün | Numara kilitli; defter ve kurallar denetim kaydı olmadan değişimi reddeder. | ✔ |
+| Operasyon Merkezi değişimi | Depo, zimmet, servis ve hurdadaki numaralar engel; sunucuda yeniden denetlenir. | ✔ |
+| Excel import | Dosya içinde tekrar reddedilir; sistemde var olan numara atlanır ve raporlanır. v3.6 bu mantığa dokunmadı (yalnız sayımdaki rafa giden satır Havuz'a alınır). | ✔ (birim testleri) |
+| Cihaz satırları (çıkış, sevk, zimmet, talep, sepet) | Aynı numara listede iki kez girilemez. Aktif zimmet veya servisteki numara ikinci kez çıkamaz. | ✔ |
+| Kısmi transfer | Numaralı satır bölünemez. | ✔ (defter testi) |
+
+**Grafikler.** Demirbaş/sarf çıkış grafikleri hareket kayıtlarındaki tür ve adetten sayılır; Envanter No'ya bağlı değildir, v3.6 dokunmadı. Sayımdaki raf ürünleri `window.data`'da kalır; yalnız tablo ve seçim listelerinden gizlenir.
+
+**Test.**
+
+- **Otomatik paketler:**
+  - lint:xss 0 izinsiz
+  - birim 386/386
+  - kural 398/398
+  - defter emülatörü 32/32
+  - atomik yazıcı 10/10
+  - sahiplik 22/22
+  - personel 15/15
+- **Tarayıcı (emülatör) 8/8:**
+  - kayıtlı numarayla Ürün Ekle ve Numara ata reddedilir;
+  - Operasyon Merkezi'nde başka kayıttaki numara engellenir;
+  - listede aynı numara ve servisteki numara reddedilir;
+  - çok adetli numaralı satırda otomatik dolma yok;
+  - tek adetlik satırda var.
+- **Uçtan uca akış testleri (`scratch/flow-tests.js --emu`, 56 senaryo):**
+  - Düzenekteki giriş yolu, d2b117a'dan beri native olan kod alanına da yazacak şekilde düzeltildi.
+  - Çalışma ağacı, commit'li HEAD ve v3.6 öncesi (`bce475c`) ayrı ayrı koşuldu. HEAD'de 17 senaryo düşüyor; v3.6 öncesinde aynı 17'si ve ek 2 senaryo düşüyor. **v3.6 yeni bir hata getirmedi.**
+  - 17 eski hata düzenek bakımı işidir: EBYS, oturum ve dosya alanı değişiklikleri teste yansıtılmamış. v3.6 kapsamı dışında.
+
 Elle test için: [v3.6 Kontrol Listesi](./v3.6%20Kontrol%20Listesi.md).
