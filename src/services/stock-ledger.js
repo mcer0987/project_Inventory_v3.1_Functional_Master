@@ -238,6 +238,7 @@
                 lastUpdate: inp.now,
             };
             if (source.envanterNo) targetDoc.envanterNo = source.envanterNo;
+            if (fullMove && source.sn) targetDoc.sn = source.sn;
             if (inp.targetCol === 'b2') targetDoc.status = status;
             const errors = (inp.targetCol === 'b1' ? S.validateB1 : S.validateB2)(targetDoc);
             if (errors.length) throw new LedgerError('schema-violation', `Hedef kayıt şema sözleşmesine uymuyor: ${errors.join(', ')}`, { errors });

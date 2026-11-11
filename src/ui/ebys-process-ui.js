@@ -11,17 +11,47 @@ function selectPerson(value='') {
     for(const p of people()){const o=n('option',`${p.name||p.adSoyad} · ${p.pri||p.id}`);o.value=String(p.id);select.append(o);}
     if(value)select.value=value;return select;
 }
-function modal(title) {
+const processDialogs=new Map(), ownerEpochs=new Map();
+function closeOwned(owner) {
+    ownerEpochs.set(owner,(ownerEpochs.get(owner)||0)+1);
+    for(const [d,record] of processDialogs)if(!owner||record.owner===owner){d.remove();processDialogs.delete(d);}
+}
+function guardDialog(d,validate) {
+    const record=processDialogs.get(d);record.validate=validate;
+    let generation=0,saved=null;
+    const status=n('p',''),retry=btn('Durumu yeniden kontrol et',()=>resume());retry.hidden=true;
+    retry.classList.add('ebys-recheck');
+    status.setAttribute('role','status');d.append(status,retry);
+    const lock=()=>{record.ready=false;generation++;if(!saved)saved=[...d.querySelectorAll('button')].filter(b=>b!==retry&&b.textContent!=='Kapat'&&!b.classList.contains('ebys-dialog-close')).map(b=>[b,b.disabled]);saved.forEach(([b])=>b.disabled=true);};
+    const resume=async()=>{
+        lock();const token=generation;
+        try{
+            const valid=await validate();
+            if(!d.isConnected||token!==generation||document.hidden)return;
+            if(record.actor!==window.userAuth?.uid||!valid){d.remove();processDialogs.delete(d);return;}
+            saved?.forEach(([b,disabled])=>b.disabled=disabled);saved=null;record.ready=true;retry.hidden=true;status.textContent='';
+        }catch(error){
+            if(!d.isConnected||token!==generation)return;
+            if(record.actor!==window.userAuth?.uid||error.code==='permission-denied'){d.remove();processDialogs.delete(d);return;}
+            status.textContent='Güncel durum kontrol edilemedi. Notunuz korunuyor; yeniden kontrol edin.';retry.hidden=false;
+        }
+    };
+    record.pause=lock;record.resume=resume;record.ready=!document.hidden;if(document.hidden)lock();
+}
+function modal(title,owner='process') {
     const d=n('dialog',null,'ebys-document-dialog ebys-process-dialog');const x=btn('✕',()=>d.close());x.className='ebys-dialog-close';x.setAttribute('aria-label','Pencereyi kapat');d.append(x,n('h3',title));
     d.addEventListener('close',()=>d.remove());d.addEventListener('click',e=>{const r=d.getBoundingClientRect();if(e.target===d&&(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom))d.close();});
-    document.body.append(d);d.showModal();return d;
+    processDialogs.set(d,{owner,actor:window.userAuth?.uid,ready:!document.hidden});d.addEventListener('close',()=>processDialogs.delete(d));document.body.append(d);d.showModal();return d;
 }
-async function open(versionId,documentId,allowStart=true) {
+let viewEpoch=0;
+async function open(versionId,documentId,allowStart=true,owner='process') {
+    const ownerEpoch=ownerEpochs.get(owner)||0;
+    const epoch=viewEpoch;
     const actor=window.userAuth?.uid;
     try {
-        const p=await api().getProcess(versionId);if(actor!==window.userAuth?.uid)return;
-        const d=modal('Evrak onay süreci'),status=n('p','','ebys-process-status');status.hidden=true;status.setAttribute('role','status');d.append(status);
-        const run=async(action,again=true)=>{const controls=[...d.querySelectorAll('button')],disabled=controls.map(b=>b.disabled);controls.forEach(b=>b.disabled=true);try{await action();if(d.isConnected){d.close();if(again)await open(versionId,documentId);}}catch(e){status.hidden=false;status.textContent=e.message;}finally{controls.forEach((b,i)=>b.disabled=disabled[i]);}};
+        const p=await api().getProcess(versionId);if(actor!==window.userAuth?.uid||epoch!==viewEpoch||ownerEpoch!==(ownerEpochs.get(owner)||0))return;
+        const d=modal('Evrak onay süreci',owner),status=n('p','','ebys-process-status');status.hidden=true;status.setAttribute('role','status');d.append(status);
+        const run=async(action,again=true)=>{if(document.hidden||actor!==window.userAuth?.uid||!processDialogs.get(d)?.ready)return;const controls=[...d.querySelectorAll('button')],disabled=controls.map(b=>b.disabled);controls.forEach(b=>b.disabled=true);try{await action();if(d.isConnected){d.close();if(again)await open(versionId,documentId,allowStart,owner);}}catch(e){if(e.code==='permission-denied'){closeOwned(owner);return;}status.hidden=false;status.textContent=e.message;}finally{controls.forEach((b,i)=>b.disabled=disabled[i]);}};
         if(!p&&!allowStart){d.append(n("p","Onay rotası henüz yazar tarafından başlatılmadı."));}
         else if(!p){
             d.append(n('p','Dondurulmuş sürüm için sıralı onay rotası seçin. Son onayda bu evrak türü için yönetimin tanımladığı icra sorumlusuna iş açılır. Belge sahibi onay görevine atanamaz.'));
@@ -106,49 +136,66 @@ async function open(versionId,documentId,allowStart=true) {
             if(p.ownerUid===actor&&['returned','rejected','withdrawn'].includes(p.state))d.append(btn('Yeni sürüm hazırla',()=>run(async()=>{const data=await window.AppModules.EBYSDocuments.readDocument(p.documentId);if(data.head.currentVersionId!==p.id)throw new Error('Bu evrak için daha yeni bir sürüm hazırlanmış.');await window.AppModules.EBYSDocuments.reopenDraft({documentId:p.documentId,expectedRevision:data.head.revision,operationId:crypto.randomUUID()});window.AppModules.EBYSDocumentsUI?.open(p.documentId);},false)));
         }
         const footer=n('footer',null,'ebys-process-footer');footer.append(n('small',p?.state==='active'?'Bu pencereyi kapatmak süreci iptal etmez.':'Pencereyi kapatabilirsiniz.'),btn('Kapat',()=>d.close()));d.append(footer);
+        guardDialog(d,async()=>{
+            const [current]=await Promise.all([api().getProcess(versionId),api().getVersion(versionId)]);
+            return p ? current?.revision===p.revision&&current?.state===p.state&&current?.activeAssigneeUid===p.activeAssigneeUid : !current;
+        });
     }catch(error){window.showAppAlert?.(error.message,'error');}
 }
 function renderTasks(tasks,section) {
-    const stops=[];
+    let alive=true;const actor=window.userAuth?.uid;
     section.replaceChildren();
     for(const t of [...tasks.filter(t=>t.state==='active').map(t=>({...t,view:'active'})),...tasks.filter(t=>t.hasDecision).map(t=>({...t,view:'history'}))]){
         const history=t.view==='history',row=n('article',null,'modern-card mb-2 ebys-task-card');
         row.dataset.versionId=t.versionId;row.dataset.documentId=t.documentId;row.dataset.taskView=t.view;
-        const title=n('h4','Evrak','ebys-task-title'),meta=n('p','Sürüm bilgisi yükleniyor…','ebys-task-meta'),state=n('p','','ebys-task-state');
+        const title=n('h4','Evrak','ebys-task-title'),meta=n('p','Konu ve sürüm için ayrıntıyı açın.','ebys-task-meta'),state=n('p','','ebys-task-state');
         row.append(n('strong',(kinds[t.kind]||t.kind)+' · '+(history?'Karar geçmişi':'Aktif görev')),title,meta,state);
-        const end=t.validUntil?.toMillis?.()||0;
+        const end=window.AppModules.EBYSProcessSchema.taskExpiryMillis(t);
         if(!history){const due=t.dueAt?.toDate?.().toLocaleString('tr-TR')||'—';row.append(n('p','Hedef tamamlanma: '+due+(Date.now()>end?' · Yetki süresi dolmuş':t.dueAt?.toMillis?.()<Date.now()?' · Görev gecikti':'')));}
         if(history){
             row.append(n('p','Bu kayıt karar verdiğiniz sabit sürüme aittir. Yeni sürümlere kendiliğinden erişim sağlamaz.','ebys-task-help'));
             for(const [step,decision]of Object.entries(t.decisionsByStep||{}))row.append(n('p','Adım '+(Number(step)+1)+': '+(decision.result==='approved'?'Onaylandı':'Reddedildi')+' · '+(decision.reason||'')));
         }
         const actions=n('div',null,'ebys-task-actions');
-        const decide=!history&&Date.now()<end?btn('Görev / Karar',()=>open(t.processId,t.documentId)):null;if(decide)actions.append(decide);
+        const decide=!history&&Date.now()<end?btn('Görev / Karar',()=>open(t.processId,t.documentId,true,'ebysMyTasks')):null;if(decide)actions.append(decide);
         const read=btn(history?'Karar verdiğim sürümü aç':'Görevdeki sürümü aç',async()=>{
             try{
-                const v=await api().getVersion(t.versionId);
-                const view=modal((v.metadataSnapshot?.subject||'Evrak')+' · Sürüm '+(v.versionNo||'—'));
+                const epoch=viewEpoch;const v=await api().getVersion(t.versionId);
+                if(!alive||!row.isConnected||actor!==window.userAuth?.uid||epoch!==viewEpoch)return;
+                const view=modal((v.metadataSnapshot?.subject||'Evrak')+' · Sürüm '+(v.versionNo||'—'),'ebysMyTasks');guardDialog(view,async()=>{await api().getVersion(t.versionId);return true;});
                 view.append(n('p',history?'Bu, karar verdiğiniz sürümdür.':'Bu, size atanmış görevin sürümüdür.','ebys-process-help'),n('p',(v.metadataSnapshot?.correspondent||'')+' · '+(v.metadataSnapshot?.date||'')),n('div',v.content,'ebys-preview-content'),btn('Kapat',()=>view.close()));
-            }catch(e){window.showAppAlert?.(e.message,'warning');}
+            }catch(e){if(!alive||!row.isConnected||actor!==window.userAuth?.uid)return;closeOwned('ebysMyTasks');title.textContent='Evrak';meta.textContent='Sürüm bilgisi alınamadı.';window.showAppAlert?.(e.message,'warning');}
         });
         read.disabled=!history&&Date.now()>=end;actions.append(read);row.append(actions);section.append(row);
-        if(api().watchTaskContext)stops.push(api().watchTaskContext(t,context=>{
-            title.textContent=context.subject||'Evrak';
-            meta.textContent='Sürüm '+(context.versionNo||'—')+' · Evrak kimliği: '+String(t.documentId||'').slice(0,8);
-            state.textContent=context.state==='returned'?'Evrak yazara iade edildi. Bu sürümdeki geçmiş kararınız korunur.':context.state?('Süreç: '+(states[context.state]||'Erişim kapandı')):'';
-            if(context.available===false)state.textContent='Bu sürüme erişim şu anda kapalı. Güncel görev durumunu kontrol edin.';
-            const active=context.state==='active'&&Date.now()<end;
-            if(decide)decide.disabled=!active;
-            read.disabled=context.available===false||(!history&&!active);
-        },e=>{state.textContent=e.message;}));
+        state.textContent='Görev kaydı: '+(t.state==='active'?'Aktif':t.state==='delegated'?'Devredildi':t.state==='cancelled'?'İptal edildi':'Kapandı')+' · Güncel süreç durumunu ayrıntıdan kontrol edin.';
+        const detail=btn('Konu / sürüm / durum',async()=>{
+            detail.disabled=true;
+            try {
+                const [p,v]=await Promise.all([api().getProcess(t.processId),api().getVersion(t.versionId)]);
+                if(!alive||!row.isConnected||actor!==window.userAuth?.uid)return;
+                title.textContent=v.metadataSnapshot?.subject||'Evrak';
+                meta.textContent='Sürüm '+(v.versionNo||'—')+' · Evrak kimliği: '+String(t.documentId||'').slice(0,8);
+                state.textContent='Kontrol anındaki süreç: '+(states[p?.state]||'Erişim kapandı')+' · '+new Date().toLocaleTimeString('tr-TR');
+            }catch(error){
+                if(!alive||!row.isConnected||actor!==window.userAuth?.uid)return;
+                closeOwned('ebysMyTasks');title.textContent='Evrak';meta.textContent='Sürüm bilgisi alınamadı.';state.textContent=error.message;
+            }finally{if(alive&&row.isConnected)detail.disabled=false;}
+        });actions.append(detail);
     }
     if(!section.children.length)section.append(n('p','Aktif evrak göreviniz veya karar geçmişiniz yok.'));
-    return()=>stops.forEach(stop=>stop());
+    return()=>{alive=false;};
 }
 // Her kuyruk sunucudan 50 kayıt alır; sonraki sayfa Firestore cursor ile açılır.
 function registerQueue(key, host, subscribe, render) {
     if(!host)return;
+    let startQueue=null,stopQueue=null;
+    const panel=host.closest('.tab-content, .admin-tab-content');
+    const visible=()=>!document.hidden&&(!panel||getComputedStyle(panel).display!=='none');
+    const reconcile=()=>{if(visible())startQueue?.();else stopQueue?.(document.hidden?'pause':'panel');};
+    if(panel)new MutationObserver(reconcile).observe(panel,{attributes:true,attributeFilter:['style','class']});
+    document.addEventListener('visibilitychange',reconcile);
     window.registerSyncListener(key,()=>{
+        const actor=window.userAuth?.uid;
         let cursor = null, stop = null, stopRender = null, alive = true, generation = 0;
         const clearCards = () => {
             const cleanup = stopRender;
@@ -166,7 +213,7 @@ function registerQueue(key, host, subscribe, render) {
             clearCards();
             host.replaceChildren();
             const unsubscribe = subscribe(rows => {
-                if (!alive || current !== generation) return;
+                if (!alive || current !== generation || actor!==window.userAuth?.uid) return;
                 clearCards();
                 stopRender = render(rows, host);
                 const nav = n('div', null, 'd-flex gap-2 my-2');
@@ -175,22 +222,27 @@ function registerQueue(key, host, subscribe, render) {
                 if (rows.length === 50) nav.append(btn('Sonraki sayfa', () => { cursor = rows.at(-1)._cursor; load(); }));
                 host.append(nav);
             }, error => {
-                if (!alive || current !== generation) return;
-                generation++;
+                if (!alive || current !== generation || actor!==window.userAuth?.uid) return;
+                running=false;generation++;
                 clearQuery();
                 clearCards();
+                closeOwned(key);
                 host.textContent = error.message;
             }, cursor);
             if (alive && current === generation) stop = unsubscribe;
             else unsubscribe();
         };
-        load();
+        let running=false;
+        startQueue=()=>{if(actor!==window.userAuth?.uid){stopQueue('session');return;}if(!running){running=true;load();}};
+        stopQueue=(reason='session')=>{running=false;generation++;clearQuery();clearCards();host.replaceChildren();if(reason!=='pause')closeOwned(key);};
+        reconcile();
         return () => {
+            startQueue=null;stopQueue?.();stopQueue=null;
             alive = false;
             clearQuery();
             clearCards();
             host.replaceChildren();
-            document.querySelectorAll('.ebys-document-dialog').forEach(dialog => dialog.remove());
+            closeOwned(key);
         };
     });
 }
@@ -206,3 +258,14 @@ registerQueue('ebysMyReturned',document.getElementById('ebysMyReturned'),(...arg
     if(host.children.length===0)host.append(n('p','Bu sayfada geri dönen evrakınız yok.'));
 });
 window.AppModules=window.AppModules||{};window.AppModules.EBYSProcessUI={open};
+
+const clearProcessSession=()=>{viewEpoch++;closeOwned();};
+window.registerSyncListener('ebysProcessDialogs',()=>clearProcessSession);
+window.addEventListener('onAppLogout',clearProcessSession);
+document.addEventListener('visibilitychange',()=>{
+    for(const [d,record] of processDialogs){
+        if(!d.isConnected){processDialogs.delete(d);continue;}
+        if(record.actor!==window.userAuth?.uid){d.remove();processDialogs.delete(d);continue;}
+        if(document.hidden)record.pause?.();else record.resume?.();
+    }
+});

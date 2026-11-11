@@ -3,8 +3,10 @@ import { fireDb } from './firebase-handler.js';
 import './ebys-execution-service.js';
 import '../utils/ebys-document-schema.js';
 import '../utils/ebys-process-schema.js';
+import '../utils/ebys-purchase-schema.js';
 const S = () => window.AppModules.EBYSDocumentSchema;
 const P = () => window.AppModules.EBYSProcessSchema;
+const purchase = () => window.AppModules.EBYSPurchaseSchema;
 const uid = () => { if (!window.userAuth?.uid) throw new Error('Oturum gerekli.'); return window.userAuth.uid; };
 const ref = (c, id) => doc(fireDb, window.AppEnv.COLLECTION_ROOT, c, 'items', id);
 const taskId = (id, who) => `${id}__${who}`;
@@ -15,7 +17,8 @@ function task(p, step, assigneeUid, old = null, validUntil = null) {
         assigneeUid, principalUid: step.assigneeUid, stepIndex: p.currentStep, stepId: step.stepId, kind: step.kind, state: 'active',
         decisionsByStep: old?.decisionsByStep || {}, hasDecision: old?.hasDecision || false, revision: (old?.revision || 0) + 1,
         createdAt: old?.createdAt || serverTimestamp(), updatedAt: serverTimestamp(), validFrom: serverTimestamp(),
-        validUntil: validUntil || Timestamp.fromMillis(now + 90 * 86400000), dueAt: Timestamp.fromMillis(now + step.dueHours * 3600000) };
+        ...(validUntil ? { validUntil } : { validUntil: null, validForSeconds: P().TASK_VALID_FOR_SECONDS }),
+        dueAt: Timestamp.fromMillis(now + step.dueHours * 3600000) };
 }
 async function person(tx, id, ownerUid) {
     const snap = await tx.get(ref('personel', id));
@@ -23,35 +26,132 @@ async function person(tx, id, ownerUid) {
     if (!p || p.active === false || !p.uid || p.uid === ownerUid) throw new Error('Pasif, hesapsız veya belge sahibi kişi göreve atanamaz.');
     return p;
 }
+function processSession() {
+    const actorUid = uid(), root = window.AppEnv.COLLECTION_ROOT;
+    const assertCurrent = () => {
+        if (actorUid !== window.userAuth?.uid || root !== window.AppEnv.COLLECTION_ROOT) throw new Error('Oturum veya ortam değişti.');
+    };
+    return { actorUid, root, assertCurrent };
+}
+
+async function purchaseVersion(session, purchaseOrderId, snapshot, versionId, expectedOwner) {
+    session.assertCurrent();
+    const data = snapshot.data();
+    if (!data || (expectedOwner !== undefined && data.ownerUid !== expectedOwner)) throw new Error('Bağlı satın alma sürümü bulunamadı.');
+    const context = { root: session.root, purchaseOrderId, versionId, ownerUid: data.ownerUid };
+    const version = { root: session.root, pathId: snapshot.id, data };
+    const digest = await purchase().digestPurchaseVersion(context, version);
+    session.assertCurrent();
+    if (digest !== data.contentDigest) throw new Error('Satın alma sürüm özeti uyuşmuyor.');
+    return { context, version };
+}
+
+function purchaseRateError(code, message) {
+    return Object.assign(new Error(message), { code });
+}
+function observedRates(data) {
+    return data ? { rates: data.rates, date: data.date, source: data.source } : null;
+}
+const tryOnly = proposal => proposal.items.every(item => item.currency === 'TRY');
+function quotePurchase(proposal, source) {
+    const money = window.AppModules.PurchaseMoney;
+    if (tryOnly(proposal)) return {
+        exchangeRate: { TRY: 1, USD: 1, EUR: 1 }, exchangeRateDate: new Date().toISOString().slice(0, 10),
+        exchangeRateSource: 'TRY', reportingTotalTRY: money.calculate(proposal.items).totals.TRY.total
+    };
+    const quote = money.snapshotRates(proposal, source);
+    money.scaled(quote.reportingTotalTRY, 2, 'TRY rapor toplamı');
+    return quote;
+}
+
+export async function getPurchaseApprovalPreview({ purchaseOrderId, versionId }) {
+    const session = processSession();
+    purchase().financePath({ root: session.root, purchaseOrderId, versionId });
+    const snapshot = await getDocFromServer(ref('ebysVersions', versionId));
+    const { version } = await purchaseVersion(session, purchaseOrderId, snapshot, versionId);
+    const proposal = version.data.purchaseSnapshot;
+    const source = tryOnly(proposal) ? null : observedRates((await getDocFromServer(ref('system_config', 'ebys_rates'))).data());
+    session.assertCurrent();
+    if (!tryOnly(proposal) && purchase().compareRateSource(source, source) !== 'same') {
+        throw purchaseRateError('purchase-rates-unavailable', 'Döviz kurları eksik veya geçersiz. Yöneticinizden kur ayarlarını kontrol etmesini isteyin.');
+    }
+    return { purchaseOrderId, versionId, rateSource: source, reportingTotalTRY: quotePurchase(proposal, source).reportingTotalTRY };
+}
+
+async function firstPurchaseFinance(tx, session, p, input, operationId) {
+    if (!p.purchaseOrderId || !purchase().isFirstPositiveDecision(p.currentStep, input.result)) return null;
+    session.assertCurrent();
+    const financeRef = doc(fireDb, purchase().financePath({ root: session.root, purchaseOrderId: p.purchaseOrderId, versionId: p.id }));
+    const [snapshot, prior] = await Promise.all([tx.get(ref('ebysVersions', p.id)), tx.get(financeRef)]);
+    if (prior.exists()) throw new Error('İlk karar için mali kayıt zaten var. Süreç durumunu yeniden açın.');
+    const { context, version } = await purchaseVersion(session, p.purchaseOrderId, snapshot, p.id, p.ownerUid);
+    const proposal = version.data.purchaseSnapshot;
+    let source = null;
+    if (!tryOnly(proposal)) {
+        source = observedRates((await tx.get(ref('system_config', 'ebys_rates'))).data());
+        session.assertCurrent();
+        if (purchase().compareRateSource(source, source) !== 'same') {
+            throw purchaseRateError('purchase-rates-unavailable', 'Döviz kurları eksik veya geçersiz. Yöneticinizden kur ayarlarını kontrol etmesini isteyin.');
+        }
+        if (purchase().compareRateSource(input.fxPreview, source) !== 'same') {
+            throw purchaseRateError('purchase-rates-changed', 'Tutar veya kur bilgisi değişti. Güncel tutarı inceleyip yeniden karar verin.');
+        }
+    }
+    const data = purchase().normalizeFinance(context, version, {
+        schemaVersion: 2, purchaseOrderId: p.purchaseOrderId, versionId: p.id, contentDigest: version.data.contentDigest,
+        actorUid: session.actorUid, operationId, ...quotePurchase(proposal, source), createdAt: serverTimestamp()
+    });
+    return { ref: financeRef, data };
+}
+
+
 async function command(commandName, input, callback) {
-    const actorUid = uid(), operationId = input.operationId || S().uuid();
-    const payloadDigest = await S().digest({ command: commandName, ...input, operationId: null });
+    const session = processSession(), { actorUid, root } = session, operationId = input.operationId || S().uuid();
+    const payloadDigest = await S().digest({ ...input, command: commandName, operationId: null });
+    const opRef = doc(fireDb, root, 'ebysProcessOperations', 'items', operationId);
     const execute = () => runTransaction(fireDb, async tx => {
-        const opRef = ref('ebysProcessOperations', operationId), op = await tx.get(opRef);
+        session.assertCurrent();
+        const op = await tx.get(opRef);
+        session.assertCurrent();
         if (op.exists()) {
             const d = op.data();
-            if (d.actorUid !== actorUid || d.payloadDigest !== payloadDigest) throw new Error('İşlem anahtarı farklı içerikle kullanıldı.');
+            if (d.actorUid !== actorUid || d.command !== commandName || d.payloadDigest !== payloadDigest) throw new Error('İşlem anahtarı farklı içerikle kullanıldı.');
             return d.result;
         }
-        const result = await callback(tx, operationId, actorUid);
+        const result = await callback(tx, operationId, actorUid, session);
+        session.assertCurrent();
         tx.set(opRef, { id: operationId, processId: result.processId, actorUid, command: commandName, payloadDigest, result, ownerUid: result.ownerUid, createdAt: serverTimestamp() });
         tx.set(ref('ebysProcessEvents', operationId), { id: operationId, processId: result.processId, actorUid, command: commandName, ownerUid: result.ownerUid, revision: result.revision, reason: input.reason || '', createdAt: serverTimestamp() });
         return result;
     });
-    try { return await execute(); }
-    catch (error) {
+    try {
+        const result = await execute();
+        session.assertCurrent();
+        return result;
+    } catch (error) {
+        session.assertCurrent();
         // Eşzamanlı aynı komutun ilk yazımı tamamlandıysa yalnız o doğrulanmış sonucu döndür.
-        try { const saved = await getDocFromServer(ref('ebysProcessOperations', operationId)); const d = saved.data();
-            if (d && d.actorUid === actorUid && d.payloadDigest === payloadDigest) return d.result;
+        try {
+            const d = (await getDocFromServer(opRef)).data();
+            session.assertCurrent();
+            if (d && d.actorUid === actorUid && d.command === commandName && d.payloadDigest === payloadDigest) return d.result;
         } catch { /* Başka aktör veya gerçek izin reddi sonuç kazandırmaz. */ }
+        session.assertCurrent();
         throw error;
     }
 }
 export async function startProcess(input) {
-    return command('start', input, async (tx, operationId, actorUid) => {
+    return command('start', input, async (tx, operationId, actorUid, session) => {
         const [version, old, headSnap] = await Promise.all([tx.get(ref('ebysVersions', input.versionId)), tx.get(ref('ebysProcesses', input.versionId)), tx.get(ref('ebysDocuments', input.documentId))]);
         const v = version.data(), head = headSnap.data();
         if (!v || v.ownerUid !== actorUid || v.documentId !== input.documentId || head?.currentVersionId !== input.versionId || old.exists()) throw new Error('Sürüm bu süreç için uygun değil.');
+        const schemaVersion = v.schemaVersion === undefined ? 1 : v.schemaVersion;
+        if (schemaVersion === 2) {
+            if (head.purchaseOrderId !== input.documentId) throw new Error('Satın alma evrak bağı geçersiz.');
+            await purchaseVersion(session, input.documentId, version, input.versionId, actorUid);
+        } else if (schemaVersion !== 1 || Object.hasOwn(head, 'purchaseOrderId')) {
+            throw new Error('Evrak sürümü ve karar motoru uyuşmuyor.');
+        }
         const template = input.templateId ? (await tx.get(ref('ebysRouteTemplates', input.templateId))).data() : null;
         if(input.templateId && !template)throw new Error('Rota şablonu bulunamadı.');
         const selected = P().route(template?.routeSnapshot || input.route), route = [];
@@ -61,6 +161,7 @@ export async function startProcess(input) {
             route.push({ ...step, assigneeUid:p.uid, name:source?.name || p.name || p.adSoyad || step.personnelId });
         }
         const p = { id: input.versionId, documentId: input.documentId, versionId: input.versionId, ownerUid: actorUid, routeSnapshot: route, templateId: template?.id || '', templateRevision: template?.revision || 0,
+            ...(schemaVersion === 2 ? { purchaseOrderId: input.documentId } : {}),
             currentStep: 0, activeAssigneeUid: route[0].assigneeUid, state: 'active', revision: 1, lastOperationId: operationId, lastCommand: 'start', lastResult: '', lastReason: '', createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
         tx.set(ref('ebysProcesses', p.id), p); tx.set(ref('ebysTasks', taskId(p.id, p.activeAssigneeUid)), task(p, route[0], p.activeAssigneeUid));
         return { processId: p.id, revision: 1, ownerUid: actorUid };
@@ -68,10 +169,11 @@ export async function startProcess(input) {
 }
 export async function decideTask(input) {
     const reason = P().reason(input.result, input.reason);
-    return command('decide', { ...input, reason }, async (tx, operationId, actorUid) => {
+    return command('decide', { ...input, reason }, async (tx, operationId, actorUid, session) => {
         const snap = await tx.get(ref('ebysProcesses', input.processId)), p = snap.data(); check(p, input.expectedRevision);
         const currentRef = ref('ebysTasks', taskId(p.id, p.activeAssigneeUid)), current = (await tx.get(currentRef)).data();
         if (p.state !== 'active' || p.activeAssigneeUid !== actorUid || !current || current.state !== 'active') throw new Error('Aktif görev size ait değil.');
+        const financial = await firstPurchaseFinance(tx, session, p, input, operationId);
         const next = { ...p, revision: p.revision + 1, lastOperationId: operationId, lastCommand: 'decide', lastResult: input.result, lastReason: reason, updatedAt: serverTimestamp() };
         const decisions = { ...current.decisionsByStep };
         if (input.result !== 'returned') decisions[String(p.currentStep)] = { stepId: current.stepId, versionId: p.id, kind: current.kind, actorUid, principalUid: current.principalUid, result: input.result, reason, decidedAt: serverTimestamp() };
@@ -86,7 +188,9 @@ export async function decideTask(input) {
         } else { next.state = input.result === 'approved' ? 'completed' : input.result; next.activeAssigneeUid = ''; }
         const head = next.state !== 'active' ? (await tx.get(ref('ebysDocuments', p.documentId))).data() : null;
         const job = next.state === 'completed' ? await window.AppModules.EBYSExecution.assignExecutionJob(tx, next, head) : null;
+        session.assertCurrent();
         tx.set(ref('ebysProcesses', p.id), next);
+        if (financial) tx.set(financial.ref, financial.data);
         if (job) tx.set(ref('ebysExecutionJobs', job.id), job);
         if (head) tx.set(ref('ebysDocuments',p.documentId), { ...head, state: next.state === 'completed' ? 'internally_approved' : next.state, revision: head.revision+1, updatedAt: serverTimestamp() });
         tx.set(currentRef, nextTask?.id === current.id ? nextTask : closed);

@@ -26,4 +26,12 @@ test('belge türü ürün türünden ayrıdır; satın alma yalnız kendi şablo
     assert.match(elements.tplSelectDropdown.innerHTML, /purchase/);
     assert.match(elements.tplSelectDropdown.innerHTML, /legacy/);
     assert.doesNotMatch(elements.tplSelectDropdown.innerHTML, /incoming/);
+    const catalog = window.AppModules.EBYSDocumentTypes;
+    assert.deepEqual(Array.from(catalog.types.filter(type => type.purchaseSelectable), type => type.code), [catalog.purchaseCode]);
+    for (const code of ['INCOMING_DOCUMENT', 'OUTGOING_DOCUMENT', 'INTERNAL_CORRESPONDENCE']) {
+        assert.equal(catalog.byCode(code).supported, true);
+    }
+    for (const code of ['APPROVAL_OLUR', 'COVER_LETTER']) {
+        assert.equal(catalog.byCode(code).supported, false);
+    }
 });

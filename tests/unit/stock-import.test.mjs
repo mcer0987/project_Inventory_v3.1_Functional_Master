@@ -325,6 +325,19 @@ test('Envanter No: B1 kaydına da yazılır ve tam B1 sözleşmesinden geçer', 
     assert.deepEqual(plain(load().S.validateB1(r.records[0])), []);
 });
 
+test('Seri No: tanınır, kayda sn olarak yazılır; boş ve "-" değer alan eklemez', () => {
+    const r = build([
+        { Ürün: 'Laptop X', Tür: 'Laptop', 'Envanter No': 'ENV-1', 'Seri No': ' SN-123 ' },
+        { Ürün: 'Laptop Y', Tür: 'Laptop', 'Envanter No': 'ENV-2', 'Seri No': '' },
+        { Ürün: 'Laptop Z', Tür: 'Laptop', 'Envanter No': 'ENV-3', 'Seri No': '-' },
+    ], 'b2');
+    assert.deepEqual(r.errors, []);
+    assert.ok(!r.warnings.some(w => /tanınmadı/.test(w)), '"Seri No" sütunu tanınmayan sütun uyarısı almamalı');
+    assert.equal(r.records[0].sn, 'SN-123');
+    assert.ok(!('sn' in r.records[1]) && !('sn' in r.records[2]));
+    r.records.forEach(rec => assert.deepEqual(plain(load().S.validateB2(rec)), []));
+});
+
 test('Envanter No: boş satır importu tamamen durdurur', () => {
     const { S, I, makeId } = load();
     const r = plain(I.buildStockRecords([{ Ürün: 'Laptop', Tür: 'Laptop' }], 'b2', { schema: S, makeId }));

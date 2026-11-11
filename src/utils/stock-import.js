@@ -46,6 +46,7 @@
         limit: ['limit', 'kritik stok', 'min stok', 'minimum stok'],
         // Envanter No B1 ve B2 stok kayıtlarında saklanır ve tekrar importları ayırt etmek için kullanılır.
         envanterNo: ['envanter no', 'envanter numarası', 'envanter numarasi', 'envanterno', 'envanter', 'inventory no', 'asset no'],
+        sn: ['seri no', 'seri numarası', 'seri numarasi', 'seri', 'sn', 's/n', 'serial', 'serial no', 'serial number'],
     };
     const ALIAS_INDEX = new Map();
     Object.entries(FIELD_ALIASES).forEach(([field, list]) => list.forEach(a => ALIAS_INDEX.set(headerKey(a), field)));
@@ -176,7 +177,7 @@
                 added.push(incoming);
                 return;
             }
-            const comparedFields = ['sütun', 'raf', 'tür', 'ürün', 'marka', 'adet', 'durumu', 'açıklama', 'limit'];
+            const comparedFields = ['sütun', 'raf', 'tür', 'ürün', 'marka', 'adet', 'durumu', 'açıklama', 'limit', 'sn'];
             const differences = matches.length === 1
                 ? comparedFields.filter(field => String(matches[0].item[field] ?? '') !== String(incoming[field] ?? ''))
                 : [];
@@ -406,6 +407,7 @@
             // Demirbaş kararı tek kuraldan: ürün türü tanımı → dosyadaki bayrak → ad bir tür adı mı (Schema.isDemirbas).
             draft.isDemirbas = schema.isDemirbas({ ...draft, isDemirbas: flag });
             draft.envanterNo = envanterNo;
+            if (v.sn && v.sn !== '-') draft.sn = v.sn;
             if (v.limit !== undefined && v.limit !== '') {
                 const l = Number(v.limit);
                 if (!Number.isInteger(l) || l < 0) { errors.push(`Satır ${line}: geçersiz limit "${v.limit}".`); return; }

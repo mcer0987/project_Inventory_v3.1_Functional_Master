@@ -152,8 +152,8 @@ test('[update] yalnız "eksik zorunlu alan" muafiyeti: set aynı kısmi kaydı e
 test('alan kümeleri açık: Envanter No B1/B2 ortak opsiyonel alanı; status yalnız B2', () => {
     const S = loadSchema();
     // v3.4: sonCikisId — personel çıkışında stok düşümünü b3 kaydına bağlar (firestore.rules staffExitStockOk)
-    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'sonCikisId', 'stokOncekiDurum']);
-    assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'sonCikisId', 'stokOncekiDurum']);
+    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'sn', 'sonCikisId', 'stokOncekiDurum']);
+    assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'sn', 'sonCikisId', 'stokOncekiDurum']);
     assert.ok(S.stockKnownKeys('b1').includes('envanterNo') && !S.stockKnownKeys('b1').includes('status'));
     assert.ok(S.stockKnownKeys('b2').includes('envanterNo') && S.stockKnownKeys('b2').includes('status'));
 });

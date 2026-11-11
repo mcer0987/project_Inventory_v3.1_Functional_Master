@@ -7,7 +7,7 @@
         body.replaceChildren();
         for (const type of window.AppModules.EBYSDocumentTypes.types) {
             const row = document.createElement('tr');
-            for (const value of [type.code, type.name, type.direction, type.route, type.available ? 'Pilot kullanımda' : 'Sonraki aşama']) {
+            for (const value of [type.name, type.direction, type.route, type.supported ? 'Kullanımda' : 'Bağımsız tür olarak sunulmuyor']) {
                 const cell = document.createElement('td');
                 cell.textContent = value;
                 row.append(cell);

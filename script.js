@@ -1900,7 +1900,8 @@ window.showImportFormatHelp = function (depo = 'b1') {
         '6. Adet  (opsiyonel — boşsa 0/Tükendi sayılır; negatif ya da tam sayı olmayan değer reddedilir)',
         '7. Durumu  (opsiyonel — ör. Kullanıma Hazır, Pasif, Hurda, Servis Sürecinde)',
         '8. Envanter No  (ZORUNLU — her satırda bulunmalı ve benzersiz olmalı)',
-        '9. Açıklama  (opsiyonel)', '',
+        '9. Seri No  (opsiyonel — cihazın seri numarası)',
+        '10. Açıklama  (opsiyonel)', '',
         'Sütun adı büyük/küçük harf ve Türkçe karakterden bağımsız tanınır (ör. "Raf No", "raf numarası", "shelf" hepsi aynı alana eşlenir).',
         'Sıra önemli DEĞİLDİR — eşleme başlık adına göre yapılır; yukarıdaki sıra yalnız okunabilirlik içindir.',
         `Tek dosyada en fazla ${maxRows} veri satırı kabul edilir (yönetici dahil aşılamaz); daha büyük listeleri ${maxRows} satırlık parçalara bölüp ayrı ayrı içe aktarın.`,
@@ -1936,6 +1937,7 @@ window.showImportFormatHelp = function (depo = 'b1') {
             ['Adet', '0 veya pozitif tam sayı. Boş bırakılırsa 0 / Tükendi kabul edilir.', '1'],
             ['Durumu', 'Ör. Kullanıma Hazır, Pasif, Hurda veya Servis Sürecinde.', 'Kullanıma Hazır'],
             ['Envanter No', 'Her satırda zorunludur. B1 ve B2’de saklanır; mevcut numaralar yeniden eklenmez.', 'ENV-2026-001'],
+            ['Seri No', 'Cihazın seri numarası. Ürün kaydında saklanır.', 'SN5X8K2L9'],
             ['Açıklama', 'Ürünle ilgili ek bilgi veya not.', 'İdari işler'],
         ];
         const list = el('ol', 'import-guide-columns');
@@ -2210,6 +2212,7 @@ window.exportToExcel = function (depo) {
                 "Son Güncelleme": tsToTurkiye(item.lastUpdate)
             };
             row["Envanter No"] = item.envanterNo || "-";
+            row["Seri No"] = item.sn || "-";
             return row;
         });
         sheetName = depo.toUpperCase() + " Deposu";

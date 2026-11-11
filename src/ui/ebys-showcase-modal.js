@@ -21,7 +21,7 @@ const BOOKS = [
 
 const BOOK_STEPS = [
     { icon: 'fa-pen', title: 'Taslak', text: 'Konu, muhatap ve metin yazılır. Taslak istenildiği kadar düzenlenebilir.' },
-    { icon: 'fa-lock', title: 'Onaya sun / Dondur', text: 'Metin mühürlenir. Bu sürüm artık değiştirilemez; değişiklik yeni sürüm demektir.' },
+    { icon: 'fa-lock', title: 'Onaya sun / Dondur', text: 'Metin mühürlenir. Bu sürüm artık değiştirilemez. Yeni sürüm aynı evraka eklenir ve evrak toplamını artırmaz.' },
     { icon: 'fa-stamp', title: 'Resmi kayıt', text: 'Evrak, kurum koduyla başlayan benzersiz kayıt numarasını alır ve defterde yerini bulur.' },
 ];
 
@@ -62,6 +62,7 @@ const ORG_FACTS = [
 ];
 
 const FAQ = [
+    ['Belgeyi nereden açarım ve defter neyi gösterir?', 'Satın alma talebini Satın Alma ekranından, gelen ve giden evrakı veya iç yazışmayı ilgili Evrak Kayıt Defteri sekmesinden açın. Kurum içi onay tamamlandığında işin durumunu İcra Takibi bölümünden izleyin. Defter araması ve filtresi yalnız açık sayfadaki en fazla 50 kaydı kapsar. Güncel toplamlar için Toplamları yenile seçeneğini kullanın.'],
     ['Evrakı dondurduktan sonra yazım hatası fark ettim, ne yapmalıyım?', 'Dondurulan sürüm değişmez. İmzacılardan biri evrakı gerekçeyle yazara iade ettiğinde düzeltip yeni sürüm olarak yeniden sunabilirsiniz.'],
     ['Başkasına ait bir onay görevini neden göremiyorum?', 'Görevler kişiye özeldir. Sıra size gelmeden evrak listenizde görünmez; sıra geldiğinde "Bana Gelen Onaylar" ekranında açılır.'],
     ['İzne çıkacağım; bekleyen onaylarım ne olacak?', 'Yönetici bekleyen görevinizi en çok 90 gün için başka bir personele devredebilir. Kayıtta asıl görevli olarak adınız görünmeye devam eder.'],
@@ -171,7 +172,7 @@ function renderBooks() {
 function renderSign() {
     const root = el('div', { cls: 'ebys-sc-section' });
     root.append(sectionHead('Aşama 5 · Kişisel Görevler', 'Sırası gelen imzalar',
-        'Sıranız geldiğinde Bana Gelen Onaylar → Evrak görevlerim bölümünden Görev / Karar seçeneğini açın ve evrakı inceleyin.'));
+        'Görevdeki sürümü aç seçeneği size gönderilen metni gösterir. Durum kontrolü başarısız olursa Durumu yeniden kontrol et seçeneğini kullanabilirsiniz. Sıranız geldiğinde Bana Gelen Onaylar → Evrak görevlerim bölümünden Görev / Karar seçeneğini açın.'));
 
     const chain = el('ol', { cls: 'ebys-sc-chain', attrs: { 'aria-label': 'Örnek onay zinciri' } });
     const nodes = CHAIN.map(c => {
@@ -219,7 +220,7 @@ function renderSign() {
             el('div', { cls: 'ebys-sc-feature' }, [
                 badge('Süreli vekâlet', 'amber'),
                 el('strong', { text: 'İzindeyken işler durmaz' }),
-                el('p', { text: 'Yönetici bekleyen görevi bitiş tarihiyle (en çok 90 gün) başka bir personele devreder. Asıl görevlinin adı kayıtta kalır.' }),
+                el('p', { text: 'Yönetici bekleyen görevi bitiş tarihiyle (en çok 90 gün) başka bir personele devreder. Asıl görevlinin adı kayıtta kalır. Süre dolduysa yöneticinizden görev durumunu kontrol etmesini isteyin; görev kendiliğinden asıl kişiye dönmez.' }),
             ]),
         ]));
     paint();
@@ -319,7 +320,7 @@ function renderExecution() {
         { tone: 'sky', icon: 'fa-link', title: 'Stok işlemini doğrulayın',
             text: 'Teslim için stok kaydı gerekiyorsa işin Detay ekranından Stok işlemini doğrula ve bağla seçeneğini kullanın. Sorumlu, bağladığınız işlem numarasını kapanışta girebilir.' },
         { tone: 'green', icon: 'fa-box-archive', title: 'Kapanışı ve yedeği izleyin',
-            text: 'İcra Takibi tablosundan tamamlanan işleri görün. Evraklarımı yedekle ile erişebildiğiniz evrak ve ilgili icra kayıtlarını dışa aktarabilirsiniz.' },
+            text: 'Kurum içi onay tamamlandığında işin durumunu İcra Takibi tablosundan izleyin. Evrak kopyasını indir ile kendi evraklarınızı ve yetkili olduğunuz ilgili kayıtları alabilirsiniz. Kurum kurtarma paketi ayrı hazırlanır.' },
     ] : [
         { tone: 'indigo', icon: 'fa-clipboard-check', title: 'Size atanan işi kabul edin',
             text: 'Görevlerim → İcra İşlerim → Görevi aç yolunu izleyin. Evrakı inceleyip Kabul Et dediğinizde iş İcrada durumuna geçer.' },

@@ -39,6 +39,7 @@ dialog.ebys-document-dialog{position:fixed;inset:0;margin:auto!important;width:m
 .ebys-process-footer{justify-content:space-between;margin-top:20px;padding-top:16px;border-top:1px solid var(--color-border,#cbd5e1)}
 .ebys-process-footer small{font-size:.8rem;opacity:.8;flex:1;min-width:180px;line-height:1.5}
 .ebys-process-status:not([hidden]){padding:10px 12px;border-radius:8px;background:rgba(220,38,38,.08);color:var(--color-danger,#dc2626);font-size:.85rem}
+.ebys-document-dialog .ebys-recheck[hidden]{display:none}
 @media(max-width:600px){.ebys-process-grid{grid-template-columns:1fr}.ebys-process-step-state{flex-basis:100%;padding-left:42px}.ebys-process-route li{flex-wrap:wrap}}
 .ebys-registry-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:170px}
 .ebys-registry-actions button{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;margin:0!important;border-radius:8px;white-space:nowrap;font-size:.85rem}

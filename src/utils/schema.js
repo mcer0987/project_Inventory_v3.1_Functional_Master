@@ -264,11 +264,12 @@
     //          stokOncekiDurum — stok 0'a düşerken saklanan önceki durum (computeStockPatch); tam kayıt yazan yollar
     //                            (saveData / upsertItem / geri yükleme) kaydı bu alanla birlikte yeniden yazar.
     //          envanterNo      — B1/B2 stok kaydı kimliği (benzersizlik kontrolü importta yapılır).
+    //          sn              — cihazın seri numarası (Excel/CSV içe aktarma; benzersizlik zorunlu değil).
     //          sonCikisId      — v3.4: personel çıkışında stok düşümünü aynı commit'teki b3 kaydına bağlar (firestore.rules
     //                            staffExitStockOk); yalnız runStockOps personel çıkışı yazar.
-    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo', 'sonCikisId']);
+    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo', 'sn', 'sonCikisId']);
     const B2_OPTIONAL_KEYS = Object.freeze([...B1_OPTIONAL_KEYS]);
-    const STOCK_STRING_KEYS = Object.freeze(['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status', 'envanterNo', 'stokOncekiDurum']);
+    const STOCK_STRING_KEYS = Object.freeze(['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status', 'envanterNo', 'sn', 'stokOncekiDurum']);
 
     const B1_SPEC = Object.freeze({ required: B1_KEYS, optional: B1_OPTIONAL_KEYS, legacy: B1_LEGACY_KEYS, label: 'B1' });
     const B2_SPEC = Object.freeze({ required: B2_KEYS, optional: B2_OPTIONAL_KEYS, legacy: B2_LEGACY_KEYS, label: 'B2' });

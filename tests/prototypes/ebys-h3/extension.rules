@@ -1,0 +1,92 @@
+    // H3-A candidate only. Never loaded by the production firebase.json.
+    function h3StaffNameByPid(r,pid) {
+      let pd = get(/databases/$(database)/documents/$(r)/personel/items/$(pid)).data;
+      let n1 = pd.get('name', '');
+      let n2 = pd.get('adSoyad', '');
+      let nm = (n1 is string && n1 != '') ? n1 : ((n2 is string && n2 != '') ? n2 : pd.get('ad', ''));
+      return nm is string ? nm.trim() : '';
+    }
+    function h3Legacy(d) { return d.get('engineVersion','legacy') == 'legacy' && !('ebysDocumentId' in d); }
+    function h3New(d) { return d.get('engineVersion','') == 'ebys-v1'; }
+    function h3Purchase(r,id) { return ebysPath(r,'purchaseOrders',id); }
+    function h3Finance(r,pid,vid) { return /databases/$(database)/documents/$(r)/purchaseFinance/items/$(pid)/versions/$(vid); }
+    function h3HeadCreate(r,id,h) {
+      return h.get('purchaseOrderId','') == '' ? !h.keys().hasAny(['purchaseOrderId'])
+        : h.purchaseOrderId == id && h.kind == 'internal' && !exists(h3Purchase(r,id))
+          && getAfter(h3Purchase(r,id)).data.createdByUid == h.ownerUid
+          && getAfter(h3Purchase(r,id)).data.ebysDocumentId == id;
+    }
+    function h3Pointer(r,id,d) {
+      let h = getAfter(ebysPath(r,'ebysDocuments',id)).data;
+      let u = get(ebysPath(r,'units',d.unitId)).data;
+      return h3New(d) && ebysId(id) && d.id == id && d.ebysDocumentId == id
+        && d.keys().hasOnly(['id','engineVersion','schemaVersion','ebysDocumentId','createdByUid','unitId','birim','documentTypeCode','revision','createdAt','updatedAt'])
+        && d.schemaVersion == 2 && d.documentTypeCode == 'PURCHASE_REQUEST' && d.createdByUid == request.auth.uid
+        && d.unitId == h.unitId && d.birim == u.name && u.get('active',true) == true
+        && h.purchaseOrderId == id && h.ownerUid == d.createdByUid && h.updatedAt == request.time
+        && d.updatedAt == request.time && d.revision == h.revision && ebysCommand(r,h,'saveDraft')
+        && h3Proposal(getAfter(ebysPath(r,'ebysDrafts',id)).data.purchaseSnapshot,id);
+    }
+    match /{r}/purchaseOrders/items/{id} {
+      allow get: if validRoot(r) && member(r) && !exists(h3Purchase(r,id));
+      allow create: if h3New(request.resource.data) ? validRoot(r) && member(r) && h3Pointer(r,id,request.resource.data)
+        && !exists(ebysPath(r,'ebysDocuments',id)) && request.resource.data.revision == 1 && request.resource.data.createdAt == request.time
+        : h3Legacy(request.resource.data) && (isAdmin(r) ? h3OldAdminCreate(r,id) : h3OldStaffCreate(r,id));
+      allow update: if h3New(resource.data) ? validRoot(r) && member(r) && h3Pointer(r,id,request.resource.data)
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.revision > resource.data.revision
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unitId','birim','revision','updatedAt'])
+        : h3Legacy(resource.data) && h3Legacy(request.resource.data) && (isAdmin(r) ? h3OldAdminUpdate(r,id) : h3OldStaffUpdate(r,id));
+    }
+    function h3Proposal(p,id) {
+      return p is map && p.keys().hasOnly(['purchaseOrderId','documentTypeCode','items','totals','butce','budgetMode','calculationVersion'])
+        && p.purchaseOrderId == id && p.calculationVersion == 1 && p.items is list && p.totals is map && p.documentTypeCode == 'PURCHASE_REQUEST' && poItemsOk(p)
+        && p.butce is number && p.butce >= 0 && p.butce <= 1000000000 && p.budgetMode in ['auto','manual'];
+    }
+    function h3Draft(r,h,d) {
+      return h.get('purchaseOrderId','') == '' ? !d.keys().hasAny(['purchaseSnapshot'])
+        : h.purchaseOrderId == h.id && d.purchaseSnapshot.purchaseOrderId == h.id
+          && getAfter(h3Purchase(r,h.id)).data.revision == h.revision;
+    }
+    function h3UnitSnapshot(r,h,s) {
+      let u = get(ebysPath(r,'units',h.unitId)).data;
+      return u.get('active',true) == true && s == {'unitId':h.unitId,'name':u.name,'code':u.get('code',''),
+        'organizationId':u.get('organizationId',''),'organizationCode':h.organizationCode,'source':'units'};
+    }
+    function h3Version(r,h,d,draft) {
+      return h.get('purchaseOrderId','') == '' ? d.schemaVersion == 1 && !d.keys().hasAny(['purchaseSnapshot','unitSnapshot'])
+        : d.schemaVersion == 2 && d.purchaseSnapshot == draft.purchaseSnapshot
+          && d.purchaseSnapshot.purchaseOrderId == h.id && h3UnitSnapshot(r,h,d.unitSnapshot);
+    }
+    function h3ProcessStart(r,id,p) {
+      let v = get(ebysPath(r,'ebysVersions',id)).data;
+      return v.get('schemaVersion',1) == 2 ? p.purchaseOrderId == v.purchaseSnapshot.purchaseOrderId
+        : !p.keys().hasAny(['purchaseOrderId']);
+    }
+    function h3FirstFinance(r,p,n) {
+      return p.get('purchaseOrderId','') == '' || p.currentStep != 0 || n.lastCommand != 'decide' || n.lastResult != 'approved'
+        || getAfter(h3Finance(r,p.purchaseOrderId,p.id)).data.createdAt == request.time;
+    }
+    function h3FinanceRead(r,pid,vid) {
+      let v = get(ebysPath(r,'ebysVersions',vid)).data;
+      return v.get('schemaVersion',1) == 2 && v.purchaseSnapshot.purchaseOrderId == pid
+        && (v.ownerUid == request.auth.uid || epAccess(r,vid) || ejVersionAccess(r,vid));
+    }
+    function h3FinanceCreate(r,pid,vid,d) {
+      let p = get(ep(r,vid)).data;
+      let n = getAfter(ep(r,vid)).data;
+      let v = get(ebysPath(r,'ebysVersions',vid)).data;
+      return d.keys().hasOnly(['schemaVersion','purchaseOrderId','versionId','contentDigest','actorUid','operationId','exchangeRate','exchangeRateDate','exchangeRateSource','reportingTotalTRY','createdAt'])
+        && d.schemaVersion == 2 && d.purchaseOrderId == pid && d.versionId == vid && d.actorUid == request.auth.uid
+        && p.purchaseOrderId == pid && p.currentStep == 0 && p.state == 'active' && p.activeAssigneeUid == request.auth.uid
+        && n.lastCommand == 'decide' && n.lastResult == 'approved' && n.revision == p.revision+1
+        && d.operationId == n.lastOperationId && n.updatedAt == request.time && d.createdAt == request.time
+        && v.documentId == pid && v.ownerUid == p.ownerUid && v.purchaseSnapshot.purchaseOrderId == pid && d.contentDigest == v.contentDigest
+        && poFxFieldsOk(d) && d.exchangeRate.USD > 0 && d.exchangeRate.EUR > 0 && financeSource(r,d,v.purchaseSnapshot);
+    }
+    match /{r}/purchaseFinance/items/{purchaseId}/versions/{versionId} {
+      allow get: if validRoot(r) && member(r) && h3FinanceRead(r,purchaseId,versionId);
+      allow create: if validRoot(r) && member(r) && h3FinanceCreate(r,purchaseId,versionId,request.resource.data);
+      allow list, update, delete: if false;
+    }

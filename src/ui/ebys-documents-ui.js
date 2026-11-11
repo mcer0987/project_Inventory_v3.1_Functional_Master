@@ -7,23 +7,83 @@ import './ebys-execution-ui.js';
 const api = () => window.AppModules.EBYSDocuments;
 const schema = () => window.AppModules.EBYSDocumentSchema;
 const labels = { incoming: 'Gelen Evrak Defteri', outgoing: 'Giden Evrak Defteri', internal: 'İç Yazışmalar' };
-const states = { draft: 'Taslak', registered: 'Kayıtlı', in_review: 'İncelemede / rota bekliyor', internally_approved: 'Kurum içi onay tamamlandı', closed: 'Kapandı', returned:'İade edildi',rejected:'Reddedildi',withdrawn:'Geri çekildi',pending_execution: 'İcrada', archived: 'Arşivde' };
+const states = { draft: 'Taslak', registered: 'Kayıtlı', in_review: 'Donduruldu · Süreç durumuna bakın', internally_approved: 'Kurum içi onay tamamlandı', closed: 'Kapandı', returned:'İade edildi',rejected:'Reddedildi',withdrawn:'Geri çekildi',pending_execution: 'İcra bekliyor (eski kayıt)', archived: 'Arşivde' };
 const node = (tag, text, css) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (css) n.className = css; return n; };
 const button = (text, action, css = 'btn btn-sm btn-outline-primary') => { const b = node('button', text, css); b.type = 'button'; b.onclick = action; return b; };
-let kind = 'incoming', rows = [], cursor = null, unsubscribe = null, dialog = null, syncAllowed = false, countsRevision = 0;
+let kind = 'incoming', rows = [], cursor = null, unsubscribe = null, dialog = null, syncAllowed = false, countsRevision = 0, listRevision = 0, editorEpoch = 0, countsLoaded = false, countsBusy = false;
+const documentDialogs=new Map();let sessionActor=null;
+const registryVisible=()=>!document.hidden&&getComputedStyle(document.getElementById('purchaseTab')).display!=='none';
+function clearDocumentDialogs(documentId=null){for(const [d,r] of documentDialogs)if(!documentId||r.documentId===documentId){d.remove();documentDialogs.delete(d);}if(!documentId)dialog=null;}
+function pauseEditors(){for(const [d,r] of documentDialogs){r.ready=false;r.generation++;if(!r.saved)r.saved=[...d.querySelectorAll('button')].filter(b=>b.textContent!=='Kapat'&&!b.classList.contains('ebys-dialog-close')&&b!==r.retry).map(b=>[b,b.disabled]);r.saved.forEach(([b])=>b.disabled=true);}}
+async function resumeEditors(){
+    for(const [d,r] of documentDialogs){
+        if(!d.isConnected){documentDialogs.delete(d);continue;}
+        const generation=++r.generation;
+        try{
+            if(r.actor!==window.userAuth?.uid){d.remove();documentDialogs.delete(d);continue;}
+            if(r.validate&&!await r.validate()){
+                if(generation===r.generation&&d.isConnected){r.status.textContent='Evrak değişti. Metniniz korunuyor. İşlem yapmak için güncel evrakı yeniden açın.';r.retry.hidden=true;}continue;
+            }
+            if(!d.isConnected||generation!==r.generation||document.hidden)continue;
+            if(r.actor!==window.userAuth?.uid){d.remove();documentDialogs.delete(d);continue;}
+            r.saved?.forEach(([b,disabled])=>b.disabled=disabled);r.saved=null;r.ready=true;r.retry.hidden=true;r.status.textContent='';
+        }catch(error){
+            if(!d.isConnected||generation!==r.generation)continue;
+            if(r.actor!==window.userAuth?.uid){d.remove();documentDialogs.delete(d);}
+            else if(error.code==='permission-denied'){clearDocumentDialogs(r.documentId);}
+            else{r.status.textContent='Evrak durumu kontrol edilemedi. Metniniz korunuyor; yeniden kontrol edin.';r.retry.hidden=false;}
+        }
+    }
+}
 const host = document.getElementById('ebysDocumentRegistry');
+const countScope = document.getElementById('ebysCountScope');
+const countStatus = document.getElementById('ebysCountStatus');
+const countRefresh = document.getElementById('ebysCountRefresh');
 const message = text => { const status=document.getElementById('ebysDocumentStatus'); if(status)status.textContent=text;else window.showAppAlert?.(text); };
-function clear() { rows = []; document.getElementById('ebysDocumentRows')?.replaceChildren(); document.querySelectorAll('.ebys-document-dialog').forEach(d => d.remove()); dialog = null; }
-function stop() { unsubscribe?.(); unsubscribe = null; countsRevision++; }
+function clear() { editorEpoch++;rows = []; document.getElementById('ebysDocumentRows')?.replaceChildren(); clearDocumentDialogs(); }
+function stop(resetCounts=true) {
+    unsubscribe?.();
+    unsubscribe = null;
+    countsRevision++;
+    listRevision++;
+    if (resetCounts) {
+        countsLoaded = false;
+        document.querySelectorAll('[data-ebys-count]').forEach(n => { n.textContent = '—'; });
+        if (countStatus) countStatus.textContent = '';
+    } else if (countsBusy && countStatus) {
+        countStatus.textContent = 'Son sayım tamamlanmadı. Toplamları yeniden kontrol edebilirsiniz.';
+    }
+    if (countRefresh) countRefresh.disabled = false;
+    countsBusy = false;
+}
 async function refreshCounts() {
+    if(!syncAllowed||countsBusy||!registryVisible())return;
+    countsBusy=true;countsLoaded=true;const actor=window.userAuth?.uid;
+    if (countRefresh) countRefresh.disabled = true;
+    if (countStatus) countStatus.textContent = 'Toplamlar kontrol ediliyor…';
     const revision = ++countsRevision;
     try {
         const counts = await api().countDocuments();
-        if (revision !== countsRevision || !syncAllowed) return;
+        if (revision !== countsRevision || !syncAllowed || !registryVisible() || actor!==window.userAuth?.uid) return;
+        countsLoaded=true;
         for (const key of ['total', 'draft', 'registered', 'in_review']) document.getElementById(`ebysCount-${key}`).textContent = String(counts[key]);
-    } catch { if (revision === countsRevision) document.querySelectorAll('[data-ebys-count]').forEach(n => { n.textContent = '—'; }); }
+        if (countStatus) countStatus.textContent = 'Toplamlar güncel. Son kontrol: ' + new Date().toLocaleTimeString('tr-TR');
+    } catch {
+        if (revision === countsRevision && registryVisible() && actor === window.userAuth?.uid && countStatus) {
+            countStatus.textContent = 'Toplamlar kontrol edilemedi. Yeniden deneyebilirsiniz.';
+        }
+    } finally {
+        if (revision === countsRevision) {
+            countsBusy = false;
+            if (countRefresh) countRefresh.disabled = false;
+        }
+    }
 }
 function dismissable(modal) {
+    const r={actor:window.userAuth?.uid,generation:0,ready:!document.hidden};documentDialogs.set(modal,r);
+    r.status=node('p','');r.status.setAttribute('role','status');r.retry=button('Durumu yeniden kontrol et',()=>resumeEditors());r.retry.hidden=true;modal.append(r.status,r.retry);
+    r.retry.classList.add('ebys-recheck');
+    modal.addEventListener('close',()=>{if(modal.dataset.confirming!=='true')documentDialogs.delete(modal);});
     const close = button('✕', () => modal.close(), 'ebys-dialog-close'); close.setAttribute('aria-label', 'Pencereyi kapat'); modal.append(close);
     const outside = e => { const r = modal.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
     let downOutside = false;
@@ -32,12 +92,13 @@ function dismissable(modal) {
     modal.addEventListener('close', () => { if (!modal.open && modal.dataset.confirming !== 'true') modal.remove(); });
 }
 function subscribe() {
-    stop();
+    unsubscribe?.();unsubscribe=null;const revision=++listRevision, actor=window.userAuth?.uid;
     const repair = document.getElementById("ebysLegacyAccessRepair");
     if (repair) repair.hidden = !window.isDbAdmin?.();
-    if (!syncAllowed || !window.userAuth || document.getElementById('purchaseTab')?.style.display === 'none') return () => {};
+    if (!syncAllowed || !window.userAuth || !registryVisible()) return () => {};
     message('Evraklar yükleniyor…');
-    const own = api().listDocuments(data => { rows = data; render(); refreshCounts(); message(`${data.length} kayıt · Sayfa başına en fazla 50 evrak`); }, error => message(`Evraklar yüklenemedi: ${error.message}`), cursor, kind);
+    if(!countsLoaded)refreshCounts();
+    const own = api().listDocuments(data => { if(revision!==listRevision||!syncAllowed||!registryVisible()||actor!==window.userAuth?.uid)return; rows=data;render();message(data.length+' kayıt · Sayfa başına en fazla 50 evrak · Arama ve durum filtresi yalnız bu sayfada'); },error=>{if(revision!==listRevision||actor!==window.userAuth?.uid)return;stop();clear();message('Evraklar yüklenemedi: '+error.message);},cursor,kind);
     unsubscribe = own;
     return () => { own(); if (unsubscribe === own) { unsubscribe = null; clear(); } };
 }
@@ -74,14 +135,14 @@ function field(form, label, name, value = '', options = null, multiline = false)
 }
 async function open(id = null) {
     try {
-        const actor = window.userAuth?.uid;
+        const actor = window.userAuth?.uid, epoch=editorEpoch;
         const loaded = id ? await api().readDocument(id) : null;
-        if (!actor || actor !== window.userAuth?.uid) return;
+        if (!actor || actor !== window.userAuth?.uid || epoch!==editorEpoch) return;
         let head = loaded?.head || { id: schema().uuid(), kind, revision: 0, unitId: '', organizationCode: 'MED', registrationNo: '', state: 'draft' };
         const data = loaded?.body || {}, metadata = data.metadataSnapshot || data.metadata || {};
         const frozen = !!head.currentVersionId;
         dialog?.remove(); dialog = node('dialog', null, 'ebys-document-dialog');
-        const editor = dialog; dismissable(editor);
+        const editor = dialog; dismissable(editor);documentDialogs.get(editor).documentId=head.id;documentDialogs.get(editor).validate=async()=>{if(!loaded)return true;const current=await api().readDocument(head.id);return current.head.revision===head.revision;};
         const form = node('form', null, 'ebys-document-form'); form.method = 'dialog';
         const title = node('h3', `${labels[head.kind]} · ${head.registrationNo || 'Yeni taslak'}`, 'ebys-wide'); form.append(title);
         const unitOptions = [['', 'Birim seçin'], ...(window.data?.units || []).filter(u => u.active !== false || String(u.id) === head.unitId).map(u => [String(u.id), u.name || u.birimAdi || String(u.id)])];
@@ -104,7 +165,7 @@ async function open(id = null) {
                 content: values.content, metadata: Object.fromEntries(['subject','correspondent','date','filePlanCode','confidentiality','distribution','externalRegistrationNo'].map(k => [k, values[k]])) };
         };
         async function act(action) {
-            if (busy) return; busy = true; actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
+            if (busy||document.hidden||actor!==window.userAuth?.uid||!documentDialogs.get(editor)?.ready) return; busy = true; actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
             try {
                 if (!frozen) {
                     if (!form.reportValidity()) return;
@@ -125,16 +186,17 @@ async function open(id = null) {
                     pendingFreeze = null;
                 }
                 if (action === 'issueVerification') await window.AppModules.EBYSVerification.issueVerification(head.id);
+                if(!editor.isConnected||actor!==window.userAuth?.uid||epoch!==editorEpoch)return;
                 status.textContent = action === 'freeze' ? 'İçerik donduruldu ve incelemeye hazır.' : 'Evrak kaydedildi.';
                 if (action === 'save') { editor.close(); cursor = null; subscribe(); message('Taslak kaydedildi.'); }
                 else if (editor.isConnected) await open(head.id);
-            } catch (error) { status.textContent = error.message; }
+            } catch (error) { if(error.code==='permission-denied'){clearDocumentDialogs();return;}status.textContent = error.message; }
             finally { busy = false; actions.querySelectorAll('button').forEach(b => { b.disabled = false; }); }
         }
         if (!frozen) {
             actions.append(button('Taslağı kaydet', () => act('save'), 'btn btn-primary'));
             actions.append(button('Onaya sun / Dondur', async () => {
-                if (busy || !form.reportValidity()) return;
+                if (busy || document.hidden || !documentDialogs.get(editor)?.ready || !form.reportValidity()) return;
                 if (typeof window.showCustomConfirm !== 'function') { status.textContent = 'Onay penceresi yüklenemedi; sayfayı yenileyin.'; return; }
                 // Kurumsal onay katmanı native dialogun altında kalmasın; form ve girişleri korunur.
                 editor.dataset.confirming = 'true'; editor.close();
@@ -162,6 +224,8 @@ async function open(id = null) {
 function preview(head, data) {
     const modal = node('dialog', null, 'ebys-document-dialog'); const body = node('article', null, 'ebys-preview');
     dismissable(modal);
+    documentDialogs.get(modal).documentId=head.id;
+    documentDialogs.get(modal).validate=async()=>{if(!head.revision)return true;const current=await api().readDocument(head.id);return current.head.revision===head.revision;};
     const meta = data.metadataSnapshot || data.metadata || data;
     body.append(node('h2', meta.subject || 'Üst yazı'), node('p', `Sayı: ${head.registrationNo || 'TASLAK'} · Tarih: ${meta.date || ''}`),
         node('p', `Muhatap: ${meta.correspondent || ''}`), node('p', `Dosya planı: ${meta.filePlanCode || ''} · Gizlilik: ${meta.confidentiality || ''}`),
@@ -192,21 +256,52 @@ if (host) {
             catch(e){message(e.message);}
         });repair.id="ebysLegacyAccessRepair";repair.hidden=true;host.append(repair);
     }
+    if (countRefresh) countRefresh.onclick = refreshCounts;
     const tabs = document.getElementById('ebysDocumentKinds');
     for (const [value, label] of Object.entries(labels)) { const b = button(label, () => { kind = value; cursor = null; subscribe(); }); b.dataset.kind = value; tabs.append(b); }
-    for (const [value, label] of Object.entries(states)) { const opt = node('option', label); opt.value = value; document.getElementById('ebysStateFilter').append(opt); }
+    for (const [value, label] of Object.entries(states)) { if (value === 'pending_execution') continue; const opt = node('option', label); opt.value = value; document.getElementById('ebysStateFilter').append(opt); }
     document.getElementById('ebysStateFilter').onchange = render;
     document.getElementById('ebysDocumentSearch').oninput = render;
     document.getElementById('ebysDocumentNew').onclick = () => open();
     document.getElementById('ebysDocumentNext').onclick = () => { if (rows.length === 50) { cursor = rows.at(-1)._cursor; subscribe(); } };
     document.getElementById('ebysDocumentFirst').onclick = () => { cursor = null; subscribe(); };
-    document.getElementById('ebysDocumentExport').onclick = async () => {
-        try { const data = await api().exportOwnDocuments(); const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); const a = node('a'); a.href = url; a.download = `ebys-${Date.now()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
-        catch (error) { message(error.message); }
+    const exportButton = document.getElementById('ebysDocumentExport');
+    exportButton.onclick = async () => {
+        exportButton.disabled = true;
+        try {
+            const data = await api().exportOwnDocuments();
+            const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+            const link = node('a');
+            link.href = url;
+            link.download = `ebys-kisisel-kopya-${Date.now()}.json`;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            const partial = Object.values(data.manifest.collections).some(entry => entry.status === 'partial');
+            message(partial ? 'Kişisel kopya indirildi. Eksik ilişkiler dosyada belirtiliyor.' : 'Kişisel evrak kopyası indirildi.');
+        } catch (error) {
+            message(error.message);
+        } finally {
+            exportButton.disabled = false;
+        }
     };
-    window.registerSyncListener('ebysDocuments', () => { syncAllowed = true; subscribe(); return () => { syncAllowed = false; stop(); clear(); }; });
-    window.AppModules.AdminTabs.onAny(tab => { if (tab === 'purchaseTab') subscribe(); else { stop(); clear(); } });
-    window.addEventListener('onAppLogout', () => { stop(); clear(); });
+    window.registerSyncListener('ebysDocuments', () => {
+        sessionActor = window.userAuth?.uid;
+        syncAllowed = true;
+        if (countScope) {
+            const scope = window.isDbAdmin?.() ? 'Kurumun' : 'Kendi';
+            countScope.textContent = scope + ' tüm evrak türlerindeki toplamlarını gösterir. Sayfa filtresi bu toplamları değiştirmez. Bir evrakın yeni sürümü toplamı artırmaz.';
+        }
+        subscribe();
+        return () => { syncAllowed = false; sessionActor = null; stop(); clear(); };
+    });
+    window.AppModules.AdminTabs.onAny(tab => { if (tab === 'purchaseTab') {if(!unsubscribe)subscribe();} else { stop(); clear(); } });
+    document.addEventListener('visibilitychange',()=>{
+        if(!syncAllowed)return;
+        if(sessionActor!==window.userAuth?.uid){syncAllowed=false;stop();clear();return;}
+        if(document.hidden){pauseEditors();stop(false);rows=[];document.getElementById('ebysDocumentRows')?.replaceChildren();}
+        else if(registryVisible()){if(!unsubscribe)subscribe();resumeEditors();}
+    });
+    window.addEventListener('onAppLogout', () => { syncAllowed=false;stop();clear(); });
     window.addEventListener('onInventoryDataUpdated', e => { if (e.detail?.collection === 'units') render(); });
 }
 window.AppModules.EBYSDocumentsUI={open};

@@ -1,6 +1,19 @@
 (function () {
     'use strict';
     const kinds = ['paraf', 'approval', 'consent'];
+    const TASK_VALID_FOR_SECONDS = 90 * 86400;
+    // Gösterim hesabıdır; erişim kararını sunucudaki kurallar verir.
+    function taskExpiryMillis(task) {
+        const start = task?.validFrom?.toMillis?.();
+        if (!Number.isFinite(start)) return 0;
+        if (Object.prototype.hasOwnProperty.call(task, 'validForSeconds')) {
+            const seconds = task.validForSeconds;
+            return Number.isInteger(seconds) && seconds > 0 && seconds <= TASK_VALID_FOR_SECONDS && task.validUntil === null
+                ? start + seconds * 1000 : 0;
+        }
+        const end = task.validUntil?.toMillis?.();
+        return Number.isFinite(end) && end > start ? end : 0;
+    }
     function route(input) {
         if (!Array.isArray(input) || !input.length || input.length > 6) throw new Error('Rota 1–6 adım içermeli.');
         return input.map((step, index) => {
@@ -18,5 +31,5 @@
         return text;
     }
     window.AppModules = window.AppModules || {};
-    window.AppModules.EBYSProcessSchema = Object.freeze({ route, reason, kinds });
+    window.AppModules.EBYSProcessSchema = Object.freeze({ route, reason, kinds, TASK_VALID_FOR_SECONDS, taskExpiryMillis });
 })();
