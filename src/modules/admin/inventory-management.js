@@ -550,7 +550,10 @@ window.inventoryManagementModule = {
     const box = row.querySelector('.assign-dev-ids');
     const productId = row.querySelector('.assign-product-sel')?.value;
     if (!productId) { window.DeviceIds.hide(box); return; }
-    window.DeviceIds.render(box, Number(row.querySelector('.assign-qty-inp')?.value) || 1);
+    // v3.6: ürün kaydındaki demirbaş no 1. cihaz satırına otomatik ve kilitli gelir
+    const warehouse = row.querySelector('.assign-warehouse-sel')?.value;
+    const product = (window.data?.[warehouse] || []).find(p => p && String(p.id) === String(productId));
+    window.DeviceIds.render(box, Number(row.querySelector('.assign-qty-inp')?.value) || 1, { fixed: window.DeviceIds.fixedFor(product) });
   },
 
   removeAssignRow: function (btn) {

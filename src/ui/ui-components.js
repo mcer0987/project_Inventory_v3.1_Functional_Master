@@ -119,6 +119,28 @@ function _setAssetPlate(state, value) {
         assign.dataset.bound = '1';
         assign.addEventListener('click', () => { _setAssetPlate('editable', ''); input.focus(); });
     }
+    _syncAssetPlateVisibility();
+}
+
+// v3.6 · Plaka yalnız demirbaşta: sarf üründe (boş numara) alan gizlenir ve numara gönderilmez. Numarası zaten dolu eski bir
+//        sarf kaydında veri kaybolmasın diye salt okunur "Envanter No" olarak görünür. Karar #isDemirbas kutusundan (tür
+//        seçimi handleTypeChange ile kutuyu ayarlar); modal açılışında, tür ve kutu değişiminde yeniden hesaplanır.
+function _syncAssetPlateVisibility() {
+    const plate = document.getElementById('assetPlate');
+    const form = document.getElementById('productForm');
+    if (!plate) return;
+    const box = document.getElementById('isDemirbas');
+    const demirbas = !box || box.checked;
+    const locked = plate.dataset.state === 'locked';
+    plate.hidden = !demirbas && !locked;
+    const label = document.getElementById('assetPlateLabel');
+    if (label) label.textContent = demirbas ? 'Demirbaş No' : 'Envanter No';
+    if (form && plate.hidden) form.dataset.inventoryLocked = '1';
+    else if (form) form.dataset.inventoryLocked = plate.dataset.state === 'editable' ? '0' : '1';
+    if (box && !box.dataset.plateBound) {
+        box.dataset.plateBound = '1';
+        box.addEventListener('change', _syncAssetPlateVisibility);
+    }
 }
 
 // v3.6: sayımdaki raflar listede görünür ama seçilemez ("(Sayımda)"); kaydın ŞU ANKİ rafı seçili kalabilsin diye kapatılmaz.
@@ -209,6 +231,7 @@ export const UIComponents = {
 
         const checkbox = document.getElementById('isDemirbas');
         if (checkbox) checkbox.checked = isDemirbas;
+        _syncAssetPlateVisibility();   // v3.6: sarf türünde plaka gizlenir
     },
 
     // =========================================================================
@@ -374,6 +397,7 @@ export const UIComponents = {
         }
 
         modal.style.display = 'block';
+        _syncAssetPlateVisibility();   // v3.6: kutu durumu bu noktada kesin (düzenlemede kayıttan, eklemede sıfır)
         // v3.6 · İP-3: Enter / "Sonraki" ile alandan alana geçiş ve dokunmatik çubuk (bir kez bağlanır).
         window.AppModules?.FormKeyboardNav?.attach(form);
     },
@@ -498,6 +522,7 @@ export const UIComponents = {
         if (!box || !window.DeviceIds) return;
         if (item && dispatch && window.Schema.isDemirbas(item)) {
             window.DeviceIds.render(box, Number(document.getElementById('transQty')?.value) || 1, {
+                fixed: window.DeviceIds.fixedFor(item),   // v3.6: demirbaş no ürün kaydından, kilitli
                 // Faz 3.5: her tuşta değil, yazma durunca (200 ms) — uzun kimlik listelerinde tarama tuş başına tekrarlanmaz
                 onInput: ids => {
                     clearTimeout(this._serviceHintTimer);

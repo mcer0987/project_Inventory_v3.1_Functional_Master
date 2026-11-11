@@ -26,15 +26,29 @@
             .dev-ids input { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 6px; font-size: 13px; font-family: monospace;
                              border: 1px solid var(--color-border, #cbd5e1); background: var(--color-surface, #fff); color: var(--color-text, #1f2937); margin: 0; }
             .dev-ids-hint { font-size: 11px; color: var(--color-text-muted, #64748b); margin-top: 6px; }
-            .dev-ids-warn { font-size: 12px; color: var(--color-danger, #e74c3c); margin-top: 6px; }`;
+            .dev-ids-warn { font-size: 12px; color: var(--color-danger, #e74c3c); margin-top: 6px; }
+            .dev-ids input.dev-env-fixed { border-color: #c9a227; background: #fbf7e8; color: #3b2f0b; font-weight: 700; cursor: default; }
+            [data-theme="dark"] .dev-ids input.dev-env-fixed { background: #2a2412; color: #f6e7b0; }`;
         document.head.appendChild(st);
     }
 
     const DeviceIds = {
         MAX_UNITS,
 
+        // v3.6: ürün kaydında geçerli Envanter No varsa o cihazın kimliğidir → { envanterNo, sn } (yoksa null).
+        fixedFor(item) {
+            const S = window.Schema;
+            if (!item || !S || typeof S.normDeviceId !== 'function') return null;
+            const env = String(item.envanterNo ?? '').trim();
+            if (!S.normDeviceId(env) || env === '-') return null;
+            const sn = String(item.sn ?? '').trim();
+            return { envanterNo: env, sn: sn && sn !== '-' ? sn : '' };
+        },
+
         // Konteynere qty kadar satır çizer; mevcut değerler (values ya da ekrandakiler) sırayla korunur.
-        render(container, qty, { values, onInput } = {}) {
+        // v3.6 · fixed: ürün kaydındaki demirbaş no — 1. satırın Envanter No'su otomatik dolar ve kilitlenir (değişim yalnız
+        //        Operasyon Merkezi'nde); Seri No kayıtta varsa ön doldurulur, düzeltilebilir. Diğer satırlar elle girilir.
+        render(container, qty, { values, onInput, fixed } = {}) {
             if (!container) return;
             injectStyle();
             const prev = values || this.read(container);
@@ -45,9 +59,16 @@
             let html = `<div class="dev-ids-head">🛡️ Demirbaş · cihaz kimlikleri (${n} cihaz) — her satırda Seri No veya Envanter No, en az biri zorunlu</div>`;
             for (let i = 0; i < n; i++) {
                 const v = prev[i] || {};
-                html += `<div class="dev-ids-row" data-unit="${i}"><span class="dev-ids-no">${i + 1}.</span>
-                    <input type="text" class="dev-sn" placeholder="Seri No" autocomplete="off" value="${esc(v.sn && v.sn !== '-' ? v.sn : '')}">
-                    <input type="text" class="dev-env" placeholder="Envanter No" autocomplete="off" value="${esc(v.envanterNo && v.envanterNo !== '-' ? v.envanterNo : '')}"></div>`;
+                const lock = i === 0 && fixed && fixed.envanterNo ? fixed : null;
+                const sn = v.sn && v.sn !== '-' ? v.sn : (lock && lock.sn) || '';
+                const env = lock ? lock.envanterNo : (v.envanterNo && v.envanterNo !== '-' ? v.envanterNo : '');
+                html += `<div class="dev-ids-row" data-unit="${i}"${lock ? ` data-fixed-env="${esc(lock.envanterNo)}"` : ''}><span class="dev-ids-no">${i + 1}.</span>
+                    <input type="text" class="dev-sn" placeholder="Seri No" autocomplete="off" value="${esc(sn)}">
+                    <input type="text" class="dev-env${lock ? ' dev-env-fixed' : ''}" placeholder="Envanter No" autocomplete="off" value="${esc(env)}"${lock
+                        ? ' readonly aria-readonly="true" title="Ürün kaydındaki demirbaş no — değişim: Operasyon Merkezi"' : ''}></div>`;
+            }
+            if (fixed && fixed.envanterNo && n > 0) {
+                html += '<div class="dev-ids-hint">🔒 1. cihazın Envanter No\'su ürün kaydından otomatik geldi; değişim yalnız Yönetim Paneli › Operasyon Merkezi\'nde.</div>';
             }
             if (want > MAX_UNITS) html += `<div class="dev-ids-warn">Tek seferde en fazla ${MAX_UNITS} demirbaş cihaz işlenebilir.</div>`;
             container.innerHTML = html;
@@ -58,7 +79,8 @@
             if (!container) return [];
             return [...container.querySelectorAll('.dev-ids-row')].map(r => ({
                 sn: (r.querySelector('.dev-sn')?.value || '').trim(),
-                envanterNo: (r.querySelector('.dev-env')?.value || '').trim(),
+                // kilitli satırda ekrandaki değer değil, ürün kaydından gelen değer esastır
+                envanterNo: (r.dataset.fixedEnv ?? r.querySelector('.dev-env')?.value ?? '').trim(),
             }));
         },
 
@@ -78,7 +100,8 @@
             const dem = !!sel && sel.dataset.isDemirbas === 'true' && !!sel.dataset.id;
             if (!box) return;
             if (dem) {
-                this.render(box, Number(document.getElementById('exitQty')?.value) || 1);
+                const product = ((window.data || {})[sel.dataset.repo] || []).find(x => x && String(x.id) === String(sel.dataset.id));
+                this.render(box, Number(document.getElementById('exitQty')?.value) || 1, { fixed: this.fixedFor(product) });
                 if (snLabel) snLabel.style.display = 'none';
                 if (snInput) snInput.required = false;
             } else {

@@ -6375,3 +6375,8 @@ tr.zim-row-awaiting td { opacity: 0.85; }
 #quickProductModal.kb-open .quick-product-card {
     max-height: calc(var(--vv-h, 100dvh) - 16px - 58px);
 }
+
+/* v3.6: plaka sarf üründe gizlenir (display:grid hidden niteliğini ezmesin) */
+.asset-plate[hidden] {
+    display: none !important;
+}

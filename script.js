@@ -1018,7 +1018,9 @@ window.showRequestApprovalModal = function (request) {
             const dem = isDemSelection();
             overlay.querySelector('#raSn').style.display = dem ? 'none' : '';
             overlay.querySelector('#raSnLabel').style.display = dem ? 'none' : '';
-            if (dem) window.DeviceIds.render(devBox, want); else window.DeviceIds.hide(devBox);
+            // v3.6: seçilen stok kaleminin demirbaş no'su 1. cihaz satırına otomatik ve kilitli gelir
+            const fixedFrom = selected && selected !== NO_STOCK ? candidates.find(x => x.key === selected) : null;
+            if (dem) window.DeviceIds.render(devBox, want, { fixed: window.DeviceIds.fixedFor(fixedFrom && fixedFrom.p) }); else window.DeviceIds.hide(devBox);
             // Faz 2 (B-1): onayın sonucu önceden söylenir — sarf tüketim çıkışıdır, kişinin envanterine girmez.
             const c = selected && selected !== NO_STOCK ? candidates.find(x => x.key === selected) : null;
             const tip = selected ? window.requestOutcome(request, c ? c.p : null) : null;
@@ -1367,7 +1369,7 @@ window.sendDraftInventoryRequest = async function (id) {
         cartItems.forEach((cartItem, idx) => {
             if (!window.Schema.isDemirbas(cartItem.item)) return;
             window.DeviceIds.render(document.getElementById(`cartDev_${idx}`), cartItem.exitQty,
-                { values: cartItem.ids || [], onInput: v => { cartItem.ids = v; } });
+                { values: cartItem.ids || [], onInput: v => { cartItem.ids = v; }, fixed: window.DeviceIds.fixedFor(cartItem.item) });
         });
     };
 

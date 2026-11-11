@@ -188,3 +188,13 @@ Plaka açık ve koyu temada ekran görüntüsüyle kontrol edildi.
    - Ürün yeni numarada.
    - Üst çubuk › **Güvenlik Raporu**nda `envanter-no-degisim` kaydı var.
    - Cihaz geçmişinde "değişim zinciri" satırı görünüyor.
+
+## 10. Ek (11.11.2026) — sarf üründe plaka, cihaz satırında otomatik demirbaş no
+
+| Konu | Sonuç |
+|---|---|
+| Sarf ürün | Envanter No alanı (plaka) gösterilmez ve numara gönderilmez. Karar #isDemirbas kutusundan; tür seçimi kutuyu ayarlar. Tür demirbaşa çevrilince plaka görünür ve yazılabilir olur. Numarası zaten dolu eski bir sarf kaydında veri kaybolmasın diye salt okunur "ENVANTER NO" olarak görünür. |
+| Otomatik demirbaş no | Envanter çıkışı, sevk (servis, dış birim, hurda), zimmet, talep onayı ve sepette ürün kaydında numara varsa 1. cihaz satırının Envanter No'su otomatik gelir ve kilitlidir (`DeviceIds.fixedFor` / `render({ fixed })`). Seri No kayıtta varsa ön dolar ve düzeltilebilir. Kayıt anında kilitli satırın değeri ekrandan değil ürün kaydından okunur. Numarası olmayan üründe eski davranış sürer. |
+| Test | `device-ids-fixed.test.mjs` (gerçek tarayıcı) 1/1. Emülatörde tarayıcı 8/8: sarf düzenle/ekle plaka gizliliği, demirbaş kilidi, çıkış ve servise sevkte otomatik ve kilitli numara. Gerçek personel hesabıyla (`flow.personel`) sayımdaki raf ürününün görünmemesi ve çıkışın reddi de bu turda doğrulandı. `npm run test:unit` 386/386, `lint:xss` 0 izinsiz. |
+
+Elle test için: [v3.6 Kontrol Listesi](./v3.6%20Kontrol%20Listesi.md).
