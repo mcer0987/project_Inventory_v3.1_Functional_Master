@@ -2,14 +2,14 @@
 
 > **Tarih:** 11.11.2026
 > **Dal:** `feat/v3.6-raf-sayim-envanter-no-mobil-form` (taban `417fc56`)
-> **Durum:** Onaylandı; iş paketleri sırayla uygulanıyor. Her paketin ilerlemesi kendi walkthrough belgesindedir.
+> **Durum:** Üç iş paketi uygulandı ve test edildi; **canlıya yayın yapılmadı.** Ayrıntılar her paketin walkthrough belgesinde.
 > **Başlangıç ölçümü:** `npm run test:unit` 352/352 · `npm run lint:xss` 0 izinsiz · Hosting 108/108.
 
-| İş paketi | Belge |
-|---|---|
-| İP-1 Raf yönetimi ve sayım kilidi | [İP-1 Raf Yönetimi ve Sayım - Implementation Walkthrough.md](./İP-1%20Raf%20Yönetimi%20ve%20Sayım%20-%20Implementation%20Walkthrough.md) |
-| İP-2 Envanter No plakası ve değişim aracı | [İP-2 Envanter No Kilidi ve Değişim Aracı - Implementation Walkthrough.md](./İP-2%20Envanter%20No%20Kilidi%20ve%20Değişim%20Aracı%20-%20Implementation%20Walkthrough.md) |
-| İP-3 Mobil ve dokunmatik ürün formu | [İP-3 Mobil Ürün Formu - Implementation Walkthrough.md](./İP-3%20Mobil%20Ürün%20Formu%20-%20Implementation%20Walkthrough.md) |
+| İş paketi | Belge | Commit | Test özeti |
+|---|---|---|---|
+| İP-1 Raf yönetimi ve sayım kilidi | [İP-1 Raf Yönetimi ve Sayım - Implementation Walkthrough.md](./İP-1%20Raf%20Yönetimi%20ve%20Sayım%20-%20Implementation%20Walkthrough.md) | `78c4149` | birim 367 · kural 392 · defter emü. 31 · tarayıcı 19/19 |
+| İP-2 Envanter No plakası ve değişim aracı | [İP-2 Envanter No Kilidi ve Değişim Aracı - Implementation Walkthrough.md](./İP-2%20Envanter%20No%20Kilidi%20ve%20Değişim%20Aracı%20-%20Implementation%20Walkthrough.md) | `d51ab28` | birim 375 · kural 398 · defter emü. 32 · tarayıcı 15/15 |
+| İP-3 Mobil ve dokunmatik ürün formu | [İP-3 Mobil Ürün Formu - Implementation Walkthrough.md](./İP-3%20Mobil%20Ürün%20Formu%20-%20Implementation%20Walkthrough.md) | İP-3 commit'i | birim 382 · kural 398 · tarayıcı 11/11 |
 
 ---
 

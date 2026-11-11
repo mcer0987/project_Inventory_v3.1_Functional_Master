@@ -374,6 +374,8 @@ export const UIComponents = {
         }
 
         modal.style.display = 'block';
+        // v3.6 · İP-3: Enter / "Sonraki" ile alandan alana geçiş ve dokunmatik çubuk (bir kez bağlanır).
+        window.AppModules?.FormKeyboardNav?.attach(form);
     },
 
     // =========================================================================

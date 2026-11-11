@@ -412,3 +412,86 @@
         transition: none;
     }
 }
+
+/* ─── v3.6 · İP-3: Ürün Ekle/Düzenle modalı klavye açıkken ────────────────────────────────────────────────────────────
+   dvh klavyeyle küçülmez; form-keyboard-nav.js görünür alanı --vv-h / --vv-top olarak verir ve .kb-open ekler. Modal görünür
+   alanın üstüne hizalanır, yüksekliği klavye + çubuk kadar kısalır. Başlık (plaka) ve Kaydet kaydırmada görünür kalır. */
+@media (max-width: 768px) {
+    .modal.kb-open:not(#loginModal) > .modal-content {
+        top: calc(var(--vv-top, 0px) + 8px);
+        transform: translate(-50%, 0);
+        max-height: calc(var(--vv-h, 100dvh) - 16px - 58px);
+    }
+
+    #productForm .product-modal-header {
+        position: sticky;
+        top: -16px;
+        z-index: 2;
+        margin: -16px -16px 12px;
+        padding: 16px 48px 10px 16px;
+        background: var(--color-surface, #fff);
+        border-bottom: 1px solid var(--color-border-light, #eef2f7);
+    }
+
+    /* Klavye açıkken başlık sıkışır (alanlara yer kalsın); Kaydet çubukta olduğu için formdaki yapışkan Kaydet gizlenir. */
+    #productModal.kb-open .product-modal-header {
+        gap: 6px;
+        padding-top: 10px;
+        padding-bottom: 6px;
+    }
+
+    #productModal.kb-open #modalTitle {
+        font-size: 1.05rem;
+    }
+
+    #productModal.kb-open .asset-plate {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 10px;
+    }
+
+    #productModal.kb-open .asset-plate::before,
+    #productModal.kb-open .asset-plate::after,
+    #productModal.kb-open .asset-plate-hint {
+        display: none;
+    }
+
+    #productModal.kb-open .asset-plate-input {
+        padding: 2px 6px;
+        font-size: 14px;
+    }
+
+    #productModal.kb-open .asset-plate-eyebrow {
+        white-space: nowrap;
+    }
+
+    .form-kb-active #productModal.kb-open #productForm .save-btn {
+        display: none;
+    }
+
+    #productForm .save-btn {
+        position: sticky;
+        bottom: -16px;
+        z-index: 2;
+        width: 100%;
+        min-height: 46px;
+        margin-top: 8px;
+        box-shadow: 0 -6px 12px var(--color-surface, #fff);
+    }
+
+    /* Kapat düğmesi kaydırmada kaybolmasın: sıfır yükseklikli yapışkan blok (yer kaplamaz), başlığın üstünde durur. */
+    #productModal .close {
+        position: sticky;
+        top: -16px;
+        z-index: 3;
+        display: block;
+        float: none;
+        width: 36px;
+        height: 0;
+        margin: 0 -6px 0 auto;
+        line-height: 44px;
+        text-align: center;
+        overflow: visible;
+    }
+}

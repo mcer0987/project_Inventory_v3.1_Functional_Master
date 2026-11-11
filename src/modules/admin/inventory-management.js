@@ -928,6 +928,10 @@ window.inventoryManagementModule = {
       e.preventDefault();
       window.inventoryManagementModule._saveQuickProduct();
     });
+    // v3.6 · İP-3: mobilde klavye açıkken alandan alana geçiş ve kart görünür alana sığar (style.css .quick-product-card).
+    modal.dataset.kbModal = '1';
+    modal.firstElementChild.classList.add('quick-product-card');
+    window.AppModules?.FormKeyboardNav?.attach(document.getElementById('quickProductForm'));
   },
 
   quickAddProduct: function () {

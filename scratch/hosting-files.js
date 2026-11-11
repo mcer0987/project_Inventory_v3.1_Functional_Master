@@ -62,7 +62,8 @@ const expected = f => /^(index|admin|404|verify)\.html$/.test(f) || /^[^/]+\.(cs
 // feat/envanter-talep-iade · Faz 3: admin bekleyen talep rozeti (1). Faz 4: iade talebi şeması (1). Faz 5: iade arayüzü (1).
 // Faz 6: iade tutanağı PDF (pdf-generator.js'e eklendi, yeni dosya yok) ve Zimmet ve İade Rehberi modalı + stili (2).
 // v3.6 · İP-2: Envanter No değişimi saf modülü ve Operasyon Merkezi kartı (2).
-const EXPECTED_COUNT = 110;
+// v3.6 · İP-3: form klavye gezinmesi (1).
+const EXPECTED_COUNT = 111;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

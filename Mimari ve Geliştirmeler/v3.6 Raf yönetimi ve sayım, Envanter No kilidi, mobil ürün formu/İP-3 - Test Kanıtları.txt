@@ -1,0 +1,38 @@
+İP-3 Mobil ve Dokunmatik Ürün Formu — Test Kanıtları (11.11.2026, dal feat/v3.6-raf-sayim-envanter-no-mobil-form)
+
+== node --test tests/unit/form-keyboard-nav.test.mjs
+✔ nextField: sıradaki / önceki alan; sınırda null; listede olmayan alanda baştan ya da sondan başlar (1.0749ms)
+✔ barOffset: klavye kapalıyken 0; açıkken düzen yüksekliği − görünür alt kenar; kaydırılmış görünür alan hesaba katılır (0.4272ms)
+✔ tarayıcı: Enter sonraki alana geçer, yalnız son alanda gönderir; salt okunur, onay kutusu ve gizli alan atlanır; enterkeyhint (2245.3964ms)
+✔ tarayıcı (dokunmatik): klavye açılınca çubuk klavyenin üstüne çıkar, modal görünür alana sığar; Sonraki/Önceki/Kaydet çalışır (2944.7342ms)
+ℹ tests 4
+ℹ pass 4
+ℹ fail 0
+
+== npm run test:unit
+ℹ tests 382
+ℹ pass 382
+ℹ fail 0
+
+== npm run test:rules
+ℹ tests 398
+ℹ pass 398
+ℹ fail 0
+
+== npm run lint:xss
+xss-lint · 89 dosya · 208 sink · 286 HTML şablonu · 1012 dinamik ifade
+  güvenli 993 · izinli (xss-ok) 19 · İZİNSİZ 0
+
+== Uygulama içi mobil görünüm (390×844 dokunmatik, klavye taklidi)
+✔ alan sırası: seçimler üstte, yazılan alanlar art arda — prodInventoryNo → prodColumn → prodShelf → prodType → prodStatus → prodName → prodBrand → prodQty → prodDesc
+✔ enterkeyhint: next … done — next,next,next,next,done
+✔ Adet sayısal klavye açar (inputmode=numeric)
+✔ klavye açık: pencere görünür alanın içinde, çubuğun üstünde — {"kbOpen":true,"top":8,"bottom":354,"barTop":365,"barBottom":420,"fieldTop":161,"fieldBottom":201,"saveBottom":0,"saveHidden":true,"headTop":8,"hidden":false}
+✔ odaklı alan görünür alanda (klavyenin arkasında değil) — 161-201
+✔ yapışkan başlık pencere içinde; klavye açıkken Kaydet çubukta (formdaki gizli) — başlık 8
+✔ Enter ve "Sonraki" alanı ilerletir, klavye açık kalır ve alan görünür — prodBrand → prodQty · 215,255
+✔ son alana kadar kayıt yok, son alanda Enter kaydeder
+✔ masaüstü: dokunmatik çubuk ve klavye düzeni devreye girmez
+✔ admin hızlı ürün kartı: klavye düzeni, çubuk ve enterkeyhint — {"kb":true,"bar":true,"hint":"next","last":"done","cardBottom":354,"barTop":365}
+✔ sayfa hatası yok
+11/11 geçti

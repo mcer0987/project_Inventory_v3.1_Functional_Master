@@ -6306,3 +6306,72 @@ tr.zim-row-awaiting td { opacity: 0.85; }
 [data-theme="dark"] .inv-no-check[data-state="warn"] { color: #fbbf24; }
 [data-theme="dark"] .inv-no-check[data-state="ok"] { color: #4ade80; }
 [data-theme="dark"] .inv-no-check[data-state="error"] { color: #f87171; }
+
+/* ─── v3.6 · İP-3: dokunmatik form çubuğu (src/ui/form-keyboard-nav.js) ─────────────────────────────────────────────
+   Odak formdayken klavyenin hemen üstüne yapışır (konumu visualViewport ile JS verir); düğmeler odağı formdan almaz. */
+.form-kb-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 15000;
+    display: flex;
+    gap: 8px;
+    padding: 6px 10px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: var(--color-surface, #fff);
+    border-top: 1px solid var(--color-border, #e2e8f0);
+    box-shadow: 0 -4px 14px rgba(15, 23, 42, 0.12);
+    transition: transform 120ms ease-out;
+}
+
+.form-kb-bar[hidden] {
+    display: none;
+}
+
+.form-kb-btn {
+    flex: 1;
+    min-height: 42px;
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 10px;
+    background: var(--color-surface-alt, #f8fafc);
+    color: var(--color-text, #1e293b);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    touch-action: manipulation;
+}
+
+.form-kb-btn:disabled {
+    opacity: 0.45;
+}
+
+.form-kb-submit {
+    border-color: var(--color-primary, #2563eb);
+    background: var(--color-primary, #2563eb);
+    color: #fff;
+}
+
+[data-theme="dark"] .form-kb-bar {
+    box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .form-kb-bar { transition: none; }
+}
+
+/* Hızlı ürün kartı (admin): kısa ekranda kaydırılabilir; klavye açıkken görünür alana sığar. */
+.quick-product-card {
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+}
+
+#quickProductModal.kb-open {
+    align-items: flex-start !important;
+    padding-top: calc(var(--vv-top, 0px) + 8px);
+}
+
+#quickProductModal.kb-open .quick-product-card {
+    max-height: calc(var(--vv-h, 100dvh) - 16px - 58px);
+}
