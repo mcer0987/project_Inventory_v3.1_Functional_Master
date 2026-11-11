@@ -6,6 +6,7 @@
     let activeDepot = 'b1';
     let sortMode = 'occupancy';
     let searchQuery = '';
+    let shelfFilter = 'all';   // v3.6: 'all' | 'empty' (boş raf ayıklaması) | 'locked' (sayımdaki raflar)
     let drawer = null;
 
     function escapeHtml(value) {
@@ -90,15 +91,19 @@
     // Katalogda henüz olmayan ama üzerinde ürün bulunan eski raflar da (geçiş dönemi) kanonik koduyla gösterilmeye
     // devam eder — aksi halde göç tamamlanana kadar dolu bir raf haritadan KAYBOLURDU.
     function collectShelves(depot) {
-        const grouped = new Map();   // kanonik kod → { code, key, items, registered }
+        const grouped = new Map();   // kanonik kod → { code, key, items, registered, doc }
         const unassigned = [];
 
         catalogShelvesFor(depot).forEach(s => {
-            if (!grouped.has(s.code)) grouped.set(s.code, { code: s.code, key: s.code, items: [], registered: true });
+            if (!grouped.has(s.code)) grouped.set(s.code, { code: s.code, key: s.code, items: [], registered: true, doc: s });
         });
+        const depotRows = valuesOf(window.data && window.data[depot]).filter(item => item && typeof item === 'object');
 
-        valuesOf(window.data && window.data[depot]).filter(item => item && typeof item === 'object').forEach(item => {
+        depotRows.forEach(item => {
             if (!productIsInStock(item)) {
+                // v3.6: sayımdaki rafa bağlı (adet 0 / pasif durumlu) kayıt Havuz'da değil, kendi rafının çekmecesinde sayılır.
+                const lockedHome = grouped.get(productShelfCode(item));
+                if (lockedHome && schema().isShelfCountLocked(lockedHome.doc)) return;
                 unassigned.push(item);
                 return;
             }
@@ -111,15 +116,22 @@
             grouped.get(code).items.push(item);
         });
 
-        const shelves = Array.from(grouped.values(), g => ({
-            code: g.code,
-            key: g.key,
-            items: g.items,
-            capacity: capacityFor(depot, g.code),
-            varieties: new Set(g.items.map(productType)).size,
-            isUnassigned: false,
-            registered: g.registered,   // WMS'ten kapasitesi tanımlı mı (false: geçiş dönemi, eski/kataloglanmamış raf)
-        }));
+        const shelves = Array.from(grouped.values(), g => {
+            const bound = schema().rowsOnShelf(depotRows, g.code);   // adet 0 dahil rafa bağlı tüm kayıtlar
+            return {
+                code: g.code,
+                key: g.key,
+                items: g.items,
+                capacity: capacityFor(depot, g.code),
+                varieties: new Set(g.items.map(productType)).size,
+                isUnassigned: false,
+                registered: g.registered,   // WMS'ten kapasitesi tanımlı mı (false: geçiş dönemi, eski/kataloglanmamış raf)
+                doc: g.doc || null,
+                locked: schema().isShelfCountLocked(g.doc),
+                boundRows: bound,
+                hasPhysicalStock: bound.some(row => schema().hasPhysicalStock(row)),
+            };
+        });
         if (unassigned.length) {
             shelves.push({
                 code: 'Rafı Tanımsız',
@@ -129,6 +141,7 @@
                 varieties: new Set(unassigned.map(productType)).size,
                 isUnassigned: true,
                 registered: false,
+                doc: null, locked: false, boundRows: unassigned, hasPhysicalStock: false,
             });
         }
         return shelves;
@@ -151,9 +164,20 @@
                 varieties: new Set(items.map(productType)).size,
                 isUnassigned: true,
                 registered: false,
+                doc: null, locked: false, boundRows: items, hasPhysicalStock: false,
                 depot,   // makeShelfCard bunu activeDepot yerine kullanır (bkz. aşağı)
             };
         });
+    }
+
+    // v3.6: boş raf = katalogda olup fiziksel stoğu (durumdan bağımsız adet > 0) olmayan raf.
+    function isEmptyShelf(shelf) {
+        return !shelf.isUnassigned && shelf.registered && !shelf.hasPhysicalStock;
+    }
+    function matchesFilter(shelf) {
+        if (shelfFilter === 'empty') return isEmptyShelf(shelf);
+        if (shelfFilter === 'locked') return shelf.locked;
+        return true;
     }
 
     function matchesQuery(shelf) {
@@ -193,6 +217,8 @@
             <span class="shelf-metric"><strong>Toplam Raf</strong><span>${physical.length}</span></span>
             <span class="shelf-metric"><strong>Dolu Raf</strong><span>${physical.filter(shelf => shelf.items.length > 0).length}</span></span>
             <span class="shelf-metric shelf-metric-alert"><strong>Kritik / Tam Dolu</strong><span>${fullOrCritical}</span></span>
+            <span class="shelf-metric"><strong>Boş Raf</strong><span>${physical.filter(isEmptyShelf).length}</span></span>
+            <span class="shelf-metric shelf-metric-lock"><strong>Sayımda</strong><span>${physical.filter(shelf => shelf.locked).length}</span></span>
             ${shelves.some(shelf => shelf.isUnassigned) ? `<span class="shelf-metric shelf-metric-muted"><strong>Rafı Tanımsız</strong><span>${shelves.find(shelf => shelf.isUnassigned).items.length} ürün</span></span>` : ''}
         `;
     }
@@ -213,16 +239,21 @@
             <button type="button" class="shelf-capacity-btn" data-action="capacity"
                 data-depot="${escapeHtml(depotAttr)}" data-shelf="${escapeHtml(shelf.key)}"
                 aria-label="${escapeHtml(shelf.code)} raf kapasitesini değiştir" title="Kapasiteyi düzenle">⚙️</button>`;
+        // v3.6: sayım ve boş raf rozetleri (kartın üst satırında; gerekçe ipucu olarak).
+        const badgesHtml = shelf.locked
+            ? `<span class="shelf-card-badge shelf-card-badge-lock" title="${escapeHtml(`Sayım gerekçesi: ${shelf.doc.lockReason}`)}">🔒 Sayımda</span>`
+            : (isEmptyShelf(shelf) ? '<span class="shelf-card-badge shelf-card-badge-empty">Boş raf</span>' : '');
         return `
-            <article class="shelf-card shelf-card-${state}">
+            <article class="shelf-card shelf-card-${state}${shelf.locked ? ' shelf-card-locked' : ''}">
                 ${capacityControl}
                 <button type="button" class="shelf-card-open" data-action="inspect"
                     data-depot="${escapeHtml(depotAttr)}" data-shelf="${escapeHtml(shelf.key)}"
-                    aria-label="${escapeHtml(shelf.code)} rafını incele">
+                    aria-label="${escapeHtml(shelf.code)} rafını incele${shelf.locked ? ' (sayımda)' : ''}">
                     <span class="shelf-card-heading">
                         <span class="shelf-card-code">${escapeHtml(shelf.code)}</span>
                         <span class="shelf-card-count">${shelf.items.length} ürün</span>
                     </span>
+                    ${badgesHtml}
                     <span class="shelf-card-types">${escapeHtml(shelf.varieties)} ürün çeşidi${!shelf.isUnassigned && !shelf.registered
             ? ' · <span class="shelf-card-unregistered" title="Bu raf için WMS\'ten kapasite tanımlanmadı; zorunlu kapasite kuralı henüz uygulanmıyor (geçiş dönemi).">katalog dışı</span>' : ''}</span>
                     ${shelf.capacity ? `
@@ -238,19 +269,28 @@
         `;
     }
 
-    function makeProductRow(item, index, depot) {
+    function makeProductRow(item, index, depot, opts = {}) {
         const name = productName(item);
         const type = productType(item);
         const serial = firstValue(item.seriNo, item.serialNo, item.seri, item.sn);
         const barcode = firstValue(item.barkod, item.barcode, item.urunKodu, item.productCode);
         const quantity = productQuantity(item);
-        const details = [type, barcode && `Barkod/Kod: ${barcode}`, serial && `Seri No: ${serial}`].filter(Boolean).join(' · ');
-        const moveButton = productIsInStock(item) ? `
+        const envanterNo = firstValue(item.envanterNo);
+        const details = [type, envanterNo && `Envanter No: ${envanterNo}`, barcode && `Barkod/Kod: ${barcode}`, serial && `Seri No: ${serial}`]
+            .filter(Boolean).join(' · ');
+        // v3.6: sayımdaki raf (ya da bayraklı kayıt) taşınamaz; yerine adet düzeltmesi sunulur.
+        const locked = opts.locked === true || schema().isRowCountLocked(item);
+        const actionButton = locked ? `
+                    <button type="button" class="shelf-product-move shelf-product-count" data-action="count-fix"
+                        data-depot="${escapeHtml(depot)}" data-id="${escapeHtml(item.id)}"
+                        aria-label="${escapeHtml(name)} ürününün sayılan adedini gir">Sayım düzelt</button>`
+            : productIsInStock(item) ? `
                     <button type="button" class="shelf-product-move" data-action="move-product"
                         data-depot="${escapeHtml(depot)}" data-id="${escapeHtml(item.id)}"
                         aria-label="${escapeHtml(name)} ürününün rafını değiştir">Rafı değiştir</button>` : '';
+        const muted = !productIsInStock(item);
         return `
-            <li class="shelf-product-row">
+            <li class="shelf-product-row${muted ? ' is-muted' : ''}">
                 <span class="shelf-product-index">${index + 1}</span>
                 <span class="shelf-product-info">
                     <strong>${escapeHtml(name)}</strong>
@@ -258,7 +298,7 @@
                 </span>
                 <span class="shelf-product-actions">
                     <span class="shelf-product-quantity">${escapeHtml(quantity)} <small>adet</small></span>
-                    ${moveButton}
+                    ${actionButton}
                 </span>
             </li>
         `;
@@ -295,6 +335,8 @@
                     <button type="button" class="shelf-drawer-close" data-action="close" aria-label="Raf çekmecesini kapat">×</button>
                 </header>
                 <div class="shelf-drawer-summary" id="shelfDrawerSummary"></div>
+                <p class="shelf-drawer-lock" id="shelfDrawerLock" role="status" hidden></p>
+                <div class="shelf-drawer-actions" id="shelfDrawerActions" role="group" aria-label="Raf işlemleri"></div>
                 <div class="shelf-drawer-list-header">
                     <div><small>STOCK POSITIONS</small><h3>Raf içeriği</h3></div>
                     <span id="shelfDrawerItemCount" class="shelf-drawer-item-count"></span>
@@ -306,7 +348,44 @@
             if (event.target === drawer || event.target.closest('[data-action="close"]')) closeDrawer();
             const moveButton = event.target.closest('[data-action="move-product"]');
             if (moveButton) moveProductToShelf(moveButton.dataset.depot, moveButton.dataset.id);
+            // v3.6 · raf yönetimi ve sayım
+            const action = event.target.closest('[data-shelf-action]');
+            if (action) runShelfAction(action.dataset.shelfAction, action.dataset.depot, action.dataset.shelf);
+            const countButton = event.target.closest('[data-action="count-fix"]');
+            if (countButton) countFixDialog(countButton.dataset.depot, countButton.dataset.id);
         });
+    }
+
+    // v3.6: çekmecedeki raf işlemleri — rafın durumuna göre (katalog dışı / kilitsiz / sayımda) gösterilir.
+    function drawerActionsHtml(depot, shelf) {
+        if (shelf.isUnassigned) return '';
+        const button = (action, label, variant = '') => `<button type="button" class="shelf-drawer-action ${escapeHtml(variant ? `shelf-drawer-action-${variant}` : '')}"
+            data-shelf-action="${escapeHtml(action)}" data-depot="${escapeHtml(depot)}" data-shelf="${escapeHtml(shelf.key)}">${escapeHtml(label)}</button>`;
+        if (!shelf.registered) {
+            return `<span class="shelf-drawer-action-note">Bu raf katalogda yok; sayım ve raf yönetimi için önce kapasitesini tanımlayın.</span>
+                ${button('capacity', '⚙️ Kataloğa ekle')}`;
+        }
+        if (shelf.locked) return [button('unlock', '✅ Sayımı bitir', 'primary'), button('capacity', '⚙️ Kapasite')].join('');
+        return [
+            button('lock', '🔒 Sayıma al', 'primary'),
+            button('capacity', '⚙️ Kapasite'),
+            button('rename', '✏️ Adı düzelt'),
+            button('remove', '🗑️ Rafı kaldır', 'danger'),
+        ].join('');
+    }
+
+    function runShelfAction(action, depot, shelfKey) {
+        const shelf = collectShelves(depot).find(item => item.key === shelfKey);
+        if (!shelf) { notify('Raf bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        if (action === 'capacity') setCapacity(depot, shelf.code);
+        else if (action === 'lock') lockShelfDialog(depot, shelf);
+        else if (action === 'unlock') unlockShelf(depot, shelf);
+        else if (action === 'rename') renameShelfDialog(depot, shelf);
+        else if (action === 'remove') removeShelf(depot, shelf);
+    }
+
+    function notify(message, type) {
+        if (typeof window.showAppAlert === 'function') window.showAppAlert(message, type);
     }
 
     // v3.3 Aşama 4 (P2-07): açılış ile canlı içerik yenilemesi ayrıldı. Önceden her veri güncellemesinde açık çekmece
@@ -318,14 +397,25 @@
         const shelf = collectShelves(depot).find(item => item.key === shelfKey);
         if (!shelf) return false;
         const depotName = depot === 'b1' ? 'B1 Sarf Deposu' : 'B2 Demirbaş Deposu';
+        // v3.6: fiziksel rafta, rafa bağlı TÜM kayıtlar (adet 0 / pasif durumlu dahil) listelenir — sayımda hepsi sayılır.
+        const rows = shelf.isUnassigned ? shelf.items
+            : [...shelf.boundRows].sort((a, b) => Number(productIsInStock(b)) - Number(productIsInStock(a)));
         drawer.querySelector('#shelfDrawerDepot').textContent = depotName;
         drawer.querySelector('#shelfDrawerTitle').textContent = shelf.code;
         drawer.querySelector('#shelfDrawerSummary').textContent = shelf.isUnassigned
             ? `${shelf.items.length} stok dışı veya rafı tanımsız ürün`
             : `${shelf.items.length} / ${shelf.capacity} slot kullanılıyor · ${shelf.varieties} ürün çeşidi`;
-        drawer.querySelector('#shelfDrawerItemCount').textContent = `${shelf.items.length} kalem`;
-        drawer.querySelector('#shelfDrawerProducts').innerHTML = shelf.items.length
-            ? shelf.items.map((item, index) => makeProductRow(item, index, depot)).join('')
+        const lockNote = drawer.querySelector('#shelfDrawerLock');
+        lockNote.hidden = !shelf.locked;
+        lockNote.textContent = shelf.locked
+            ? `🔒 Sayımda — ${shelf.doc.lockReason}. Bu raftaki ürünler depo listelerinde gizli; çıkış, zimmet, talep ve transfer yapılamaz. Sayılan adetleri "Sayım düzelt" ile girin, bitince "Sayımı bitir"e basın.`
+            : '';
+        const actions = drawer.querySelector('#shelfDrawerActions');
+        actions.innerHTML = drawerActionsHtml(depot, shelf);
+        actions.hidden = actions.innerHTML.trim() === '';
+        drawer.querySelector('#shelfDrawerItemCount').textContent = `${rows.length} kalem`;
+        drawer.querySelector('#shelfDrawerProducts').innerHTML = rows.length
+            ? rows.map((item, index) => makeProductRow(item, index, depot, { locked: shelf.locked })).join('')
             : '<li class="shelf-empty">Bu rafta listelenecek ürün bulunmuyor.</li>';
         return true;
     }
@@ -357,10 +447,13 @@
         try {
             const allShelves = activeDepot === 'havuz' ? collectPoolShelves() : collectShelves(activeDepot);
             metrics.innerHTML = makeMetricsHtml(allShelves);
-            const visible = sortShelves(allShelves.filter(matchesQuery));
+            const visible = sortShelves(allShelves.filter(shelf => matchesFilter(shelf) && matchesQuery(shelf)));
+            const emptyText = shelfFilter === 'empty' ? 'Bu depoda boş raf yok.'
+                : shelfFilter === 'locked' ? 'Bu depoda sayımda olan raf yok.'
+                    : 'Aramanızla eşleşen raf veya ürün bulunamadı.';
             grid.innerHTML = visible.length
                 ? visible.map(makeShelfCard).join('')
-                : '<div class="shelf-empty">Aramanızla eşleşen raf veya ürün bulunamadı.</div>';
+                : `<div class="shelf-empty">${escapeHtml(emptyText)}</div>`;
         } catch (error) {
             console.error('[ShelfMatrix] Raf haritası çizilemedi:', error);
             grid.innerHTML = '<div class="shelf-empty shelf-error">Raf haritası yüklenemedi. Geliştirici konsolunu kontrol edin.</div>';
@@ -508,12 +601,15 @@
         select.append(placeholder);
 
         let availableCount = 0;
+        const lockedCodes = new Set(catalogShelvesFor(depot).filter(s => schema().isShelfCountLocked(s)).map(s => s.code));
         names.forEach(name => {
             const stats = window.ShelfCapacity.slotStats(depot, name);
             const option = document.createElement('option');
             option.value = name;
-            option.disabled = name === currentShelf || stats.available < 1;
-            option.textContent = `${name} · ${stats.used}/${stats.capacity} slot · ${stats.available} boş`;
+            option.disabled = name === currentShelf || stats.available < 1 || lockedCodes.has(name);
+            option.textContent = lockedCodes.has(name)
+                ? `${name} · sayımda`
+                : `${name} · ${stats.used}/${stats.capacity} slot · ${stats.available} boş`;
             if (!option.disabled) availableCount += 1;
             select.append(option);
         });
@@ -571,6 +667,222 @@
         dialog.result.then(() => {});
     }
 
+    // ─── v3.6 · Raf yönetimi ve sayım diyalogları ─────────────────────────────────────────────────────────────────────
+    // Her işlem servis katmanına gider (window.createShelf / setShelfCountLock / renameShelf / deleteShelf / runProductSave);
+    // kurallar ve denetim kaydı orada. Burada yalnız giriş, nedenli ön uyarı ve sonuç bildirimi.
+    function addField(dialog, { id, label, element }) {
+        const lab = document.createElement('label');
+        lab.className = 'shelf-dialog-label';
+        lab.htmlFor = id;
+        lab.textContent = label;
+        element.id = id;
+        dialog.fields.append(lab, element);
+        return element;
+    }
+    function showDialogError(dialog, message, focusEl) {
+        dialog.error.textContent = message;
+        dialog.error.hidden = false;
+        if (focusEl) focusEl.focus();
+    }
+    function guardedSubmit(dialog, handler) {
+        let busy = false;
+        const submit = dialog.form.querySelector('.shelf-dialog-submit');
+        dialog.form.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (busy) return;
+            busy = true;
+            submit.disabled = true;
+            dialog.error.hidden = true;
+            try { await handler(); }
+            catch (error) { showDialogError(dialog, error && error.message ? error.message : 'İşlem tamamlanamadı.'); }
+            finally { busy = false; submit.disabled = false; }
+        });
+    }
+    function serviceOr(dialog, name) {
+        if (typeof window[name] === 'function') return true;
+        showDialogError(dialog, 'Raf servisi yüklenmemiş; işlem yapılmadı.');
+        return false;
+    }
+
+    function addShelfDialog() {
+        if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Raf ekleme')) return;
+        const dialog = createDialog('RAF YÖNETİMİ', 'Yeni raf ekle', 'Raf kataloğa eklenir; ürün yerleştirme ve sayım bu kayıt üzerinden yapılır. Kod büyük harfe çevrilir.', 'Rafı ekle');
+        const depot = document.createElement('select');
+        [['b1', 'B1 Sarf Deposu'], ['b2', 'B2 Demirbaş Deposu']].forEach(([value, text]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = text;
+            depot.append(option);
+        });
+        depot.value = activeDepot === 'b2' ? 'b2' : 'b1';
+        addField(dialog, { id: 'shelfAddDepot', label: 'Depo', element: depot });
+        const code = document.createElement('input');
+        code.type = 'text';
+        code.maxLength = schema().SHELF_CODE_MAX_LENGTH;
+        code.required = true;
+        code.placeholder = 'ör. RAF-A 7';
+        code.autocomplete = 'off';
+        addField(dialog, { id: 'shelfAddCode', label: 'Raf kodu', element: code });
+        const preview = document.createElement('small');
+        preview.className = 'shelf-dialog-hint';
+        dialog.fields.append(preview);
+        code.addEventListener('input', () => { preview.textContent = code.value.trim() ? `Kayıt kodu: ${schema().normShelfCode(code.value)}` : ''; });
+        const capacity = document.createElement('input');
+        capacity.type = 'number';
+        capacity.min = '1';
+        capacity.max = String(schema().SHELF_MAX_CAPACITY);
+        capacity.step = '1';
+        capacity.value = String(DEFAULT_CAPACITY);
+        capacity.required = true;
+        addField(dialog, { id: 'shelfAddCapacity', label: 'Kapasite (ürün slotu)', element: capacity });
+        code.focus();
+        guardedSubmit(dialog, async () => {
+            if (!serviceOr(dialog, 'createShelf')) return;
+            const result = await window.createShelf(depot.value, code.value, Number(capacity.value));
+            dialog.finish(result);
+            notify(`${result.code} rafı ${result.depot.toUpperCase()} kataloğuna eklendi.`, 'success');
+            render();
+        });
+    }
+
+    function lockShelfDialog(depot, shelf) {
+        if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Raf sayımı')) return;
+        const dialog = createDialog('SAYIM', `${shelf.code} rafını sayıma al`,
+            'Sayımdaki raftaki ürünler B1/B2 listelerinde gizlenir; çıkış, zimmet, talep ve transfer yapılamaz. Sayılan adetleri bu panelden girersiniz.',
+            'Sayıma al');
+        const reason = document.createElement('textarea');
+        reason.rows = 3;
+        reason.maxLength = schema().SHELF_LOCK_REASON_MAX;
+        reason.required = true;
+        reason.placeholder = 'ör. Yıl sonu sayımı';
+        addField(dialog, { id: 'shelfLockReason', label: 'Sayım gerekçesi (zorunlu)', element: reason });
+        reason.focus();
+        guardedSubmit(dialog, async () => {
+            if (!reason.value.trim()) { showDialogError(dialog, 'Sayım gerekçesini yazın.', reason); return; }
+            if (!serviceOr(dialog, 'setShelfCountLock')) return;
+            const result = await window.setShelfCountLock(depot, shelf.code, { locked: true, reason: reason.value });
+            dialog.finish(result);
+            notify(`${shelf.code} rafı sayıma alındı; ${result.rowsChanged} kayıt depo listelerinden gizlendi.`, 'success');
+            render();
+            refreshDrawerIfOpen();
+        });
+    }
+
+    // Çekmece üstünde onay: ortak onay kutusu (#customAlertOverlay, z-index 9999) çekmecenin (13000) ARKASINDA kalırdı;
+    // WMS'in kendi diyaloğu (14000, DialogStack) kullanılır. Dönüş: onaylandıysa true.
+    async function confirmInDrawer(eyebrow, title, message, confirmText, { danger = false } = {}) {
+        const dialog = createDialog(eyebrow, title, message, confirmText);
+        if (danger) dialog.form.querySelector('.shelf-dialog-submit').classList.add('is-danger');
+        dialog.form.addEventListener('submit', event => { event.preventDefault(); dialog.finish(true); });
+        dialog.form.querySelector('.shelf-dialog-submit').focus();
+        return (await dialog.result) === true;
+    }
+
+    async function unlockShelf(depot, shelf) {
+        if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Raf sayımı')) return;
+        const question = `${shelf.code} rafındaki ${shelf.boundRows.length} kayıt yeniden depo listelerinde görünecek ve hareket edebilecek.`;
+        const ok = await confirmInDrawer('SAYIM', 'Sayım bitirilsin mi?', question, 'Sayımı bitir');
+        if (!ok) return;
+        try {
+            const result = await window.setShelfCountLock(depot, shelf.code, { locked: false });
+            notify(`${shelf.code} rafının sayımı bitti; ${result.rowsChanged} kayıt listelere döndü.`, 'success');
+        } catch (error) {
+            notify(`Sayım bitirilemedi: ${error.message || 'bilinmeyen hata'}`, 'error');
+        }
+        render();
+        refreshDrawerIfOpen();
+    }
+
+    function renameShelfDialog(depot, shelf) {
+        if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Raf adı düzeltme')) return;
+        if (shelf.boundRows.length) {
+            notify(`${shelf.code} rafına bağlı ${shelf.boundRows.length} ürün kaydı var; ad yalnız boş rafta düzeltilebilir. Önce ürünleri taşıyın.`, 'warning');
+            return;
+        }
+        const dialog = createDialog('RAF YÖNETİMİ', `${shelf.code} rafının adını düzelt`, 'Kapasite ve durum korunur; eski ad → yeni ad denetim kaydına yazılır.', 'Adı kaydet');
+        const code = document.createElement('input');
+        code.type = 'text';
+        code.maxLength = schema().SHELF_CODE_MAX_LENGTH;
+        code.required = true;
+        code.value = shelf.code;
+        code.autocomplete = 'off';
+        addField(dialog, { id: 'shelfRenameCode', label: 'Yeni raf kodu', element: code });
+        code.focus();
+        code.select();
+        guardedSubmit(dialog, async () => {
+            if (!serviceOr(dialog, 'renameShelf')) return;
+            const result = await window.renameShelf(depot, shelf.code, code.value);
+            dialog.finish(result);
+            closeDrawer();
+            notify(`Raf adı ${shelf.code} → ${result.code} olarak düzeltildi.`, 'success');
+            render();
+        });
+    }
+
+    async function removeShelf(depot, shelf) {
+        if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Raf kaldırma')) return;
+        const stocked = shelf.boundRows.filter(row => schema().hasPhysicalStock(row)).length;
+        if (stocked) {
+            notify(`${shelf.code} rafında stokta ${stocked} ürün kaydı var; raf kaldırılmadan önce ürünleri başka rafa taşıyın.`, 'warning');
+            return;
+        }
+        const zero = shelf.boundRows.length;
+        const question = `${shelf.code} rafı katalogdan kaldırılacak.${zero ? ` Rafa bağlı ${zero} tükenmiş kayıt Havuz'a (rafsız) alınacak.` : ''}`;
+        const ok = await confirmInDrawer('RAF YÖNETİMİ', 'Raf kaldırılsın mı?', question, 'Rafı kaldır', { danger: true });
+        if (!ok) return;
+        if (typeof window.deleteShelf !== 'function') { notify('Raf servisi yüklenmemiş; raf kaldırılmadı.', 'error'); return; }
+        try {
+            const result = await window.deleteShelf(depot, shelf.code);
+            closeDrawer();
+            notify(`${shelf.code} rafı kaldırıldı.${result.movedToPool ? ` ${result.movedToPool} kayıt Havuz'a alındı.` : ''}`, 'success');
+        } catch (error) {
+            notify(`Raf kaldırılamadı: ${error.message || 'bilinmeyen hata'}`, 'error');
+        }
+        render();
+    }
+
+    function countFixDialog(depot, itemId) {
+        if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Sayım düzeltmesi')) return;
+        const item = valuesOf(window.data && window.data[depot]).find(row => row && String(row.id) === String(itemId));
+        if (!item) { notify('Ürün bulunamadı; raf içeriği güncellenmiş olabilir.', 'error'); return; }
+        const before = Math.trunc(productQuantity(item));
+        const dialog = createDialog('SAYIM DÜZELTMESİ', productName(item),
+            `Sistemdeki adet: ${before}. Rafta saydığınız adedi girin; fark denetim kaydına yazılır.`, 'Adedi kaydet');
+        const qty = document.createElement('input');
+        qty.type = 'number';
+        qty.min = '0';
+        qty.step = '1';
+        qty.inputMode = 'numeric';
+        qty.required = true;
+        qty.value = String(before);
+        addField(dialog, { id: 'shelfCountQty', label: 'Sayılan adet', element: qty });
+        const note = document.createElement('input');
+        note.type = 'text';
+        note.maxLength = 200;
+        note.placeholder = 'ör. 2 adet eksik bulundu';
+        addField(dialog, { id: 'shelfCountNote', label: 'Not (isteğe bağlı)', element: note });
+        qty.focus();
+        qty.select();
+        guardedSubmit(dialog, async () => {
+            const after = Number(qty.value);
+            if (!Number.isInteger(after) || after < 0) { showDialogError(dialog, '0 veya daha büyük bir tam sayı girin.', qty); return; }
+            if (after === before) { dialog.finish(null); return; }
+            if (!serviceOr(dialog, 'runProductSave') || typeof window.computeStockPatch !== 'function') return;
+            // Durum (Tükendi ↔ önceki durum) stok hareketleriyle aynı kuraldan hesaplanır; eski 'qty' alanına yazılmaz.
+            const { patch } = window.computeStockPatch(depot, item, after - before);
+            const fields = { adet: after, lastUpdate: Date.now() };
+            ['durumu', 'status', 'stokOncekiDurum'].forEach(key => { if (patch[key] !== undefined) fields[key] = patch[key]; });
+            await window.runProductSave({
+                col: depot, id: item.id, isNew: false, fields,
+                audit: { type: 'sayim-duzeltme', reason: note.value.trim() || 'Sayım düzeltmesi' },
+            });
+            dialog.finish(after);
+            notify(`${productName(item)}: ${before} → ${after} adet olarak kaydedildi.`, 'success');
+            render();
+            refreshDrawerIfOpen();
+        });
+    }
+
     // ─── v3.3 Aşama 6 (Veri Geçişi) — "Sistem Raf Sayaçlarını Eşitle (Sync)" ────────────────────────────────────────
     // [WHY]: P1-02 (Aşama 2/4) yalnız kendinden SONRAKİ yazmalarda usedSlots'u doğru tutar; bu, ondan ÖNCEKİ kaymayı
     //        (ve kataloğa sonradan eklenen eski rafları) kapatan TEK SEFERLİK, geçici bir göç aracıdır.
@@ -593,6 +905,8 @@
             ).join('') + '</ul>');
         }
         rows.push(`<p>Havuzda (rafsız) <strong>${escapeHtml(result.pool.total)}</strong> ürün var (B1: ${escapeHtml(result.pool.b1)} · B2: ${escapeHtml(result.pool.b2)}) — "Havuz" sekmesinden atayabilirsiniz.</p>`);
+        const lockFixed = Array.isArray(result.lockFixed) ? result.lockFixed.length : 0;
+        rows.push(`<p>Sayım işareti raf durumuna göre düzeltilen kayıt: <strong>${escapeHtml(lockFixed)}</strong>.</p>`);
         return rows.join('');
     }
 
@@ -607,7 +921,7 @@
         if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Raf sayaçlarını eşitleme')) return;
         const button = document.getElementById('shelfMatrixSyncBtn');
         const question = 'B1 ve B2\'deki TÜM stok taranacak, raf doluluk sayaçları (usedSlots) gerçek veriyle eşitlenecek. '
-            + 'Bu tek seferlik bir bakım/göç işlemidir; yalnız SAYAÇLARI düzeltir, ürün verisine dokunmaz. Devam edilsin mi?';
+            + 'Ürünlerdeki sayım işareti de rafın sayım durumuna göre düzeltilir; başka ürün verisine dokunulmaz. Devam edilsin mi?';
         const confirmed = typeof window.showCustomConfirm === 'function'
             ? await window.showCustomConfirm('Raf Sayaçlarını Eşitle', question, { confirmText: 'Eşitle' })
             : window.confirm(question);
@@ -635,6 +949,15 @@
         if (!app) return;
         app.addEventListener('click', event => {
             if (event.target.closest('#shelfMatrixSyncBtn')) { syncShelfCountersAction(); return; }
+            if (event.target.closest('#shelfAddBtn')) { addShelfDialog(); return; }
+            const filterButton = event.target.closest('[data-shelf-filter]');
+            if (filterButton) {
+                shelfFilter = ['all', 'empty', 'locked'].includes(filterButton.dataset.shelfFilter) ? filterButton.dataset.shelfFilter : 'all';
+                app.querySelectorAll('[data-shelf-filter]').forEach(button =>
+                    button.setAttribute('aria-pressed', String(button.dataset.shelfFilter === shelfFilter)));
+                render();
+                return;
+            }
             const depotButton = event.target.closest('[data-depot].shelf-depot-btn');
             if (depotButton) {
                 // v3.3 Aşama 6: 'havuz' üçüncü bir SEKME'dir (gerçek depo değil) — collectPoolShelves kullanılır.

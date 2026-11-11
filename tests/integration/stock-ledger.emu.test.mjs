@@ -15,7 +15,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, collection, getDoc, getDocs, getDocsFromServer, setDoc, updateDoc, deleteDoc, runTransaction, writeBatch, serverTimestamp, setLogLevel } from 'firebase/firestore';
+import { doc, collection, getDoc, getDocs, getDocsFromServer, setDoc, updateDoc, deleteDoc, runTransaction, writeBatch, serverTimestamp, deleteField, setLogLevel } from 'firebase/firestore';
 
 setLogLevel('silent');
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -391,4 +391,93 @@ test('kurallar: b1/b2 — yeni eski alan (b1 status) ve eksi/ondalık adet redde
     await assertSucceeds(updateDoc(ref(db, 'b1', 'p1'), { isWatched: true }));
     await seed(d => updateDoc(ref(d, 'system_config', 'admin_settings'), { restoreLock: { collections: ['b1'], owner: ADMIN_UID } }));
     await assertSucceeds(setDoc(ref(db, 'b1', 'legacy1'), { id: 'legacy1', name: 'Eski biçim', qty: '3' }), 'geri alma eski biçimi yazabilmeli');
+});
+
+// ─── v3.6 · Raf yönetimi ve sayım kilidi (gerçek transaction + üretim kuralları) ──────────────────────────────────────
+let auditSeq = 0;
+const shelfDeps = db => ({
+    ...deps(db),
+    fns: { ...deps(db).fns, deleteField },
+    findShelfRows: async (depot, code) => (await getDocs(collection(db, ROOT, depot, 'items'))).docs
+        .map(d => ({ id: d.id, data: d.data() })).filter(r => S.itemShelfCode(r.data) === S.normShelfCode(code)),
+    auditRecord: entry => {
+        const id = `al_test_${++auditSeq}`;
+        const data = {
+            id, type: entry.type ?? null, refCol: entry.refCol ?? null, refId: entry.refId ?? null, item: entry.item ?? null,
+            qty: Number.isFinite(entry.qty) ? entry.qty : null, actorName: 'Yönetici', actorPersonelId: null, uid: ADMIN_UID,
+            authKind: 'admin', result: entry.result, reason: entry.reason ?? null, page: 'admin', ts: serverTimestamp(),
+        };
+        if (entry.fromValue != null) data.fromValue = String(entry.fromValue);
+        if (entry.toValue != null) data.toValue = String(entry.toValue);
+        return { id, data };
+    },
+});
+const audits = async type => (await all('auditLogs')).filter(a => a.type === type);
+
+test('v3.6 emülatör: sayıma alma — raf kilidi + denetim kaydı tek commit; raftaki tüm kayıtlar işaretlenir; başka raf etkilenmez', async () => {
+    await seed(db => setDoc(ref(db, 'b1', 'p0'), item('p0', { adet: 0, durumu: 'Tükendi' })));
+    const r = await L.setShelfCountLock(shelfDeps(adminDb()), { depot: 'b1', code: 'raf-a 1', locked: true, reason: 'Yıl sonu sayımı' });
+    assert.equal(r.changed, true);
+    assert.equal(r.rowsChanged, 3, 'p0 (adet 0), p1, p2');
+    const sh = await read('shelves', 'b1_RAF-A 1');
+    assert.equal(sh.active, false);
+    assert.equal(sh.lockReason, 'Yıl sonu sayımı');
+    assert.equal(sh.lockedBy, ADMIN_UID);
+    for (const id of ['p0', 'p1', 'p2']) assert.equal((await read('b1', id)).rafPasif, true, id);
+    assert.equal((await read('b1', 'p3')).rafPasif, undefined, 'Raf-A 2 dokunulmaz');
+    const [a] = await audits('raf-sayima-alindi');
+    assert.equal(a.refId, 'b1_RAF-A 1');
+    assert.equal(a.qty, 3);
+});
+
+test('v3.6 emülatör: sayımdaki raftan transfer ve rafa taşıma reddedilir; aynı rafta adet düzeltmesi denetim kaydıyla yazılır', async () => {
+    await L.setShelfCountLock(shelfDeps(adminDb()), { depot: 'b1', code: 'RAF-A 1', locked: true, reason: 'Sayım' });
+    await rejectsCode(L.runTransfer(deps(adminDb()), transfer()), 'shelf-locked');
+    await rejectsCode(L.runProductSave(deps(adminDb()), { col: 'b1', id: 'p3', isNew: false, fields: { raf: 'Raf-A 1' } }), 'shelf-locked');
+    await rejectsCode(L.runProductSave(deps(adminDb()), { col: 'b1', id: 'p1', isNew: false, fields: { adet: 9 }, audit: { type: 'sayim-duzeltme' } }), 'audit-missing');
+    const res = await L.runProductSave(shelfDeps(adminDb()), { col: 'b1', id: 'p1', isNew: false, fields: { adet: 9 }, audit: { type: 'sayim-duzeltme', reason: 'Sayım farkı' } });
+    assert.equal((await read('b1', 'p1')).adet, 9);
+    assert.equal((await read('b1', 'p1')).rafPasif, true, 'bayrak korunur');
+    const [a] = await audits('sayim-duzeltme');
+    assert.equal(a.id, res.auditId);
+    assert.deepEqual([a.qty, a.fromValue, a.toValue], [-1, '10', '9']);
+});
+
+test('v3.6 emülatör: sayımı bitirme — kilit alanları silinir, active:true, bayraklar false; tekrar çağrı idempotent', async () => {
+    await L.setShelfCountLock(shelfDeps(adminDb()), { depot: 'b1', code: 'RAF-A 1', locked: true, reason: 'Sayım' });
+    const r = await L.setShelfCountLock(shelfDeps(adminDb()), { depot: 'b1', code: 'RAF-A 1', locked: false });
+    assert.equal(r.changed, true);
+    const sh = await read('shelves', 'b1_RAF-A 1');
+    assert.equal(sh.active, true);
+    assert.equal('lockReason' in sh, false);
+    assert.equal((await read('b1', 'p1')).rafPasif, false);
+    const again = await L.setShelfCountLock(shelfDeps(adminDb()), { depot: 'b1', code: 'RAF-A 1', locked: false });
+    assert.deepEqual([again.changed, again.rowsChanged], [false, 0]);
+    assert.equal((await audits('raf-sayim-bitti')).length, 1, 'ikinci çağrı yeni kanıt üretmez');
+    const t = await L.runTransfer(deps(adminDb()), transfer());
+    assert.equal(t.duplicate, false, 'sayım bitince transfer serbest');
+});
+
+test('v3.6 emülatör: dolu raf kaldırılamaz; boş raf (adet 0 kayıtlı) kaldırılır, kayıt Havuz\'a, kaymış sayaç önce sıfırlanır', async () => {
+    await rejectsCode(L.deleteShelf(shelfDeps(adminDb()), { depot: 'b1', code: 'RAF-A 2' }), 'shelf-not-empty');
+    await seed(db => updateDoc(ref(db, 'b1', 'p3'), { adet: 0, durumu: 'Tükendi' }));   // sayaç 1'de kaldı (kayma)
+    const r = await L.deleteShelf(shelfDeps(adminDb()), { depot: 'b1', code: 'RAF-A 2' });
+    assert.equal(r.movedToPool, 1);
+    assert.equal(await read('shelves', 'b1_RAF-A 2'), null);
+    assert.equal((await read('b1', 'p3')).raf, '');
+    assert.equal((await audits('raf-silindi')).length, 1);
+});
+
+test('v3.6 emülatör: raf ekleme (varsa ret) ve boş rafın adını düzeltme — eski → yeni denetim kaydı', async () => {
+    const c = await L.createShelf(shelfDeps(adminDb()), { depot: 'b2', code: 'raf-9', capacity: 4 });
+    assert.equal(c.id, 'b2_RAF-9');
+    await rejectsCode(L.createShelf(shelfDeps(adminDb()), { depot: 'b2', code: 'RAF-9', capacity: 4 }), 'shelf-exists');
+    await rejectsCode(L.renameShelf(shelfDeps(adminDb()), { depot: 'b1', code: 'RAF-A 1', newCode: 'RAF-A 9' }), 'shelf-not-empty');
+    const r = await L.renameShelf(shelfDeps(adminDb()), { depot: 'b2', code: 'RAF-9', newCode: 'RAF-10' });
+    assert.equal(r.id, 'b2_RAF-10');
+    assert.equal(await read('shelves', 'b2_RAF-9'), null);
+    assert.equal((await read('shelves', 'b2_RAF-10')).capacity, 4);
+    const [a] = await audits('raf-adi-duzeltildi');
+    assert.deepEqual([a.fromValue, a.toValue], ['RAF-9', 'RAF-10']);
+    assert.equal((await audits('raf-eklendi')).length, 1);
 });

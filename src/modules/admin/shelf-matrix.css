@@ -1030,3 +1030,191 @@ body.shelf-dialog-open {
         padding-left: 16px;
     }
 }
+
+/* ─── v3.6 · Raf yönetimi ve sayım ─────────────────────────────────────────────────────────────────────────────── */
+.shelf-matrix-manage {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: -6px 0 16px;
+}
+
+.shelf-add-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 40px;
+    padding: 8px 14px;
+    border: 1px solid var(--color-primary, #2563eb);
+    border-radius: 10px;
+    background: var(--color-primary, #2563eb);
+    color: #fff;
+    font: inherit;
+    font-size: 0.84rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.shelf-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.shelf-filter-chip {
+    min-height: 36px;
+    padding: 6px 12px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 999px;
+    background: var(--shelf-surface);
+    color: var(--shelf-text);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.shelf-filter-chip[aria-pressed="true"] {
+    border-color: var(--color-primary, #2563eb);
+    background: color-mix(in srgb, var(--color-primary, #2563eb) 12%, var(--shelf-surface));
+    color: var(--color-primary, #2563eb);
+}
+
+.shelf-add-btn:focus-visible,
+.shelf-filter-chip:focus-visible,
+.shelf-drawer-action:focus-visible {
+    outline: 2px solid var(--color-primary, #2563eb);
+    outline-offset: 2px;
+}
+
+.shelf-metric-lock > span {
+    color: #b45309;
+}
+
+.shelf-card-locked {
+    border-top: 3px solid #7c3aed;
+    background: color-mix(in srgb, #7c3aed 4%, var(--shelf-surface));
+}
+
+.shelf-card-badge {
+    display: inline-block;
+    width: fit-content;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.shelf-card-badge-lock {
+    background: rgba(124, 58, 237, 0.12);
+    color: #6d28d9;
+}
+
+.shelf-card-badge-empty {
+    background: rgba(100, 116, 139, 0.14);
+    color: var(--shelf-muted);
+}
+
+.shelf-drawer-lock {
+    margin: 12px 22px 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(124, 58, 237, 0.3);
+    border-radius: 11px;
+    background: rgba(124, 58, 237, 0.07);
+    color: var(--shelf-text);
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+
+.shelf-drawer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 22px 0;
+}
+
+.shelf-drawer-action {
+    min-height: 38px;
+    padding: 7px 12px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 10px;
+    background: var(--shelf-surface);
+    color: var(--shelf-text);
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.shelf-drawer-action-primary {
+    border-color: var(--shelf-drawer-accent);
+    background: var(--shelf-drawer-accent);
+    color: #fff;
+}
+
+.shelf-drawer-action-danger {
+    border-color: rgba(220, 38, 38, 0.4);
+    color: #b91c1c;
+}
+
+.shelf-drawer-action-note {
+    flex-basis: 100%;
+    color: var(--shelf-muted);
+    font-size: 0.78rem;
+}
+
+.shelf-product-row.is-muted .shelf-product-info,
+.shelf-product-row.is-muted .shelf-product-quantity {
+    opacity: 0.62;
+}
+
+.shelf-product-count {
+    border-color: rgba(124, 58, 237, 0.4);
+    background: rgba(124, 58, 237, 0.08);
+    color: #6d28d9;
+}
+
+.shelf-dialog-fields textarea {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--shelf-border);
+    border-radius: 10px;
+    outline: none;
+    background: var(--shelf-surface-alt);
+    color: var(--shelf-text);
+    font: inherit;
+    font-size: 0.88rem;
+    resize: vertical;
+}
+
+.shelf-dialog-fields textarea:focus {
+    border-color: var(--shelf-drawer-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--shelf-drawer-accent) 16%, transparent);
+}
+
+.shelf-dialog-hint {
+    color: var(--shelf-muted);
+    font-size: 0.74rem;
+}
+
+[data-theme="dark"] .shelf-card-badge-lock,
+[data-theme="dark"] .shelf-product-count {
+    color: #c4b5fd;
+    background: rgba(167, 139, 250, 0.14);
+}
+
+[data-theme="dark"] .shelf-metric-lock > span {
+    color: #fbbf24;
+}
+
+[data-theme="dark"] .shelf-drawer-action-danger {
+    color: #fca5a5;
+}
+
+.shelf-dialog-submit.is-danger {
+    border-color: #dc2626;
+    background: #dc2626;
+}

@@ -148,6 +148,10 @@
         if (stogaEkle) {
             product = findReturnProduct(item, view, depo);
             if (!product) return fail(`${String(depo).toUpperCase()} deposunda bu ürün tek ve kesin olarak bulunamadı. Stoğa eklemeden kapatabilir ya da ürünü depoda tanımlayabilirsiniz.`);
+            // v3.6: sayımdaki rafa stok eklenmez (sayım sonucu değişmesin). Defter de reddeder; burada nedeni önceden söylenir.
+            if (S().isRowCountLocked && S().isRowCountLocked(product)) {
+                return fail('Ürünün rafı sayımda; şu an stoğa eklenemez. "Stoğa ekle" seçeneğini kaldırarak kapatabilir ya da sayım bitince tekrar deneyebilirsiniz.');
+            }
         }
         const fields = { iadeEdildi: true, iadeDepo: teslimAlindi ? depo : null, iadeEdildiTarihi: tarih };
         const writes = [{ op: 'update', col: 'b3', id: item.id, fields }];

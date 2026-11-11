@@ -124,6 +124,8 @@ for (const m of MODES) {
         assert.ok(has(S.validateB1(m.b1({ raf: 5 }), m.opts), 'raf string değil'));
         assert.ok(has(S.validateB2(m.b2({ status: 1 }), m.opts), 'status string değil'));
         assert.ok(has(S.validateB1(m.b1({ isWatched: 'evet' }), m.opts), 'isWatched boolean değil'));
+        assert.ok(has(S.validateB1(m.b1({ rafPasif: 'evet' }), m.opts), 'rafPasif boolean değil'));
+        assert.ok(has(S.validateB2(m.b2({ rafPasif: 1 }), m.opts), 'rafPasif boolean değil'));
         assert.ok(has(S.validateB1(m.b1({ adet: '5' }), m.opts), 'geçersiz adet'));
         assert.ok(has(S.validateB1(m.b1({ limit: '5' }), m.opts), 'geçersiz limit'));
         assert.ok(has(S.validateB2(m.b2({ limit: -1 }), m.opts), 'geçersiz limit'));
@@ -139,6 +141,8 @@ for (const m of MODES) {
         assert.deepEqual([...S.validateB2(m.b2({ limit: null }), m.opts)], [], 'B2 limit tanımsız (null) olabilir');
         assert.deepEqual([...S.validateB1(m.b1({ limit: 0 }), m.opts)], []);
         assert.deepEqual([...S.validateB1(m.b1({ id: 1760000000123 }), m.opts)], [], 'makeId sayısal id');
+        assert.deepEqual([...S.validateB1(m.b1({ rafPasif: true }), m.opts)], [], 'v3.6 sayım kilidi kopyası');
+        assert.deepEqual([...S.validateB2(m.b2({ rafPasif: false }), m.opts)], [], 'kilit kalkınca false yazılır');
     });
 }
 
@@ -152,8 +156,9 @@ test('[update] yalnız "eksik zorunlu alan" muafiyeti: set aynı kısmi kaydı e
 test('alan kümeleri açık: Envanter No B1/B2 ortak opsiyonel alanı; status yalnız B2', () => {
     const S = loadSchema();
     // v3.4: sonCikisId — personel çıkışında stok düşümünü b3 kaydına bağlar (firestore.rules staffExitStockOk)
-    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'sn', 'sonCikisId', 'stokOncekiDurum']);
-    assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'sn', 'sonCikisId', 'stokOncekiDurum']);
+    // v3.6: rafPasif — kaydın rafı sayımda (raf kilidinin kopyası; gizleme ve personel çıkış kuralı okur)
+    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'rafPasif', 'sn', 'sonCikisId', 'stokOncekiDurum']);
+    assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'rafPasif', 'sn', 'sonCikisId', 'stokOncekiDurum']);
     assert.ok(S.stockKnownKeys('b1').includes('envanterNo') && !S.stockKnownKeys('b1').includes('status'));
     assert.ok(S.stockKnownKeys('b2').includes('envanterNo') && S.stockKnownKeys('b2').includes('status'));
 });

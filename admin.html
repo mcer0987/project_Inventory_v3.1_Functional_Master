@@ -1715,9 +1715,27 @@
     <div id="shelfMatrixTab" class="admin-tab-content" style="display: none;">
         <section id="shelfMatrixApp" class="shelf-matrix" aria-label="Depo raf haritası">
             <header class="shelf-matrix-header">
-                <div>
+                <div class="panel-intro">
                     <h2>🧱 Depo Raf Haritası</h2>
-                    <p>B1 ve B2 stoklarını fiziksel raf konumlarına göre bulun.</p>
+                    <p class="panel-intro-desc">B1 ve B2 stoklarını raf konumlarına göre bulun; raf ekleyin, boş rafları ayıklayın ve sayım için rafı kilitleyin.</p>
+                    <button type="button" class="panel-help-trigger" data-panel-help aria-expanded="false"
+                        aria-controls="shelfMatrixHelp"><i class="fas fa-info-circle" aria-hidden="true"></i> Nasıl çalışır?</button>
+                    <div id="shelfMatrixHelp" class="panel-help" hidden>
+                        <h3>Raf yönetimi</h3>
+                        <ul>
+                            <li><strong>Raf Ekle:</strong> depo, raf kodu ve kapasite girin. Kod büyük harfe çevrilir; aynı depoda aynı kodla ikinci raf eklenmez.</li>
+                            <li><strong>Raf işlemleri:</strong> bir rafa tıklayınca açılan panelde kapasite, ad düzeltme, kaldırma ve sayım düğmeleri bulunur.</li>
+                            <li><strong>Boş Raflar:</strong> stokta ürünü olmayan katalog raflarını listeler. Bu raflar kaldırılabilir; rafa bağlı tükenmiş kayıtlar Havuz'a alınır.</li>
+                            <li><strong>Ad düzeltme:</strong> yalnız hiçbir ürün kaydının göstermediği rafta yapılır. Dolu rafın adı için önce ürünleri taşıyın.</li>
+                        </ul>
+                        <h3>Sayım</h3>
+                        <ul>
+                            <li><strong>Sayıma al:</strong> gerekçe yazarak rafı kilitleyin. Raftaki ürünler B1/B2 listelerinde, aramalarda ve raporlarda gizlenir; personel bu ürünleri görmez.</li>
+                            <li>Sayım sürerken bu ürünlerden çıkış, zimmet, talep, transfer, servis ve iade ile stok ekleme yapılamaz; rafa yeni ürün yerleştirilemez.</li>
+                            <li><strong>Sayım düzelt:</strong> paneldeki her ürün için saydığınız adedi girin. Eski ve yeni adet denetim kaydına yazılır.</li>
+                            <li><strong>Sayımı bitir:</strong> ürünler listelere döner ve yeniden hareket edebilir. Sayımdaki raf kaldırılamaz ve adı değiştirilemez.</li>
+                        </ul>
+                    </div>
                 </div>
                 <!-- v3.3 Aşama 6 (Veri Geçişi): geçici/tek seferlik uzlaştırma aracı — raf sayaçlarını (usedSlots)
                          gerçek stokla eşitler. Kalıcı bir günlük işlem değildir; bkz. shelf-matrix.js syncShelfCountersAction. -->
@@ -1782,6 +1800,14 @@
                         <option value="variety">Ürün çeşidi</option>
                     </select>
                 </label>
+            </div>
+            <div class="shelf-matrix-manage" role="group" aria-label="Raf yönetimi">
+                <button type="button" id="shelfAddBtn" class="shelf-add-btn"><i class="fas fa-plus" aria-hidden="true"></i> Raf Ekle</button>
+                <div class="shelf-filter-chips" role="group" aria-label="Raf filtresi">
+                    <button type="button" class="shelf-filter-chip" data-shelf-filter="all" aria-pressed="true">Tüm raflar</button>
+                    <button type="button" class="shelf-filter-chip" data-shelf-filter="empty" aria-pressed="false">Boş raflar</button>
+                    <button type="button" class="shelf-filter-chip" data-shelf-filter="locked" aria-pressed="false">🔒 Sayımdaki raflar</button>
+                </div>
             </div>
             <div id="shelfMatrixMetrics" class="shelf-matrix-metrics" aria-live="polite"></div>
             <div id="shelfMatrixGrid" class="shelf-matrix-grid" aria-live="polite"></div>

@@ -387,3 +387,136 @@ test('planShelfSync: katalogda depot/code alanı bozuk ya da eksik olan belgeler
     assert.deepEqual(plain(r.writes), []);
     assert.deepEqual(plain(r.unregistered), []);
 });
+
+// ─── v3.6 · Raf sayım kilidi ────────────────────────────────────────────────────────────────────────────────────────
+
+const lockedShelf = (depot, code, capacity, usedSlots) => ({
+    ...shelf(depot, code, capacity, usedSlots, false), lockReason: 'Yıl sonu sayımı', lockedAt: 1, lockedBy: 'admin-uid',
+});
+const row = (id, extra = {}) => ({ id, data: { ...src({ id }), ...extra } });
+
+test('v3.6 transfer: sayımdaki kaynak raftan (raf kilidi ya da kayıt bayrağı) ve sayımdaki hedef rafa taşıma shelf-locked; hiçbir şey yazılmaz', () => {
+    rejectsWith(() => L.planTransfer(input(), reads({ shelves: { 'b1_RAF-A 1': lockedShelf('b1', 'RAF-A 1', 5, 3), 'b2_RAF-1': shelf('b2', 'RAF-1', 5, 2) } })), 'shelf-locked');
+    rejectsWith(() => L.planTransfer(input(), reads({ source: src({ rafPasif: true }) })), 'shelf-locked');
+    rejectsWith(() => L.planTransfer(input(), reads({ shelves: { 'b1_RAF-A 1': shelf('b1', 'RAF-A 1', 5, 3), 'b2_RAF-1': lockedShelf('b2', 'RAF-1', 5, 2) } })), 'shelf-locked');
+    assert.equal(L.planTransfer(input(), reads()).duplicate, false, 'kilit yokken transfer eskisi gibi');
+});
+
+test('v3.6 ürün kaydı: sayımdaki rafa yeni ürün, sayımdaki raftan/rafa taşıma reddedilir', () => {
+    const lockedA1 = { 'b1_RAF-A 1': lockedShelf('b1', 'RAF-A 1', 5, 2) };
+    rejectsWith(() => L.planProductSave({ col: 'b1', id: 'b1_new1', isNew: true, fields: { ...newB1Fields(), adet: 0 }, uid: 'u' }, { existing: null, shelves: lockedA1 }), 'shelf-locked');
+    rejectsWith(() => L.planProductSave({ col: 'b1', id: 'b1_old1', isNew: false, fields: { raf: 'Raf-A 2' }, uid: 'u' },
+        { existing: existingB1({ rafPasif: true }), shelves: { ...lockedA1, 'b1_RAF-A 2': shelf('b1', 'RAF-A 2', 5, 0) } }), 'shelf-locked');
+    rejectsWith(() => L.planProductSave({ col: 'b1', id: 'b1_old1', isNew: false, fields: { raf: 'Raf-A 1' }, uid: 'u' },
+        { existing: existingB1({ raf: 'Raf-A 2' }), shelves: { ...lockedA1, 'b1_RAF-A 2': shelf('b1', 'RAF-A 2', 5, 1) } }), 'shelf-locked');
+});
+
+test('v3.6 sayım düzeltmesi: kilitli AYNI rafta 0→N adet serbest (shelf-inactive değil), kapasite yine uygulanır, eski active:false raf etkilenmez', () => {
+    const plan = L.planProductSave({ col: 'b1', id: 'b1_old1', isNew: false, fields: { adet: 4, durumu: 'Kullanıma Hazır' }, uid: 'u' },
+        { existing: existingB1({ adet: 0, durumu: 'Tükendi', rafPasif: true }), shelves: { 'b1_RAF-A 1': lockedShelf('b1', 'RAF-A 1', 5, 2) } });
+    assert.deepEqual(plain(plan.result.shelves), [{ id: 'b1_RAF-A 1', before: 2, after: 3 }]);
+    assert.equal(plan.result.qtyBefore, 0);
+    assert.equal(plan.result.qtyAfter, 4);
+    rejectsWith(() => L.planProductSave({ col: 'b1', id: 'b1_old1', isNew: false, fields: { adet: 4, durumu: 'Kullanıma Hazır' }, uid: 'u' },
+        { existing: existingB1({ adet: 0, durumu: 'Tükendi', rafPasif: true }), shelves: { 'b1_RAF-A 1': lockedShelf('b1', 'RAF-A 1', 2, 2) } }), 'shelf-full');
+    rejectsWith(() => L.planProductSave({ col: 'b1', id: 'b1_old1', isNew: false, fields: { adet: 4, durumu: 'Kullanıma Hazır' }, uid: 'u' },
+        { existing: existingB1({ adet: 0, durumu: 'Tükendi' }), shelves: { 'b1_RAF-A 1': shelf('b1', 'RAF-A 1', 5, 2, false) } }), 'shelf-inactive');
+});
+
+test('v3.6 ürün kaydı: bayrak rafın gerçek durumundan yazılır — formdan gelen rafPasif yok sayılır, kayma kendiliğinden düzelir', () => {
+    const write = p => plain(p.writes).find(w => w.col === 'b1');
+    const healed = L.planProductSave({ col: 'b1', id: 'b1_old1', isNew: false, fields: { ürün: 'Yeni ad', rafPasif: true }, uid: 'u' },
+        { existing: existingB1({ rafPasif: true }), shelves: { 'b1_RAF-A 1': shelf('b1', 'RAF-A 1', 5, 1) } });
+    assert.equal(write(healed).data.rafPasif, false, 'kilitsiz rafta kalmış bayrak kalkar');
+    const flagged = L.planProductSave({ col: 'b1', id: 'b1_old1', isNew: false, fields: { ürün: 'Yeni ad' }, uid: 'u' },
+        { existing: existingB1(), shelves: { 'b1_RAF-A 1': lockedShelf('b1', 'RAF-A 1', 5, 1) } });
+    assert.equal(write(flagged).data.rafPasif, true, 'kilitli rafta bayrağı eksik kayıt işaretlenir');
+    const untouched = L.planProductSave({ col: 'b1', id: 'b1_old1', isNew: false, fields: { ürün: 'Yeni ad' }, uid: 'u' },
+        { existing: existingB1(), shelves: {} });
+    assert.equal('rafPasif' in write(untouched).data, false, 'kilitsiz kayıtta alan hiç yazılmaz');
+    const created = L.planProductSave({ col: 'b1', id: 'b1_new1', isNew: true, fields: { ...newB1Fields(), rafPasif: true }, uid: 'u' }, { existing: null, shelves: {} });
+    assert.equal('rafPasif' in plain(created.writes).find(w => w.col === 'b1').data, false, 'yeni kayıtta bayrağı yalnız raf kilidi yazar');
+});
+
+test('v3.6 planShelfLock: kilit gerekçe ister; raf yazımı sunucu saati + uid; kayıt bayrakları yalnız gerekeni yazar; idempotent', () => {
+    rejectsWith(() => L.planShelfLock({ depot: 'b1', code: 'Raf-A 1', locked: true, reason: '  ', uid: 'u' }, shelf('b1', 'RAF-A 1', 5, 2), []), 'invalid-argument');
+    rejectsWith(() => L.planShelfLock({ depot: 'b1', code: 'Raf-A 1', locked: true, reason: 'x', uid: 'u' }, null, []), 'shelf-missing');
+    const rows = [row('a', { rafPasif: true }), row('b'), row('c', { raf: 'Raf-A 2' })];
+    const p = L.planShelfLock({ depot: 'b1', code: 'raf-a 1', locked: true, reason: ' Yıl  sonu <b>sayımı</b> ', uid: 'u' }, shelf('b1', 'RAF-A 1', 5, 2), rows);
+    const w = plain(p.shelfWrite);
+    assert.equal(w.id, 'b1_RAF-A 1');
+    assert.equal(w.data.active, false);
+    assert.equal(w.data.lockReason, 'Yıl sonu ‹b>sayımı‹/b>', 'boşluk sadeleşir, etiket işareti kurala takılmayacak biçime çevrilir');
+    assert.deepEqual(w.data.lockedAt, plain(L.SERVER_TIME));
+    assert.equal(w.data.lockedBy, 'u');
+    assert.deepEqual(plain(p.rowWrites), [{ kind: 'update', col: 'b1', id: 'b', data: { rafPasif: true } }], 'yalnız bu rafta bayrağı eksik kayıt');
+    assert.equal(p.audit.type, 'raf-sayima-alindi');
+    assert.equal(p.audit.qty, 2);
+    const again = L.planShelfLock({ depot: 'b1', code: 'RAF-A 1', locked: true, reason: 'başka', uid: 'u' }, lockedShelf('b1', 'RAF-A 1', 5, 2), rows);
+    assert.equal(again.shelfWrite, null, 'zaten kilitli: raf yazılmaz');
+    assert.equal(again.audit, null, 'ikinci kez denetim kaydı yok');
+});
+
+test('v3.6 planShelfLock: kilit kaldırma üç alanı siler, active:true; yalnız bayraklı kayıtlara false yazar', () => {
+    const p = L.planShelfLock({ depot: 'b1', code: 'RAF-A 1', locked: false, uid: 'u' }, lockedShelf('b1', 'RAF-A 1', 5, 2), [row('a', { rafPasif: true }), row('b')]);
+    const w = plain(p.shelfWrite);
+    assert.equal(w.data.active, true);
+    for (const k of ['lockReason', 'lockedAt', 'lockedBy']) assert.deepEqual(w.data[k], plain(L.DELETE_FIELD));
+    assert.deepEqual(plain(p.rowWrites), [{ kind: 'update', col: 'b1', id: 'a', data: { rafPasif: false } }]);
+    assert.equal(p.audit.type, 'raf-sayim-bitti');
+    assert.equal(p.audit.reason, 'Yıl sonu sayımı');
+});
+
+test('v3.6 planShelfDelete: stoklu (Pasif durumlu dahil) raf, sayımdaki raf ve eski alanlı kayıt reddedilir; adet 0 kayıtlar Havuz\'a', () => {
+    const base = shelf('b1', 'RAF-A 1', 5, 0);
+    rejectsWith(() => L.planShelfDelete({ depot: 'b1', code: 'RAF-A 1' }, base, [row('a', { adet: 1, durumu: 'Pasif (Arızalı)' })]), 'shelf-not-empty');
+    rejectsWith(() => L.planShelfDelete({ depot: 'b1', code: 'RAF-A 1' }, lockedShelf('b1', 'RAF-A 1', 5, 0), []), 'shelf-locked');
+    rejectsWith(() => L.planShelfDelete({ depot: 'b1', code: 'RAF-A 1' }, base, [row('a', { raf: '', shelf: 'Raf-A 1', adet: 0 })]), 'legacy-shelf-field');
+    const p = L.planShelfDelete({ depot: 'b1', code: 'RAF-A 1' }, shelf('b1', 'RAF-A 1', 5, 2), [row('a', { adet: 0, durumu: 'Tükendi', rafPasif: true }), row('b', { adet: 0 })]);
+    assert.deepEqual(plain(p.rowWrites), [
+        { kind: 'update', col: 'b1', id: 'a', data: { raf: '', rafPasif: false } },
+        { kind: 'update', col: 'b1', id: 'b', data: { raf: '' } },
+    ]);
+    assert.equal(p.counterFix, true, 'kaymış sayaç önce sıfırlanmalı (kural silmeyi yazma öncesi değere göre denetler)');
+    assert.equal(p.audit.type, 'raf-silindi');
+    assert.equal(L.planShelfDelete({ depot: 'b1', code: 'RAF-A 1' }, base, []).counterFix, false);
+});
+
+test('v3.6 planShelfRename: yalnız boş ve kilitsiz raf; hedef ad boşta olmalı; kapasite/aktiflik korunur; eski → yeni kanıtı', () => {
+    const old = shelf('b1', 'RAF-A 1', 7, 0, false);
+    rejectsWith(() => L.planShelfRename({ depot: 'b1', code: 'RAF-A 1', newCode: 'RAF-A 9', uid: 'u' }, old, null, [row('a', { adet: 0 })]), 'shelf-not-empty');
+    rejectsWith(() => L.planShelfRename({ depot: 'b1', code: 'RAF-A 1', newCode: 'RAF-A 9', uid: 'u' }, old, shelf('b1', 'RAF-A 9', 5, 0), []), 'shelf-exists');
+    rejectsWith(() => L.planShelfRename({ depot: 'b1', code: 'RAF-A 1', newCode: 'raf-a 1', uid: 'u' }, old, null, []), 'invalid-argument');
+    rejectsWith(() => L.planShelfRename({ depot: 'b1', code: 'RAF-A 1', newCode: 'RAF-A 9', uid: 'u' }, lockedShelf('b1', 'RAF-A 1', 5, 0), null, []), 'shelf-locked');
+    const p = L.planShelfRename({ depot: 'b1', code: 'RAF-A 1', newCode: 'raf-a 9', uid: 'u' }, old, null, []);
+    assert.equal(p.newId, 'b1_RAF-A 9');
+    assert.equal(p.newDoc.capacity, 7);
+    assert.equal(p.newDoc.active, false, 'eski "yeni yerleştirmeye kapalı" durumu korunur');
+    assert.equal(p.newDoc.usedSlots, 0);
+    assert.deepEqual([p.audit.fromValue, p.audit.toValue], ['RAF-A 1', 'RAF-A 9']);
+});
+
+test('v3.6 planShelfSync bayrakları raf kilidine eşitler: kilitli rafta eksik bayrak konur; kilitsiz/katalog dışı rafta kalan bayrak kalkar', () => {
+    const items = {
+        b1: [
+            { ...src({ id: 'x1' }), __docId: 'doc_x1' },
+            { ...src({ id: 'x2', raf: 'Raf-A 2', rafPasif: true }) },
+            { ...src({ id: 'x3', raf: 'Raf-Z 9', rafPasif: true }) },
+            { ...src({ id: 'x4', raf: 'Raf-A 2' }) },
+        ],
+        b2: [],
+    };
+    const shelfDocs = { 'b1_RAF-A 1': lockedShelf('b1', 'RAF-A 1', 5, 1), 'b1_RAF-A 2': shelf('b1', 'RAF-A 2', 5, 2) };
+    const r = L.planShelfSync(items, shelfDocs, { uid: 'u' });
+    assert.deepEqual(plain(r.lockFixed), [
+        { col: 'b1', id: 'doc_x1', rafPasif: true },
+        { col: 'b1', id: 'x2', rafPasif: false },
+        { col: 'b1', id: 'x3', rafPasif: false },
+    ]);
+});
+
+test('v3.6 assertNotCountLocked: bayrak ya da raf kilidi tek başına yeterli (fail-closed)', () => {
+    rejectsWith(() => L.assertNotCountLocked({ raf: 'Raf-A 1', rafPasif: true }, null), 'shelf-locked');
+    rejectsWith(() => L.assertNotCountLocked({ raf: 'Raf-A 1' }, lockedShelf('b1', 'RAF-A 1', 5, 1)), 'shelf-locked');
+    L.assertNotCountLocked({ raf: 'Raf-A 1' }, shelf('b1', 'RAF-A 1', 5, 1, false));
+});

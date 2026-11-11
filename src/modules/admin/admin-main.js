@@ -17,6 +17,18 @@ import '../self-approval-reporter.js';   // J4: Güvenlik Raporu iki sayfada (EB
 
 window.AppModules = window.AppModules || {};
 
+// v3.6 · AGENTS.md (panel açıklaması + yardım): [data-panel-help] düğmesi aria-controls ile bağlı yardım alanını açar/kapatır.
+// Tek belge düzeyi dinleyici — WMS ve Operasyon Merkezi panelleri aynı deseni kullanır.
+document.addEventListener('click', event => {
+    const button = event.target.closest('[data-panel-help]');
+    if (!button) return;
+    const panel = document.getElementById(button.getAttribute('aria-controls'));
+    if (!panel) return;
+    const open = button.getAttribute('aria-expanded') !== 'true';
+    button.setAttribute('aria-expanded', String(open));
+    panel.hidden = !open;
+});
+
 // [WHY]: admin.html'de window.currentUser hiç set edilmiyordu; onay/red ve TODO kimliksiz kalıyordu (EBYS-08, TODO-03).
 window.currentUser = window.getActiveUser();
 const welcomeEl = document.getElementById('welcomeUserName');

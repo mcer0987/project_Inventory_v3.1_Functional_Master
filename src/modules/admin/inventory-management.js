@@ -576,7 +576,8 @@ window.inventoryManagementModule = {
     const fixtures = products.filter(p => {
       const hasStock = (p.adet || 0) > 0;
       const durum = window.Schema.normalizeStock(p, warehouse).durum;
-      return hasStock && durum !== 'Pasif' && durum !== 'Hurda' && window.Schema.isDemirbas(p);
+      return hasStock && durum !== 'Pasif' && durum !== 'Hurda' && window.Schema.isDemirbas(p)
+        && !window.Schema.isRowCountLocked(p);   // v3.6: rafı sayımdaki ürün zimmetlenemez
     });
 
     if (fixtures.length === 0) {

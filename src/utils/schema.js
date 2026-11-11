@@ -267,7 +267,10 @@
     //          sn              — cihazın seri numarası (Excel/CSV içe aktarma; benzersizlik zorunlu değil).
     //          sonCikisId      — v3.4: personel çıkışında stok düşümünü aynı commit'teki b3 kaydına bağlar (firestore.rules
     //                            staffExitStockOk); yalnız runStockOps personel çıkışı yazar.
-    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo', 'sn', 'sonCikisId']);
+    //          rafPasif        — v3.6: kaydın rafı sayımda (raf belgesinin sayım kilidinin kopyası). Gizleme ve personel çıkış
+    //                            kuralı bu alanı okur; stok hareketinin asıl kararı defterde raf belgesinden verilir. Yalnız raf
+    //                            kilidi / uzlaştırma ve ürün kaydı planlayıcısı yazar.
+    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo', 'sn', 'sonCikisId', 'rafPasif']);
     const B2_OPTIONAL_KEYS = Object.freeze([...B1_OPTIONAL_KEYS]);
     const STOCK_STRING_KEYS = Object.freeze(['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status', 'envanterNo', 'sn', 'stokOncekiDurum']);
 
@@ -302,6 +305,7 @@
         if (has('limit') && e.limit !== null && (!Number.isInteger(e.limit) || e.limit < 0)) errors.push(`geçersiz limit: ${e.limit}`);
         if (has('isDemirbas') && typeof e.isDemirbas !== 'boolean') errors.push('isDemirbas boolean değil');
         if (has('isWatched') && typeof e.isWatched !== 'boolean') errors.push('isWatched boolean değil');
+        if (has('rafPasif') && typeof e.rafPasif !== 'boolean') errors.push('rafPasif boolean değil');
         if (has('lastUpdate') && typeof e.lastUpdate !== 'number') errors.push('lastUpdate sayı değil');
         STOCK_STRING_KEYS.forEach(k => { if (has(k) && typeof e[k] !== 'string') errors.push(`${k} string değil`); });
         return errors;
@@ -415,6 +419,10 @@
     // Kanonik kod: büyük harf (Türkçe harfler dahil, İ → I katlanır), rakam; ilk karakterden sonra boşluk . - _ olabilir.
     const SHELF_CODE_RE = /^[A-Z0-9ÇĞÖŞÜ][A-Z0-9ÇĞÖŞÜ .\-_]*$/;
     const SHELF_KEYS = Object.freeze(['code', 'depot', 'capacity', 'usedSlots', 'active', 'updatedAt', 'updatedBy']);
+    // v3.6 · Sayım kilidi: üç alan ya hep birlikte vardır ya hiç yoktur; varken active:false zorunludur. active:false TEK BAŞINA
+    // kilit değildir — eski anlamı ("yeni yerleştirmeye kapalı") korunur (Global-Architecture KURAL 3).
+    const SHELF_LOCK_KEYS = Object.freeze(['lockReason', 'lockedAt', 'lockedBy']);
+    const SHELF_LOCK_REASON_MAX = 300;
     // Slot işgal etmeyen durumlar (normName ile karşılaştırılır: büyük/küçük harf, ı/i ve fazla boşluk farkı yok sayılır).
     // 'pasif' ayrıca alt dize olarak aranır (filter-module isPassiveStatus ile aynı: "Tükendi / Pasif", "Pasif (Arızalı)").
     const SHELF_INACTIVE_STATUSES = Object.freeze(['stok dışı', 'stok disi', 'tükendi', 'tukendi'].map(normName));
@@ -521,7 +529,18 @@
         const errors = [];
         if (!d || typeof d !== 'object' || Array.isArray(d)) return ['kayıt yok'];
         SHELF_KEYS.forEach(k => { if (!Object.prototype.hasOwnProperty.call(d, k) || d[k] === undefined) errors.push(`eksik alan: ${k}`); });
-        Object.keys(d).forEach(k => { if (!SHELF_KEYS.includes(k)) errors.push(`bilinmeyen alan: ${k}`); });
+        Object.keys(d).forEach(k => { if (!SHELF_KEYS.includes(k) && !SHELF_LOCK_KEYS.includes(k)) errors.push(`bilinmeyen alan: ${k}`); });
+        const lockKeys = SHELF_LOCK_KEYS.filter(k => Object.prototype.hasOwnProperty.call(d, k) && d[k] !== undefined);
+        if (lockKeys.length && lockKeys.length !== SHELF_LOCK_KEYS.length) errors.push('sayım kilidi alanları eksik (lockReason, lockedAt, lockedBy birlikte olmalı)');
+        if (lockKeys.length === SHELF_LOCK_KEYS.length) {
+            if (d.active !== false) errors.push('sayım kilidindeki raf active:false olmalı');
+            if (typeof d.lockReason !== 'string' || isBlank(d.lockReason) || d.lockReason.length > SHELF_LOCK_REASON_MAX) {
+                errors.push(`sayım gerekçesi 1–${SHELF_LOCK_REASON_MAX} karakter olmalı`);
+            }
+            const t = d.lockedAt;
+            if (!((typeof t === 'number' && Number.isFinite(t) && t > 0) || (t !== null && typeof t === 'object'))) errors.push('lockedAt zaman değeri değil');
+            if (typeof d.lockedBy !== 'string' || isBlank(d.lockedBy) || d.lockedBy.length > 128) errors.push('lockedBy (admin UID) geçersiz');
+        }
         if ('depot' in d && !SHELF_DEPOTS.includes(d.depot)) errors.push(`geçersiz depo: ${d.depot}`);
         if ('code' in d && !isValidShelfCode(d.code)) errors.push(`geçersiz raf kodu: ${d.code}`);
         if ('capacity' in d && (!Number.isInteger(d.capacity) || d.capacity < SHELF_MIN_CAPACITY || d.capacity > SHELF_MAX_CAPACITY)) {
@@ -541,6 +560,41 @@
             errors.push(`belge kimliği uyumsuz: ${opts.id} ≠ ${d.depot}_${d.code}`);
         }
         return errors;
+    }
+
+    // v3.6 · Raf belgesi sayım kilidinde mi? (Yalnız kilit alanı; active:false tek başına kilit değildir.)
+    function isShelfCountLocked(shelfDoc) {
+        return !!shelfDoc && typeof shelfDoc === 'object' && typeof shelfDoc.lockReason === 'string' && !isBlank(shelfDoc.lockReason);
+    }
+    // v3.6 · Stok kaydı sayımdaki bir rafta mı? (raf kilidinin kayıttaki kopyası; gizleme ve personel kuralı bunu okur)
+    function isRowCountLocked(item) {
+        return !!item && typeof item === 'object' && item.rafPasif === true;
+    }
+    // Rafta fiziksel olarak ürün var mı: durumu ne olursa olsun adedi > 0 olan kayıt (slot sayımından farklı: "Pasif" durumlu
+    // ama rafta duran ürün de rafı dolu tutar).
+    function hasPhysicalStock(item) {
+        const qty = Number.parseFloat(item && (item.adet ?? item.qty ?? item.quantity ?? 0));
+        return Number.isFinite(qty) && qty > 0;
+    }
+    // Bir depodaki kayıtlardan kanonik raf koduna bağlı olanlar (adet 0 dahil).
+    function rowsOnShelf(items, code) {
+        const target = normShelfCode(code);
+        if (!target) return [];
+        return _stockValues(items).filter(item => itemShelfCode(item) === target);
+    }
+    /**
+     * Katalogda olup fiziksel stoğu olmayan raflar (boş raf ayıklaması). shelves: katalog belgeleri dizisi ya da {id: belge};
+     * itemsByDepot: {b1:[], b2:[]}. Dönüş: [{id, depot, code, capacity, zeroRows}] — zeroRows: rafa bağlı adedi 0 kayıt sayısı
+     * (raf kaldırılırken Havuz'a alınır).
+     */
+    function emptyShelves(shelves, itemsByDepot) {
+        const list = Array.isArray(shelves) ? shelves : Object.entries(shelves || {}).map(([id, doc]) => ({ id, ...doc }));
+        return list.filter(s => s && SHELF_DEPOTS.includes(s.depot) && isValidShelfCode(s.code)).map(s => {
+            const rows = rowsOnShelf((itemsByDepot || {})[s.depot], s.code);
+            return { s, rows };
+        }).filter(({ rows }) => !rows.some(hasPhysicalStock)).map(({ s, rows }) => ({
+            id: s.id || `${s.depot}_${s.code}`, depot: s.depot, code: s.code, capacity: s.capacity, zeroRows: rows.length,
+        }));
     }
 
     // ─── 3.9a · Cihaz kimliği (Seri No / Envanter No) ───
@@ -655,6 +709,7 @@
         SHELF_COLLECTION, SHELF_DEPOTS, SHELF_DEFAULT_CAPACITY, SHELF_MIN_CAPACITY, SHELF_MAX_CAPACITY, SHELF_CODE_MAX_LENGTH,
         SHELF_KEYS, normShelfCode, isValidShelfCode, itemShelfCode, isSlotOccupying, computeUsedSlots, slotUsageByShelf,
         shelfDocId, buildShelfDoc, validateShelfDoc,
+        SHELF_LOCK_KEYS, SHELF_LOCK_REASON_MAX, isShelfCountLocked, isRowCountLocked, hasPhysicalStock, rowsOnShelf, emptyShelves,
         requestStatus, normalizeRequest,
         normDeviceId, deviceKeys, validateDeviceIds,
     };

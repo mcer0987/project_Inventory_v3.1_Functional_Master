@@ -963,7 +963,7 @@ window.showRequestApprovalModal = function (request) {
             return 2;
         };
         const candidates = ['b1', 'b2'].flatMap(repo => (window.data[repo] || [])
-            .filter(p => _stockQty(p) > 0 && p.durumu !== 'Pasif' && p.status !== 'Pasif')
+            .filter(p => _stockQty(p) > 0 && p.durumu !== 'Pasif' && p.status !== 'Pasif' && !window.Schema?.isRowCountLocked?.(p))
             .map(p => ({ repo, p, rank: rank(p), key: `${repo}|${p.id}` })))
             .sort((a, b) => a.rank - b.rank || _stockLabel(a.p).localeCompare(_stockLabel(b.p), 'tr'));
         const exact = candidates.filter(c => c.rank === 0 && _stockQty(c.p) >= want);
@@ -1281,7 +1281,7 @@ window.sendDraftInventoryRequest = async function (id) {
             window.data[repo].forEach((item, index) => {
                 const isDem = window.checkIsDemirbas ? window.checkIsDemirbas(item) : (item.isDemirbas === true);
                 const qty = parseInt(item.adet || item.qty || 0);
-                if (qty > 0) {
+                if (qty > 0 && !window.Schema?.isRowCountLocked?.(item)) {
                     const searchStr = `${item.ürün || ''} ${item.marka || ''} ${item.name || ''} ${item.raf || ''} ${item.sütun || ''} ${item.tür || ''} ${item.açıklama || ''}`.toLocaleLowerCase('tr-TR');
                     if (searchStr.includes(searchTerm)) {
                         results.push({ item, index, repo, isDemirbasStrict: isDem, qty });
@@ -1457,7 +1457,7 @@ window.searchForRequest = function () {
     if (!list) return;
     if (filter.length < 2) { list.style.display = 'none'; return; }
     list.innerHTML = '';
-    const allProducts = [...(window.data.b1 || []), ...(window.data.b2 || [])];
+    const allProducts = [...(window.data.b1 || []), ...(window.data.b2 || [])].filter(item => !window.Schema?.isRowCountLocked?.(item));
     const results = allProducts.filter(item =>
         (item.ürün || "").toLocaleLowerCase('tr-TR').includes(filter) ||
         (item.marka || "").toLocaleLowerCase('tr-TR').includes(filter) ||
@@ -1498,7 +1498,7 @@ window.searchForExit = function () {
     const allProducts = [
         ...(window.data.b1 || []).map((item, index) => ({ ...item, _repo: 'b1', _index: index })),
         ...(window.data.b2 || []).map((item, index) => ({ ...item, _repo: 'b2', _index: index }))
-    ];
+    ].filter(item => !window.Schema?.isRowCountLocked?.(item));   // v3.6: sayımdaki raf
     const results = allProducts.filter(item =>
         ((item.ürün || item.name || '')?.toLocaleLowerCase('tr-TR').includes(filter)) ||
         ((item.marka || item.tür || item.type || '')?.toLocaleLowerCase('tr-TR').includes(filter)) ||
@@ -1836,7 +1836,7 @@ document.addEventListener('change', (e) => {
 window.exportPDF = function (depo) {
     if (!validateAdminAction()) return;
     if (depo === 'b3') return _exportB3PDF();
-    const items = window.data[depo] || [];
+    const items = (window.data[depo] || []).filter(item => !window.Schema?.isRowCountLocked?.(item));   // v3.6: tabloyla aynı
     function getStatusClass(status) {
         if (!status) return "status-diger";
         status = status.toLowerCase();
@@ -2178,7 +2178,8 @@ async function importExcel(event) {
 
 window.exportToExcel = function (depo) {
     if (!window.data || !window.data[depo]) { showAppAlert("İndirilecek veri bulunamadı!", "error"); return; }
-    const items = window.data[depo];
+    // v3.6: B1/B2 raporu depo görünümüyle aynı — sayımdaki raflardaki ürünler dahil edilmez.
+    const items = depo === 'b3' ? window.data[depo] : window.data[depo].filter(item => !window.Schema?.isRowCountLocked?.(item));
     let excelData = [];
     let sheetName = "";
     if (depo === 'b3') {

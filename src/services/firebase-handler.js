@@ -178,13 +178,16 @@ const staffGateRef = () => doc(fireDb, COLLECTION_ROOT, 'accessGate', 'items', '
 //        birebir; metinlerde "<" görsel eşdeğeriyle değişir (kural etiketli metni reddeder, kayıt düşmesin).
 const AUDIT_RESULTS = ['blocked', 'approved', 'cancelled'];
 const _auditText = v => (v === undefined || v === null || v === '') ? null : String(v).replace(/</g, '‹').slice(0, 300);
-export const appendAuditLog = window.appendAuditLog = async function (entry = {}) {
+const _auditValue = v => (v === undefined || v === null || v === '') ? null : String(v).replace(/</g, '‹').slice(0, 128);
+// v3.6: kayıt kurucu ayrı — transaction içinde işlemle AYNI commit'te yazılabilsin (stock-ledger deps.auditRecord).
+// fromValue / toValue yalnız verildiğinde yazılır (kural: ≤128 karakter etiketsiz metin).
+export const buildAuditRecord = window.buildAuditRecord = function (entry = {}) {
     const u = window.userAuth;
-    if (!u) return { ok: false, code: 'no-auth' };
-    if (!AUDIT_RESULTS.includes(entry.result)) return { ok: false, code: 'invalid-argument' };
+    if (!u) throw new SaveDataError('no-auth', 'Oturum bulunamadı; denetim kaydı yazılamadı.');
+    if (!AUDIT_RESULTS.includes(entry.result)) throw new SaveDataError('invalid-argument', 'Geçersiz denetim sonucu.');
     const id = 'al_' + window.makeId();
     const qty = Number(entry.qty);
-    const rec = {
+    const data = {
         id,
         type: _auditText(entry.type),
         refCol: _auditText(entry.refCol),
@@ -200,6 +203,17 @@ export const appendAuditLog = window.appendAuditLog = async function (entry = {}
         page: window.location.pathname.includes('admin.html') ? 'admin' : 'index',
         ts: serverTimestamp(),
     };
+    const fromValue = _auditValue(entry.fromValue);
+    const toValue = _auditValue(entry.toValue);
+    if (fromValue !== null) data.fromValue = fromValue;
+    if (toValue !== null) data.toValue = toValue;
+    return { id, data };
+};
+export const appendAuditLog = window.appendAuditLog = async function (entry = {}) {
+    const u = window.userAuth;
+    if (!u) return { ok: false, code: 'no-auth' };
+    if (!AUDIT_RESULTS.includes(entry.result)) return { ok: false, code: 'invalid-argument' };
+    const { id, data: rec } = buildAuditRecord(entry);
     try {
         await setDoc(doc(fireDb, COLLECTION_ROOT, 'auditLogs', 'items', id), rec);
         return { ok: true, id };
@@ -453,6 +467,11 @@ window.startRealtimeSync = function () {
                 // Kayıtta id alanı yoksa doküman id'si kullanılır; aksi halde düzenleme/silme hedefsiz kalıyor ve kayıt temp_ id ile çoğalıyordu.
                 items.push(colName === 'purchaseOrders' ? { ...docSnap.data(), id: docSnap.id } : { id: docSnap.id, ...docSnap.data() });
             });
+            // v3.6: sayım bayrağı (rafPasif) değişen satır tablodan çıkar / tabloya döner; satır yaması bunu yapamaz → tam çizim.
+            const lockFlip = (colName === 'b1' || colName === 'b2') && changesPayload.some(c => {
+                const prev = (window._dbMirror[colName] || []).find(x => x && String(x.id) === String(c.id));
+                return (prev && prev.rafPasif === true) !== (c.data && c.data.rafPasif === true);
+            });
 
             // Veriyi global hafızaya ve Mirror'a (kopya) al
             window.data[colName] = items;
@@ -466,7 +485,7 @@ window.startRealtimeSync = function () {
             // YENI YAPI: PubSub (Event) Mimarisi
             // [HOW]: isPatch bayrağı ile sadece modifikasyon olan durumlarda Targeted Patching devreye girer
             const isInitialLoad = !window.isFirebaseLoaded; // Basit bir kontrol
-            const isTargetedPatch = hasModifications && snapshot.docChanges().every(c => c.type === 'modified');
+            const isTargetedPatch = hasModifications && !lockFlip && snapshot.docChanges().every(c => c.type === 'modified');
 
             window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', {
                 detail: {
@@ -1019,6 +1038,10 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
         }
     }
     if (prepared.length > 490) return fail('invalid-argument', `Tek atomik işlemde en fazla 490 doküman yazılabilir (${prepared.length}).`);
+    // v3.6: rafı sayımdaki kayıt silinemez (sayılan ürün kaybolmasın). Kaynak: Firestore'daki son hâl (mirror).
+    const lockedDelete = prepared.find(p => p.op === 'delete' && (p.col === 'b1' || p.col === 'b2')
+        && window.Schema?.isRowCountLocked?.((window._dbMirror[p.col] || []).find(_sameId(p.id))));
+    if (lockedDelete) return fail('shelf-locked', 'Rafı sayımda olan ürün silinemez; sayım bitince tekrar deneyin.', { collection: lockedDelete.col, id: lockedDelete.id });
     const guard = _schemaGuardError(prepared, opts);   // Faz 3.5/K2: b3/b1/b2 sözleşmesi — ihlalde batch'in hiçbir parçası yazılmaz
     if (guard) return fail(guard.code, guard.message, guard.details);
     const owner = _ownerGuardError(prepared);           // Faz 4B · J9: sahiplik alanları değiştirilemez
@@ -1304,14 +1327,23 @@ const STOCK_COLLECTIONS = ['b1', 'b2'];
 
 // Transaction'ın saf hesaplama kısmı (okunan dokümanlar → yazılacak stok değişiklikleri). Sunucu verisiyle transaction
 // içinde çağrılır; saf olduğu için ayrıca test edilebilir. Yetersiz stok veya eksik dokümanda SaveDataError fırlatır.
-export const planStockOps = window.planStockOps = function (entries, datas) {
+// v3.6: shelfDocs[i] — i. girdinin rafının TAZE belgesi (yoksa null). Kayıt bayrağı (rafPasif) ya da rafın sayım kilidi
+//       hareketi reddeder (StockLedger.assertNotCountLocked; fail-closed). Yeniden oluşturulan kayıt eski bayrağı taşımaz.
+export const planStockOps = window.planStockOps = function (entries, datas, shelfDocs = []) {
+    const assertMovable = (row, shelfDoc) => {
+        if (window.StockLedger) window.StockLedger.assertNotCountLocked(row, shelfDoc || null);
+        else if (row && row.rafPasif === true) throw new SaveDataError('shelf-locked', 'Ürünün rafı sayımda; sayım bitene kadar stok hareketi yapılamaz.');
+    };
     return entries.map((e, i) => {
         const data = datas[i];
         if (!data) {
             if (!e.createIfMissing) throw new SaveDataError('not-found', `Stok kaydı bulunamadı (${e.col}/${e.id}); liste güncellenmiş olabilir.`);
             const item = _clean({ ..._stripRenderFields(e.createIfMissing), id: e.id, lastUpdate: Date.now() });
+            delete item.rafPasif;
+            assertMovable(item, shelfDocs[i]);
             return { col: e.col, id: e.id, name: item.ürün || item.name || e.id, before: 0, after: parseInt(item.adet ?? item.qty ?? 0, 10) || 0, created: true, full: item };
         }
+        assertMovable(data, shelfDocs[i]);
         const name = data.ürün || data.name || e.id;
         const r = computeStockPatch(e.col, data, e.delta);
         if (r.after < 0) throw new SaveDataError('insufficient-stock', `Yetersiz stok: "${name}" (mevcut ${r.before}, istenen ${-e.delta}).`, { col: e.col, id: e.id, before: r.before });
@@ -1402,18 +1434,28 @@ export const runStockOps = window.runStockOps = async function ({ stock = [], wr
             const entries = [...stockByKey.values()];
             const snaps = [];
             for (const e of entries) snaps.push(await tx.get(_docRef(e.col, e.id)));   // tüm okumalar yazmalardan önce
-            const results = planStockOps(entries, snaps.map(sn => sn.exists() ? sn.data() : null));
+            // v3.6: her girdinin rafı (personel dahil — okuma izni var) transaction'da okunur; sayım kilidinin tek doğruluk
+            //       kaynağı raf belgesidir. Aynı raf bir kez okunur; sayaç planı da bu okumaları kullanır.
+            const shelfReads = {};
+            const readShelf = async (sid) => {
+                if (!sid || Object.prototype.hasOwnProperty.call(shelfReads, sid)) return;
+                const s = await tx.get(_docRef('shelves', sid));   // raf okumaları da yazmalardan ÖNCE (Firestore kuralı)
+                shelfReads[sid] = s.exists() ? s.data() : null;
+            };
+            const L = window.StockLedger, S = window.Schema;
+            const entryShelfIds = entries.map((e, i) => {
+                const row = snaps[i].exists() ? snaps[i].data() : e.createIfMissing;
+                return L && S && row ? L.shelfIdOf(e.col, S.itemShelfCode(row)) : null;
+            });
+            for (const sid of entryShelfIds) await readShelf(sid);
+            const results = planStockOps(entries, snaps.map(sn => sn.exists() ? sn.data() : null), entryShelfIds.map(sid => (sid ? shelfReads[sid] : null)));
             if (staffLinks) results.forEach(r => { r.patch = { ...r.patch, sonCikisId: staffLinks.get(`${r.col}|${r.id}`) }; });
 
             const deltas = new Map();
             if (!staffLinks) results.forEach((r, i) => {
                 _shelfDeltaFor(r.col, snaps[i], r).forEach(([sid, d]) => { if (sid) deltas.set(sid, (deltas.get(sid) || 0) + d); });
             });
-            const shelfReads = {};
-            for (const sid of deltas.keys()) {
-                const s = await tx.get(_docRef('shelves', sid));   // raf okumaları da yazmalardan ÖNCE (Firestore kuralı)
-                shelfReads[sid] = s.exists() ? s.data() : null;
-            }
+            for (const sid of deltas.keys()) await readShelf(sid);
             const shelfPlan = window.StockLedger
                 ? window.StockLedger.planShelfCounterWrites(deltas, shelfReads, window.userAuth.uid, { requireCatalog: false })
                 : { shelves: [], writes: [] };
@@ -1484,8 +1526,13 @@ export const runStockTransaction = window.runStockTransaction = async function (
 //        sayaçlara dokunamaz); işlem kayıtları ${ROOT}/stockOperations/items/{operationId} (yalnız ekleme).
 const _ledgerDeps = () => ({
     db: fireDb, root: COLLECTION_ROOT,
-    fns: { runTransaction, doc, getDoc, serverTimestamp },
+    fns: { runTransaction, doc, getDoc, serverTimestamp, deleteField, writeBatch },
     uid: window.userAuth ? window.userAuth.uid : null,
+    // v3.6: denetim kaydı işlemle aynı commit'te (yönetici kimliği oturumdaki kişiden).
+    auditRecord: entry => {
+        const me = typeof window.getActiveUser === 'function' ? window.getActiveUser() : null;
+        return buildAuditRecord({ actorName: me && me.name, actorPersonelId: me && me.id, ...entry });
+    },
 });
 function _ledgerPreflight(cols, forbiddenMessage) {
     if (!window.StockLedger) throw new SaveDataError('write-failed', 'Stok defteri modülü (stock-ledger.js) yüklenmemiş; işlem yapılmadı.');
@@ -1563,6 +1610,93 @@ export const saveShelfCapacity = window.saveShelfCapacity = async function (depo
     return out;
 };
 
+// ─── v3.6 · Raf yönetimi ve sayım kilidi ────────────────────────────────────────────────────────────────────────────
+// [WHY]: Raf ekleme / adını düzeltme / kaldırma ve sayım kilidi yalnız yöneticinin bilinçli işlemleridir; her biri denetim
+//        kaydı bırakır (Global-Architecture Sütun 3) ve kurallarla da sınırlıdır (firestore.rules shelves bloğu).
+// [HOW]: Motor stock-ledger.js (saf plan + transaction). Rafa bağlı kayıtlar sunucudan taze okunur:
+//        - kilit (sık): canlı listeden rafın ham yazımları toplanır, raf / shelf / rafNo alanlarında indeksli 'in' sorgusu
+//          (Global-Architecture KURAL 4). Bu arada farklı yazımla eklenen bir kayıt kaçarsa hareket yine engellenir (defter raf
+//          belgesini okur); bayrağı WMS eşitlemesi düzeltir.
+//        - kaldırma / ad düzeltme (seyrek, "boş mu" kararı): deponun tamamı taze okunur (exhaustive).
+async function _findShelfRows(depot, code, { exhaustive = false } = {}) {
+    const S = window.Schema;
+    const target = S.normShelfCode(code);
+    const byId = new Map();
+    const take = snap => snap.docs.forEach(d => byId.set(d.id, { id: d.id, data: d.data() }));
+    if (exhaustive) {
+        take(await getDocsFromServer(collection(fireDb, COLLECTION_ROOT, depot, 'items')));
+    } else {
+        const variants = new Set([target]);
+        (window.data[depot] || []).forEach(row => {
+            if (S.itemShelfCode(row) !== target) return;
+            ['raf', 'shelf', 'rafNo'].forEach(k => { if (typeof row[k] === 'string' && row[k] !== '') variants.add(row[k]); });
+        });
+        const values = [...variants];
+        for (const field of ['raf', 'shelf', 'rafNo']) {
+            for (let k = 0; k < values.length; k += 30) {
+                take(await getDocsFromServer(query(collection(fireDb, COLLECTION_ROOT, depot, 'items'), where(field, 'in', values.slice(k, k + 30)))));
+            }
+        }
+    }
+    return [...byId.values()].filter(r => S.itemShelfCode(r.data) === target);
+}
+const _shelfDeps = () => ({ ..._ledgerDeps(), countUsage: _countShelfUsage, findShelfRows: _findShelfRows });
+function _applyLocalRows(rows) {
+    (rows || []).forEach(w => _applyLocal(w.col, { op: 'update', id: w.id, data: w.data }));
+    if ((rows || []).length) {
+        new Set(rows.map(w => w.col)).forEach(col => window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: col, isPatch: false, changes: [] } })));
+    }
+}
+
+/** Yeni raf (katalogda varsa ret). Dönüş: { id, code, depot, capacity, usedSlots, active, created }. */
+export const createShelf = window.createShelf = async function (depot, code, capacity) {
+    _ledgerPreflight([depot].filter(Boolean), 'Raf ekleme yalnızca sistem yöneticisi tarafından yapılabilir.');
+    let res;
+    try { res = await window.StockLedger.createShelf(_shelfDeps(), { depot, code, capacity }); }
+    catch (e) { throw _ledgerError(e, 'createShelf'); }
+    const { local, ...out } = res;
+    _shelfLocal(out.id, local, 'set');
+    return out;
+};
+
+/** Sayım kilidi koy (locked:true, reason zorunlu) / kaldır. Dönüş: { id, code, depot, locked, changed, rowsChanged }. */
+export const setShelfCountLock = window.setShelfCountLock = async function (depot, code, { locked, reason } = {}) {
+    _ledgerPreflight([depot].filter(Boolean), 'Raf sayımı yalnızca sistem yöneticisi tarafından başlatılıp bitirilebilir.');
+    let res;
+    try { res = await window.StockLedger.setShelfCountLock(_shelfDeps(), { depot, code, locked: locked === true, reason }); }
+    catch (e) { throw _ledgerError(e, 'setShelfCountLock'); }
+    const { localShelf, localRows, ...out } = res;
+    if (localShelf) _shelfLocal(out.id, localShelf);
+    _applyLocalRows(localRows);
+    console.log(`☁️ raf ${out.id}: sayım ${out.locked ? 'başladı' : 'bitti'}${out.changed ? '' : ' (raf zaten bu durumdaydı)'}, ${out.rowsChanged} kayıt işaretlendi`);
+    return out;
+};
+
+/** Boş rafı kaldır (adet 0 kayıtlar Havuz'a). Dönüş: { id, code, depot, movedToPool }. */
+export const deleteShelf = window.deleteShelf = async function (depot, code) {
+    _ledgerPreflight([depot].filter(Boolean), 'Raf kaldırma yalnızca sistem yöneticisi tarafından yapılabilir.');
+    let res;
+    try { res = await window.StockLedger.deleteShelf(_shelfDeps(), { depot, code }); }
+    catch (e) { throw _ledgerError(e, 'deleteShelf'); }
+    const { localRows, ...out } = res;
+    window.data.shelves = (window.data.shelves || []).filter(s => s && s.id !== out.id);
+    _bumpDataRevision();
+    _applyLocalRows(localRows);
+    return out;
+};
+
+/** Boş rafın adını düzelt. Dönüş: { id, code, depot, previousId }. */
+export const renameShelf = window.renameShelf = async function (depot, code, newCode) {
+    _ledgerPreflight([depot].filter(Boolean), 'Raf adı yalnızca sistem yöneticisi tarafından düzeltilebilir.');
+    let res;
+    try { res = await window.StockLedger.renameShelf(_shelfDeps(), { depot, code, newCode }); }
+    catch (e) { throw _ledgerError(e, 'renameShelf'); }
+    const { local, ...out } = res;
+    window.data.shelves = (window.data.shelves || []).filter(s => s && s.id !== out.previousId);
+    _shelfLocal(out.id, local, 'set');
+    return out;
+};
+
 // ─── v3.3 · Aşama 4 · saveProduct transaction'a bağlanması (Denetim P1-02 devamı) ───────────────────────────────────
 // [WHY]: Yeni ürün (appendItem) ve düzenleme (updateItem) kör batch'tir; raf sayacına hiç dokunmaz (P2-04). Düzenleme
 //        ayrıca window.data'nın bayat kopyasıyla çalışıyordu — eşzamanlı bir raf değişikliğiyle yarışabilirdi.
@@ -1611,6 +1745,7 @@ export const syncShelfCounters = window.syncShelfCounters = async function () {
     [...out.updated, ...out.capacityRaised].forEach(u => {
         _shelfLocal(u.id, u.capacityBefore !== undefined ? { usedSlots: u.after, capacity: u.after } : { usedSlots: u.after });
     });
+    _applyLocalRows((out.lockFixed || []).map(f => ({ col: f.col, id: f.id, data: { rafPasif: f.rafPasif } })));
     console.log(`🔄 [Sync] Raf sayaçları eşitlendi: ${out.updated.length} güncellendi, ${out.capacityRaised.length} kapasite yükseltilerek düzeltildi, `
         + `${out.unchanged} zaten doğruydu, ${out.unregistered.length} katalog dışı raf, havuzda ${out.pool.total} ürün (B1 ${out.pool.b1} · B2 ${out.pool.b2}).`);
     return out;

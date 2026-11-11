@@ -814,6 +814,14 @@ window.receiveFromService = async function (serviceId) {
         açıklama: "Servisten Döndü: " + (record.not || ""),
     };
     delete recovered.sn; delete recovered.envanterNo;   // cihaz kimliği stok satırına değil hareket kayıtlarına aittir
+    delete recovered.rafPasif;   // v3.6: sayım bayrağını yalnız raf kilidi yazar
+
+    // v3.6: rafı sayımdaki kayda stok eklenmez (defter de reddeder); servis kaydı açık kalır.
+    const existingRow = (window.data[targetRepo] || []).find(p => p && String(p.id) === productId);
+    if (window.Schema?.isRowCountLocked?.(existingRow)) {
+        if (typeof showAppAlert === 'function') showAppAlert('Ürünün rafı sayımda; servisten depoya dönüş sayım bitince yapılabilir. Servis kaydı açık kaldı.', 'warning');
+        return;
+    }
 
     const ok = typeof showCustomConfirm === 'function'
         ? await showCustomConfirm('Depoya Geri Al', `"${recovered.ürün || '-'}" (${qty} adet) ${targetRepo.toUpperCase()} deposuna geri alınacak; servis kaydı kapanır ve cihaz geçmişinde kalır. Onaylıyor musunuz?`)

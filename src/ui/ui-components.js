@@ -92,6 +92,21 @@ function _productShelfOptions(depot, configuredShelves, shelfDocs, currentShelf,
     return options;
 }
 
+// v3.6: sayımdaki raflar listede görünür ama seçilemez ("(Sayımda)"); kaydın ŞU ANKİ rafı seçili kalabilsin diye kapatılmaz.
+function _shelfOptionsHtml(depot, options, currentShelf) {
+    const S = window.Schema;
+    const norm = v => (S && typeof S.normShelfCode === 'function' ? S.normShelfCode(v) : String(v || '').trim().toLocaleUpperCase('tr-TR'));
+    const locked = new Set(((window.data && window.data.shelves) || [])
+        .filter(s => s && s.depot === depot && S && typeof S.isShelfCountLocked === 'function' && S.isShelfCountLocked(s))
+        .map(s => s.code));
+    const current = norm(currentShelf);
+    return options.map(s => {
+        const isLocked = locked.has(norm(s));
+        const disabled = isLocked && norm(s) !== current;
+        return `<option value="${escapeHtml(s)}"${disabled ? ' disabled' : ''}>${escapeHtml(s)}${isLocked ? ' (Sayımda)' : ''}</option>`;
+    }).join('');
+}
+
 export const UIComponents = {
 
     // =========================================================================
@@ -223,8 +238,7 @@ export const UIComponents = {
             window.Schema && window.Schema.normShelfCode
         );
         if (shelfSelect) {
-            shelfSelect.innerHTML = shelfOptions
-                .map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+            shelfSelect.innerHTML = _shelfOptionsHtml(activeTab, shelfOptions, selectedShelf);
         }
         if (typeSelect) {
             // Faz 4 · J2: ürün türü adı kayıt verisi (productTypes) — option değerinde ve metninde kaçırılır.
@@ -419,7 +433,11 @@ export const UIComponents = {
             const colSel   = document.getElementById('transNewCol');
             const shelfSel = document.getElementById('transNewShelf');
             if (locs && colSel)   colSel.innerHTML   = locs.columns.map(c => `<option>${escapeHtml(c)}</option>`).join('');
-            if (locs && shelfSel) shelfSel.innerHTML = locs.shelves.map(s => `<option>${escapeHtml(s)}</option>`).join('');
+            // v3.6: hedef raf listesi katalogdaki raflarla birleşir; sayımdaki raflar seçilemez.
+            if (locs && shelfSel) {
+                const options = _productShelfOptions(targetData.key, locs.shelves, window.data && window.data.shelves, '', window.Schema && window.Schema.normShelfCode);
+                shelfSel.innerHTML = _shelfOptionsHtml(targetData.key, options, '');
+            }
         } else {
             internalDiv.style.display = 'none';
         }

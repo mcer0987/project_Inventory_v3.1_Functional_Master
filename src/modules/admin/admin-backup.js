@@ -212,8 +212,14 @@
             return { status: 'failed', code, message, summary };
         }
         notify('Yedek geri yüklendi', 'success');
+        // v3.6: yedekteki sayım bayrakları (rafPasif) bugünkü raf kilitleriyle eşitlenir (raf kataloğu yedekte yoktur).
+        let lockSync = null;
+        if (typeof window.syncShelfCounters === 'function') {
+            try { lockSync = await window.syncShelfCounters(); }
+            catch (e) { notify('Yedek geri yüklendi; raf sayaçları ve sayım işaretleri eşitlenemedi. Depo Raf Haritası\'ndan "Raf Sayaçlarını Eşitle"yi çalıştırın.', 'warning'); }
+        }
         if (Service.reloadAfterRestore) setTimeout(() => location.reload(), 800);
-        return { status: 'restored', summary };
+        return { status: 'restored', summary, lockSync };
     }
 
     const Service = {

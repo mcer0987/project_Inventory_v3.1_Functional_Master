@@ -1192,6 +1192,13 @@ describe('Denetim günlüğü (4.7 · KJ-7)', () => {
     test('geçersiz sonuç reddedilir', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), result: 'hacked' })));
     test('etiketli metin reddedilir', () => assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), item: XSS })));
     test('oturumsuz ekleyemez', () => assertFails(setDoc(item(ctx.none(), LIVE, 'auditLogs', 'L1'), valid())));
+    test('v3.6: yapısal eski → yeni değer (fromValue / toValue) eklenebilir', () => assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'),
+        { ...valid(), fromValue: 'ENV-001', toValue: 'ENV-002' })));
+    test('v3.6: fromValue / toValue yalnız ≤128 karakter etiketsiz metin', async () => {
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), fromValue: 7 }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), toValue: XSS }));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'auditLogs', 'L1'), { ...valid(), toValue: 'x'.repeat(129) }));
+    });
     test('personel okuyamaz', () => assertFails(getDoc(item(ctx.s1(), LIVE, 'auditLogs', 'a1'))));
     test('admin okur', () => assertSucceeds(getDoc(item(ctx.admin(), LIVE, 'auditLogs', 'a1'))));
     test('admin güncelleyemez', () => assertFails(updateDoc(item(ctx.admin(), LIVE, 'auditLogs', 'a1'), { result: 'approved' })));
@@ -1404,6 +1411,63 @@ describe('v3.3 · Raf kataloğu (shelves) ve stok işlem defteri (stockOperation
     test('shelves / stockOperations genel koleksiyon kuralından yazılamaz (knownCol dışı)', async () => {
         await assertFails(setDoc(item(ctx.admin(), LIVE, 'shelves', 'serbest'), { id: 'serbest' }));
         await assertFails(setDoc(item(ctx.admin(), LIVE, 'stockOperations', 'op_free_00001'), { id: 'op_free_00001' }));
+    });
+});
+
+describe('v3.6 · Raf sayım kilidi (lockReason / lockedAt / lockedBy)', () => {
+    const SID = 'b1_RAF-A 1';
+    const base = { code: 'RAF-A 1', depot: 'b1', capacity: 5, usedSlots: 2, active: true, updatedAt: new Date(0), updatedBy: 'admin-uid' };
+    const ref = db => item(db, LIVE, 'shelves', SID);
+    const lockPatch = (extra = {}) => ({
+        active: false, lockReason: 'Yıl sonu sayımı', lockedAt: serverTimestamp(), lockedBy: 'admin-uid',
+        updatedAt: serverTimestamp(), updatedBy: 'admin-uid', ...extra,
+    });
+    const seedLocked = () => seed(db => setDoc(ref(db), { ...base, active: false, lockReason: 'Sayım', lockedAt: new Date(1000), lockedBy: 'admin-uid' }));
+    beforeEach(() => seed(db => setDoc(ref(db), base)));
+
+    test('admin rafı sunucu saati ve kendi uid\'siyle sayıma alır; personel alamaz', async () => {
+        await assertFails(updateDoc(ref(ctx.s1()), lockPatch({ lockedBy: 'uid-s1', updatedBy: 'uid-s1' })));
+        await assertSucceeds(updateDoc(ref(ctx.admin()), lockPatch()));
+    });
+    test('KÖTÜ NİYET: geçmiş tarihli kilit, başkası adına kilit, eksik kilit alanı, active:true ile kilit reddedilir', async () => {
+        await assertFails(updateDoc(ref(ctx.admin()), lockPatch({ lockedAt: new Date('2020-01-01T00:00:00.000Z') })));
+        await assertFails(updateDoc(ref(ctx.admin()), lockPatch({ lockedBy: 'someone-else' })));
+        const { lockedBy, ...partial } = lockPatch();
+        await assertFails(updateDoc(ref(ctx.admin()), partial));
+        await assertFails(updateDoc(ref(ctx.admin()), lockPatch({ active: true })));
+    });
+    test('gerekçe boş, yalnız boşluk, 300 karakterden uzun ya da etiketli olamaz', async () => {
+        for (const lockReason of ['', '   ', 'x'.repeat(301), XSS]) await assertFails(updateDoc(ref(ctx.admin()), lockPatch({ lockReason })));
+    });
+    test('kilit sürerken sayaç / kapasite yazılır; kilit alanları değiştirilemez', async () => {
+        await seedLocked();
+        await assertSucceeds(updateDoc(ref(ctx.admin()), { usedSlots: 1, updatedAt: serverTimestamp(), updatedBy: 'admin-uid' }));
+        await assertSucceeds(updateDoc(ref(ctx.admin()), { capacity: 8, updatedAt: serverTimestamp(), updatedBy: 'admin-uid' }));
+        await assertFails(updateDoc(ref(ctx.admin()), { lockReason: 'Başka', updatedAt: serverTimestamp(), updatedBy: 'admin-uid' }));
+        await assertFails(updateDoc(ref(ctx.admin()), { lockedAt: serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: 'admin-uid' }));
+    });
+    test('sayım bitirme: üç alan kaldırılır ve active:true olur; yalnız active:true yapmak reddedilir', async () => {
+        await seedLocked();
+        await assertFails(updateDoc(ref(ctx.admin()), { active: true, updatedAt: serverTimestamp(), updatedBy: 'admin-uid' }));
+        await assertSucceeds(updateDoc(ref(ctx.admin()), {
+            active: true, lockReason: deleteField(), lockedAt: deleteField(), lockedBy: deleteField(),
+            updatedAt: serverTimestamp(), updatedBy: 'admin-uid',
+        }));
+    });
+    test('geriye dönük uyum: kilitsiz active:false raf (eski anlam) güncellenebilir', async () => {
+        await seed(db => setDoc(ref(db), { ...base, active: false }));
+        await assertSucceeds(updateDoc(ref(ctx.admin()), { capacity: 9, updatedAt: serverTimestamp(), updatedBy: 'admin-uid' }));
+    });
+    test('kilitli raf, sayacı 0 olsa da silinemez; kilit kalkınca silinir', async () => {
+        await seed(db => setDoc(ref(db), { ...base, usedSlots: 0, active: false, lockReason: 'Sayım', lockedAt: new Date(1000), lockedBy: 'admin-uid' }));
+        await assertFails(deleteDoc(ref(ctx.admin())));
+        await seed(db => setDoc(ref(db), { ...base, usedSlots: 0 }));
+        await assertSucceeds(deleteDoc(ref(ctx.admin())));
+    });
+    test('kilitli raf doğrudan oluşturulursa da sunucu saati ve yazan kanıtlanır', async () => {
+        const fresh = { ...base, code: 'RAF-B 1', usedSlots: 0, ...lockPatch() };
+        await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'shelves', 'b1_RAF-B 1'), fresh));
+        await assertFails(setDoc(item(ctx.admin(), LIVE, 'shelves', 'b1_RAF-C 1'), { ...fresh, code: 'RAF-C 1', lockedAt: new Date(1000) }));
     });
 });
 

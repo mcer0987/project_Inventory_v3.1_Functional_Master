@@ -5952,3 +5952,95 @@ tr.zim-row-awaiting td { opacity: 0.85; }
 @media (prefers-reduced-motion: reduce) {
     .request-badge-pulse { animation: none; }
 }
+
+/* ─── v3.6 · Panel açıklaması ve yardım alanı (AGENTS.md) ─────────────────────────────────────────────────────────
+   Kısa açıklama her zaman görünür; uzun anlatım [data-panel-help] düğmesiyle açılan alanda (admin-main.js dinleyicisi).
+   #b3'teki desenin genel hâli: renkler tema değişkenlerinden, iki sayfada da çalışır. */
+.panel-intro-desc {
+    margin: 6px 0 0;
+    color: var(--color-text-muted, #64748b);
+    font-size: 0.92rem;
+    line-height: 1.5;
+}
+
+.panel-help-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    min-height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(37, 99, 235, 0.28);
+    background: rgba(37, 99, 235, 0.07);
+    color: #1d4ed8;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.panel-help-trigger:focus-visible {
+    outline: 2px solid #1d4ed8;
+    outline-offset: 2px;
+}
+
+.panel-help {
+    margin-top: 10px;
+    max-width: 760px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    border-left: 3px solid #1d4ed8;
+    background: rgba(37, 99, 235, 0.05);
+    color: var(--color-text, #1e293b);
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.panel-help h3 {
+    margin: 4px 0 6px;
+    font-size: 13.5px;
+}
+
+.panel-help ul {
+    margin: 0 0 8px;
+    padding-left: 18px;
+}
+
+.panel-help li + li {
+    margin-top: 4px;
+}
+
+[data-theme="dark"] .panel-help-trigger {
+    border-color: rgba(147, 197, 253, 0.35);
+    background: rgba(147, 197, 253, 0.1);
+    color: #93c5fd;
+}
+
+[data-theme="dark"] .panel-help-trigger:focus-visible {
+    outline-color: #93c5fd;
+}
+
+[data-theme="dark"] .panel-help {
+    border-color: rgba(147, 197, 253, 0.25);
+    border-left-color: #93c5fd;
+    background: rgba(147, 197, 253, 0.07);
+}
+
+/* v3.6 · Depo listesinde yalnız yöneticiye: sayımdaki raflar yüzünden gizlenen kayıt sayısı (table-engine.js). */
+.count-lock-notice {
+    margin: 0 0 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(217, 119, 6, 0.35);
+    background: rgba(245, 158, 11, 0.1);
+    color: #92400e;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+[data-theme="dark"] .count-lock-notice {
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.12);
+}

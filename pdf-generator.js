@@ -369,7 +369,7 @@ window.exportPDF=function (depo) {
     doc.text(`${depo.toUpperCase()} Depo Envanteri`, 20, 20);
     doc.setFontSize(12);
     let y = 30;
-    (data[depo] || []).forEach(item => {
+    (data[depo] || []).filter(item => !window.Schema?.isRowCountLocked?.(item)).forEach(item => {
         doc.text(`${item.name || '-'} (${item.type || '-'}) - ${item.shelf || '-'} - ${item.status || '-'} - Adet: ${item.qty || 0}`, 20, y);
         y += 10;
         if (y > 280) { doc.addPage(); y = 20; }

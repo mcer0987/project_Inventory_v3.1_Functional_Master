@@ -243,10 +243,18 @@
                 warnings.push(`Satır ${q.line}: "${q.code}" rafı dolu (${s.capacity} slot); ürün Havuz'a (rafsız) alındı.`);
             }
         });
+        // v3.6: sayımdaki rafa (sayım kilidi) slot işgal etmeyen kayıt da yazılmaz — sayım listesi değişmesin; Havuz'a gider.
+        const countLocked = code => { const c = catalog.get(code); return !!(c && c.doc && typeof c.doc.lockReason === 'string' && c.doc.lockReason.trim() !== ''); };
         (requests || []).filter(q => !q.occupying).forEach(q => {
             const rec = byId.get(String(q.id));
             if (!rec) return;
             const s = running.get(q.code);
+            if (countLocked(q.code)) {
+                rec.raf = '';
+                poolInactiveCount += 1;
+                warnings.push(`Satır ${q.line}: "${q.code}" rafı sayımda; kayıt Havuz'a (rafsız) alındı.`);
+                return;
+            }
             rec.raf = catalog.has(q.code) || (s && s.isNew && s.used > 0) ? q.code : '';
         });
 
@@ -255,8 +263,11 @@
         }));
         const shelfEntries = shelfChanges.map(c => {
             const s = running.get(c.code);
+            // v3.6: mevcut rafın sayım kilidi alanları (varsa) aynen taşınır — tam belge yazımı onları silmesin.
+            const lockFields = s.doc ? Object.fromEntries(['lockReason', 'lockedAt', 'lockedBy']
+                .filter(k => s.doc[k] !== undefined).map(k => [k, s.doc[k]])) : {};
             const base = s.doc
-                ? { code: s.doc.code, depot: s.doc.depot, capacity: s.doc.capacity, active: s.doc.active }
+                ? { code: s.doc.code, depot: s.doc.depot, capacity: s.doc.capacity, active: s.doc.active, ...lockFields }
                 : { code: c.code, depot, capacity: c.capacity, active: true };
             return { col: SHELF_COL, id: c.id, prev: s.doc, next: { ...base, usedSlots: c.after, updatedAt: serverTime, updatedBy: uid }, cas: true };
         });

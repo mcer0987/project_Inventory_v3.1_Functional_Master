@@ -1275,12 +1275,20 @@ window.deleteCriticalGroup = async function (groupKey) {
     // [WHY]: Onay kutusu açıkken gelen bir snapshot indeksleri kaydırıyordu; silme yanlış ürünleri vurup tüm veritabanını
     //        yazıyordu (ADM-07, DATA-06). [HOW]: Grup ürünleri id ile silinir, B1+B2 tek atomik batch'te; sonuç kontrol edilir.
     if (onay) {
-        const ops = group.items.filter(i => i.id != null && i.id !== '').map(i => ({ op: 'delete', col: i.key, id: i.id }));
+        // v3.6: rafı sayımdaki kayıt silinmez; atlananlar bildirilir.
+        const locked = i => window.Schema?.isRowCountLocked?.((window.data[i.key] || []).find(x => x && String(x.id) === String(i.id)));
+        const withId = group.items.filter(i => i.id != null && i.id !== '');
+        const ops = withId.filter(i => !locked(i)).map(i => ({ op: 'delete', col: i.key, id: i.id }));
+        const skipped = withId.length - ops.length;
+        if (!ops.length) {
+            showAppAlert("Bu gruptaki ürünlerin rafı sayımda; sayım bitince tekrar deneyin.", "warning");
+            return;
+        }
         if (!(await window.writeOk(window.applyItemOps(ops)))) {
             showAppAlert("Silme kaydedilemedi; hiçbir ürün silinmedi.", "error");
             return;
         }
-        showAppAlert(`${ops.length} ürün depodan silindi.`, "success");
+        showAppAlert(`${ops.length} ürün depodan silindi.${skipped ? ` Rafı sayımda olan ${skipped} kayıt silinmedi.` : ''}`, "success");
     }
 };
 

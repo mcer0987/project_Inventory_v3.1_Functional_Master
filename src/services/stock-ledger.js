@@ -39,6 +39,10 @@
     const OP_ID_RE = /^[A-Za-z0-9_-]{8,80}$/;
     // Planlayıcının çıktısında sunucu zamanı yer tutucusu; yürütücü fns.serverTimestamp() ile değiştirir (saf kalır).
     const SERVER_TIME = Object.freeze({ __ledgerServerTime__: true });
+    // Alan silme yer tutucusu (v3.6 · raf sayım kilidinin kaldırılması); yürütücü fns.deleteField() ile değiştirir.
+    const DELETE_FIELD = Object.freeze({ __ledgerDeleteField__: true });
+    const AUDIT_COL = 'auditLogs';
+    const ROW_CHUNK = 450;
 
     class LedgerError extends Error {
         constructor(code, message, details) {
@@ -69,6 +73,32 @@
     // Geçersiz raf kodlu (ör. "/" içeren eski) kayıtların raf belgesi olamaz → sayaç yok (null).
     function shelfIdOf(depot, code) {
         try { return schema().shelfDocId(depot, code); } catch (e) { return null; }
+    }
+
+    // ─── v3.6 · Raf sayım kilidi ─────────────────────────────────────────────────────────────────────────────────────
+    // [WHY]: Sayım sırasında raftaki ürün hareket ederse sayım sonucu anlamını yitirir. Kilidin tek doğruluk kaynağı raf
+    //        belgesidir (lockReason / lockedAt / lockedBy); kayıttaki rafPasif yalnız gizleme ve personel kuralı için kopyadır.
+    // [HOW]: Her stok hareketi transaction içinde raf belgesini ve kaydı okur; İKİSİNDEN BİRİ kilit diyorsa reddeder
+    //        (fail-closed: bayrak ile raf çelişirse yine ret; WMS uzlaştırması düzeltir). Aynı raf içindeki adet düzeltmesi
+    //        (sayımın kendisi) ürün kaydı yolundan yapılır ve serbesttir.
+    function countLockedError(what, label, shelfDoc) {
+        const reason = shelfDoc && typeof shelfDoc.lockReason === 'string' ? ` (${shelfDoc.lockReason})` : '';
+        return new LedgerError('shelf-locked', `“${label}” rafı sayımda${reason}; ${what}`, { shelf: label });
+    }
+    function assertNotCountLocked(row, shelfDoc, what = 'sayım bitene kadar bu üründe stok hareketi yapılamaz.') {
+        const S = schema();
+        if (S.isShelfCountLocked(shelfDoc) || S.isRowCountLocked(row)) {
+            throw countLockedError(what, (shelfDoc && shelfDoc.code) || S.itemShelfCode(row), shelfDoc);
+        }
+    }
+    function cleanLockReason(v) {
+        return String(v ?? '').replace(/</g, '‹').replace(/\s+/g, ' ').trim();
+    }
+    // Yeni bir planlayıcı denetim kaydı istiyorsa yürütücü bağımlılığı zorunludur (Global-Architecture Sütun 3).
+    function requireAudit(deps) {
+        if (!deps || typeof deps.auditRecord !== 'function') {
+            throw new LedgerError('audit-missing', 'Denetim kaydı yazıcısı yüklenmemiş; işlem yapılmadı.');
+        }
     }
 
     /** Giriş doğrulaması; temizlenmiş giriş döner. */
@@ -143,6 +173,8 @@
      */
     function planShelfCounterWrites(deltas, shelfReads, uid, opts = {}) {
         const requireCatalog = opts.requireCatalog !== false;
+        // v3.6: yalnız sayım kilidindeki AYNI raf içinde adet düzeltmesi (0→N) için çağıranın açıkça verdiği raflar.
+        const allowInactive = new Set(opts.allowInactive || []);
         const shelves = [];
         const writes = [];
         const reads = shelfReads || {};
@@ -157,7 +189,7 @@
                     }
                     continue;   // geçiş dönemi: katalogda olmayan rafta sayaç tutulmaz, işlem engellenmez
                 }
-                if (doc.active !== true) throw new LedgerError('shelf-inactive', `“${doc.code}” rafı yeni yerleştirmeye kapalı (pasif).`, { shelfId: sid });
+                if (doc.active !== true && !allowInactive.has(sid)) throw new LedgerError('shelf-inactive', `“${doc.code}” rafı yeni yerleştirmeye kapalı (pasif).`, { shelfId: sid });
                 const used = Number.isInteger(doc.usedSlots) ? doc.usedSlots : 0;
                 if (used + d > doc.capacity) {
                     throw new LedgerError('shelf-full', `“${doc.code}” rafı dolu (${used}/${doc.capacity} slot). Müsait bir raf seçin veya kapasiteyi artırın.`, { shelfId: sid, used, capacity: doc.capacity });
@@ -206,6 +238,13 @@
         const sourceShelfId = shelfIdOf(inp.sourceCol, S.itemShelfCode(source));
         if (sameCol && sourceShelfId === inp.targetShelfId) {
             throw new LedgerError('invalid-argument', 'Ürün zaten bu rafta.');
+        }
+        // v3.6: sayımdaki raftan çıkış da, sayımdaki rafa giriş de yok.
+        const shelfReads = r.shelves || {};
+        assertNotCountLocked(source, sourceShelfId ? shelfReads[sourceShelfId] : null, 'sayım bitene kadar bu raftan ürün taşınamaz.');
+        const targetShelfDoc = shelfReads[inp.targetShelfId] || null;
+        if (S.isShelfCountLocked(targetShelfDoc)) {
+            throw countLockedError('sayım bitene kadar bu rafa ürün taşınamaz.', targetShelfDoc.code, targetShelfDoc);
         }
         if (!fullMove && !inp.newTargetId) throw new LedgerError('invalid-argument', 'Kısmi taşıma için yeni kayıt kimliği gerekli.');
 
@@ -326,31 +365,195 @@
         const existing = r.existing || null;
         const validate = i.col === 'b1' ? S.validateB1 : S.validateB2;
 
+        const shelfReads = r.shelves || {};
+        const shelfOf = doc => { const sid = shelfIdOf(i.col, S.itemShelfCode(doc)); return { sid, doc: sid ? shelfReads[sid] || null : null }; };
+
         if (i.isNew) {
             if (existing) throw new LedgerError('conflict', `"${i.col}" içinde ${i.id} id'li kayıt zaten var.`, { col: i.col, id: i.id });
             const nextDoc = { id: i.id, ...fields };
+            delete nextDoc.rafPasif;   // v3.6: sayım bayrağını yalnız raf kilidi yazar
             const errors = validate(nextDoc);
             if (errors.length) throw new LedgerError('schema-violation', `Yeni kayıt şema sözleşmesine uymuyor: ${errors.join(', ')}`, { errors });
-            const deltas = new Map();
-            if (S.isSlotOccupying(nextDoc)) {
-                const sid = shelfIdOf(i.col, S.itemShelfCode(nextDoc));
-                if (sid) deltas.set(sid, 1);
+            const target = shelfOf(nextDoc);
+            if (S.isShelfCountLocked(target.doc)) {
+                throw countLockedError('sayımdaki rafa yeni ürün eklenemez; sayım bitince ekleyin.', target.doc.code, target.doc);
             }
-            const { shelves, writes: shelfWrites } = planShelfCounterWrites(deltas, r.shelves || {}, i.uid, { requireCatalog: false });
+            const deltas = new Map();
+            if (S.isSlotOccupying(nextDoc) && target.sid) deltas.set(target.sid, 1);
+            const { shelves, writes: shelfWrites } = planShelfCounterWrites(deltas, shelfReads, i.uid, { requireCatalog: false });
             return { result: { col: i.col, id: i.id, created: true, shelves }, writes: [{ kind: 'set', col: i.col, id: i.id, data: nextDoc }, ...shelfWrites] };
         }
 
         if (!existing) throw new LedgerError('not-found', `Düzenlenen kayıt bulunamadı (${i.col}/${i.id}); liste güncellenmiş olabilir.`, { col: i.col, id: i.id });
+        const writeFields = { ...fields };
+        delete writeFields.rafPasif;   // v3.6: bayrak aşağıda rafın gerçek durumundan yazılır
+        const nextDoc = { ...existing, ...writeFields };
+        const prev = shelfOf(existing);
+        const next = shelfOf(nextDoc);
+        const moving = S.itemShelfCode(existing) !== S.itemShelfCode(nextDoc);
+        if (moving) {
+            assertNotCountLocked(existing, prev.doc, 'sayım bitene kadar bu raftan ürün taşınamaz.');
+            if (S.isShelfCountLocked(next.doc)) throw countLockedError('sayım bitene kadar bu rafa ürün taşınamaz.', next.doc.code, next.doc);
+        }
+        const nextLocked = S.isShelfCountLocked(next.doc);
+        if ((existing.rafPasif === true) !== nextLocked) writeFields.rafPasif = nextLocked;
         // applyItemOps'un 'update' dalıyla (_stockViolation) AYNI kapalı sözleşme: alan adı VE tip; yalnız eksik zorunlu alan muaf.
-        const fieldErrors = validate(fields, { partial: true });
+        const fieldErrors = validate(writeFields, { partial: true });
         if (fieldErrors.length) throw new LedgerError('schema-violation', fieldErrors.join(', '), { errors: fieldErrors });
-        const nextDoc = { ...existing, ...fields };
         const deltas = new Map();
         const add = (sid, d) => { if (sid) deltas.set(sid, (deltas.get(sid) || 0) + d); };
-        if (S.isSlotOccupying(existing)) add(shelfIdOf(i.col, S.itemShelfCode(existing)), -1);
-        if (S.isSlotOccupying(nextDoc)) add(shelfIdOf(i.col, S.itemShelfCode(nextDoc)), +1);
-        const { shelves, writes: shelfWrites } = planShelfCounterWrites(deltas, r.shelves || {}, i.uid, { requireCatalog: false });
-        return { result: { col: i.col, id: i.id, created: false, shelves }, writes: [{ kind: 'update', col: i.col, id: i.id, data: fields }, ...shelfWrites] };
+        if (S.isSlotOccupying(existing)) add(prev.sid, -1);
+        if (S.isSlotOccupying(nextDoc)) add(next.sid, +1);
+        // Sayım düzeltmesi: kilitli AYNI rafta 0→N geçişi (raf active:false) yalnız bu rafa izin verilir; kapasite yine uygulanır.
+        const allowInactive = !moving && nextLocked ? [next.sid] : [];
+        const { shelves, writes: shelfWrites } = planShelfCounterWrites(deltas, shelfReads, i.uid, { requireCatalog: false, allowInactive });
+        return {
+            result: { col: i.col, id: i.id, created: false, shelves, qtyBefore: qtyOf(existing), qtyAfter: qtyOf(nextDoc) },
+            writes: [{ kind: 'update', col: i.col, id: i.id, data: writeFields }, ...shelfWrites],
+        };
+    }
+
+    // ─── v3.6 · Raf yönetimi planlayıcıları (saf) ────────────────────────────────────────────────────────────────────
+    function shelfTarget(input) {
+        const S = schema();
+        const i = input || {};
+        if (!S.SHELF_DEPOTS.includes(i.depot)) throw new LedgerError('invalid-argument', `Geçersiz depo: ${i.depot}`);
+        const code = S.normShelfCode(i.code);
+        if (!S.isValidShelfCode(code)) {
+            throw new LedgerError('invalid-argument', `Geçersiz raf kodu: "${i.code ?? ''}" (harf, rakam, boşluk, . - _; en fazla ${S.SHELF_CODE_MAX_LENGTH} karakter).`);
+        }
+        return { depot: i.depot, code, id: S.shelfDocId(i.depot, code) };
+    }
+    // Rafa bağlı TAZE kayıtlar ([{id, data}]) içinden yalnız gerçekten bu kanonik koda bağlı olanlar (savunma amaçlı süzme).
+    function rowsFor(code, rows) {
+        const S = schema();
+        return (rows || []).filter(r => r && r.data && S.itemShelfCode(r.data) === code);
+    }
+    // Satır bayrağı yazmaları: kilitte bayrağı olmayan her kayda true; kilit kalkınca yalnız true olanlara false.
+    function planLockRowWrites(depot, code, rows, locked) {
+        const S = schema();
+        const validate = depot === 'b1' ? S.validateB1 : S.validateB2;
+        return rowsFor(code, rows).filter(r => (locked ? r.data.rafPasif !== true : r.data.rafPasif === true)).map(r => {
+            const data = { rafPasif: locked };
+            const errors = validate(data, { partial: true });
+            if (errors.length) throw new LedgerError('schema-violation', errors.join(', '), { errors });
+            return { kind: 'update', col: depot, id: String(r.id), data };
+        });
+    }
+
+    /**
+     * SAF — raf sayım kilidi. input: { depot, code, locked, reason, uid }; shelfDoc: TAZE raf belgesi; rows: rafa bağlı TAZE
+     * kayıtlar. Raf zaten istenen durumdaysa raf yazılmaz ve denetim kaydı oluşmaz; yalnız satır bayrakları uzlaştırılır
+     * (yeniden deneme güvenli). Dönüş: { shelfWrite|null, rowWrites, audit|null, result }.
+     */
+    function planShelfLock(input, shelfDoc, rows) {
+        const S = schema();
+        const t = shelfTarget(input);
+        if (!shelfDoc) throw new LedgerError('shelf-missing', `“${t.code}” rafı raf kataloğunda yok; önce rafı ekleyin.`, { shelfId: t.id });
+        const locked = input.locked === true;
+        const already = S.isShelfCountLocked(shelfDoc);
+        let shelfWrite = null;
+        let audit = null;
+        if (locked && !already) {
+            const reason = cleanLockReason(input.reason);
+            if (!reason) throw new LedgerError('invalid-argument', 'Sayım gerekçesini yazın (ör. "Yıl sonu sayımı").');
+            if (reason.length > S.SHELF_LOCK_REASON_MAX) throw new LedgerError('invalid-argument', `Sayım gerekçesi en fazla ${S.SHELF_LOCK_REASON_MAX} karakter olabilir.`);
+            shelfWrite = { kind: 'update', col: SHELF_COL, id: t.id, data: {
+                active: false, lockReason: reason, lockedAt: SERVER_TIME, lockedBy: input.uid, updatedAt: SERVER_TIME, updatedBy: input.uid,
+            } };
+            audit = { type: 'raf-sayima-alindi', refCol: SHELF_COL, refId: t.id, item: t.code, reason };
+        } else if (!locked && already) {
+            shelfWrite = { kind: 'update', col: SHELF_COL, id: t.id, data: {
+                active: true, lockReason: DELETE_FIELD, lockedAt: DELETE_FIELD, lockedBy: DELETE_FIELD, updatedAt: SERVER_TIME, updatedBy: input.uid,
+            } };
+            audit = { type: 'raf-sayim-bitti', refCol: SHELF_COL, refId: t.id, item: t.code, reason: shelfDoc.lockReason };
+        }
+        const onShelf = rowsFor(t.code, rows);
+        if (audit) audit.qty = onShelf.length;
+        const rowWrites = planLockRowWrites(t.depot, t.code, onShelf, locked);
+        return { shelfWrite, rowWrites, audit, result: { id: t.id, code: t.code, depot: t.depot, locked, changed: !!shelfWrite, rows: onShelf.length } };
+    }
+
+    /**
+     * SAF — rafı kaldırma. Fiziksel stoğu (adet > 0, durumu ne olursa olsun) olan raf kaldırılamaz; sayımdaki raf kaldırılamaz.
+     * Rafa bağlı adet 0 kayıtların raf alanı boşaltılır (Havuz). Raf kodu 'raf' dışındaki eski bir alandan geliyorsa kayıt
+     * şema gereği değiştirilemeyeceği için kaldırma reddedilir. Sayaç kaymışsa (usedSlots > 0) yürütücü önce ayrı commit'te
+     * sıfırlar (kural silmeyi yazma öncesi değere göre değerlendirir). Dönüş: { rowWrites, counterFix, audit, result }.
+     */
+    function planShelfDelete(input, shelfDoc, rows) {
+        const S = schema();
+        const t = shelfTarget(input);
+        if (!shelfDoc) throw new LedgerError('shelf-missing', `“${t.code}” rafı raf kataloğunda yok (kaldırılmış olabilir).`, { shelfId: t.id });
+        if (S.isShelfCountLocked(shelfDoc)) throw countLockedError('raf kaldırılmadan önce sayımı bitirin.', t.code, shelfDoc);
+        const onShelf = rowsFor(t.code, rows);
+        const stocked = onShelf.filter(r => S.hasPhysicalStock(r.data));
+        if (stocked.length) {
+            throw new LedgerError('shelf-not-empty', `“${t.code}” rafında stokta ${stocked.length} ürün kaydı var; raf kaldırılmadan önce ürünleri başka rafa taşıyın.`, { count: stocked.length });
+        }
+        const legacy = onShelf.filter(r => S.normShelfCode(r.data.raf) !== t.code);
+        if (legacy.length) {
+            throw new LedgerError('legacy-shelf-field', `“${t.code}” rafına eski biçimli bir alanla bağlı ${legacy.length} kayıt var; bu kayıtlar düzeltilmeden raf kaldırılamaz.`, { ids: legacy.map(r => String(r.id)) });
+        }
+        const validate = t.depot === 'b1' ? S.validateB1 : S.validateB2;
+        const rowWrites = onShelf.map(r => {
+            const data = r.data.rafPasif === true ? { raf: '', rafPasif: false } : { raf: '' };
+            const errors = validate(data, { partial: true });
+            if (errors.length) throw new LedgerError('schema-violation', errors.join(', '), { errors });
+            return { kind: 'update', col: t.depot, id: String(r.id), data };
+        });
+        const used = Number.isInteger(shelfDoc.usedSlots) ? shelfDoc.usedSlots : 0;
+        return {
+            rowWrites,
+            counterFix: used !== 0,
+            audit: { type: 'raf-silindi', refCol: SHELF_COL, refId: t.id, item: t.code, qty: rowWrites.length,
+                reason: rowWrites.length ? `Boş raf kaldırıldı; ${rowWrites.length} tükenmiş kayıt Havuz'a alındı.` : 'Boş raf kaldırıldı.' },
+            result: { id: t.id, code: t.code, depot: t.depot, movedToPool: rowWrites.length },
+        };
+    }
+
+    /**
+     * SAF — raf adını (kodunu) düzeltme. Kod belge kimliğidir ve kurallarda değiştirilemez: yeni kodla belge oluşturulur, eski
+     * silinir. Yalnız hiçbir kaydın göstermediği ve sayımda olmayan rafta. Dönüş: { newDoc, newId, counterFix, audit, result }.
+     */
+    function planShelfRename(input, oldDoc, newDoc, rows) {
+        const S = schema();
+        const t = shelfTarget(input);
+        const n = shelfTarget({ depot: input.depot, code: input.newCode });
+        if (n.id === t.id) throw new LedgerError('invalid-argument', 'Yeni raf adı eskisiyle aynı.');
+        if (!oldDoc) throw new LedgerError('shelf-missing', `“${t.code}” rafı raf kataloğunda yok.`, { shelfId: t.id });
+        if (S.isShelfCountLocked(oldDoc)) throw countLockedError('adı değiştirilmeden önce sayımı bitirin.', t.code, oldDoc);
+        if (newDoc) throw new LedgerError('shelf-exists', `“${n.code}” adlı raf bu depoda zaten var.`, { shelfId: n.id });
+        const onShelf = rowsFor(t.code, rows);
+        if (onShelf.length) {
+            throw new LedgerError('shelf-not-empty', `“${t.code}” rafına bağlı ${onShelf.length} ürün kaydı var; adı yalnız boş rafta düzeltilebilir. Önce ürünleri taşıyın.`, { count: onShelf.length });
+        }
+        const data = S.buildShelfDoc({ depot: t.depot, code: n.code, capacity: oldDoc.capacity, usedSlots: 0, active: oldDoc.active === true, updatedAt: SERVER_TIME, updatedBy: input.uid });
+        const used = Number.isInteger(oldDoc.usedSlots) ? oldDoc.usedSlots : 0;
+        return {
+            newId: n.id, newDoc: data, counterFix: used !== 0,
+            audit: { type: 'raf-adi-duzeltildi', refCol: SHELF_COL, refId: n.id, item: n.code, fromValue: t.code, toValue: n.code },
+            result: { id: n.id, code: n.code, depot: t.depot, previousId: t.id },
+        };
+    }
+
+    /**
+     * SAF — kayıt bayraklarının (rafPasif) raf kilidiyle uzlaştırılması (WMS eşitleme ve geri yükleme sonrası). Raf belgesi
+     * yoksa ya da kilitsizse bayrak kalkar; kilitliyse konur. Yalnız farklı olan kayıtlar yazılır.
+     */
+    function planShelfLockSync(itemsByDepot, shelfDocs) {
+        const S = schema();
+        const writes = [];
+        STOCK_COLS.forEach(depot => {
+            ((itemsByDepot && itemsByDepot[depot]) || []).forEach(row => {
+                const sid = shelfIdOf(depot, S.itemShelfCode(row));
+                const locked = !!sid && S.isShelfCountLocked((shelfDocs || {})[sid]);
+                if ((row.rafPasif === true) === locked) return;
+                const id = row.__docId ?? row.id;
+                if (id === undefined || id === null || String(id) === '') return;
+                writes.push({ col: depot, id: String(id), data: { rafPasif: locked } });
+            });
+        });
+        return writes;
     }
 
     // ─── Firestore yürütücüleri (bağımlılıklar enjekte edilir: { db, root, fns:{runTransaction, doc, getDoc, serverTimestamp}, uid }) ───
@@ -358,15 +561,23 @@
     const materialize = (deps, data) => {
         if (!data) return data;
         const out = {};
-        Object.keys(data).forEach(k => { out[k] = data[k] === SERVER_TIME ? deps.fns.serverTimestamp() : data[k]; });
+        Object.keys(data).forEach(k => {
+            out[k] = data[k] === SERVER_TIME ? deps.fns.serverTimestamp() : data[k] === DELETE_FIELD ? deps.fns.deleteField() : data[k];
+        });
         return out;
     };
-    // Yerel bellek için: sunucu zamanı yerine istemci saati (anlık çizim; gerçek değer dinleyiciden gelir).
+    // Yerel bellek için: sunucu zamanı yerine istemci saati (anlık çizim; gerçek değer dinleyiciden gelir). Silinen alan undefined.
     const localData = (data, now) => {
         if (!data) return data;
         const out = {};
-        Object.keys(data).forEach(k => { out[k] = data[k] === SERVER_TIME ? now : data[k]; });
+        Object.keys(data).forEach(k => { out[k] = data[k] === SERVER_TIME ? now : data[k] === DELETE_FIELD ? undefined : data[k]; });
         return out;
+    };
+    // Denetim kaydı transaction'ın İÇİNDE yazılır: işlem ile kanıtı aynı commit'te (biri olup diğeri olmaz).
+    const writeAudit = (tx, deps, entry) => {
+        const rec = deps.auditRecord({ result: 'approved', ...entry });
+        tx.set(makeRef(deps)(AUDIT_COL, rec.id), rec.data);
+        return rec.id;
     };
 
     /**
@@ -449,6 +660,11 @@
         const input = { ...rawInput, uid: deps.uid };
         if (!STOCK_COLS.includes(input.col)) throw new LedgerError('invalid-argument', `Geçersiz koleksiyon: ${input.col}`);
         if (input.id == null || String(input.id).trim() === '') throw new LedgerError('invalid-argument', 'Kayıt kimliği gerekli.');
+        // v3.6: sayım düzeltmesi gibi kanıt isteyen kayıtlar input.audit = { type, reason } ile gelir (aynı commit'te yazılır).
+        if (input.audit) {
+            requireAudit(deps);
+            if (input.isNew) throw new LedgerError('invalid-argument', 'Denetim kaydı yalnız mevcut ürün düzeltmesinde kullanılır.');
+        }
         const now = Date.now();
         const ref = makeRef(deps);
         return deps.fns.runTransaction(deps.db, async (tx) => {
@@ -479,8 +695,147 @@
                 else if (w.kind === 'update') tx.update(r, materialize(deps, w.data));
                 else tx.delete(r);
             });
+            let auditId = null;
+            if (input.audit) {
+                const { qtyBefore, qtyAfter } = plan.result;
+                auditId = writeAudit(tx, deps, {
+                    type: input.audit.type, refCol: input.col, refId: String(input.id),
+                    item: (existing && (existing.ürün || existing.name)) || String(input.id),
+                    qty: qtyAfter - qtyBefore, fromValue: String(qtyBefore), toValue: String(qtyAfter), reason: input.audit.reason,
+                });
+            }
             const localWrites = plan.writes.map(w => ({ ...w, data: localData(w.data, now) }));
-            return { ...plan.result, localWrites };
+            return { ...plan.result, auditId, localWrites };
+        });
+    }
+
+    // ─── v3.6 · Raf yönetimi yürütücüleri ────────────────────────────────────────────────────────────────────────────
+    // deps: _ledgerDeps + fns.{deleteField, writeBatch} + findShelfRows(depot, code, {exhaustive}) → Promise<[{id, data}]>
+    //       (SUNUCUDAN taze; istemci SDK'sı transaction içinde sorgu çalıştıramaz) + auditRecord(entry) → {id, data}.
+    async function commitRowWrites(deps, writes) {
+        const ref = makeRef(deps);
+        for (let k = 0; k < writes.length; k += ROW_CHUNK) {
+            const batch = deps.fns.writeBatch(deps.db);
+            writes.slice(k, k + ROW_CHUNK).forEach(w => batch.update(ref(w.col, w.id), materialize(deps, w.data)));
+            await batch.commit();
+        }
+    }
+    async function zeroShelfCounter(deps, id) {
+        await deps.fns.runTransaction(deps.db, async (tx) => {
+            const snap = await tx.get(makeRef(deps)(SHELF_COL, id));
+            if (!snap.exists()) throw new LedgerError('shelf-missing', 'Raf bu sırada kaldırılmış.', { shelfId: id });
+            tx.update(makeRef(deps)(SHELF_COL, id), materialize(deps, { usedSlots: 0, updatedAt: SERVER_TIME, updatedBy: deps.uid }));
+        });
+    }
+
+    /** Yeni raf (katalogda varsa ret). Kullanım sunucudan sayılır; raf ve denetim kaydı aynı commit'te. */
+    async function createShelf(deps, input) {
+        requireAudit(deps);
+        const t = shelfTarget(input);
+        planShelfSave({ ...input, uid: deps.uid, usedSlotsIfNew: 0 }, { usedSlots: 0 });   // erken giriş doğrulaması
+        const ref = makeRef(deps);
+        if ((await deps.fns.getDoc(ref(SHELF_COL, t.id))).exists()) {
+            throw new LedgerError('shelf-exists', `“${t.code}” rafı bu depoda zaten var.`, { shelfId: t.id });
+        }
+        const usedSlotsIfNew = await deps.countUsage(t.depot, t.code);
+        const now = Date.now();
+        return deps.fns.runTransaction(deps.db, async (tx) => {
+            const snap = await tx.get(ref(SHELF_COL, t.id));
+            if (snap.exists()) throw new LedgerError('shelf-exists', `“${t.code}” rafı bu depoda zaten var.`, { shelfId: t.id });
+            const plan = planShelfSave({ ...input, uid: deps.uid, usedSlotsIfNew }, null);
+            tx.set(ref(SHELF_COL, t.id), materialize(deps, plan.data));
+            writeAudit(tx, deps, { type: 'raf-eklendi', refCol: SHELF_COL, refId: t.id, item: t.code, qty: plan.data.capacity });
+            return { ...plan.result, local: { id: t.id, ...localData(plan.data, now) } };
+        });
+    }
+
+    /**
+     * Sayım kilidi koy / kaldır. Sıra: (1) raf belgesi + denetim kaydı tek transaction'da — bu andan itibaren defter hareketi
+     * reddeder; (2) rafa bağlı kayıtların bayrakları ≤450'lik parçalar; (3) doğrulama turu (eksik kalan bir kez daha yazılır).
+     * Yarıda kalırsa aynı çağrı tekrar edilebilir (raf zaten istenen durumdaysa yalnız bayraklar uzlaştırılır).
+     */
+    async function setShelfCountLock(deps, input) {
+        requireAudit(deps);
+        const t = shelfTarget(input);
+        const locked = input.locked === true;
+        const ref = makeRef(deps);
+        const now = Date.now();
+        // Ön okuma yalnız denetim kaydındaki kayıt sayısı içindir; bayraklar kilitten SONRAKİ taze okumayla yazılır.
+        const preRows = await deps.findShelfRows(t.depot, t.code);
+        const shelfStep = await deps.fns.runTransaction(deps.db, async (tx) => {
+            const snap = await tx.get(ref(SHELF_COL, t.id));
+            const plan = planShelfLock({ ...input, uid: deps.uid }, snap.exists() ? snap.data() : null, preRows);
+            if (plan.shelfWrite) {
+                tx.update(ref(SHELF_COL, t.id), materialize(deps, plan.shelfWrite.data));
+                writeAudit(tx, deps, plan.audit);
+            }
+            return { changed: !!plan.shelfWrite, local: plan.shelfWrite ? localData(plan.shelfWrite.data, now) : null };
+        });
+        const rowWrites = planLockRowWrites(t.depot, t.code, await deps.findShelfRows(t.depot, t.code), locked);
+        await commitRowWrites(deps, rowWrites);
+        let pending = planLockRowWrites(t.depot, t.code, await deps.findShelfRows(t.depot, t.code), locked);
+        if (pending.length) {
+            await commitRowWrites(deps, pending);
+            rowWrites.push(...pending);
+            pending = planLockRowWrites(t.depot, t.code, await deps.findShelfRows(t.depot, t.code), locked);
+            if (pending.length) {
+                throw new LedgerError('lock-incomplete', `${pending.length} kaydın sayım işareti güncellenemedi; işlemi tekrar deneyin ya da WMS'ten raf sayaçlarını eşitleyin.`, { pending: pending.length });
+            }
+        }
+        return {
+            id: t.id, code: t.code, depot: t.depot, locked, changed: shelfStep.changed, rowsChanged: rowWrites.length,
+            localShelf: shelfStep.local, localRows: rowWrites.map(w => ({ col: w.col, id: w.id, data: w.data })),
+        };
+    }
+
+    /** Boş rafı kaldır: adet 0 kayıtlar Havuz'a alınır, raf belgesi silinir, denetim kaydı — kayıtlar, silme ve kanıt tek commit. */
+    async function deleteShelf(deps, input) {
+        requireAudit(deps);
+        const t = shelfTarget(input);
+        const ref = makeRef(deps);
+        const rows = await deps.findShelfRows(t.depot, t.code, { exhaustive: true });
+        const pre = await deps.fns.getDoc(ref(SHELF_COL, t.id));
+        const first = planShelfDelete({ ...input, uid: deps.uid }, pre.exists() ? pre.data() : null, rows);
+        if (first.counterFix) await zeroShelfCounter(deps, t.id);
+        return deps.fns.runTransaction(deps.db, async (tx) => {
+            const snap = await tx.get(ref(SHELF_COL, t.id));
+            const fresh = [];
+            for (const r of rowsFor(t.code, rows)) {
+                const s = await tx.get(ref(t.depot, r.id));
+                if (s.exists()) fresh.push({ id: r.id, data: s.data() });
+            }
+            const shelfDoc = snap.exists() ? snap.data() : null;
+            const plan = planShelfDelete({ ...input, uid: deps.uid }, shelfDoc, fresh);
+            if (plan.counterFix) throw new LedgerError('retry', 'Raf sayacı bu sırada değişti; işlemi tekrar deneyin.');
+            plan.rowWrites.forEach(w => tx.update(ref(w.col, w.id), materialize(deps, w.data)));
+            tx.delete(ref(SHELF_COL, t.id));
+            writeAudit(tx, deps, plan.audit);
+            return { ...plan.result, localRows: plan.rowWrites.map(w => ({ col: w.col, id: w.id, data: w.data })) };
+        });
+    }
+
+    /** Boş rafın adını düzelt: yeni kodla belge + eskisinin silinmesi + denetim kaydı tek commit. */
+    async function renameShelf(deps, input) {
+        requireAudit(deps);
+        const t = shelfTarget(input);
+        const ref = makeRef(deps);
+        const rows = await deps.findShelfRows(t.depot, t.code, { exhaustive: true });
+        const [preOld, preNew] = await Promise.all([
+            deps.fns.getDoc(ref(SHELF_COL, t.id)),
+            deps.fns.getDoc(ref(SHELF_COL, shelfTarget({ depot: input.depot, code: input.newCode }).id)),
+        ]);
+        const first = planShelfRename({ ...input, uid: deps.uid }, preOld.exists() ? preOld.data() : null, preNew.exists() ? preNew.data() : null, rows);
+        if (first.counterFix) await zeroShelfCounter(deps, t.id);
+        const now = Date.now();
+        return deps.fns.runTransaction(deps.db, async (tx) => {
+            const oldSnap = await tx.get(ref(SHELF_COL, t.id));
+            const newSnap = await tx.get(ref(SHELF_COL, first.newId));
+            const plan = planShelfRename({ ...input, uid: deps.uid }, oldSnap.exists() ? oldSnap.data() : null, newSnap.exists() ? newSnap.data() : null, rows);
+            if (plan.counterFix) throw new LedgerError('retry', 'Raf sayacı bu sırada değişti; işlemi tekrar deneyin.');
+            tx.set(ref(SHELF_COL, plan.newId), materialize(deps, plan.newDoc));
+            tx.delete(ref(SHELF_COL, t.id));
+            writeAudit(tx, deps, plan.audit);
+            return { ...plan.result, local: { id: plan.newId, ...localData(plan.newDoc, now) } };
         });
     }
 
@@ -545,7 +900,11 @@
                 }
             });
         });
-        return { writes, updated, capacityRaised, unregistered, pool, unchanged };
+        // v3.6: sayım bayrakları da aynı araçla raf kilidine eşitlenir (bayrak raf belgesinin kopyasıdır).
+        const lockWrites = planShelfLockSync(itemsByDepot, shelfDocs);
+        lockWrites.forEach(w => writes.push(w));
+        const lockFixed = lockWrites.map(w => ({ col: w.col, id: w.id, rafPasif: w.data.rafPasif }));
+        return { writes, updated, capacityRaised, unregistered, pool, unchanged, lockFixed };
     }
 
     /**
@@ -562,7 +921,9 @@
             deps.fns.getDocsFromServer(deps.fns.collection(deps.db, deps.root, 'b2', 'items')),
             deps.fns.getDocsFromServer(deps.fns.collection(deps.db, deps.root, SHELF_COL, 'items')),
         ]);
-        const itemsByDepot = { b1: b1Snap.docs.map(d => d.data()), b2: b2Snap.docs.map(d => d.data()) };
+        // __docId: bayrak düzeltmesi belge kimliğiyle yazılır (kayıttaki eski id alanı belge kimliğinden farklı olabilir).
+        const withDocId = d => ({ ...d.data(), __docId: d.id });
+        const itemsByDepot = { b1: b1Snap.docs.map(withDocId), b2: b2Snap.docs.map(withDocId) };
         const shelfDocs = {};
         shelfSnap.docs.forEach(d => { shelfDocs[d.id] = d.data(); });
 
@@ -578,8 +939,10 @@
     }
 
     window.StockLedger = Object.freeze({
-        STOCK_COLS, SHELF_COL, OP_COL, OP_ID_RE, SERVER_TIME, LedgerError,
+        STOCK_COLS, SHELF_COL, OP_COL, OP_ID_RE, SERVER_TIME, DELETE_FIELD, AUDIT_COL, LedgerError,
         newOperationId, checkTransferInput, transferShelfIds, shelfIdOf, planShelfCounterWrites,
         planTransfer, planShelfSave, planProductSave, planShelfSync, runTransfer, saveShelf, runProductSave, runShelfSync,
+        assertNotCountLocked, planShelfLock, planShelfDelete, planShelfRename, planShelfLockSync,
+        createShelf, setShelfCountLock, deleteShelf, renameShelf,
     });
 })();

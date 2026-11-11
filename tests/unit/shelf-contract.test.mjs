@@ -332,3 +332,57 @@ test('ShelfCapacity sözleşme fonksiyonlarını Schema ile aynı sonuçla yenid
     assert.deepEqual(SC.validateShelfDoc(validShelf()), []);
     assert.equal(SC.computeUsedSlots([item('a-1'), item('A-1')], 'A-1'), 2);
 });
+
+// ─── v3.6 · Sayım kilidi ───────────────────────────────────────────────────────────────────────────────────────
+
+const lockedShelf = (extra = {}) => ({
+    ...validShelf(), active: false, lockReason: 'Yıl sonu sayımı', lockedAt: 1762800000000, lockedBy: 'uid_admin_1', ...extra,
+});
+
+test('v3.6 sayım kilidi: üç alan birlikte ve active:false ile geçerli; eski active:false (kilitsiz) raf da geçerli', () => {
+    const S = loadSchema();
+    assert.deepEqual(S.validateShelfDoc(lockedShelf()), []);
+    assert.deepEqual(S.validateShelfDoc({ ...validShelf(), active: false }), [], 'eski anlam: yeni yerleştirmeye kapalı raf');
+    assert.equal(S.isShelfCountLocked(lockedShelf()), true);
+    assert.equal(S.isShelfCountLocked({ ...validShelf(), active: false }), false, 'active:false tek başına sayım kilidi değildir');
+    assert.equal(S.isShelfCountLocked(null), false);
+});
+
+test('v3.6 sayım kilidi: eksik kilit alanı, active:true ile kilit, boş/uzun gerekçe ve geçersiz uid reddedilir', () => {
+    const S = loadSchema();
+    const has = (errs, text) => errs.some(e => e.includes(text));
+    const { lockedAt, ...noTime } = lockedShelf();
+    assert.ok(has(S.validateShelfDoc(noTime), 'sayım kilidi alanları eksik'));
+    assert.ok(has(S.validateShelfDoc(lockedShelf({ active: true })), 'active:false olmalı'));
+    assert.ok(has(S.validateShelfDoc(lockedShelf({ lockReason: '   ' })), 'sayım gerekçesi'));
+    assert.ok(has(S.validateShelfDoc(lockedShelf({ lockReason: 'x'.repeat(S.SHELF_LOCK_REASON_MAX + 1) })), 'sayım gerekçesi'));
+    assert.ok(has(S.validateShelfDoc(lockedShelf({ lockedAt: 'dün' })), 'lockedAt zaman değeri değil'));
+    assert.ok(has(S.validateShelfDoc(lockedShelf({ lockedBy: '' })), 'lockedBy'));
+    assert.ok(has(S.validateShelfDoc({ ...validShelf(), sayim: true }), 'bilinmeyen alan: sayim'), 'kilit dışındaki fazla alan yine reddedilir');
+});
+
+test('v3.6 isRowCountLocked yalnız rafPasif === true; emptyShelves fiziksel stoğu (durumdan bağımsız) olmayan katalog raflarını verir', () => {
+    const S = loadSchema();
+    assert.equal(S.isRowCountLocked({ rafPasif: true }), true);
+    assert.equal(S.isRowCountLocked({ rafPasif: 'true' }), false);
+    assert.equal(S.isRowCountLocked({}), false);
+    const shelves = [
+        { id: 'b1_RAF-A 1', ...validShelf() },
+        { id: 'b1_RAF-A 2', ...validShelf(), code: 'RAF-A 2' },
+        { id: 'b1_RAF-A 3', ...validShelf(), code: 'RAF-A 3' },
+        { id: 'b2_RAF-1', ...validShelf(), depot: 'b2', code: 'RAF-1' },
+    ];
+    const items = {
+        b1: [
+            item('Raf-A 1', 2),
+            item('raf-a 2', 0, { durumu: 'Tükendi' }),
+            item('Raf-A 3', 3, { durumu: 'Pasif (Arızalı)' }),
+        ],
+        b2: [item('Raf-A 1', 4)],
+    };
+    const empty = S.emptyShelves(shelves, items);
+    assert.deepEqual(empty.map(e => e.id).sort(), ['b1_RAF-A 2', 'b2_RAF-1'],
+        'adet 0 kaydı olan raf boştur; "Pasif" durumlu ama adedi olan ürün rafı dolu tutar; depo ayrımı korunur');
+    assert.equal(empty.find(e => e.id === 'b1_RAF-A 2').zeroRows, 1, 'kaldırmada Havuz\'a alınacak adet 0 kayıt sayısı');
+    assert.deepEqual(S.rowsOnShelf(items.b1, 'RAF-A 2').length, 1);
+});

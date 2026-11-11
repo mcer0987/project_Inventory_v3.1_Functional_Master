@@ -739,7 +739,9 @@
         if (btn) btn.disabled = true;
         try {
             // 1. Önizleme
-            const preview = _DUP_COLLECTIONS.flatMap(_findDuplicates);
+            // v3.6: rafı sayımdaki kayıtlar silinmez (sayım sonucu bozulmasın).
+            const notLocked = d => !window.Schema?.isRowCountLocked?.(d.item);
+            const preview = _DUP_COLLECTIONS.flatMap(_findDuplicates).filter(notLocked);
             if (preview.length === 0) {
                 _dupAlert('🔍 B1/B2 depolarında tekerrür eden kayıt bulunamadı. (B3 hareket defteri taranmaz.)', 'info');
                 return;
@@ -764,7 +766,7 @@
 
             // 2. Onaydan SONRA güncel diziden yeniden hesapla; yalnız önizlemede sayılan ve hâlâ kopya olanlar silinir
             const shown = new Set(preview.map(_dupKey));
-            const toDelete = _DUP_COLLECTIONS.flatMap(_findDuplicates).filter(d => shown.has(_dupKey(d)));
+            const toDelete = _DUP_COLLECTIONS.flatMap(_findDuplicates).filter(d => shown.has(_dupKey(d)) && notLocked(d));
             const skipped = preview.length - toDelete.length;
             if (toDelete.length === 0) {
                 _dupAlert('Veriler bu arada değişti; silinecek kayıt kalmadı. Hiçbir şey silinmedi.', 'warning');

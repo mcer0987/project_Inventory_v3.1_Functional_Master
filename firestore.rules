@@ -520,6 +520,7 @@ service cloud.firestore {
     //          aynı ve o türün isDemirbas alanı false (istemcideki Schema.isDemirbas'ta da tür tanımı önceliklidir); ürün
     //          commit sonrasında bu kayda bağlı ve aradaki adet farkı kayıttaki adet. Alan kişi oturumdaki personelin kendisi.
     //        Raf sayaçları personele yazdırılmaz (shelves bloğu); bkz. firebase-handler runStockOps notu.
+    //        v3.6: rafı sayımda olan (rafPasif == true) üründen personel çıkışı yapılamaz; ek belge erişimi gerektirmez.
     function b3Doc(r, id) { return /databases/$(database)/documents/$(r)/b3/items/$(id); }
     function staffExitStockOk(r, c, pid, old, d) {
       let exitId = d.get('sonCikisId', '');
@@ -530,6 +531,7 @@ service cloud.firestore {
         && keys.hasOnly(['adet', 'qty', 'lastUpdate', 'durumu', 'status', 'stokOncekiDurum', 'sonCikisId'])
         && keys.hasAll(['adet', 'sonCikisId'])
         && old.get('adet', null) is int && stockQtyOk(d) && d.adet < old.adet
+        && old.get('rafPasif', false) != true
         && (!keys.hasAny(['qty']) || d.get('qty', null) == d.adet)
         && (!keys.hasAny(['durumu', 'status', 'stokOncekiDurum'])
             || (d.adet == 0 && d.get('durumu', 'Tükendi') == 'Tükendi' && d.get('status', 'Tükendi') == 'Tükendi'
@@ -819,7 +821,8 @@ service cloud.firestore {
     //        ikisi de olağan kurala takılır. Bu yüzden YALNIZ toplu yazma kilidi (restoreLock) sürerken: şekli geçerli belge
     //        zaman/uid kanıtı olmadan yazılabilir, dolu raf silinebilir (b1/b2 muafiyetiyle aynı desen). Kod/depo yine sabit.
     function shelfShapeOk(shelfId, d) {
-      return d.keys().hasOnly(['code', 'depot', 'capacity', 'usedSlots', 'active', 'updatedAt', 'updatedBy'])
+      return d.keys().hasOnly(['code', 'depot', 'capacity', 'usedSlots', 'active', 'updatedAt', 'updatedBy',
+                               'lockReason', 'lockedAt', 'lockedBy'])
         && d.keys().hasAll(['code', 'depot', 'capacity', 'usedSlots', 'active', 'updatedAt', 'updatedBy'])
         && d.depot in ['b1', 'b2']
         && d.code is string && d.code.size() >= 1 && d.code.size() <= 40
@@ -827,7 +830,31 @@ service cloud.firestore {
         && shelfId == d.depot + '_' + d.code
         && d.capacity is int && d.capacity >= 1 && d.capacity <= 200
         && d.usedSlots is int && d.usedSlots >= 0
-        && d.active is bool;
+        && d.active is bool
+        && shelfLockShapeOk(d);
+    }
+    // ─── v3.6 · Raf sayım kilidi ────────────────────────────────────────────────────────────────────────────────────
+    // [WHY]: Sayım sırasında raftaki ürünler hareket etmemeli; kilit yalnız istemcide olsaydı konsoldan kaldırılabilir ya da
+    //        geçmiş tarihli kurulabilirdi. Eski active:false ("yeni yerleştirmeye kapalı") rafların anlamı değişmemeli.
+    // [HOW]: lockReason / lockedAt / lockedBy ya hep birlikte vardır ya hiç yoktur; varken active == false. Kilit konarken
+    //        zaman ve yazan sunucuda kanıtlanır (request.time / auth.uid); kilit sürerken bu üç alan değişmez (sayaç ve kapasite
+    //        yazımları birleşik belgede aynı değerleri taşır). active:false TEK BAŞINA kilit değildir. Kilitli raf silinemez.
+    function shelfLockShapeOk(d) {
+      return !d.keys().hasAny(['lockReason', 'lockedAt', 'lockedBy'])
+        || (d.keys().hasAll(['lockReason', 'lockedAt', 'lockedBy'])
+            && d.active == false
+            && d.lockReason is string && d.lockReason.trim().size() >= 1 && d.lockReason.size() <= 300 && noTag(d.lockReason)
+            && d.lockedAt is timestamp
+            && d.lockedBy is string && d.lockedBy.size() >= 1 && d.lockedBy.size() <= 128);
+    }
+    function shelfLockFreshOk(d) {
+      return !d.keys().hasAny(['lockReason']) || (d.lockedAt == request.time && d.lockedBy == request.auth.uid);
+    }
+    function shelfLockKeptOk(d, old) {
+      return !d.keys().hasAny(['lockReason'])
+        || (old.keys().hasAny(['lockReason'])
+            ? d.lockReason == old.lockReason && d.lockedAt == old.lockedAt && d.lockedBy == old.lockedBy
+            : shelfLockFreshOk(d));
     }
     function shelfDocOk(shelfId, d) {
       return shelfShapeOk(shelfId, d)
@@ -836,7 +863,8 @@ service cloud.firestore {
     }
     match /{root}/shelves/items/{shelfId} {
       allow read: if validRoot(root) && member(root);
-      allow create: if validRoot(root) && isAdmin(root) && shelfDocOk(shelfId, request.resource.data);
+      allow create: if validRoot(root) && isAdmin(root) && shelfDocOk(shelfId, request.resource.data)
+        && shelfLockFreshOk(request.resource.data);
       allow update: if validRoot(root) && isAdmin(root)
         && request.resource.data.code == resource.data.code
         && request.resource.data.depot == resource.data.depot
@@ -844,10 +872,11 @@ service cloud.firestore {
              && (request.resource.data.usedSlots <= resource.data.usedSlots
                  || request.resource.data.usedSlots <= request.resource.data.capacity)
              && (request.resource.data.capacity == resource.data.capacity
-                 || request.resource.data.capacity >= request.resource.data.usedSlots))
+                 || request.resource.data.capacity >= request.resource.data.usedSlots)
+             && shelfLockKeptOk(request.resource.data, resource.data))
             || (restoreLockOn(root) && shelfShapeOk(shelfId, request.resource.data)));
       allow delete: if validRoot(root) && isAdmin(root)
-        && (resource.data.get('usedSlots', 0) == 0 || restoreLockOn(root));
+        && ((resource.data.get('usedSlots', 0) == 0 && !resource.data.keys().hasAny(['lockReason'])) || restoreLockOn(root));
     }
 
     // ─── v3.3 · Aşama 2 · Stok işlem defteri (Denetim P1-01 mükerrerlik) — ${root}/stockOperations/items/{operationId} ──
@@ -884,11 +913,15 @@ service cloud.firestore {
     }
 
     // Denetim günlüğü (4.7 · KJ-7): yalnız ekleme, katı şema, sunucu saati, kendi uid'i; admin dahil kimse düzeltemez/silemez.
+    // v3.6: fromValue / toValue — değişimin yapısal eski → yeni değeri (Envanter No, raf kodu, sayım adedi). Cihaz geçmişi
+    //       eski numarayı bu eşlemeyle izler (Global-Architecture Sütun 1: geçmiş üzerine yazılmaz).
+    function auditValueOk(v) { return v == null || (v is string && v.size() <= 128 && noTag(v)); }
     match /{root}/auditLogs/items/{logId} {
       allow read: if validRoot(root) && isAdmin(root);
       allow create: if validRoot(root) && member(root)
         && request.resource.data.keys().hasOnly(['id', 'type', 'refCol', 'refId', 'item', 'qty', 'actorName',
-             'actorPersonelId', 'uid', 'authKind', 'result', 'reason', 'page', 'ts'])
+             'actorPersonelId', 'uid', 'authKind', 'result', 'reason', 'page', 'ts', 'fromValue', 'toValue'])
+        && auditValueOk(request.resource.data.get('fromValue', null)) && auditValueOk(request.resource.data.get('toValue', null))
         && request.resource.data.result in ['blocked', 'approved', 'cancelled']
         && request.resource.data.ts == request.time
         && request.resource.data.uid == request.auth.uid

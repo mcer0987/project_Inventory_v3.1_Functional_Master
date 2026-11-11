@@ -324,6 +324,34 @@ test('plan: kapasitesi zaten aşılmış raf otomatik büyütülmez; pasif raf H
     assert.match(plan.warnings[1], /"P" rafı pasif/);
 });
 
+test('v3.6 plan: sayımdaki rafa ne slot işgal eden ne de adet 0 kayıt yazılır (Havuz); eski "pasif" rafa adet 0 kayıt yine yazılır', () => {
+    const { I } = load();
+    const lock = { active: false, lockReason: 'Sayım', lockedAt: 1, lockedBy: 'u' };
+    const records = [{ id: 'a', raf: 'S' }, { id: 'b', raf: 'S' }, { id: 'c', raf: 'P' }];
+    const requests = [
+        { id: 'a', code: 'S', occupying: true, line: 2 },
+        { id: 'b', code: 'S', occupying: false, line: 3 },
+        { id: 'c', code: 'P', occupying: false, line: 4 },
+    ];
+    const shelfDocs = [shelfDoc('S', 5, 1, lock), shelfDoc('P', 5, 0, { active: false })];
+    const { plan } = plain(I.planImportEntries({ col: 'b1', records, requests, shelfDocs, uid: 'u', serverTime: 'T' }));
+    assert.deepEqual(plan.records.map(r => r.raf), ['', '', 'P']);
+    assert.equal(plan.poolInactiveCount, 2);
+    assert.match(plan.warnings.join(' | '), /"S" rafı sayımda/);
+    assert.deepEqual(plan.shelfChanges, [], 'sayımdaki rafın sayacına dokunulmaz');
+});
+
+test('v3.6 plan: sayacı değişen rafın tam belge yazımı sayım kilidi alanlarını korur', () => {
+    const { I } = load();
+    // Kilit alanları taşıyan ama aktif görünen (bozuk) bir belgeyle bile yazım alanları düşürmemeli.
+    const doc = shelfDoc('K', 5, 1, { lockReason: 'Sayım', lockedAt: 7, lockedBy: 'u' });
+    const { entries } = plain(I.planImportEntries({ col: 'b1', records: [{ id: 'a', raf: 'K' }],
+        requests: [{ id: 'a', code: 'K', occupying: true, line: 2 }], shelfDocs: [doc], uid: 'u', serverTime: 'T' }));
+    assert.equal(entries[0].next.lockReason, 'Sayım');
+    assert.equal(entries[0].next.lockedAt, 7);
+    assert.equal(entries[0].next.lockedBy, 'u');
+});
+
 test('plan: slot işgal etmeyen satır, aynı içe aktarmada yaratılan rafa yazılabilir ama sayaca eklenmez', () => {
     const { I } = load();
     const records = [{ id: 'dolu', raf: 'YENI' }, { id: 'bos', raf: 'YENI' }];

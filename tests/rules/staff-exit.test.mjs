@@ -80,6 +80,21 @@ describe('İzin verilen: personel sarf çıkışı', () => {
     });
 });
 
+describe('v3.6 · Sayımdaki raf (rafPasif)', () => {
+    test('rafı sayımda olan sarf üründen personel çıkışı reddedilir', async () => {
+        await seed(db => updateDoc(item(db, 'b1', 'p_sarf'), { rafPasif: true }));
+        await assertFails(exitBatch(s1()));
+    });
+    test('KÖTÜ NİYET: personel çıkışla birlikte bayrağı kaldıramaz', async () => {
+        await seed(db => updateDoc(item(db, 'b1', 'p_sarf'), { rafPasif: true }));
+        await assertFails(exitBatch(s1(), { patch: { rafPasif: false } }));
+    });
+    test('sayım bittikten sonra (rafPasif:false) çıkış yine geçer', async () => {
+        await seed(db => updateDoc(item(db, 'b1', 'p_sarf'), { rafPasif: false }));
+        await assertSucceeds(exitBatch(s1()));
+    });
+});
+
 describe('Reddedilen: demirbaş ve tür', () => {
     test('demirbaş türündeki ürün (urunTuruId demirbaş tür) çıkamaz', () => assertFails(exitBatch(s1(), {
         pid: 'p_dem', before: 3, qty: 1, entry: { urunTuruId: 'pt_dem', urunTuru: 'Laptop' } })));

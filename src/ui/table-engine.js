@@ -124,6 +124,26 @@ function _renderLoadMoreButton(depo, filteredCount) {
     }
 }
 
+// v3.6: Yönetici, sayımdaki raflar yüzünden gizlenen ürün sayısını depo görünümünde görür (personel görmez).
+function _renderCountLockNotice(depo) {
+    const anchor = document.getElementById(`table${depo.toUpperCase()}`) || document.getElementById(`cardView${depo.toUpperCase()}`);
+    if (!anchor || !anchor.parentNode) return;
+    const id = `countLockNotice${depo.toUpperCase()}`;
+    let note = document.getElementById(id);
+    const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
+    const hidden = isAdmin && window.Schema && typeof window.Schema.isRowCountLocked === 'function'
+        ? (window.data[depo] || []).filter(item => window.Schema.isRowCountLocked(item)).length : 0;
+    if (!hidden) { if (note) note.remove(); return; }
+    if (!note) {
+        note = document.createElement('div');
+        note.id = id;
+        note.className = 'count-lock-notice';
+        note.setAttribute('role', 'status');
+        anchor.parentNode.insertBefore(note, anchor);
+    }
+    note.textContent = `🔒 Sayımdaki raflarda ${hidden} ürün kaydı bu listede gizli. Sayım ve adet düzeltmesi: Yönetim Paneli › Depo Raf Haritası.`;
+}
+
 // [WHY]: KJ-6 — yeniden çizilen satırlarda tooltip davranışı inline JS gerektirmemeli.
 // [HOW]: Click bindActions ile; hover, mouseover/out ve relatedTarget ile satır sınırında çalışır.
 function _bindTableActions(tbody) {
@@ -194,6 +214,12 @@ export const getProcessedData = function (depo) {
         return copy;
     });
 
+    // v3.6: rafı sayımda olan ürünler depo görünümlerinde (tablo, arama, kart) kimseye gösterilmez; yönetici onları WMS raf
+    //       panelinde görür. Depo filtresinden ÖNCE: o kanca b2'de ve "Tümü"nde erken döner.
+    if (window.Schema && typeof window.Schema.isRowCountLocked === 'function') {
+        rawData = rawData.filter(item => !window.Schema.isRowCountLocked(item));
+    }
+
     if (typeof window.getFilteredB1Data === 'function') {
         rawData = window.getFilteredB1Data(depo, rawData);
     }
@@ -247,6 +273,7 @@ export const renderTable = function (depo, append = false, customLimit = null) {
     if (!append) {
         tbody.innerHTML = '';
         if (!customLimit) _currentPage = 1;
+        if (depo === 'b1' || depo === 'b2') _renderCountLockNotice(depo);
     }
 
     const start = append ? (_currentPage - 1) * PAGE_SIZE : 0;
@@ -426,6 +453,7 @@ export const renderMobileCards = function (depo) {
 
     const rawData = window.data[depo] || [];
     const allData = getProcessedData(depo);
+    _renderCountLockNotice(depo);
 
     if (allData.length === 0) {
         cardContainer.innerHTML = `
@@ -609,7 +637,7 @@ export const patchDOMForCollection = function (colName, changes) {
         const itemQty = data.adet !== undefined ? data.adet : (data.qty || 0);
         const itemStatus = data.durumu || data.status || '-';
         const isPassive = window.isPassiveStatus ? window.isPassiveStatus(itemStatus) : (itemStatus === 'Pasif');
-        const hideNow = _passiveFilterExcludes(colName, isPassive);
+        const hideNow = data.rafPasif === true || _passiveFilterExcludes(colName, isPassive);
 
         const rowEl = document.querySelector(`tr[data-depo="${colName}"][data-id="${id}"]`);
         if (rowEl) {

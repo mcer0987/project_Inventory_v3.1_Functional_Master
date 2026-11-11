@@ -1,0 +1,155 @@
+İP-1 Raf Yönetimi ve Sayım — Test Kanıtları (11.11.2026, dal feat/v3.6-raf-sayim-envanter-no-mobil-form)
+
+== npm run test:unit
+✔ B2 eski "type" alanı da okunur; boolean olmayan bayrak demirbaş sayılır (güvenli taraf) (0.1727ms)
+✔ capacity=5, usedSlots=4: 1. içe aktarma rafa girer ve sayaç 5 olur; 2. içe aktarma Havuz'a gider, sayaç 5'te kalır (17.2339ms)
+✔ import ile yeni raf 12 kapasiteyle yaratılır; kapasite aşımı ürünleri Havuz'a alır (13.7279ms)
+✔ ARA COMMIT HATASI (günlüklü iş): ürünler, yaratılan raf ve güncellenen sayaç BİRLİKTE geri alınır (14.6727ms)
+✔ bağlantı koptu → kilit + günlük kalır; recover ürünleri, yeni rafı ve sayacı birlikte geri alır (9.6898ms)
+✔ eşzamanlılık (tek batch): plan ile commit arasında raf sayacı değişirse ÇAKIŞMA — hiçbir şey yazılmaz (8.9398ms)
+✔ eşzamanlılık (günlüklü iş): kilit alındıktan sonra raf farklıysa ÇAKIŞMA — veri yazılmaz, günlük/kilit temizlenir (9.7997ms)
+✔ başarılı günlüklü iş: sayaçlar ve yeni raf ürünlerle birlikte kalıcı; günlük ve kilit temiz (19.6653ms)
+✔ plan: raf girdileri ÖNCE gelir, cas:true taşır; prev = sunucudaki tam belge (yeni rafta null) (7.3664ms)
+✔ plan: kapasitesi zaten aşılmış raf otomatik büyütülmez; pasif raf Havuz; başka depodaki aynı kod sayılmaz (12.3166ms)
+✔ v3.6 plan: sayımdaki rafa ne slot işgal eden ne de adet 0 kayıt yazılır (Havuz); eski "pasif" rafa adet 0 kayıt yine yazılır (7.3085ms)
+✔ v3.6 plan: sayacı değişen rafın tam belge yazımı sayım kilidi alanlarını korur (20.691ms)
+✔ plan: slot işgal etmeyen satır, aynı içe aktarmada yaratılan rafa yazılabilir ama sayaca eklenmez (5.6627ms)
+✔ ürün modalı sabit rafları ve depoya ait kayıtlı rafları listeler; mevcut ürün rafını da korur (2.0177ms)
+✔ bekleyen talep sayımı: taslak ve işlenmişler sayılmaz; iade talepleri ayrı toplanır (12.6511ms)
+✔ raf dinleyicisi: yetki reddi sağlık durumuna yansır ve ensureRealtimeSync ölü dinleyiciyi yeniden kurar (0.7769ms)
+✔ normShelfCode: boş/null/"-" → "" (rafsız); sıfır dolgusu anlamlıdır; idempotent (3.154ms)
+✔ itemShelfCode: raf → shelf → rafNo; boş ve "-" atlanır (2.6035ms)
+✔ computeUsedSlots: her pozitif/aktif kayıt 1 slot; raf yazım farkları aynı rafta sayılır (3.3734ms)
+✔ slotUsageByShelf: kanonik koda göre gruplar; rafsız işgaller "" anahtarında (3.552ms)
+✔ ShelfCapacity.slotStats: kanonik raf ve ortak slot tanımıyla sayar (eski ham karşılaştırma yerine) (5.9709ms)
+✔ v3.3 Aşama 2: ortak raf kataloğu (window.data.shelves) localStorage ayarından önce gelir (4.932ms)
+✔ ShelfCapacity.setCapacity: kanonik anahtarla yazar; yazım farkı aynı rafı günceller (5.2911ms)
+✔ v3.6 sayım kilidi: üç alan birlikte ve active:false ile geçerli; eski active:false (kilitsiz) raf da geçerli (4.0307ms)
+✔ v3.6 sayım kilidi: eksik kilit alanı, active:true ile kilit, boş/uzun gerekçe ve geçersiz uid reddedilir (4.4045ms)
+✔ v3.6 isRowCountLocked yalnız rafPasif === true; emptyShelves fiziksel stoğu (durumdan bağımsız) olmayan katalog raflarını verir (4.7482ms)
+✔ içe aktarma: "Raf No" → raf (rafNo YOK), isDemirbas üretilir, her kayıt tam B1 sözleşmesinden geçer (14.1966ms)
+✔ içe aktarma: "Raf/Shelf" başlığı raf alanına eşlenir ve tanınmayan sütun uyarısı üretmez (9.3478ms)
+✔ shelfCapacityInfo verilmediyse (eski çağıran/test) ham raf metni aynen yazılır, hata/uyarı yok, shelvesToCreate boş (7.2489ms)
+✔ raf katalogda VARSA ve müsaitse eşleşir, kanonik koda normalize edilir; otomatik yaratma GEREKMEZ (8.5155ms)
+✔ raf eşleşmesi: nokta/tire ve eksik tire farkı mevcut rafla eşleşme önerir (4.798ms)
+✔ raf eşleşmesi: birden fazla aday gösterilir; farklı karakter/sıfır dolgusu otomatik eşleşmez (4.6385ms)
+✔ raf katalogda YOKSA satır REDDEDİLMEZ — yeni raf OTOMATİK YARATILACAK şekilde işaretlenir, Havuz'a DÜŞMEZ (8.8586ms)
+✔ import ile yeni rafın kapasitesi 12 olur; 12 ürün rafa, fazlası Havuz'a alınır (9.995ms)
+✔ VAR OLAN rafın KALAN boşluğu dolunca fazlası Havuz'a alınır; raf zaten katalogda olduğu için shelvesToCreate'e girmez (8.8916ms)
+✔ stok dışı/pasif (slot işgal etmeyen) satır: kapasite denetimi ve otomatik yaratma MUAF — bilinmeyen raf Havuz, bilinen raf kanonik (10.3619ms)
+✔ dosyada raf hiç yoksa (boş hücre) zaten rafsızdır — uyarı gerekmez, yeni raf yaratılmaz (7.9539ms)
+✔ tam depo transferi: hedef aynı id ile kurulur, kaynak silinir; kaynak raf −1, hedef raf +1; işlem kaydı yazılır (8.5782ms)
+✔ kısmi transfer: kaynak TAZE adetten düşülür (istemci kopyası değil), hedefte önceden üretilmiş yeni id; kaynak rafı değişmez (0.4394ms)
+✔ hedef raf dolu → shelf-full (yazma planı oluşmaz) (0.2667ms)
+✔ hedef raf katalogda yok → shelf-missing; pasif → shelf-inactive (0.3173ms)
+✔ hedef raf kodu yazım farkı aynı rafa çözülür ("raf - 1" → b2_RAF-1) (0.2545ms)
+✔ kaynak raf katalogda yoksa sayaç atlanır (geçiş dönemi); hedef yine zorunlu (0.2262ms)
+✔ pasif ürün slot işgal etmez: hedef rafa slot istemez, kaynak rafı da düşmez (0.1881ms)
+✔ aynı depoda başka rafa tam taşıma = konum güncellemesi (kimlik korunur), −1/+1 (0.3613ms)
+✔ giriş doğrulaması: işlem kimliği, depo, adet, hedef raf (0.2734ms)
+✔ planShelfSave: yeni raf kanonik belge, kullanım altında kapasite reddi; mevcut rafta kapasite kullanımın altına inemez (0.7063ms)
+✔ planShelfCounterWrites: requireCatalog varsayılan true — katalogda olmayan raf ARTIŞTA shelf-missing fırlatır (0.1015ms)
+✔ planShelfCounterWrites: requireCatalog:false — katalogda olmayan raf ARTIŞTA sessizce atlanır (yazma/hata yok) (0.0745ms)
+✔ planShelfCounterWrites: requireCatalog:false — katalogda OLAN rafta kapasite/aktiflik yine de uygulanır (0.1422ms)
+✔ planShelfCounterWrites: AZALIŞ her zaman serbest; katalogda olmayan raf için düşülecek sayaç yoksayılır (her iki modda) (0.1199ms)
+✔ planShelfCounterWrites: delta 0 veya shelfId yoksa yoksayılır; birden çok rafı tek seferde işler (0.1318ms)
+✔ planProductSave: yeni kayıt — hedef raf katalogda olmasa da yazılır (geçiş dönemi, requireCatalog:false) (0.6409ms)
+✔ planProductSave: yeni kayıt — hedef raf katalogda VE doluysa shelf-full (hiçbir şey yazılmaz) (0.1644ms)
+✔ planProductSave: yeni kayıt — hedef raf katalogda VE müsaitse sayaç +1 yazılır (0.1295ms)
+✔ planProductSave: düzenleme — raf değişimi (taşıma) kaynaktan −1, hedefe +1 yazar; kaynak kaydı aynen korunur (0.2221ms)
+✔ planProductSave: düzenleme — aynı rafta kalıp durum Pasif olunca kaynak rafı −1 olur (katalogda ise) (0.2238ms)
+✔ planShelfSync: sayım kataloktaki usedSlots ile ZATEN aynıysa hiçbir şey yazılmaz (unchanged) (0.6993ms)
+✔ planShelfSync: sayım farklıysa (kapasite içinde) usedSlots güncellenir (0.2621ms)
+✔ planShelfSync: tamamen boşalmış raf (kullanım 0, usedSlots eski kalmış) DA düzeltilir — usage objesinde hiç anahtar olarak geçmez (1.0027ms)
+ℹ tests 367
+ℹ pass 367
+ℹ fail 0
+
+== npm run test:rules
+✔ paraf sonrası iade ve ikinci sürüm: eski içerik korunur, yeni sürüm yalnız yeni atamayla açılır (1110.4654ms)
+  ✔ başlamış akışın mali içeriği yönetici tarafından da sessizce değiştirilemez (151.0028ms)
+  ✔ v3.6: yapısal eski → yeni değer (fromValue / toValue) eklenebilir (68.6457ms)
+  ✔ v3.6: fromValue / toValue yalnız ≤128 karakter etiketsiz metin (97.9695ms)
+  ✔ bağlı personel raf kataloğunu okur ama yazamaz (115.5526ms)
+  ✔ KVKK: personele bağlı olmayan hesap / ziyaretçi raf kataloğunu okuyamaz ("signedIn" yetmez) (168.1296ms)
+  ✔ admin raf oluşturur / kapasite günceller; tanımsız kök kapalı (293.4458ms)
+  ✔ admin canlı ve localhost/demo köklerinde raf kataloğunu listeleyebilir; ziyaretçi listeleyemez (173.1536ms)
+✔ v3.3 · Raf kataloğu (shelves) ve stok işlem defteri (stockOperations) (1071.5135ms)
+  ✔ admin rafı sunucu saati ve kendi uid'siyle sayıma alır; personel alamaz (109.3085ms)
+  ✔ sayım bitirme: üç alan kaldırılır ve active:true olur; yalnız active:true yapmak reddedilir (118.2907ms)
+  ✔ geriye dönük uyum: kilitsiz active:false raf (eski anlam) güncellenebilir (111.0078ms)
+  ✔ kilitli raf, sayacı 0 olsa da silinemez; kilit kalkınca silinir (115.6968ms)
+  ✔ kilitli raf doğrudan oluşturulursa da sunucu saati ve yazan kanıtlanır (98.0544ms)
+✔ v3.6 · Raf sayım kilidi (lockReason / lockedAt / lockedBy) (995.8773ms)
+  ✔ rafı sayımda olan sarf üründen personel çıkışı reddedilir (341.2915ms)
+  ✔ sayım bittikten sonra (rafPasif:false) çıkış yine geçer (471.1949ms)
+✔ v3.6 · Sayımdaki raf (rafPasif) (1082.6425ms)
+ℹ tests 392
+ℹ pass 392
+ℹ fail 0
+
+== npm run test:ledger:emu
+✔ emülatör: tam depo transferi — ürün taşınır, iki raf sayacı ve işlem kaydı aynı commit'te (6245.5687ms)
+✔ emülatör: hedef raf dolu → shelf-full ve HİÇBİR ŞEY yazılmaz (308.5274ms)
+✔ emülatör: katalog dışı / pasif hedef raf → shelf-missing / shelf-inactive, yazma yok (186.5693ms)
+✔ emülatör: aynı depoda başka rafa tam taşıma — kimlik korunur, −1/+1 (215.6112ms)
+✔ emülatör: yeni raf kaydı güncel kullanımı sunucudan sayar; kapasite kullanımın altına inemez (340.1373ms)
+✔ kurallar: raf belgesi kimliği ve şeması (depo_KOD, kanonik kod, fazla alan, kapasite sınırı) (148.0012ms)
+✔ emülatör: yeni ürün — hedef raf katalogda olmasa da yazılır (geçiş dönemi); katalogdaysa sayaç +1 (133.0419ms)
+✔ emülatör: yeni ürün — hedef raf katalogda VE doluysa shelf-full, hiçbir şey yazılmaz (125.4051ms)
+✔ emülatör: ürün düzenleme — TAZE sunucu belgesine göre raf taşır (kaynak −1, hedef +1), yalnız değişen alan yazılır (202.8731ms)
+✔ emülatör: ürün düzenleme — hedef raf (katalogda) dolu ise reddedilir ve ürün yerinde kalır (156.8719ms)
+✔ emülatör: ürün düzenleme — EŞZAMANLI iki admin aynı ürünü farklı (BOŞ) raflara taşır; sayaçlar tutarlı kalır (1438.5891ms)
+✔ emülatör: sayım kataloktan SAPMIŞSA (kapasite içinde) gerçek Firestore belgesi düzeltilir (154.7145ms)
+✔ emülatör: kapasite GERÇEKTEN aşılmışsa (capacity < gerçek sayım) kural reddetmeden kapasite sayıma yükseltilir (139.6429ms)
+✔ emülatör: tamamen boşalmış bir raf (gerçek sayım 0, usedSlots eski) DA düzeltilir (77.3567ms)
+✔ emülatör: raf koduna sahip ürün var ama katalogda YOKSA — unregistered raporlanır, hiçbir şey yazılmaz, işlem durmaz (56.0533ms)
+✔ emülatör: rafsız (Havuz) ürünler sayılır ve raporlanır; hiçbir raf belgesine yazılmaz (74.771ms)
+✔ v3.6 emülatör: sayıma alma — raf kilidi + denetim kaydı tek commit; raftaki tüm kayıtlar işaretlenir; başka raf etkilenmez (251.6364ms)
+✔ v3.6 emülatör: sayımdaki raftan transfer ve rafa taşıma reddedilir; aynı rafta adet düzeltmesi denetim kaydıyla yazılır (370.2503ms)
+✔ v3.6 emülatör: sayımı bitirme — kilit alanları silinir, active:true, bayraklar false; tekrar çağrı idempotent (411.6434ms)
+✔ v3.6 emülatör: dolu raf kaldırılamaz; boş raf (adet 0 kayıtlı) kaldırılır, kayıt Havuz'a, kaymış sayaç önce sıfırlanır (298.9123ms)
+✔ v3.6 emülatör: raf ekleme (varsa ret) ve boş rafın adını düzeltme — eski → yeni denetim kaydı (341.897ms)
+ℹ tests 31
+ℹ pass 31
+ℹ fail 0
+
+== npm run test:atomic:emu
+✔ emülatör + kurallar (P1): capacity=5/usedSlots=4 → 1. içe aktarma rafa (sayaç 5, sunucu saati), 2. içe aktarma Havuz'a (602.5563ms)
+✔ emülatör + kurallar: import ile yeni raf 12 kapasiteyle yaratılır; kapasite aşımı Havuz'a gider (589.6568ms)
+✔ emülatör + kurallar (P1): GERÇEK sunucu reddiyle ara parça düşer → ürünler, yeni raf ve sayaç BİRLİKTE geri alınır (2612.7033ms)
+✔ emülatör + kurallar (P1): plan ile commit arasında raf değişirse transaction çakışma verir, hiçbir şey yazılmaz (639.8209ms)
+✔ kurallar (P1): raf geri yazımı (eski zaman damgası) ve dolu raf silme YALNIZ toplu yazma kilidi altında serbest (358.1709ms)
+ℹ tests 10
+ℹ pass 10
+ℹ fail 0
+
+== npm run lint:xss
+xss-lint · 85 dosya · 209 sink · 284 HTML şablonu · 1009 dinamik ifade
+  güvenli 990 · izinli (xss-ok) 19 · İZİNSİZ 0
+
+== node scratch/hosting-files.js
+Yayınlanacak dosya: 108 (kök: 23, src/: 74, pdf-fonts/: 3) · beklenen: 108
+✔ Yalnız uygulama dosyaları yayınlanacak.
+
+== Tarayıcı (yerel emülatör, gerçek admin oturumu)
+✔ yönetici girişi ve test kayıtları yüklendi
+✔ panel açıklaması görünür, yardım alanı düğmeyle açılır
+✔ Raf Ekle: kanonik kod önizlemesi ve katalog kaydı — önizleme="Kayıt kodu: V36 TEST", usedSlots=1
+✔ aynı kodla ikinci raf eklenemez — shelf-exists
+✔ çekmece rafa bağlı tüm kayıtları (adet 0 dahil) listeler — 2 satır
+✔ sayıma alma: raf kilidi ve iki kaydın bayrağı
+✔ çekmece: sayım bandı, "Sayım düzelt" var, "Rafı değiştir" yok, yalnız bitir/kapasite — ["unlock","capacity"]
+✔ sayımdaki raftan çıkış / transfer / yeni ürün / silme reddedilir — {"exit":"shelf-locked","transfer":"shelf-locked","newProduct":"shelf-locked","delete":"shelf-locked"}
+✔ sayım düzeltmesi: adet 0→2, durum Tükendi→Kullanıma Hazır, bayrak korunur, denetim kaydı — durum=Kullanıma Hazır
+✔ yönetici B1 listesi: kayıt gizli, "gizli" notu görünür, çıkış aramasında yok — 🔒 Sayımdaki raflarda 2 ürün kaydı bu listede gizli. Sayım ve adet düzeltmesi: Yönetim Paneli › Depo Raf Haritası.
+✔ personel görünümü: kayıt depo listesinde ve talep aramasında yok; yönetici notu yok — {"row":false,"notice":false,"processed":false,"reqHit":false}
+✔ sayımı bitir: kilit kalktı, bayraklar false
+✔ sayım bitince "Rafı değiştir" geri gelir — 2
+✔ stoklu raf kaldırılamaz, nedeni söylenir — V36 TEST rafında stokta 2 ürün kaydı var; raf kaldırılmadan önce ürünleri başka rafa taşıyın. | V36 TEST rafının sayımı bitti; 2 kayıt listelere döndü.
+✔ boş raf eklenir ve adı düzeltilebilir (eski → yeni) — {"created":"b1_V36 BOS","renamed":"b1_V36 BOS2","back":"b1_V36 BOS"}
+✔ "Boş raflar" filtresi boş rafı listeler, dolu rafı listelemez — V36 BOS
+✔ boş raf kaldırıldı
+✔ denetim kayıtları: eklendi / sayım / bitti / ad / silindi — raf-adi-duzeltildi,raf-adi-duzeltildi,raf-eklendi,raf-eklendi,raf-sayim-bitti,raf-sayima-alindi,raf-silindi
+✔ sayfa hatası yok
+19/19 geçti
