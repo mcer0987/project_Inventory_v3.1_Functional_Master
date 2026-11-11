@@ -107,39 +107,52 @@ function _setAssetPlate(state, value) {
     const editable = state === 'editable';
     input.readOnly = !editable;
     input.setAttribute('aria-readonly', String(!editable));
-    input.placeholder = state === 'assignable' ? '—' : 'Envanter No';
-    if (assign) assign.hidden = state !== 'assignable';
-    if (hint) {
-        hint.textContent = state === 'locked' ? 'Değişim: Yönetim Paneli › Operasyon Merkezi'
-            : state === 'assignable' ? 'Numara henüz yok; bir kez atanabilir.'
-                : 'Bir kez yazılır; kayıttan sonra kilitlenir.';
-    }
-    if (form) form.dataset.inventoryLocked = editable ? '0' : '1';
+    input.placeholder = state === 'assignable' ? '—' : 'İsteğe bağlı';
     if (assign && !assign.dataset.bound) {
         assign.dataset.bound = '1';
         assign.addEventListener('click', () => { _setAssetPlate('editable', ''); input.focus(); });
     }
+    if (form) form.dataset.inventoryLocked = editable ? '0' : '1';
     _syncAssetPlateVisibility();
 }
 
-// v3.6 · Plaka yalnız demirbaşta: sarf üründe (boş numara) alan gizlenir ve numara gönderilmez. Numarası zaten dolu eski bir
-//        sarf kaydında veri kaybolmasın diye salt okunur "Envanter No" olarak görünür. Karar #isDemirbas kutusundan (tür
-//        seçimi handleTypeChange ile kutuyu ayarlar); modal açılışında, tür ve kutu değişiminde yeniden hesaplanır.
+// v3.6 · Envanter No alanı yalnız demirbaşta: sarf üründe (boş numara) gizlenir ve numara gönderilmez; numarası zaten dolu eski
+//        bir sarf kaydında veri kaybolmasın diye salt okunur "Envanter No" olarak görünür. Karar #isDemirbas kutusundan (tür
+//        seçimi handleTypeChange ile kutuyu ayarlar). Çok adetli (adet > 1) demirbaşta numara girilmez: Envanter No tek bir cihazı
+//        tanımlar; numaralar çıkış / zimmet / sevkte cihaz başına yazılır. Modal açılışında, tür, kutu ve adet değişiminde hesaplanır.
 function _syncAssetPlateVisibility() {
     const plate = document.getElementById('assetPlate');
     const form = document.getElementById('productForm');
-    if (!plate) return;
+    const input = document.getElementById('prodInventoryNo');
+    const assign = document.getElementById('assetPlateAssign');
+    const hint = document.getElementById('assetPlateHint');
+    if (!plate || !input) return;
     const box = document.getElementById('isDemirbas');
+    const qtyEl = document.getElementById('prodQty');
     const demirbas = !box || box.checked;
-    const locked = plate.dataset.state === 'locked';
+    const state = plate.dataset.state;
+    const locked = state === 'locked';
+    const multi = !locked && demirbas && (Number(qtyEl && qtyEl.value) || 0) > 1;
     plate.hidden = !demirbas && !locked;
     const label = document.getElementById('assetPlateLabel');
     if (label) label.textContent = demirbas ? 'Demirbaş No' : 'Envanter No';
-    if (form && plate.hidden) form.dataset.inventoryLocked = '1';
-    else if (form) form.dataset.inventoryLocked = plate.dataset.state === 'editable' ? '0' : '1';
+    input.disabled = multi;
+    if (multi && state === 'editable') input.value = '';
+    if (assign) assign.hidden = state !== 'assignable' || multi;
+    if (hint) {
+        hint.textContent = multi ? 'Çok adetli kayıtta girilmez; numaralar çıkış, zimmet ve sevkte cihaz başına yazılır.'
+            : locked ? 'Değişim: Yönetim Paneli › Operasyon Merkezi'
+                : state === 'assignable' ? 'Numara henüz yok; bir kez atanabilir.'
+                    : 'Tek cihazlık kayıtta bir kez yazılır; kayıttan sonra kilitlenir.';
+    }
+    if (form) form.dataset.inventoryLocked = (plate.hidden || multi || state !== 'editable') ? '1' : '0';
     if (box && !box.dataset.plateBound) {
         box.dataset.plateBound = '1';
         box.addEventListener('change', _syncAssetPlateVisibility);
+    }
+    if (qtyEl && !qtyEl.dataset.plateBound) {
+        qtyEl.dataset.plateBound = '1';
+        qtyEl.addEventListener('input', _syncAssetPlateVisibility);
     }
 }
 

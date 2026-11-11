@@ -444,28 +444,6 @@
         font-size: 1.05rem;
     }
 
-    #productModal.kb-open .asset-plate {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 4px 10px;
-    }
-
-    #productModal.kb-open .asset-plate::before,
-    #productModal.kb-open .asset-plate::after,
-    #productModal.kb-open .asset-plate-hint {
-        display: none;
-    }
-
-    #productModal.kb-open .asset-plate-input {
-        padding: 2px 6px;
-        font-size: 14px;
-    }
-
-    #productModal.kb-open .asset-plate-eyebrow {
-        white-space: nowrap;
-    }
-
     .form-kb-active #productModal.kb-open #productForm .save-btn {
         display: none;
     }

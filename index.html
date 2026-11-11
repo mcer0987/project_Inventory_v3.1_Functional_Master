@@ -1543,19 +1543,8 @@
             <div class="modal-content">
                 <span class="close" onclick="closeProductModal()">&times;</span>
                 <form id="productForm" onsubmit="window.saveProduct(event);" autocomplete="off">
-                    <!-- v3.6 · Envanter No "demirbaş plakası": eklerken bir kez yazılır, kayıtlı üründe kilitli rozettir.
-                         Değişim yalnız Yönetim Paneli › Operasyon Merkezi › Envanter No Değişimi aracında. -->
                     <div class="product-modal-header">
                         <h2 id="modalTitle">Ürün Ekle</h2>
-                        <div class="asset-plate" id="assetPlate" data-state="editable">
-                            <span class="asset-plate-eyebrow"><i class="fas fa-lock asset-plate-lock" aria-hidden="true"></i>
-                                <span id="assetPlateLabel">Demirbaş No</span></span>
-                            <input type="text" id="prodInventoryNo" class="asset-plate-input" maxlength="64"
-                                aria-label="Envanter No (demirbaş numarası)" aria-describedby="assetPlateHint"
-                                autocomplete="off" spellcheck="false" placeholder="Envanter No">
-                            <button type="button" id="assetPlateAssign" class="asset-plate-assign" hidden>Numara ata</button>
-                            <small class="asset-plate-hint" id="assetPlateHint"></small>
-                        </div>
                     </div>
                     <input type="hidden" id="editIndex">
 
@@ -1610,6 +1599,19 @@
                     <div class="form-group">
                         <label for="prodQty">Adet:</label>
                         <input type="number" id="prodQty" required min="0" step="1" inputmode="numeric" pattern="[0-9]*">
+                    </div>
+
+                    <!-- v3.6 · Envanter No: yalnız demirbaşta; isteğe bağlı, bir kez yazılır, kayıttan sonra kilitlenir (değişim
+                         Yönetim Paneli › Operasyon Merkezi'nde). Çok adetli demirbaşta girilmez; numara çıkışta cihaz başına yazılır. -->
+                    <div class="form-group inventory-no-group" id="assetPlate" data-state="editable">
+                        <label for="prodInventoryNo"><span id="assetPlateLabel">Demirbaş No</span>
+                            <i class="fas fa-lock asset-plate-lock" aria-hidden="true"></i></label>
+                        <div class="inventory-no-field">
+                            <input type="text" id="prodInventoryNo" maxlength="64" aria-describedby="assetPlateHint"
+                                autocomplete="off" spellcheck="false" placeholder="İsteğe bağlı">
+                            <button type="button" id="assetPlateAssign" class="asset-plate-assign" hidden>Numara ata</button>
+                        </div>
+                        <small class="asset-plate-hint" id="assetPlateHint"></small>
                     </div>
 
                     <div class="form-group">

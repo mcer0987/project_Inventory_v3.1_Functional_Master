@@ -6045,147 +6045,72 @@ tr.zim-row-awaiting td { opacity: 0.85; }
     background: rgba(245, 158, 11, 0.12);
 }
 
-/* ─── v3.6 · Ürün modalı: Envanter No "demirbaş plakası" ──────────────────────────────────────────────────────────
-   Kayıtlı üründe değiştirilemeyen kimlik hissi: metal/altın çerçeve, tek aralıklı numara, kilit. Durumlar
-   (data-state): editable (ekle/kopyala), locked (kayıtlı ve dolu), assignable (kayıtlı ama boş). */
-.product-modal-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 14px;
-    margin: 0 34px 14px 0;
+/* ─── v3.6 · Ürün modalı: Envanter No alanı ──────────────────────────────────────────────────────────────────────
+   Formun olağan alanlarından biri; yalnız demirbaşta görünür. Kayıtlı ve dolu numara kilitli (kilit simgesi, salt okunur);
+   çok adetli demirbaşta devre dışıdır (numara çıkışta cihaz başına yazılır). Renkler tema değişkenlerinden. */
+.inventory-no-group[hidden] {
+    display: none !important;
 }
 
-.product-modal-header #modalTitle {
-    margin: 4px 0 0;
-}
-
-.asset-plate {
-    position: relative;
-    display: grid;
-    gap: 3px;
-    min-width: 190px;
-    max-width: 240px;
-    padding: 8px 12px 9px;
-    border-radius: 10px;
-    border: 1px solid #c9a227;
-    background: linear-gradient(135deg, #fdfbf3 0%, #f3ecd2 48%, #fbf7e8 100%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 0 0 3px rgba(201, 162, 39, 0.14), 0 3px 10px rgba(120, 90, 10, 0.12);
-}
-
-.asset-plate::before,
-.asset-plate::after {
-    content: "";
-    position: absolute;
-    top: 7px;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, #fff 0, #b8962a 70%);
-}
-
-.asset-plate::before { left: 6px; }
-.asset-plate::after { right: 6px; }
-
-.asset-plate-eyebrow {
+.inventory-no-group label {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding-left: 6px;
-    color: #7a5c0a;
-    font-size: 10.5px;
-    font-weight: 800;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
 }
 
 .asset-plate-lock {
     display: none;
-    font-size: 10px;
+    color: var(--color-text-muted, #64748b);
+    font-size: 11px;
 }
 
-.asset-plate[data-state="locked"] .asset-plate-lock {
+.inventory-no-group[data-state="locked"] .asset-plate-lock {
     display: inline-block;
 }
 
-.asset-plate-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 4px 6px;
-    border: 1px dashed rgba(122, 92, 10, 0.4);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.75);
-    color: #3b2f0b;
-    font-family: "Cascadia Mono", "Consolas", "Roboto Mono", monospace;
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
+.inventory-no-field {
+    display: flex;
+    gap: 8px;
+    align-items: center;
 }
 
-.asset-plate[data-state="locked"] .asset-plate-input,
-.asset-plate[data-state="assignable"] .asset-plate-input {
-    border-color: transparent;
-    background: transparent;
+.inventory-no-field input {
+    flex: 1;
+    min-width: 0;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+}
+
+.inventory-no-group[data-state="locked"] .inventory-no-field input,
+.inventory-no-group[data-state="assignable"] .inventory-no-field input,
+.inventory-no-field input:disabled {
+    background: var(--color-surface-alt, #f8fafc);
+    color: var(--color-text-muted, #64748b);
     cursor: default;
 }
 
-.asset-plate-input:focus-visible {
-    outline: 2px solid #b8962a;
-    outline-offset: 1px;
+.inventory-no-group[data-state="locked"] .inventory-no-field input {
+    color: var(--color-text, #1e293b);
+    font-weight: 600;
 }
 
 .asset-plate-assign {
-    justify-self: start;
-    padding: 3px 10px;
-    border: 1px solid #b8962a;
-    border-radius: 999px;
-    background: #fff;
-    color: #7a5c0a;
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border: 1px solid var(--color-primary, #2563eb);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-primary, #2563eb);
     font: inherit;
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
 }
 
 .asset-plate-hint {
-    color: #8a6d1f;
-    font-size: 11px;
+    color: var(--color-text-muted, #64748b);
+    font-size: 12px;
     line-height: 1.35;
-}
-
-[data-theme="dark"] .asset-plate {
-    border-color: #a8872a;
-    background: linear-gradient(135deg, #2a2412 0%, #3a3118 50%, #2b2513 100%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 0 0 3px rgba(212, 175, 55, 0.12), 0 3px 12px rgba(0, 0, 0, 0.35);
-}
-
-[data-theme="dark"] .asset-plate-eyebrow,
-[data-theme="dark"] .asset-plate-hint {
-    color: #e3c766;
-}
-
-[data-theme="dark"] .asset-plate-input {
-    color: #f6e7b0;
-    background: rgba(0, 0, 0, 0.2);
-    border-color: rgba(227, 199, 102, 0.35);
-}
-
-[data-theme="dark"] .asset-plate-assign {
-    background: transparent;
-    color: #e3c766;
-}
-
-@media (max-width: 600px) {
-    .product-modal-header {
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .asset-plate {
-        max-width: none;
-        width: 100%;
-        box-sizing: border-box;
-    }
 }
 
 /* ─── v3.6 · Operasyon Merkezi › Envanter No Değişimi (inventory-no-change.js) ─────────────────────────────────────── */
@@ -6270,8 +6195,25 @@ tr.zim-row-awaiting td { opacity: 0.85; }
 }
 
 .inv-no-plate {
-    max-width: 280px;
-    margin: 4px 0 12px;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 2px 0 12px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 8px;
+    background: var(--color-surface-alt, #f8fafc);
+    font-size: 13px;
+}
+
+.inv-no-plate span:first-child {
+    color: var(--color-text-muted, #64748b);
+    font-size: 12px;
+}
+
+.inv-no-plate strong {
+    font-weight: 700;
+    letter-spacing: 0.02em;
 }
 
 .inv-no-details {
@@ -6376,7 +6318,3 @@ tr.zim-row-awaiting td { opacity: 0.85; }
     max-height: calc(var(--vv-h, 100dvh) - 16px - 58px);
 }
 
-/* v3.6: plaka sarf üründe gizlenir (display:grid hidden niteliğini ezmesin) */
-.asset-plate[hidden] {
-    display: none !important;
-}

@@ -197,4 +197,16 @@ Plaka açık ve koyu temada ekran görüntüsüyle kontrol edildi.
 | Otomatik demirbaş no | Envanter çıkışı, sevk (servis, dış birim, hurda), zimmet, talep onayı ve sepette ürün kaydında numara varsa 1. cihaz satırının Envanter No'su otomatik gelir ve kilitlidir (`DeviceIds.fixedFor` / `render({ fixed })`). Seri No kayıtta varsa ön dolar ve düzeltilebilir. Kayıt anında kilitli satırın değeri ekrandan değil ürün kaydından okunur. Numarası olmayan üründe eski davranış sürer. |
 | Test | `device-ids-fixed.test.mjs` (gerçek tarayıcı) 1/1. Emülatörde tarayıcı 8/8: sarf düzenle/ekle plaka gizliliği, demirbaş kilidi, çıkış ve servise sevkte otomatik ve kilitli numara. Gerçek personel hesabıyla (`flow.personel`) sayımdaki raf ürününün görünmemesi ve çıkışın reddi de bu turda doğrulandı. `npm run test:unit` 386/386, `lint:xss` 0 izinsiz. |
 
+## 11. Ek (11.11.2026) — plaka yerine kompakt alan; çok adetli demirbaş
+
+Geri bildirim: plaka büyüktü ve renk temasına uymuyordu; pencereyi genişletip yükseltiyordu. Ayrıca demirbaşlar bazen adet bazlı girilir (ör. 32 adet) ve numaralar envanter çıkışında cihaz başına yazılır.
+
+| Konu | Sonuç |
+|---|---|
+| Görünüm | Başlıktaki plaka kaldırıldı. Envanter No, Marka'nın altında, formun diğer alanlarıyla aynı görünümde normal bir alan. Kilitliyken etikette 🔒 simgesi var; alan gri ve salt okunur. Renkler tema değişkenlerinden gelir; açık ve koyu temada uyumlu. Operasyon Merkezi penceresindeki numara da sade bir rozet. |
+| Tek cihazlık demirbaş (adet 1) | Alan isteğe bağlı bir input gibi davranır: bir kez yazılır, kayıttan sonra kilitlenir. Boş numara "Numara ata" ile bir kez atanır. |
+| Çok adetli demirbaş (adet > 1, numarasız) | Alan devre dışı ve boş. İpucu: *"Çok adetli kayıtta girilmez; numaralar çıkış, zimmet ve sevkte cihaz başına yazılır."* Yazılmış değer temizlenir, gönderilmez. Adet 1'e dönünce alan yeniden açılır. Çıkış, zimmet ve sevkte cihaz satırları boş ve yazılabilir gelir; mevcut tekillik denetimi (`checkDeviceIds`) aynen çalışır. |
+| Kurallar ve defter | Değişmedi. Dolu numara yine yalnız Operasyon Merkezi'nden ve denetim kaydıyla değişir. |
+| Test | Emülatörde tarayıcı 7/7: çok adetli demirbaşta alan devre dışı; numaralı demirbaşta kilit; adet 1 ↔ 32 geçişi; 32 adetlik üründen çıkışta boş ve yazılabilir cihaz satırları; sayfa hatası yok. `npm run test:unit` 386/386, `lint:xss` 0 izinsiz. Masaüstü ve mobil ekran görüntüleri kontrol edildi. |
+
 Elle test için: [v3.6 Kontrol Listesi](./v3.6%20Kontrol%20Listesi.md).

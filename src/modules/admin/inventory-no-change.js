@@ -88,9 +88,9 @@ function openRenameDialog(m) {
         el('header', { className: 'shelf-dialog-header' }, [el('small', { className: 'shelf-dialog-eyebrow', text: 'ENVANTER NO DEĞİŞİMİ' }), close]),
         el('h2', { text: (m.product && m.product.name) || 'Ürün', attrs: { id: 'invNoDialogTitle' } }),
     );
-    const plate = el('div', { className: 'asset-plate inv-no-plate', attrs: { 'data-state': 'locked' } }, [
-        el('span', { className: 'asset-plate-eyebrow', text: 'Mevcut Demirbaş No' }),
-        el('span', { className: 'asset-plate-input', text: String(oldNo) }),
+    const plate = el('div', { className: 'inv-no-plate' }, [
+        el('span', { text: 'Mevcut Demirbaş No' }),
+        el('strong', { text: String(oldNo) }),
     ]);
     const dl = el('dl', { className: 'inv-no-details' });
     detailRows(m).forEach(([k, v]) => dl.append(el('dt', { text: k }), el('dd', { text: String(v) })));
