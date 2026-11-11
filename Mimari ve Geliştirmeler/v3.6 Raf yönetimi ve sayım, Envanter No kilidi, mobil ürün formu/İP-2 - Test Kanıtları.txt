@@ -1,0 +1,101 @@
+İP-2 Envanter No Kilidi ve Değişim Aracı — Test Kanıtları (11.11.2026, dal feat/v3.6-raf-sayim-envanter-no-mobil-form)
+
+== npm run test:unit
+✔ evrak numarası 128 bit rastgelelik içerir; tarih ve kurum kodu doğru (11.7316ms)
+✔ P, V, kök ve sahip zinciri tarihsel sürümü güncel revizyona eşitlemeden denetlenir (10.851ms)
+✔ Envanter No: aynı numara yeniden import edilmez; farklı depodaki mevcut kayıt da korunur (20.0535ms)
+✔ v3.6 plan: sayımdaki rafa ne slot işgal eden ne de adet 0 kayıt yazılır (Havuz); eski "pasif" rafa adet 0 kayıt yine yazılır (8.8875ms)
+✔ v3.6 plan: sayacı değişen rafın tam belge yazımı sayım kilidi alanlarını korur (8.4198ms)
+✔ servisteki cihaz numarası yalnız originalData'da olsa da bulunur; hurda kaydı bulunur; eski zimmet değiştirilemez (8.1737ms)
+✔ yeni numara: kullanımda ise engel, yalnız geçmişte ise uyarı; boş, aynı, uzun ve etiketli numara reddedilir (6.5701ms)
+✔ planRename: zimmet zinciri — depo satırına numara + değişim bağı; b3/assignments yalnız numara; kanıtın eski değeri depo satırının HAM değeri (10.2486ms)
+✔ planRename: servis kaydının originalData'sı TAM harita olarak yazılır; bayat kayıt ve değiştirilemez eşleşme reddedilir (8.3587ms)
+✔ eski numara zinciri iki yönde ve çok adımda izlenir (6.3874ms)
+✔ demirbaş kaydında envanter numarası zorunludur; demirbaş değilse boş olabilir (2.6757ms)
+✔ legacyStockPatch: kayıtta OLMAYAN ortak alan (B1'e envanterNo) checked'e girer — validateB1 kabul eder (0.3701ms)
+✔ legacyStockPatch: eski B1 kaydında ZATEN olan envanterNo'nun değeri değişirse kanonik alan olarak kabul edilir (0.2216ms)
+✔ saveData: eski B1 kaydına yeni envanterNo eklenir (0.391ms)
+✔ saveData: eski B1 kaydında zaten bulunan envanterNo değiştirilebilir (0.36ms)
+✔ v3.6 sayım kilidi: üç alan birlikte ve active:false ile geçerli; eski active:false (kilitsiz) raf da geçerli (3.0691ms)
+✔ v3.6 sayım kilidi: eksik kilit alanı, active:true ile kilit, boş/uzun gerekçe ve geçersiz uid reddedilir (4.4104ms)
+✔ v3.6 isRowCountLocked yalnız rafPasif === true; emptyShelves fiziksel stoğu (durumdan bağımsız) olmayan katalog raflarını verir (4.6176ms)
+✔ generateStaffPri: iki kelime ad.soyad; daha fazla → ilk.son; tek kelime; çakışmada artan numara (4.3072ms)
+✔ planAccounts: PRI atama (bağlı olanınki korunur, çakışana numara) ve işlem türleri; plan kod içermez (5.3212ms)
+✔ Envanter No: B2 kaydına doğrudan eşlenir, tam B2 sözleşmesinden geçer (13.3832ms)
+✔ Envanter No: B1 kaydına da yazılır ve tam B1 sözleşmesinden geçer (15.88ms)
+✔ Envanter No: boş satır importu tamamen durdurur (4.8537ms)
+✔ Envanter No: dosya içi tekrarlar normalize edilerek reddedilir (8.5258ms)
+✔ Envanter No eşleşmesi: mevcut B1 veya B2 kaydı korunur, farklı alanlar raporlanır (4.2909ms)
+✔ Envanter No bulunan ürün kısmi transfer edilemez; aynı kimlik iki kayda kopyalanmaz (0.674ms)
+✔ planProductSave: katı şema — B1/B2 envanterNo alanını destekler, yanlış tipleri reddeder (0.9435ms)
+✔ v3.6 transfer: sayımdaki kaynak raftan (raf kilidi ya da kayıt bayrağı) ve sayımdaki hedef rafa taşıma shelf-locked; hiçbir şey yazılmaz (0.4555ms)
+✔ v3.6 ürün kaydı: sayımdaki rafa yeni ürün, sayımdaki raftan/rafa taşıma reddedilir (0.2528ms)
+✔ v3.6 sayım düzeltmesi: kilitli AYNI rafta 0→N adet serbest (shelf-inactive değil), kapasite yine uygulanır, eski active:false raf etkilenmez (0.3492ms)
+✔ v3.6 ürün kaydı: bayrak rafın gerçek durumundan yazılır — formdan gelen rafPasif yok sayılır, kayma kendiliğinden düzelir (0.4206ms)
+✔ v3.6 planShelfLock: kilit gerekçe ister; raf yazımı sunucu saati + uid; kayıt bayrakları yalnız gerekeni yazar; idempotent (0.7474ms)
+✔ v3.6 planShelfLock: kilit kaldırma üç alanı siler, active:true; yalnız bayraklı kayıtlara false yazar (0.2219ms)
+✔ v3.6 planShelfDelete: stoklu (Pasif durumlu dahil) raf, sayımdaki raf ve eski alanlı kayıt reddedilir; adet 0 kayıtlar Havuz'a (0.5705ms)
+✔ v3.6 planShelfRename: yalnız boş ve kilitsiz raf; hedef ad boşta olmalı; kapasite/aktiflik korunur; eski → yeni kanıtı (0.5039ms)
+✔ v3.6 planShelfSync bayrakları raf kilidine eşitler: kilitli rafta eksik bayrak konur; kilitsiz/katalog dışı rafta kalan bayrak kalkar (0.5459ms)
+✔ v3.6 Envanter No kilidi: dolu numara ürün kaydından değişmez; boş numara atanır; yazım farkı değişiklik sayılmaz (0.5879ms)
+✔ v3.6 assertNotCountLocked: bayrak ya da raf kilidi tek başına yeterli (fail-closed) (0.156ms)
+✔ [set] B1/B2 envanterNo: yokken KABUL, string KABUL, sayı/nesne/null RET (4.7455ms)
+✔ [update] B1/B2 envanterNo: yokken KABUL, string KABUL, sayı/nesne/null RET (3.3241ms)
+ℹ tests 375
+ℹ pass 375
+ℹ fail 0
+
+== npm run test:rules
+✔ dondurulmuş evraka sonradan numara alınır; sürüm içeriği değişmez (416.8761ms)
+✔ numara çakışması yeniden denenir; başka evrakın rezervasyonu ezilmez (364.8722ms)
+✔ G6A-1 · isStaff() zincirinin izole uç durumları (N3/N5/N6) (1149.4781ms)
+  ✔ v3.6: yapısal eski → yeni değer (fromValue / toValue) eklenebilir (74.2769ms)
+  ✔ v3.6: fromValue / toValue yalnız ≤128 karakter etiketsiz metin (123.1542ms)
+  ✔ dolu numara kanıtsız değiştirilemez ve boşaltılamaz (yönetici dahil) (141.8305ms)
+  ✔ boş ya da "-" numaraya bir kez atama serbest; numaraya dokunmayan yazım etkilenmez (158.3582ms)
+✔ v3.6 · Envanter No kilidi (denetim kaydına bağlı değişim) (723.257ms)
+✔ v3.6 · Raf sayım kilidi (lockReason / lockedAt / lockedBy) (1120.8437ms)
+✔ v3.6 · Sayımdaki raf (rafPasif) (1136.9348ms)
+ℹ tests 398
+ℹ pass 398
+ℹ fail 0
+
+== npm run test:ledger:emu
+✔ v3.6 emülatör: sayıma alma — raf kilidi + denetim kaydı tek commit; raftaki tüm kayıtlar işaretlenir; başka raf etkilenmez (362.4204ms)
+✔ v3.6 emülatör: sayımdaki raftan transfer ve rafa taşıma reddedilir; aynı rafta adet düzeltmesi denetim kaydıyla yazılır (266.3417ms)
+✔ v3.6 emülatör: sayımı bitirme — kilit alanları silinir, active:true, bayraklar false; tekrar çağrı idempotent (352.4426ms)
+✔ v3.6 emülatör: dolu raf kaldırılamaz; boş raf (adet 0 kayıtlı) kaldırılır, kayıt Havuz'a, kaymış sayaç önce sıfırlanır (284.0831ms)
+✔ v3.6 emülatör: raf ekleme (varsa ret) ve boş rafın adını düzeltme — eski → yeni denetim kaydı (373.0278ms)
+✔ v3.6 emülatör: zimmetteki cihazın numarası b3 + zimmet ikizi + bağlı depo satırında, denetim kaydıyla tek transaction içinde değişir (385.6288ms)
+ℹ tests 32
+ℹ pass 32
+ℹ fail 0
+
+== npm run test:atomic:emu
+ℹ tests 10
+ℹ pass 10
+ℹ fail 0
+
+== npm run lint:xss
+xss-lint · 88 dosya · 209 sink · 287 HTML şablonu · 1013 dinamik ifade
+  güvenli 994 · izinli (xss-ok) 19 · İZİNSİZ 0
+
+== node scratch/hosting-files.js (yalnız bu commit'in dosyalarıyla): 110 beklenir
+
+== Tarayıcı (yerel emülatör, gerçek admin oturumu)
+✔ Ürün Ekle: plaka yazılabilir — {"state":"editable","ro":false,"value":"","hint":"Bir kez yazılır; kayıttan sonra kilitlenir.","assign":false}
+✔ Ürün Düzenle (dolu numara): plaka kilitli, salt okunur, ipucu Operasyon Merkezi — {"state":"locked","ro":true,"value":"V36-ENV-001","hint":"Değişim: Yönetim Paneli › Operasyon Merkezi","assign":false}
+✔ kilitli plakada kayıt: ad değişti, numara değişmedi — V36-ENV-001
+✔ servis yolu da dolu numarayı değiştirmez — envanter-no-locked
+✔ boş numara: "Numara ata" ile bir kez atanır — {"before":{"state":"assignable","assign":true},"after":{"state":"editable","ro":false}}
+✔ kart: kısa açıklama + "Nasıl çalışır?" yardım alanı
+✔ arama: zimmetteki cihaz tek sonuç; geçmiş çıkış kaydı ayrı — {"cards":["📌 Zimmette · V36 Test Kişi"],"history":"Geçmiş kayıtlar (1) — değişmez"}
+✔ "Bu mu?" → tüm bilgileri ve değişecek 3 kaydı gösteren pencere — {"title":"V36 Cihaz v36n_p5","details":["Ürün","Marka","Tür","Konum","Depo / Raf / Sütun","Adet (depo satırı)","Durum","Seri No","Açıklama","Kişi","Tarih"],"targets":3}
+✔ kullanımdaki numara canlı denetimde engellenir — "v36-env-003" şu an kullanımda: Depoda · B2 · Raf Raf-1 · 1 adet (V36 Cihaz v36n_p3).
+✔ iki adımlı onay: "Onayla: eski → yeni" — Onayla: V36-ENV-005 → V36-ENV-555
+✔ b3 zimmet, zimmet ikizi ve bağlı depo satırı yeni numarada; geçmiş çıkış eski numarada
+✔ denetim kaydı: envanter-no-degisim, V36-ENV-005 → V36-ENV-555, gerekçe — ["V36-ENV-005","V36-ENV-555","etiket yenilendi"]
+✔ başarıdan sonra arama yeni numarayla yenilenir — 📌 Zimmette · V36 Test Kişi
+✔ cihaz geçmişi: değişim zinciri gösterilir, eski numaralı çıkış kaydı listelenir — 2 satır
+✔ sayfa hatası yok
+15/15 geçti

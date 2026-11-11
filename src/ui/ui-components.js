@@ -92,6 +92,35 @@ function _productShelfOptions(depot, configuredShelves, shelfDocs, currentShelf,
     return options;
 }
 
+// v3.6 · Envanter No plakası. editable: ekle/kopyala (bir kez yazılır) · locked: kayıtlı ve dolu numara (salt okunur;
+//        değişim Operasyon Merkezi aracında) · assignable: kayıtlı ama numarası boş ("Numara ata" ile bir kez yazılır).
+//        form.dataset.inventoryLocked = '1' iken saveProduct numarayı hiç göndermez (defter ve kurallar da kilitler).
+function _setAssetPlate(state, value) {
+    const plate = document.getElementById('assetPlate');
+    const input = document.getElementById('prodInventoryNo');
+    const assign = document.getElementById('assetPlateAssign');
+    const hint = document.getElementById('assetPlateHint');
+    const form = document.getElementById('productForm');
+    if (!plate || !input) return;
+    plate.dataset.state = state;
+    input.value = value || '';
+    const editable = state === 'editable';
+    input.readOnly = !editable;
+    input.setAttribute('aria-readonly', String(!editable));
+    input.placeholder = state === 'assignable' ? '—' : 'Envanter No';
+    if (assign) assign.hidden = state !== 'assignable';
+    if (hint) {
+        hint.textContent = state === 'locked' ? 'Değişim: Yönetim Paneli › Operasyon Merkezi'
+            : state === 'assignable' ? 'Numara henüz yok; bir kez atanabilir.'
+                : 'Bir kez yazılır; kayıttan sonra kilitlenir.';
+    }
+    if (form) form.dataset.inventoryLocked = editable ? '0' : '1';
+    if (assign && !assign.dataset.bound) {
+        assign.dataset.bound = '1';
+        assign.addEventListener('click', () => { _setAssetPlate('editable', ''); input.focus(); });
+    }
+}
+
 // v3.6: sayımdaki raflar listede görünür ama seçilemez ("(Sayımda)"); kaydın ŞU ANKİ rafı seçili kalabilsin diye kapatılmaz.
 function _shelfOptionsHtml(depot, options, currentShelf) {
     const S = window.Schema;
@@ -275,7 +304,11 @@ export const UIComponents = {
             setVal('prodShelf', matchedShelf);
             setVal('prodName',   item.ürün || item.name);
             setVal('prodBrand',  item.marka);
-            setVal('prodInventoryNo', mode === 'clone' ? '' : item.envanterNo);
+            const hasInventoryNo = !!(window.Schema && window.Schema.normDeviceId
+                ? window.Schema.normDeviceId(item.envanterNo) && String(item.envanterNo).trim() !== '-'
+                : String(item.envanterNo ?? '').trim() && String(item.envanterNo).trim() !== '-');
+            if (mode === 'clone') _setAssetPlate('editable', '');
+            else _setAssetPlate(hasInventoryNo ? 'locked' : 'assignable', hasInventoryNo ? item.envanterNo : '');
             setVal('prodQty',    item.adet ?? item.qty ?? 0);
             // [WHY]: 'Pasif', 'Tükendi', B2 'Aktif' gibi değerler listede yok; select "" okuyup kayıtta durumu siliyordu (DATA-04).
             const statusSel = document.getElementById('prodStatus');
@@ -337,6 +370,7 @@ export const UIComponents = {
             if (title) title.innerText = 'Yeni Ürün Ekle';
             if (form)  form.reset();
             if (form)  { delete form.dataset.editIndex; delete form.dataset.editRepo; delete form.dataset.editId; delete form.dataset.isCloning; }
+            _setAssetPlate('editable', '');
         }
 
         modal.style.display = 'block';

@@ -105,12 +105,16 @@
         container.querySelectorAll('[data-history]').forEach(a => { a.onclick = e => { e.preventDefault(); DeviceIds.showHistory(a.dataset.history); }; });
     };
 
-    DeviceIds.showHistory = function (identity) {
+    DeviceIds.showHistory = async function (identity) {
         if (!identity || identity === '-') {
             if (typeof window.showAppAlert === 'function') window.showAppAlert('Bu cihaz için Seri No / Envanter No kaydı yok.', 'warning');
             return;
         }
         injectStyle();
+        // v3.6: Envanter No değişim zinciri (yalnız yönetici okuyabilir; okunamazsa geçmiş yalnız bu numarayla gösterilir).
+        try { if (typeof window.loadInventoryNoAliases === 'function') await window.loadInventoryNoAliases(); } catch (e) { /* zincirsiz devam */ }
+        const R = window.AppModules && window.AppModules.InventoryNoRename;
+        const aliases = R && typeof R.aliasesOf === 'function' ? R.aliasesOf(identity) : [];
         const events = window.AssignmentService.getDeviceHistory(identity);
         document.getElementById('deviceHistoryModal')?.remove();
         const modal = document.createElement('div');
@@ -126,6 +130,7 @@
                 <h4 style="margin:0; font-weight:800; font-size:1.1rem;">🕘 Cihaz Geçmişi</h4>
                 <div style="margin-top:4px; font-size:13px; color:var(--color-text-muted, #64748b);">Seri No / Envanter No: <code style="font-weight:700; color:var(--color-primary, #3498db);">${esc(identity)}</code>
                   · ${events.length} kayıt · ${services} servis/sevk</div>
+                ${aliases.length ? `<div style="margin-top:4px; font-size:12px; color:var(--color-text-muted, #64748b);">Envanter No değişim zinciri: <code>${esc(aliases.join(', '))}</code> — bu numaraların kayıtları da listelenir.</div>` : ''}
               </div>
               <button type="button" data-close style="background:none; border:none; font-size:22px; cursor:pointer; color:var(--color-text-muted, #64748b);">&times;</button>
             </div>

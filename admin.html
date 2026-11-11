@@ -46,6 +46,7 @@
     <script src="src/utils/stock-import.js"></script>
     <script src="src/services/atomic-writer.js"></script>
     <script src="src/services/stock-ledger.js"></script>
+    <script src="src/utils/inventory-no-rename.js"></script>
     <script src="src/utils/staff-code-registry.js"></script>
     <script src="src/services/staff-provisioning.js"></script>
     <script src="src/utils/ownership.js"></script>
@@ -772,6 +773,56 @@
                                     </p>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+
+                    <!-- 3. v3.6 · Envanter No Değişimi (src/modules/admin/inventory-no-change.js) -->
+                    <div id="invNoChangeCard" class="modern-card inv-no-card"
+                        style="background: var(--color-surface); border: 1px solid var(--color-border-light); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow-sm, 0 4px 12px rgba(0,0,0,0.05));">
+                        <div class="p-3 px-4 border-bottom d-flex align-items-center justify-content-between"
+                            style="background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border-light) !important;">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="header-icon-mini shadow-sm"
+                                    style="width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #c9a227 0%, #8a6d1f 100%); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px;">
+                                    <i class="fas fa-tag"></i>
+                                </div>
+                                <div>
+                                    <h3 class="m-0 fw-bold" style="font-size: 1rem; color: var(--color-text);">🏷️ Envanter No
+                                        Değişimi</h3>
+                                    <span class="small text-muted" style="font-size: 12px;">Cihazın demirbaş numarasını
+                                        depo, servis, zimmet ve hurda kayıtlarında birlikte değiştirir; eski numara izde kalır.</span>
+                                </div>
+                            </div>
+                            <span class="badge rounded-pill"
+                                style="background: var(--color-surface); border: 1px solid var(--color-border-light); color: var(--color-text-muted); font-size: 11px; padding: 5px 12px; font-weight: 600;">
+                                <i class="fas fa-lock me-1"></i>Yalnız yönetici
+                            </span>
+                        </div>
+                        <div class="p-3 px-4">
+                            <button type="button" class="panel-help-trigger" data-panel-help aria-expanded="false"
+                                aria-controls="invNoHelp"><i class="fas fa-info-circle" aria-hidden="true"></i> Nasıl çalışır?</button>
+                            <div id="invNoHelp" class="panel-help" hidden>
+                                <ul>
+                                    <li><strong>Ara:</strong> değiştirmek istediğiniz numarayı yazın. Sistem B1/B2 depolarında, açık servis
+                                        kayıtlarında, aktif zimmetlerde ve hurda kayıtlarında arar. Büyük/küçük harf ve boşluk farkı önemsizdir.</li>
+                                    <li><strong>Bu mu?</strong> bulunan kaydı doğrulayın; açılan pencerede ürünün tüm bilgileri ve değişecek kayıtlar listelenir.</li>
+                                    <li><strong>Yeni numara:</strong> başka bir cihazın kullandığı numara verilemez. Yalnız geçmiş kayıtlarda geçen bir
+                                        numarada uyarı gösterilir.</li>
+                                    <li><strong>Neler değişir:</strong> cihazın şu anki kaydı (depo satırı, açık servis, aktif zimmet ya da hurda) ve ona bağlı
+                                        depo satırı. Geçmiş çıkış/zimmet kayıtları ve basılmış tutanaklar eski numarayla kalır.</li>
+                                    <li><strong>İz:</strong> eski → yeni numara güvenlik raporuna yazılır; cihaz geçmişi iki numaranın kayıtlarını birlikte gösterir.</li>
+                                    <li>Ürün formundaki demirbaş plakası kilitlidir; dolu numara yalnız bu araçla değişir.</li>
+                                </ul>
+                            </div>
+                            <form id="invNoSearchForm" class="inv-no-search" role="search" autocomplete="off">
+                                <label for="invNoSearchInput" class="form-label small fw-bold">Değiştirilecek Envanter No</label>
+                                <div class="inv-no-search-row">
+                                    <input id="invNoSearchInput" class="form-control" type="text" maxlength="64" spellcheck="false"
+                                        placeholder="ör. ENV-2026-001" required>
+                                    <button type="submit" class="btn btn-sm btn-primary">Ara</button>
+                                </div>
+                            </form>
+                            <div id="invNoResults" class="inv-no-results" aria-live="polite"></div>
                         </div>
                     </div>
 

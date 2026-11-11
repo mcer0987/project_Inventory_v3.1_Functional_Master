@@ -505,8 +505,33 @@ service cloud.firestore {
     }
     function stockUpdateOk(r, c, d, old) {
       return (!d.diff(old).addedKeys().hasAny(stockLegacyKeys(c))
-              && (!d.diff(old).affectedKeys().hasAny(['adet']) || stockQtyOk(d)))
+              && (!d.diff(old).affectedKeys().hasAny(['adet']) || stockQtyOk(d))
+              && envanterNoChangeOk(r, d, old))
         || restoreLockOn(r);
+    }
+    // ─── v3.6 · Envanter No kilidi (Global-Architecture Sütun 1-3) ──────────────────────────────────────────────────
+    // [WHY]: Envanter No cihazın kimliğidir; ürün formundan ya da konsoldan sessizce değiştirilir/silinirse cihaz geçmişi kopar
+    //        ve iz kalmaz. Değişim yalnız yönetici aracında ve inkâr edilemez kanıtla yapılmalı.
+    // [HOW]: Boş (yok, '' ya da '-') numara bir kez atanabilir. Dolu numara yalnız boş olmayan bir değere ve ancak AYNI commit'te
+    //        oluşturulan 'envanter-no-degisim' denetim kaydıyla değişir: kayıttaki sonEnvanterNoDegisimId yeni bir kimliktir, o
+    //        kimlikte commit öncesi kayıt yoktur ve commit sonrası kayıt eski → yeni değeri ve yazanın uid'ini taşır (sonCikisId
+    //        deseni). Belge erişimi yalnız numara değişirken yapılır; diğer stok yazımlarının bütçesi değişmez.
+    function envanterNoChangeOk(r, d, old) {
+      let before = old.get('envanterNo', '');
+      return !d.diff(old).affectedKeys().hasAny(['envanterNo'])
+        || !(before is string) || before.trim() == '' || before == '-'
+        || envanterNoAuditOk(r, d, old, before, d.get('envanterNo', ''));
+    }
+    function auditDoc(r, id) { return /databases/$(database)/documents/$(r)/auditLogs/items/$(id); }
+    function envanterNoAuditOk(r, d, old, before, after) {
+      let id = d.get('sonEnvanterNoDegisimId', '');
+      let a = getAfter(auditDoc(r, id)).data;
+      return after is string && after.trim() != '' && after != '-'
+        && id is string && id.size() > 0 && id.size() <= 80 && id != old.get('sonEnvanterNoDegisimId', '')
+        && !exists(auditDoc(r, id))
+        && a.get('type', '') == 'envanter-no-degisim'
+        && a.get('fromValue', '') == before && a.get('toValue', '') == after
+        && a.get('uid', '') == request.auth.uid;
     }
 
     // ─── v3.4 · Personel (BT ekibi) SARF çıkışı ──────────────────────────────────────────────────────────────

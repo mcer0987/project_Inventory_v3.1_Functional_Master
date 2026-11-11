@@ -219,6 +219,8 @@ export const saveProduct = async function (e) {
         isDemirbas: document.getElementById('isDemirbas')?.checked || false,
         lastUpdate: new Date().getTime()
     };
+    // v3.6: plaka kilitliyken (kayıtlı ürünün numarası) numara gönderilmez; değişim yalnız Operasyon Merkezi aracında.
+    if (form.dataset.inventoryLocked === '1') delete formFields.envanterNo;
     const inventoryKey = window.Schema.normDeviceId(formFields.envanterNo);
     if (inventoryKey) {
         const duplicate = ['b1', 'b2'].some(depot => (window.data[depot] || []).some(item =>

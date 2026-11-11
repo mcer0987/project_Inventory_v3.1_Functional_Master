@@ -260,7 +260,11 @@
     const tsOfText = t => { const m = String(t || '').match(/(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/); return m ? new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0)).getTime() : 0; };
     function keysFor(identity) {
         const k = S().normDeviceId(identity);
-        return k ? ['SN:' + k, 'ENV:' + k] : [];
+        if (!k) return [];
+        // v3.6: Envanter No değiştiyse eski/yeni numaraların kayıtları da aynı cihazın geçmişidir (denetim kaydı zinciri).
+        const R = window.AppModules && window.AppModules.InventoryNoRename;
+        const aliases = R && typeof R.aliasesOf === 'function' ? R.aliasesOf(identity) : [];
+        return ['SN:' + k, 'ENV:' + k, ...aliases.map(a => 'ENV:' + a)];
     }
     const hits = (rec, keys) => S().deviceKeys(rec).some(k => keys.includes(k));
 

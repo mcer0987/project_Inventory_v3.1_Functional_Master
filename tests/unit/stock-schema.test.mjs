@@ -126,6 +126,7 @@ for (const m of MODES) {
         assert.ok(has(S.validateB1(m.b1({ isWatched: 'evet' }), m.opts), 'isWatched boolean değil'));
         assert.ok(has(S.validateB1(m.b1({ rafPasif: 'evet' }), m.opts), 'rafPasif boolean değil'));
         assert.ok(has(S.validateB2(m.b2({ rafPasif: 1 }), m.opts), 'rafPasif boolean değil'));
+        assert.ok(has(S.validateB1(m.b1({ sonEnvanterNoDegisimId: 7 }), m.opts), 'sonEnvanterNoDegisimId string değil'));
         assert.ok(has(S.validateB1(m.b1({ adet: '5' }), m.opts), 'geçersiz adet'));
         assert.ok(has(S.validateB1(m.b1({ limit: '5' }), m.opts), 'geçersiz limit'));
         assert.ok(has(S.validateB2(m.b2({ limit: -1 }), m.opts), 'geçersiz limit'));
@@ -157,8 +158,10 @@ test('alan kümeleri açık: Envanter No B1/B2 ortak opsiyonel alanı; status ya
     const S = loadSchema();
     // v3.4: sonCikisId — personel çıkışında stok düşümünü b3 kaydına bağlar (firestore.rules staffExitStockOk)
     // v3.6: rafPasif — kaydın rafı sayımda (raf kilidinin kopyası; gizleme ve personel çıkış kuralı okur)
-    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'rafPasif', 'sn', 'sonCikisId', 'stokOncekiDurum']);
-    assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), ['envanterNo', 'isWatched', 'limit', 'rafPasif', 'sn', 'sonCikisId', 'stokOncekiDurum']);
+    //       sonEnvanterNoDegisimId — dolu Envanter No'nun değişimini aynı commit'teki denetim kaydına bağlar (kurallar)
+    const expected = ['envanterNo', 'isWatched', 'limit', 'rafPasif', 'sn', 'sonCikisId', 'sonEnvanterNoDegisimId', 'stokOncekiDurum'];
+    assert.deepEqual([...S.B1_OPTIONAL_KEYS].sort(), expected);
+    assert.deepEqual([...S.B2_OPTIONAL_KEYS].sort(), expected);
     assert.ok(S.stockKnownKeys('b1').includes('envanterNo') && !S.stockKnownKeys('b1').includes('status'));
     assert.ok(S.stockKnownKeys('b2').includes('envanterNo') && S.stockKnownKeys('b2').includes('status'));
 });

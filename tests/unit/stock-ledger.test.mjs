@@ -515,6 +515,22 @@ test('v3.6 planShelfSync bayrakları raf kilidine eşitler: kilitli rafta eksik 
     ]);
 });
 
+test('v3.6 Envanter No kilidi: dolu numara ürün kaydından değişmez; boş numara atanır; yazım farkı değişiklik sayılmaz', () => {
+    const edit = (existingExtra, fields) => L.planProductSave({ col: 'b2', id: 'b1_old1', isNew: false, fields, uid: 'u' },
+        { existing: existingB1({ status: 'Kullanıma Hazır', ...existingExtra }), shelves: {} });
+    rejectsWith(() => edit({ envanterNo: 'ENV-001' }, { envanterNo: 'ENV-002' }), 'envanter-no-locked');
+    rejectsWith(() => edit({ envanterNo: 'ENV-001' }, { envanterNo: '' }), 'envanter-no-locked');
+    const same = plain(edit({ envanterNo: 'ENV-001' }, { envanterNo: ' env-001 ', ürün: 'Yeni ad' }).writes[0].data);
+    assert.equal('envanterNo' in same, false, 'aynı numaranın yazım farkı yazılmaz (saklanan biçim korunur)');
+    assert.equal(same.ürün, 'Yeni ad');
+    const assigned = plain(edit({}, { envanterNo: 'ENV-009' }).writes[0].data);
+    assert.equal(assigned.envanterNo, 'ENV-009', 'numarası boş kayda bir kez atanır');
+    const dash = plain(edit({ envanterNo: '-' }, { envanterNo: 'ENV-010' }).writes[0].data);
+    assert.equal(dash.envanterNo, 'ENV-010', '"-" boş sayılır');
+    const forged = plain(edit({}, { sonEnvanterNoDegisimId: 'al_sahte' }).writes[0].data);
+    assert.equal('sonEnvanterNoDegisimId' in forged, false, 'değişim bağı yalnız değişim aracından yazılır');
+});
+
 test('v3.6 assertNotCountLocked: bayrak ya da raf kilidi tek başına yeterli (fail-closed)', () => {
     rejectsWith(() => L.assertNotCountLocked({ raf: 'Raf-A 1', rafPasif: true }, null), 'shelf-locked');
     rejectsWith(() => L.assertNotCountLocked({ raf: 'Raf-A 1' }, lockedShelf('b1', 'RAF-A 1', 5, 1)), 'shelf-locked');

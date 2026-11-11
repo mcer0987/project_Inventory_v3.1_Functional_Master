@@ -24,7 +24,7 @@ const ADMIN_EMAIL = 'admin@medipol.local';
 const ADMIN_UID = 'admin-uid';
 
 globalThis.window = globalThis.window || {};
-for (const f of ['src/utils/schema.js', 'src/services/stock-ledger.js']) {
+for (const f of ['src/utils/schema.js', 'src/services/stock-ledger.js', 'src/utils/inventory-no-rename.js']) {
     vm.runInThisContext(fs.readFileSync(path.join(ROOT_DIR, f), 'utf8'), { filename: f });
 }
 const L = globalThis.window.StockLedger;
@@ -480,4 +480,39 @@ test('v3.6 emülatör: raf ekleme (varsa ret) ve boş rafın adını düzeltme �
     const [a] = await audits('raf-adi-duzeltildi');
     assert.deepEqual([a.fromValue, a.toValue], ['RAF-9', 'RAF-10']);
     assert.equal((await audits('raf-eklendi')).length, 1);
+});
+
+// ─── v3.6 · İP-2 · Envanter No değişimi: saf planın ürettiği yazımlar üretim kurallarından geçer ─────────────────────
+test('v3.6 emülatör: zimmetteki cihazın numarası b3 + zimmet ikizi + bağlı depo satırında, denetim kaydıyla tek transaction içinde değişir', async () => {
+    const R = globalThis.window.AppModules.InventoryNoRename;
+    await seed(async db => {
+        await setDoc(ref(db, 'b2', 'dp1'), { ...item('dp1', { adet: 0, durumu: 'Tükendi', isDemirbas: true, raf: 'Raf-1' }), status: 'Tükendi', envanterNo: 'ENV-001' });
+        const z = { id: 'z1', sema: 2, tip: 'zimmet', kaynakDepo: 'b2', productId: 'dp1', urunAciklama: 'Ürün dp1', adet: 1, sn: 'SN1',
+            envanterNo: 'ENV-001', alanKisi: 'Ayşe Yılmaz', tarih: '01.11.2026', iadeEdildi: false };
+        await setDoc(ref(db, 'b3', 'z1'), z);
+        await setDoc(ref(db, 'assignments', 'z1'), { id: 'z1', envanterNo: 'ENV-001', personel: 'Ayşe Yılmaz', iadeEdildi: false });
+    });
+    globalThis.window.data = { b1: await all('b1'), b2: await all('b2'), b3: await all('b3'), assignments: await all('assignments'), serviceRecords: [] };
+    const m = R.findMatches(globalThis.window.data, 'env-001');
+    assert.equal(m.matches.length, 1);
+    const match = m.matches[0];
+    const db = adminDb();
+    const auditId = 'al_emu_rename1';
+    await runTransaction(db, async tx => {
+        const records = {};
+        for (const t of match.targets) { const sn = await tx.get(ref(db, t.col, t.id)); records[`${t.col}/${t.id}`] = sn.data(); }
+        const plan = R.planRename(match, 'ENV-777', { records, auditId, reason: 'etiket yenilendi', now: 1 });
+        plan.writes.forEach(w => tx.update(ref(db, w.col, w.id), w.data));
+        tx.set(ref(db, 'auditLogs', auditId), { id: auditId, type: plan.audit.type, refCol: plan.audit.refCol, refId: plan.audit.refId,
+            item: plan.audit.item, qty: null, actorName: 'Yönetici', actorPersonelId: null, uid: ADMIN_UID, authKind: 'admin',
+            result: 'approved', reason: plan.audit.reason, page: 'admin', ts: serverTimestamp(), fromValue: plan.fromValue, toValue: plan.toValue });
+    });
+    assert.equal((await read('b2', 'dp1')).envanterNo, 'ENV-777');
+    assert.equal((await read('b2', 'dp1')).sonEnvanterNoDegisimId, auditId);
+    assert.equal((await read('b3', 'z1')).envanterNo, 'ENV-777');
+    assert.equal((await read('assignments', 'z1')).envanterNo, 'ENV-777');
+    const a = await read('auditLogs', auditId);
+    assert.deepEqual([a.fromValue, a.toValue, a.type], ['ENV-001', 'ENV-777', 'envanter-no-degisim']);
+    // Kanıtsız ikinci değişim (ürün formu / konsol yolu) kurallarca reddedilir.
+    await assertFails(updateDoc(ref(db, 'b2', 'dp1'), { envanterNo: 'ENV-888' }));
 });

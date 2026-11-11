@@ -270,9 +270,11 @@
     //          rafPasif        — v3.6: kaydın rafı sayımda (raf belgesinin sayım kilidinin kopyası). Gizleme ve personel çıkış
     //                            kuralı bu alanı okur; stok hareketinin asıl kararı defterde raf belgesinden verilir. Yalnız raf
     //                            kilidi / uzlaştırma ve ürün kaydı planlayıcısı yazar.
-    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo', 'sn', 'sonCikisId', 'rafPasif']);
+    //          sonEnvanterNoDegisimId — v3.6: dolu Envanter No yalnız aynı commit'teki 'envanter-no-degisim' denetim kaydıyla
+    //                            değişir (firestore.rules envanterNoChangeOk); alan o kaydın kimliğidir. Yalnız değişim aracı yazar.
+    const B1_OPTIONAL_KEYS = Object.freeze(['isWatched', 'limit', 'stokOncekiDurum', 'envanterNo', 'sn', 'sonCikisId', 'rafPasif', 'sonEnvanterNoDegisimId']);
     const B2_OPTIONAL_KEYS = Object.freeze([...B1_OPTIONAL_KEYS]);
-    const STOCK_STRING_KEYS = Object.freeze(['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status', 'envanterNo', 'sn', 'stokOncekiDurum']);
+    const STOCK_STRING_KEYS = Object.freeze(['sütun', 'raf', 'tür', 'marka', 'açıklama', 'durumu', 'status', 'envanterNo', 'sn', 'stokOncekiDurum', 'sonEnvanterNoDegisimId']);
 
     const B1_SPEC = Object.freeze({ required: B1_KEYS, optional: B1_OPTIONAL_KEYS, legacy: B1_LEGACY_KEYS, label: 'B1' });
     const B2_SPEC = Object.freeze({ required: B2_KEYS, optional: B2_OPTIONAL_KEYS, legacy: B2_LEGACY_KEYS, label: 'B2' });

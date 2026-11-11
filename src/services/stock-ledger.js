@@ -387,6 +387,15 @@
         if (!existing) throw new LedgerError('not-found', `Düzenlenen kayıt bulunamadı (${i.col}/${i.id}); liste güncellenmiş olabilir.`, { col: i.col, id: i.id });
         const writeFields = { ...fields };
         delete writeFields.rafPasif;   // v3.6: bayrak aşağıda rafın gerçek durumundan yazılır
+        delete writeFields.sonEnvanterNoDegisimId;   // v3.6: yalnız Envanter No değişim aracı yazar
+        // v3.6 · Envanter No kilidi: dolu numara ürün kaydından değişmez (boş numara bir kez atanabilir). Aynı numaranın yazım
+        // farkı (boşluk/büyük-küçük) değişiklik sayılmaz ve yazılmaz. Kurallar da aynı kilidi uygular (firestore.rules).
+        if (Object.prototype.hasOwnProperty.call(writeFields, 'envanterNo') && S.normDeviceId(existing.envanterNo)) {
+            if (S.normDeviceId(writeFields.envanterNo) !== S.normDeviceId(existing.envanterNo)) {
+                throw new LedgerError('envanter-no-locked', 'Envanter No ürün kaydından değiştirilemez; değişim Yönetim Paneli › Operasyon Merkezi › Envanter No Değişimi aracından yapılır.', { col: i.col, id: i.id });
+            }
+            delete writeFields.envanterNo;
+        }
         const nextDoc = { ...existing, ...writeFields };
         const prev = shelfOf(existing);
         const next = shelfOf(nextDoc);

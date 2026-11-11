@@ -1414,6 +1414,59 @@ describe('v3.3 · Raf kataloğu (shelves) ve stok işlem defteri (stockOperation
     });
 });
 
+describe('v3.6 · Envanter No kilidi (denetim kaydına bağlı değişim)', () => {
+    const row = (id, extra = {}) => ({ id, ürün: 'Latitude', adet: 1, durumu: 'Kullanıma Hazır', status: 'Kullanıma Hazır', ...extra });
+    const audit = (id, extra = {}) => ({
+        id, type: 'envanter-no-degisim', refCol: 'b2', refId: 'e1', item: 'Latitude', qty: null, actorName: 'Yönetici',
+        actorPersonelId: null, uid: 'admin-uid', authKind: 'admin', result: 'approved', reason: 'etiket yenilendi', page: 'admin',
+        ts: serverTimestamp(), fromValue: 'ENV-001', toValue: 'ENV-002', ...extra,
+    });
+    const renameBatch = (db, { auditId = 'al_env_1', auditExtra = {}, patch = {} } = {}) => {
+        const batch = writeBatch(db);
+        batch.set(item(db, LIVE, 'auditLogs', auditId), audit(auditId, auditExtra));
+        batch.update(item(db, LIVE, 'b2', 'e1'), { envanterNo: 'ENV-002', sonEnvanterNoDegisimId: auditId, lastUpdate: 1, ...patch });
+        return batch.commit();
+    };
+    beforeEach(() => seed(async db => {
+        await setDoc(item(db, LIVE, 'b2', 'e1'), row('e1', { envanterNo: 'ENV-001' }));
+        await setDoc(item(db, LIVE, 'b2', 'e0'), row('e0'));
+        await setDoc(item(db, LIVE, 'b2', 'edash'), row('edash', { envanterNo: '-' }));
+    }));
+
+    test('dolu numara kanıtsız değiştirilemez ve boşaltılamaz (yönetici dahil)', async () => {
+        await assertFails(updateDoc(item(ctx.admin(), LIVE, 'b2', 'e1'), { envanterNo: 'ENV-002' }));
+        await assertFails(updateDoc(item(ctx.admin(), LIVE, 'b2', 'e1'), { envanterNo: '' }));
+        await assertFails(updateDoc(item(ctx.admin(), LIVE, 'b2', 'e1'), { envanterNo: deleteField() }));
+    });
+    test('boş ya da "-" numaraya bir kez atama serbest; numaraya dokunmayan yazım etkilenmez', async () => {
+        await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'b2', 'e0'), { envanterNo: 'ENV-100' }));
+        await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'b2', 'edash'), { envanterNo: 'ENV-101' }));
+        await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'b2', 'e1'), { adet: 0 }));
+    });
+    test('aynı commit\'teki eşleşen denetim kaydıyla değişim kabul edilir', async () => {
+        await assertSucceeds(renameBatch(ctx.admin()));
+        const after = await rd('b2', 'e1');
+        assert(after.envanterNo === 'ENV-002');
+        assert(after.sonEnvanterNoDegisimId === 'al_env_1');
+    });
+    test('KÖTÜ NİYET: kanıt eski/yeni değerle, türle ya da kimlikle eşleşmezse reddedilir', async () => {
+        await assertFails(renameBatch(ctx.admin(), { auditExtra: { fromValue: 'ENV-999' } }));
+        await assertFails(renameBatch(ctx.admin(), { auditExtra: { toValue: 'ENV-003' } }));
+        await assertFails(renameBatch(ctx.admin(), { auditExtra: { type: 'raf-eklendi' } }));
+        await assertFails(renameBatch(ctx.admin(), { patch: { sonEnvanterNoDegisimId: 'al_baska' } }));
+        await assertFails(renameBatch(ctx.admin(), { patch: { envanterNo: '' }, auditExtra: { toValue: '' } }), 'kanıtla bile boşaltılamaz');
+    });
+    test('KÖTÜ NİYET: önceden var olan denetim kaydı kanıt olarak yeniden kullanılamaz', async () => {
+        await seed(db => setDoc(item(db, LIVE, 'auditLogs', 'al_eski'), { ...audit('al_eski'), ts: new Date(1000) }));
+        const db = ctx.admin();
+        await assertFails(updateDoc(item(db, LIVE, 'b2', 'e1'), { envanterNo: 'ENV-002', sonEnvanterNoDegisimId: 'al_eski' }));
+    });
+    test('geri yükleme kilidi altında kanıt aranmaz (yedekten tam geri yükleme)', async () => {
+        await seed(db => setDoc(item(db, LIVE, 'system_config', 'admin_settings'), { restoreLock: { collections: ['b2'], owner: 'admin-uid' } }));
+        await assertSucceeds(updateDoc(item(ctx.admin(), LIVE, 'b2', 'e1'), { envanterNo: 'ENV-777' }));
+    });
+});
+
 describe('v3.6 · Raf sayım kilidi (lockReason / lockedAt / lockedBy)', () => {
     const SID = 'b1_RAF-A 1';
     const base = { code: 'RAF-A 1', depot: 'b1', capacity: 5, usedSlots: 2, active: true, updatedAt: new Date(0), updatedBy: 'admin-uid' };

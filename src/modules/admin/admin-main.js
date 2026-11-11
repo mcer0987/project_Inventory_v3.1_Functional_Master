@@ -13,6 +13,7 @@ import './admin-purchase-render.js';
 import './inventory-management.js';
 import './admin-backup.js';            // K3 · ADM-06: birleşik yedekleme servisi (VIP snapshot + geri yükleme)
 import './admin-router.js';
+import './inventory-no-change.js';     // v3.6: Operasyon Merkezi › Envanter No Değişimi
 import '../self-approval-reporter.js';   // J4: Güvenlik Raporu iki sayfada (EBYS-05)
 
 window.AppModules = window.AppModules || {};

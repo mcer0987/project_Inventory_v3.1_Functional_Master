@@ -181,11 +181,12 @@ const _auditText = v => (v === undefined || v === null || v === '') ? null : Str
 const _auditValue = v => (v === undefined || v === null || v === '') ? null : String(v).replace(/</g, '‹').slice(0, 128);
 // v3.6: kayıt kurucu ayrı — transaction içinde işlemle AYNI commit'te yazılabilsin (stock-ledger deps.auditRecord).
 // fromValue / toValue yalnız verildiğinde yazılır (kural: ≤128 karakter etiketsiz metin).
-export const buildAuditRecord = window.buildAuditRecord = function (entry = {}) {
+export const buildAuditRecord = window.buildAuditRecord = function (entry = {}, { id: presetId } = {}) {
     const u = window.userAuth;
     if (!u) throw new SaveDataError('no-auth', 'Oturum bulunamadı; denetim kaydı yazılamadı.');
     if (!AUDIT_RESULTS.includes(entry.result)) throw new SaveDataError('invalid-argument', 'Geçersiz denetim sonucu.');
-    const id = 'al_' + window.makeId();
+    // presetId: kaydı işaret eden alan (ör. sonEnvanterNoDegisimId) aynı commit'te yazılacaksa kimlik önceden üretilir.
+    const id = presetId || ('al_' + window.makeId());
     const qty = Number(entry.qty);
     const data = {
         id,
@@ -1695,6 +1696,99 @@ export const renameShelf = window.renameShelf = async function (depot, code, new
     window.data.shelves = (window.data.shelves || []).filter(s => s && s.id !== out.previousId);
     _shelfLocal(out.id, local, 'set');
     return out;
+};
+
+// ─── v3.6 · Envanter No değişimi (Operasyon Merkezi aracı) ──────────────────────────────────────────────────────────
+// [WHY]: Envanter No ürün formundan değiştirilemez (defter + kurallar). Değişim cihazın şu anki kaydında (depo, açık servis,
+//        aktif zimmet, hurda) ve bağlı depo satırında birlikte yapılmalı; eski → yeni değer inkâr edilemez biçimde kalmalı.
+// [HOW]: Saf plan src/utils/inventory-no-rename.js. Burada: yönetici/toplu kilit ön denetimi, yeni numaranın canlı veri + sunucudan
+//        taze indeksli sorgularla denetimi (transaction içinde sorgu yapılamaz), tek transaction'da hedeflerin taze okunması,
+//        planın taze kayıtlarla yeniden kurulması, şema muhafızı ve denetim kaydının AYNI commit'te yazılması. Kurallar depo
+//        satırındaki değişimi bu kayda bağlar (firestore.rules envanterNoChangeOk).
+const RENAME_COLS = ['b1', 'b2', 'b3', 'assignments', 'serviceRecords'];
+async function _freshInventoryNoData(raw) {
+    const R = window.AppModules.InventoryNoRename;
+    const values = [...new Set([String(raw ?? '').trim(), R.key(raw)].filter(Boolean))];
+    const data = {};
+    if (!values.length) return data;
+    const read = async (col, field) => (await getDocsFromServer(query(collection(fireDb, COLLECTION_ROOT, col, 'items'), where(field, 'in', values))))
+        .docs.map(d => ({ id: d.id, ...d.data() }));
+    for (const col of RENAME_COLS) data[col] = await read(col, 'envanterNo');
+    const snapshots = await read('serviceRecords', 'originalData.envanterNo');
+    const seen = new Set(data.serviceRecords.map(r => String(r.id)));
+    snapshots.forEach(r => { if (!seen.has(String(r.id))) data.serviceRecords.push(r); });
+    return data;
+}
+
+/** Yeni numara kullanılabilir mi? Canlı veri + sunucudan taze sorgu. Dönüş: { ok, blockers[], warnings[] }. */
+export const checkInventoryNoAvailable = window.checkInventoryNoAvailable = async function (newNo, currentKey = '') {
+    const R = window.AppModules && window.AppModules.InventoryNoRename;
+    if (!R) throw new SaveDataError('write-failed', 'Envanter No modülü (inventory-no-rename.js) yüklenmemiş.');
+    const live = R.checkNewNumber(window.data, newNo, currentKey);
+    if (!live.ok) return live;
+    const fresh = R.checkNewNumber(await _freshInventoryNoData(newNo), newNo, currentKey);
+    return { ok: fresh.ok, blockers: fresh.blockers, warnings: [...new Set([...live.warnings, ...fresh.warnings])] };
+};
+
+/**
+ * Seçilen eşleşmenin (findMatches) numarasını değiştirir. Dönüş: { auditId, fromValue, toValue, written:[{col,id}] }.
+ * Hata: SaveDataError (inventory-no-taken | conflict | schema-violation | forbidden | bulk-locked | ...).
+ */
+export const runInventoryNoRename = window.runInventoryNoRename = async function (match, newNo, { reason } = {}) {
+    const R = window.AppModules && window.AppModules.InventoryNoRename;
+    if (!R) throw new SaveDataError('write-failed', 'Envanter No modülü (inventory-no-rename.js) yüklenmemiş.');
+    if (!match || !Array.isArray(match.targets) || !match.targets.length || !match.editable) {
+        throw new SaveDataError('invalid-argument', (match && match.reason) || 'Bu kayıt için numara değiştirilemez.');
+    }
+    const cols = [...new Set(match.targets.map(t => t.col))];
+    _ledgerPreflight(cols, 'Envanter No değişimi yalnızca sistem yöneticisi tarafından yapılabilir.');
+    const oldKey = R.key(match.record && match.record.envanterNo) || R.key(match.record && match.record.originalData && match.record.originalData.envanterNo);
+    const availability = await checkInventoryNoAvailable(newNo, oldKey);
+    if (!availability.ok) throw new SaveDataError('inventory-no-taken', availability.blockers[0], { blockers: availability.blockers });
+    const auditId = 'al_' + window.makeId();
+    const me = typeof window.getActiveUser === 'function' ? window.getActiveUser() : null;
+    let result;
+    try {
+        result = await runTransaction(fireDb, async (tx) => {
+            const records = {};
+            for (const t of match.targets) {
+                const snap = await tx.get(_docRef(t.col, t.id));
+                if (snap.exists()) records[`${t.col}/${t.id}`] = snap.data();
+            }
+            let plan;
+            try { plan = R.planRename(match, newNo, { records, auditId, reason, now: Date.now() }); }
+            catch (e) { throw new SaveDataError('conflict', e.message); }
+            const prepared = plan.writes.map(w => ({ op: 'update', col: w.col, id: String(w.id), data: _clean(w.data) }));
+            const guard = _schemaGuardError(prepared, {});
+            if (guard) throw guard;
+            const owner = _ownerGuardError(prepared);
+            if (owner) throw owner;
+            prepared.forEach(p => tx.update(_docRef(p.col, p.id), p.data));
+            const rec = buildAuditRecord({ actorName: me && me.name, actorPersonelId: me && me.id, ...plan.audit, result: 'approved' }, { id: auditId });
+            tx.set(doc(fireDb, COLLECTION_ROOT, 'auditLogs', 'items', auditId), rec.data);
+            return { prepared, fromValue: plan.fromValue, toValue: plan.toValue };
+        });
+    } catch (e) {
+        throw _ledgerError(e, 'runInventoryNoRename');
+    }
+    result.prepared.forEach(p => _applyLocal(p.col, p));
+    R.addAliasPair(result.fromValue, result.toValue);
+    new Set(result.prepared.map(p => p.col)).forEach(col =>
+        window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: col, isPatch: false, changes: [] } })));
+    console.log(`☁️ Envanter No ${result.fromValue} → ${result.toValue}: ${result.prepared.map(p => `${p.col}/${p.id}`).join(', ')} | denetim ${auditId}`);
+    return { auditId, fromValue: result.fromValue, toValue: result.toValue, written: result.prepared.map(p => ({ col: p.col, id: p.id })) };
+};
+
+// Cihaz geçmişi için eski → yeni numara eşlemeleri (denetim kayıtları; yalnız yönetici okur). Kısa önbellekli.
+let _aliasLoadedAt = 0;
+export const loadInventoryNoAliases = window.loadInventoryNoAliases = async function ({ force = false } = {}) {
+    const R = window.AppModules && window.AppModules.InventoryNoRename;
+    if (!R || !(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) return false;
+    if (!force && Date.now() - _aliasLoadedAt < 60000) return true;
+    const snap = await getDocs(query(collection(fireDb, COLLECTION_ROOT, 'auditLogs', 'items'), where('type', '==', R.AUDIT_TYPE), limit(1000)));
+    R.setAliasPairs(snap.docs.map(d => ({ from: d.data().fromValue, to: d.data().toValue })));
+    _aliasLoadedAt = Date.now();
+    return true;
 };
 
 // ─── v3.3 · Aşama 4 · saveProduct transaction'a bağlanması (Denetim P1-02 devamı) ───────────────────────────────────
