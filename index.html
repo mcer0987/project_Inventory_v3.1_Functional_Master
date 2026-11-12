@@ -34,6 +34,8 @@
     <link rel="stylesheet" href="src/ui/ebys-documents.css">
     <link rel="stylesheet" href="src/ui/ebys-showcase-modal.css">
     <link rel="stylesheet" href="src/ui/zim-showcase-modal.css">
+    <link rel="stylesheet" href="src/ui/unit-showcase-modal.css">
+    <link rel="stylesheet" href="src/ui/personnel-showcase-modal.css">
     <link rel="stylesheet" href="dark-theme.css">
     <link rel="stylesheet" href="mobile-responsive.css">
     <link rel="stylesheet" href="login-redesign.css">
@@ -741,6 +743,12 @@
         </div>
 
         <div id="personel" class="tab-content">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                <p class="text-muted mb-0" style="font-size:13px;">Personel kayıtlarını, birim atamalarını ve giriş hesabı durumunu buradan yönetirsiniz.</p>
+                <button type="button" class="section-guide-link" data-personnel-showcase aria-haspopup="dialog" title="Personel kaydı, kalıcı ID/hesap ve birim ataması nasıl işler, örneklerle gösterir">
+                    <i class="fas fa-circle-question" aria-hidden="true"></i> Rehber
+                </button>
+            </div>
             <div class="actions">
                 <button class="add-btn" onclick="openPersonelModal('add')">Personel Ekle</button>
                 <button class="add-btn" onclick="exportPDF('personel')">PDF Export</button>
@@ -934,7 +942,7 @@
             </div>
             <section class="approval-queue-group" aria-labelledby="ebysTasksTitle">
                 <header class="approval-queue-divider" id="ebysTasksHeader">
-                    <h4 id="ebysTasksTitle">Evrak görevlerim</h4>
+                    <h4 id="ebysTasksTitle"><span class="badge-soft bg-primary text-white me-2">📄 EBYS</span>Evrak görevlerim</h4>
                     <p>Size atanmış evrakları ve karar verdiğiniz sabit sürümleri burada izleyin. Geçmiş karar, yeni sürüme erişim sağlamaz.</p>
                 </header>
                 <section id="ebysMyTasks" aria-labelledby="ebysTasksTitle"></section>
@@ -946,7 +954,7 @@
             </section>
             <section class="approval-queue-group" aria-labelledby="legacyApprovalsTitle">
                 <header class="approval-queue-divider" id="legacyApprovalsHeader">
-                    <h4 id="legacyApprovalsTitle">Satın alma onayları</h4>
+                    <h4 id="legacyApprovalsTitle"><span class="badge-soft bg-secondary text-white me-2">🧾 Satın Alma</span>Satın alma onayları</h4>
                     <p>Mevcut satın alma taleplerindeki onay adımlarınızı bu bölümden yönetin.</p>
                 </header>
                 <div id="myApprovalsContainer" class="approval-grid">
@@ -956,7 +964,15 @@
         </div>
 
         <div id="unitsTab" class="tab-content">
-            <h3>Birim / Departman Listesi</h3>
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                <div>
+                    <h3 class="mb-1">Birim / Departman Listesi</h3>
+                    <p class="text-muted mb-0" style="font-size:13px;">Kurumun birimlerini ve her birime atanmış personeli buradan yönetirsiniz; bir birime atanan kişi EBYS onay/havale akışlarında o birimin personeli sayılır.</p>
+                </div>
+                <button type="button" class="section-guide-link" data-unit-showcase aria-haspopup="dialog" title="Birim yönetiminin nasıl işlediğini örneklerle gösterir">
+                    <i class="fas fa-circle-question" aria-hidden="true"></i> Rehber
+                </button>
+            </div>
             <div class="actions">
                 <button class="add-btn" onclick="window.openUnitModal()">+ Yeni Birim Ekle</button>
             </div>
@@ -964,9 +980,9 @@
             <table id="tableUnits" class="main-table">
                 <thead>
                     <tr>
-                        <th style="width: 30%;">Birim Adı</th>
-                        <th style="width: 50%;">Atanan Personeller</th>
-                        <th style="text-align:right; width: 20%;">İşlemler</th>
+                        <th style="width: 35%;">Birim</th>
+                        <th style="width: 40%;">Bağlı Personel</th>
+                        <th style="text-align:right; width: 25%;">İşlemler</th>
                     </tr>
                 </thead>
                 <tbody id="unitListArea">
@@ -1272,8 +1288,14 @@
                     </div>
 
                     <div class="modal-footer-compact rounded-bottom">
+                        <span id="purEbysStatus" role="status" class="small text-muted me-auto" hidden></span>
                         <button type="button" onclick="closePurchaseModal()"
                             class="btn btn-link text-decoration-none text-muted fw-bold px-3">İptal</button>
+                        <button type="button" class="btn btn-outline-primary"
+                            title="Kurum içi sıralı onay rotasıyla ilerler; talep dondurulur ve sonradan düzenlenemez."
+                            onclick="window.AppModules.EBYSPurchaseUI.handleSubmitClick(this)">
+                            <i class="fas fa-route"></i> EBYS süreciyle gönder
+                        </button>
                         <button type="submit" id="purSaveBtn" class="btn-premium-save">
                             <i class="fas fa-paper-plane"></i> Talebi Kaydet
                         </button>
@@ -1596,11 +1618,6 @@
                         <input type="text" id="prodBrand" autocapitalize="words">
                     </div>
 
-                    <div class="form-group">
-                        <label for="prodQty">Adet:</label>
-                        <input type="number" id="prodQty" required min="0" step="1" inputmode="numeric" pattern="[0-9]*">
-                    </div>
-
                     <!-- v3.6 · Envanter No: yalnız demirbaşta; isteğe bağlı, bir kez yazılır, kayıttan sonra kilitlenir (değişim
                          Yönetim Paneli › Operasyon Merkezi'nde). Çok adetli demirbaşta girilmez; numara çıkışta cihaz başına yazılır. -->
                     <div class="form-group inventory-no-group" id="assetPlate" data-state="editable">
@@ -1612,6 +1629,11 @@
                             <button type="button" id="assetPlateAssign" class="asset-plate-assign" hidden>Numara ata</button>
                         </div>
                         <small class="asset-plate-hint" id="assetPlateHint"></small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="prodQty">Adet:</label>
+                        <input type="number" id="prodQty" required min="0" step="1" inputmode="numeric" pattern="[0-9]*">
                     </div>
 
                     <div class="form-group">
@@ -1723,11 +1745,15 @@
     <script type="module" src="src/services/firebase-handler.js"></script>
     <script type="module" src="src/services/ebys-rates.js"></script>
     <script type="module" src="src/ui/ebys-documents-ui.js"></script>
+    <script type="module" src="src/ui/ebys-process-ui.js"></script>
     <script type="module" src="src/ui/ebys-showcase-modal.js"></script>
     <script type="module" src="src/ui/zim-showcase-modal.js"></script>
+    <script type="module" src="src/ui/unit-showcase-modal.js"></script>
+    <script type="module" src="src/ui/personnel-showcase-modal.js"></script>
     <script src="src/utils/ebys-document-types.js"></script>
     <script src="src/utils/purchase-money.js"></script>
     <script src="src/ui/purchase-items-ui.js"></script>
+    <script type="module" src="src/ui/ebys-purchase-ui.js"></script>
     <script type="module" src="src/services/purchase-servises.js"></script>
     <script type="module" src="src/modules/edm-workflow.js"></script>
     <script src="src/utils/admin-quick-unlock.js"></script>

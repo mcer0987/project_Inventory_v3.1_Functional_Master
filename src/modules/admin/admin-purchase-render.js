@@ -69,7 +69,7 @@ window.renderAdminDashboard = function () {
 
             return `
                 <tr class="align-middle" style="${isCancelled ? 'background:#f1f5f9; opacity:0.7;' : ''}">
-                    <td><span class="text-muted" style="font-size: 11px;">${escapeHtml(item.evrakNo || "-")}</span></td>
+                    <td><span class="text-muted" style="font-size: 11px;">${escapeHtml(item.evrakNo || "-")}</span>${item.engineVersion === 'ebys-v1' ? ' <span class="badge-soft bg-primary text-white" style="font-size:9px;" title="Kurum içi sıralı EBYS onay rotasıyla yönetilir">EBYS</span>' : ''}</td>
                     <td><div style="font-size: 12px; color: #64748b;">${escapeHtml(item.tarih || "-")}</div></td>
                     <td>
                         <div class="fw-bold" style="font-size: 13px; color: #1e293b;">${escapeHtml(item.talepEden || item.createdByName || "-")}</div>

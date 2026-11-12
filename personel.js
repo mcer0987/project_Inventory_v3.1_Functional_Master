@@ -14,11 +14,21 @@ window.renderPersonelTable = function () {
         const onPri = SP && String(item.authEmail || '').toLowerCase() === SP.accountEmailOf(item);
         return pri + (onPri ? '✓' : '<span style="color:#b45309;" title="Hesap kurumsal kimlik adresinde değil: VIP → PRI / Hesap Göç Aracı">⚠ göç bekliyor</span>');
     };
+    // [WHY]: Bu hücre eskiden item.birim (serbest metin) gösterip gerçek item.unitId'yi "Birim ID: eski ad
+    //        kaydı" gibi anlamsız bir alt satıra düşürüyordu; Birim Yönetimi tablosu (edm-workflow.js
+    //        _unitLinkedPersonnel) ise yalnız unitId bağını gerçek kabul ediyor. İki ekran aynı kişi için
+    //        farklı birim söylüyordu (kullanıcı tespiti). [HOW]: Birim Yönetimi ile aynı gerçek kaynak:
+    //        unitId varsa güncel birim adı gösterilir; yoksa eski metin yalnız ikinci planda "eski kayıt" notu.
+    const unitCell = item => {
+        const unit = item.unitId ? (window.data.units || []).find(u => String(u.id) === String(item.unitId)) : null;
+        if (unit) return `${escapeHtml(unit.name || '-')}${unit.active === false ? ' <small class="text-muted">(Pasif birim)</small>' : ''}<br><small class="text-muted">${escapeHtml(item.jobTitle || '')}</small>`;
+        return `<span class="text-muted">Birim ataması yok</span><br><small class="text-muted">${item.birim ? 'Eski kayıt: ' + escapeHtml(item.birim) + ' · ' : ''}${escapeHtml(item.jobTitle || '')}</small>`;
+    };
     tbody.innerHTML = (window.data.personel || []).map(item => `
         <tr>
             <td><input type="checkbox" class="row-select" data-id="${escapeHtml(item.id ?? '')}"></td>
             <td>${escapeHtml(item.name || '-')}<br><small>ID: ${escapeHtml(item.id)} · UID: ${escapeHtml(item.uid || 'yok')} · ${item.active === false ? 'Pasif' : 'Aktif'}</small></td>
-            <td>${escapeHtml(item.birim || '-')}<br><small>Birim ID: ${escapeHtml(item.unitId || 'eski ad kaydı')} · ${escapeHtml(item.jobTitle || '')}</small></td>
+            <td>${unitCell(item) /* xss-ok: unitCell() escapeHtml kullanır (linter ayrıca denetler) */}</td>
             <td>${account(item) /* xss-ok: account() kendi şablonlarında escapeHtml / jsArg kullanır (linter ayrıca denetler) */}</td>
             <td>
                 <button class="edit-btn" onclick="if(validateAdminAction()) openPersonelModal('edit', ${jsArg(item.id)})">Düzenle</button>

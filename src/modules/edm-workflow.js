@@ -62,27 +62,29 @@ function _ensureUnitModal() {
     if (document.getElementById('unitModal')) return;
     const modal = document.createElement('div');
     modal.id = 'unitModal';
+    modal.className = 'um-modal';
     modal.style.cssText = 'display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10500; align-items:flex-start; justify-content:center; overflow-y:auto;';
     // Renkler tema değişkenlerinden (style.css / dark-theme.css [data-theme="dark"]); sabit renk yok.
+    // .um-modal sınıfı birim düzenleme ve hızlı personel atama modalı arasında paylaşılır (bkz. openUnitPersonnelPicker).
     modal.innerHTML = `
         <style>
-            #unitModal .um-box { background:var(--color-surface,#fff); color:var(--color-text,#2c3e50); border:1px solid var(--color-border-light,transparent);
+            .um-modal .um-box { background:var(--color-surface,#fff); color:var(--color-text,#2c3e50); border:1px solid var(--color-border-light,transparent);
                 width:500px; max-width:94vw; margin:50px auto; padding:20px; border-radius:8px; box-sizing:border-box; }
-            #unitModal hr { border:none; border-top:1px solid var(--color-border,#bdc3c7); }
-            #unitModal .um-input { width:100%; box-sizing:border-box; padding:8px; border-radius:6px; border:1px solid var(--color-border,#bdc3c7);
+            .um-modal hr { border:none; border-top:1px solid var(--color-border,#bdc3c7); }
+            .um-modal .um-input { width:100%; box-sizing:border-box; padding:8px; border-radius:6px; border:1px solid var(--color-border,#bdc3c7);
                 background:var(--color-surface-alt,#f8f9fa); color:var(--color-text,#2c3e50); }
-            #unitModal .um-input::placeholder, #unitModal .um-muted { color:var(--color-text-muted,#7f8c8d); }
-            #unitModal .um-results { display:none; border:1px solid var(--color-border,#bdc3c7); border-top:none; max-height:180px; overflow-y:auto; background:var(--color-surface,#fff); }
-            #unitModal .unit-personnel-option { padding:8px 10px; border-bottom:1px solid var(--color-border-light,#eef0f2); cursor:pointer; }
-            #unitModal .unit-personnel-option:hover { background:var(--color-surface-alt,#f8f9fa); }
-            #unitModal .unit-personnel-option.is-added { cursor:default; color:var(--color-text-muted,#7f8c8d); }
-            #unitModal .unit-personnel-option.is-added:hover { background:none; }
-            #unitModal .um-list { list-style:none; padding:0; margin:10px 0 0; max-height:150px; overflow-y:auto; }
-            #unitModal .um-list li.um-chip { padding:5px 10px; background:var(--color-surface-alt,#f8f9fa); border-bottom:1px solid var(--color-border-light,#eef0f2);
+            .um-modal .um-input::placeholder, .um-modal .um-muted { color:var(--color-text-muted,#7f8c8d); }
+            .um-modal .um-results { display:none; border:1px solid var(--color-border,#bdc3c7); border-top:none; max-height:180px; overflow-y:auto; background:var(--color-surface,#fff); }
+            .um-modal .unit-personnel-option { padding:8px 10px; border-bottom:1px solid var(--color-border-light,#eef0f2); cursor:pointer; width:100%; text-align:left; background:none; border-left:none; border-right:none; border-top:none; }
+            .um-modal .unit-personnel-option:hover { background:var(--color-surface-alt,#f8f9fa); }
+            .um-modal .unit-personnel-option.is-added { cursor:default; color:var(--color-text-muted,#7f8c8d); }
+            .um-modal .unit-personnel-option.is-added:hover { background:none; }
+            .um-modal .um-list { list-style:none; padding:0; margin:10px 0 0; max-height:150px; overflow-y:auto; }
+            .um-modal .um-list li.um-chip { padding:5px 10px; background:var(--color-surface-alt,#f8f9fa); border-bottom:1px solid var(--color-border-light,#eef0f2);
                 display:flex; justify-content:space-between; align-items:center; }
-            #unitModal .um-remove { background:none; border:none; color:var(--color-danger,#e74c3c); cursor:pointer; font-size:16px; }
-            #unitModal .um-cancel { padding:8px 15px; border:1px solid var(--color-border,#bdc3c7); background:transparent; color:var(--color-text,#2c3e50); border-radius:4px; cursor:pointer; }
-            #unitModal .um-save { background:var(--color-success-dark,#27ae60); color:#fff; padding:8px 15px; border:none; border-radius:4px; cursor:pointer; }
+            .um-modal .um-remove { background:none; border:none; color:var(--color-danger,#e74c3c); cursor:pointer; font-size:16px; }
+            .um-modal .um-cancel { padding:8px 15px; border:1px solid var(--color-border,#bdc3c7); background:transparent; color:var(--color-text,#2c3e50); border-radius:4px; cursor:pointer; }
+            .um-modal .um-save { background:var(--color-success-dark,#27ae60); color:#fff; padding:8px 15px; border:none; border-radius:4px; cursor:pointer; }
         </style>
         <div class="um-box">
             <h3 id="unitModalTitle" style="margin-top:0;">Yeni Birim Tanımla</h3>
@@ -154,6 +156,37 @@ window.deleteUnit = async function (unitId) {
 };
 
 // --- TABLO RENDER ---
+// [WHY]: Tek hücrede üç ayrı liste üst üste biniyordu: eski 'personnel' ad dizisi, eski 'personnelIds'
+//        (birimin kendi dizisi — hiçbir yerde fonksiyonel okunmuyor, yalnız kendi yazım doğrulamasında ve bu
+//        hücrede kullanılıyordu) ve gerçek EBYS yönlendirme kaynağı olan personel.unitId bazlı bağ. 20+
+//        personelli birimde bu hücre okunmaz hale geliyordu (kullanıcı tespiti).
+// [HOW]: Hücre artık yalnız gerçek bağı (personel.unitId) gösterir; 3'ten fazla kişi varsa <details> ile
+//        katlanır. Eski personnel/personnelIds, veri kaybı riski taşıdığından silinmedi; yalnız düzenleme
+//        modalında "eski kayıt" olarak kalmaya devam ediyor (ebys-definitions-ui.js renderPeople).
+function _unitLinkedPersonnel(unitId) {
+    return (window.data.personel || []).filter(p => String(p.unitId || '') === String(unitId));
+}
+function _unitPersonnelCellHtml(unitId) {
+    const linked = _unitLinkedPersonnel(unitId);
+    if (!linked.length) return '<small class="text-muted">Bağlı personel yok</small>';
+    const rows = linked.map(p => `<li>${escapeHtml(p.name || '-')}${p.active === false ? ' <small class="text-muted">(Pasif)</small>' : ''}</li>`).join('');
+    if (linked.length <= 3) return `<ul class="unit-personnel-list">${rows}</ul>`;
+    return `<details class="unit-personnel-details"><summary>${linked.length} personel</summary><ul class="unit-personnel-list">${rows}</ul></details>`;
+}
+// Pano API'si yoksa (ör. http/eski tarayıcı) buton sessizce atlanır; tek yerden yönetilir.
+window.copyUnitId = async function (unitId) {
+    if (!navigator.clipboard?.writeText) { _unitAlert('Bu tarayıcıda panoya kopyalama desteklenmiyor.', 'warning'); return; }
+    try { await navigator.clipboard.writeText(String(unitId)); _unitAlert('Birim ID panoya kopyalandı.', 'success'); }
+    catch { _unitAlert('Panoya kopyalanamadı.', 'error'); }
+};
+function _unitNameCellHtml(u) {
+    const shortId = String(u.id).length > 12 ? `${String(u.id).slice(0, 8)}…` : String(u.id);
+    return `<strong>${escapeHtml(u.name)}</strong>
+        <span class="badge-soft ${u.active === false ? 'bg-secondary text-white' : 'bg-success text-white'}" style="font-size:9px;">${u.active === false ? 'Pasif' : 'Aktif'}</span><br>
+        <small class="text-muted">${escapeHtml(u.code || '')}${u.code ? ' · ' : ''}ID: <code>${escapeHtml(shortId)}</code>
+            <button type="button" onclick="window.copyUnitId(${jsArg(String(u.id))})" title="Birim ID'sini kopyala" aria-label="Birim ID'sini kopyala"
+                style="background:none;border:none;cursor:pointer;color:inherit;padding:0 2px;"><i class="fas fa-copy"></i></button></small>`;
+}
 window.renderUnitManagement = function () {
     const container = document.getElementById('unitListArea');
     const defListContainer = document.getElementById('adminDefUnitTableBody');
@@ -164,9 +197,12 @@ window.renderUnitManagement = function () {
     if (container) {
         container.innerHTML = units.map(u => `
             <tr>
-                <td><strong>${escapeHtml(u.name)}</strong><small> · ID: ${escapeHtml(u.id)} · ${escapeHtml(u.code || "")} · ${u.active === false ? "Pasif" : "Aktif"}</small></td>
-                <td><small>${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}<br>ID: ${escapeHtml((u.personnelIds || []).join(', '))}<br>Bağlı personel: ${escapeHtml((window.data.personel || []).filter(p => String(p.unitId || '') === String(u.id)).map(p => `${p.name} (${p.id})`).join(', '))}</small></td>
+                <td>${_unitNameCellHtml(u)}</td>
+                <td>${_unitPersonnelCellHtml(u.id)}</td>
                 <td style="text-align:right;">
+                    <button onclick="window.openUnitPersonnelPicker(${jsArg(String(u.id))})" class="btn-edit" style="color:#27ae60; background:none; border:none; cursor:pointer; margin-right:10px;">
+                        <i class="fas fa-user-plus"></i> Personel Ekle
+                    </button>
                     <button onclick="window.openUnitModal(${jsArg(String(u.id))})" class="btn-edit" style="color:#2980b9; background:none; border:none; cursor:pointer; margin-right:10px;">
                         <i class="fas fa-edit"></i> Düzenle
                     </button>
@@ -181,11 +217,14 @@ window.renderUnitManagement = function () {
     if (defListContainer) {
         defListContainer.innerHTML = units.map(u => `
             <tr>
-                <td><strong>${escapeHtml(u.name)}</strong><small> · ID: ${escapeHtml(u.id)} · ${escapeHtml(u.code || "")} · ${u.active === false ? "Pasif" : "Aktif"}</small></td>
+                <td>${_unitNameCellHtml(u)}</td>
                 <td><span class="badge bg-light text-dark border">${escapeHtml(u.organizationId || "—")} / ${escapeHtml(u.parentUnitId || "Üst birim yok")}</span></td>
-                <td><small class="text-muted">${escapeHtml((u.personnel || []).join(', ') || 'Personel yok')}<br>ID: ${escapeHtml((u.personnelIds || []).join(', '))}<br>Bağlı personel: ${escapeHtml((window.data.personel || []).filter(p => String(p.unitId || '') === String(u.id)).map(p => `${p.name} (${p.id})`).join(', '))}</small></td>
+                <td>${_unitPersonnelCellHtml(u.id)}</td>
                 <td class="text-end pe-3">
                     <div class="action-buttons justify-content-end">
+                        <button onclick="window.openUnitPersonnelPicker(${jsArg(String(u.id))})" class="btn-action btn-success shadow-sm" title="Personel Ekle">
+                            <i class="fas fa-user-plus"></i>
+                        </button>
                         <button onclick="window.openUnitModal(${jsArg(String(u.id))})" class="btn-action btn-buy shadow-sm" title="Düzenle">
                             <i class="fa-solid fa-arrows-rotate"></i>
                         </button>
@@ -197,6 +236,86 @@ window.renderUnitManagement = function () {
             </tr>
         `).join('') || '<tr><td colspan="4" class="text-center p-4">Henüz birim tanımlanmadı.</td></tr>';
     }
+};
+
+// --- HIZLI PERSONEL ATAMA (işlemler sütunundaki "Personel Ekle") ---
+// [WHY]: Birim-personel bağının GERÇEK kaynağı personel.unitId'dir (EBYS havale/yönlendirme bunu okur);
+//        birimin kendi 'personnelIds' dizisi ayrı ve fonksiyonel olmayan eski bir listedir (kullanıcı onayı:
+//        yeni aksiyon gerçek bağı değiştirmeli). Mevcut arama UI'sı (.um-results/.unit-personnel-option) ve
+//        servis (EBYSDefinitions.savePersonnel → personnelPatch) olduğu gibi tekrar kullanılır.
+const unitPersonnelPicker = { unitId: null };
+function _ensureUnitPersonnelPickerModal() {
+    if (document.getElementById('unitPersonnelPickerModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'unitPersonnelPickerModal';
+    modal.className = 'um-modal';
+    modal.style.cssText = 'display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10500; align-items:flex-start; justify-content:center; overflow-y:auto;';
+    modal.innerHTML = `
+        <div class="um-box">
+            <h3 id="unitPersonnelPickerTitle" style="margin-top:0;">Birime Personel Ekle</h3>
+            <p class="um-muted" style="margin-top:0;">Seçilen kişinin birim ataması (gerçek EBYS yönlendirme bağı) bu birime değiştirilir. Kişinin önceki birimi değişir; geçmiş görev/onay kayıtları etkilenmez.</p>
+            <hr>
+            <label for="unitPersonnelPickerSearch">Personel ara:</label>
+            <input type="text" id="unitPersonnelPickerSearch" class="um-input" placeholder="Ad yazın (en az 2 harf)..." autocomplete="off"
+                oninput="window._searchUnitPersonnelPicker(this.value)" style="margin-top:4px;">
+            <div id="unitPersonnelPickerResults" class="um-results"></div>
+            <div style="margin-top:20px; text-align:right;">
+                <button type="button" class="um-cancel" onclick="window.closeUnitPersonnelPicker()">Kapat</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+window.openUnitPersonnelPicker = function (unitId) {
+    const unit = (window.data.units || []).find(u => String(u.id) === String(unitId));
+    if (!unit) { _unitAlert('Birim bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+    if (unit.active === false) { _unitAlert('Pasif birime personel atanamaz; önce birimi etkinleştirin.', 'error'); return; }
+    _ensureUnitPersonnelPickerModal();
+    unitPersonnelPicker.unitId = String(unitId);
+    document.getElementById('unitPersonnelPickerTitle').textContent = `"${_unitName(unit)}" birimine personel ekle`;
+    document.getElementById('unitPersonnelPickerSearch').value = '';
+    document.getElementById('unitPersonnelPickerResults').style.display = 'none';
+    document.getElementById('unitPersonnelPickerModal').style.display = 'flex';
+    document.getElementById('unitPersonnelPickerSearch').focus();
+};
+window.closeUnitPersonnelPicker = function () {
+    const modal = document.getElementById('unitPersonnelPickerModal');
+    if (modal) modal.style.display = 'none';
+    unitPersonnelPicker.unitId = null;
+};
+window._searchUnitPersonnelPicker = function (query) {
+    const area = document.getElementById('unitPersonnelPickerResults');
+    area.replaceChildren();
+    const term = String(query || '').trim().toLocaleLowerCase('tr-TR');
+    area.style.display = term.length >= 2 ? 'block' : 'none';
+    if (term.length < 2) return;
+    const people = (window.data.personel || []).filter(p => p.active !== false &&
+        `${p.name} ${p.id}`.toLocaleLowerCase('tr-TR').includes(term)).slice(0, 10);
+    for (const person of people) {
+        const already = String(person.unitId || '') === unitPersonnelPicker.unitId;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'unit-personnel-option' + (already ? ' is-added' : '');
+        button.textContent = `${person.name} · ID: ${person.id}${already ? ' · zaten bu birimde' : (person.birim ? ` · şu an: ${person.birim}` : '')}`;
+        button.disabled = already;
+        button.addEventListener('click', () => window._assignPersonnelToUnit(person.id));
+        area.appendChild(button);
+    }
+    if (!people.length) area.textContent = 'Eşleşen aktif personel yok.';
+};
+window._assignPersonnelToUnit = async function (personnelId) {
+    const unitId = unitPersonnelPicker.unitId;
+    const person = (window.data.personel || []).find(p => String(p.id) === String(personnelId));
+    if (!unitId || !person) { _unitAlert('Kayıt bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+    try {
+        const saved = await window.AppModules.EBYSDefinitions.savePersonnel(
+            { id: person.id, name: person.name, pri: person.pri },
+            { unitId, jobTitle: person.jobTitle || '', active: person.active !== false, expectedRevision: person.revision || 0 });
+        Object.assign(person, saved);
+        window.closeUnitPersonnelPicker();
+        window.renderUnitManagement();
+        if (typeof window.renderPersonelTable === 'function') window.renderPersonelTable();
+        _unitAlert(`${person.name} bu birime atandı.`, 'success');
+    } catch (error) { _unitAlert(error.message, 'error'); }
 };
 
 // [BUGFIX] Bug 2: Normalization helper for strict template authorization checking
@@ -898,6 +1017,19 @@ window.addEventListener('onInventoryDataUpdated', (e) => {
 const _workflowActionsInFlight = new Set();
 const _normName = s => String(s || '').trim().toLocaleLowerCase('tr-TR');
 
+// [WHY]: _workflowActionsInFlight çifte tetiklemeyi mantık düzeyinde engelliyordu ama buton tıklanabilir görünmeye
+//        devam ediyordu; kullanıcı ikinci tıklamanın neden hiçbir şey yapmadığını anlamıyordu (görev #2, çifte işlem koruması).
+// [HOW]: Tıklanan buton (document.activeElement) işlem süresince disabled + spinner ikonuyla kilitlenir; orijinal
+//        içerik finally'de geri yazılır. Buton bulunamazsa (ör. event olmadan çağrı) sessizce atlanır.
+function _lockClickedButton() {
+    const button = document.activeElement;
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return null;
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    return () => { button.disabled = false; button.innerHTML = original; };
+}
+
 // [WHY]: Onay/red/durdurma talebi canlı window.data nesnesi üzerinde değiştiriyor (adım "approved", durum, akis), sonra
 //        geçiş veya kayıt başarısız olursa nesne yarı değişmiş kalıyordu (EBYS-17). saveData v2 fark yazdığı için bu yarım
 //        hal, sonraki herhangi bir purchaseOrders kaydında sessizce kalıcı hale gelirdi (maskeleme çifti). Id'siz eski
@@ -948,6 +1080,7 @@ window.approveStep = async function (id) {
     const lockKey = String(id);
     if (_workflowActionsInFlight.has(lockKey)) return;
     _workflowActionsInFlight.add(lockKey);
+    const unlockButton = _lockClickedButton();
     let guard = null;
     try {
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
@@ -1102,6 +1235,7 @@ window.approveStep = async function (id) {
     } finally {
         _workflowActionsInFlight.delete(lockKey);
         _endMutation(lockKey);
+        unlockButton?.();
     }
 };
 
@@ -1109,6 +1243,7 @@ window.rejectStep = async function (id) {
     const lockKey = String(id);
     if (_workflowActionsInFlight.has(lockKey)) return;
     _workflowActionsInFlight.add(lockKey);
+    const unlockButton = _lockClickedButton();
     try {
         const item = window.data.purchaseOrders.find(x => String(x.id) === String(id));
         if (!item || !item.workflow) return;
@@ -1220,6 +1355,7 @@ window.rejectStep = async function (id) {
     } finally {
         _workflowActionsInFlight.delete(lockKey);
         _endMutation(lockKey);
+        unlockButton?.();
     }
 };
 
@@ -1232,6 +1368,7 @@ window.stopWorkflow = async function (id) {
     const lockKey = 'stop_' + String(id);
     if (_workflowActionsInFlight.has(lockKey)) return;
     _workflowActionsInFlight.add(lockKey);
+    const unlockButton = _lockClickedButton();
     const notify = (msg, type) => { if (typeof showAppAlert === 'function') showAppAlert(msg, type); else alert(msg); };
     try {
         if (!(typeof window.isDbAdmin === 'function' && window.isDbAdmin())) { notify('Akışı yalnız yönetici durdurabilir.', 'error'); return; }
@@ -1274,6 +1411,7 @@ window.stopWorkflow = async function (id) {
     } finally {
         _workflowActionsInFlight.delete(lockKey);
         _endMutation(lockKey);
+        unlockButton?.();
     }
 };
 

@@ -177,13 +177,25 @@ function _purchaseRequester() {
 //        henüz tanımlanmamışken gelirse liste boş kalıyor, zorunlu alan yüzünden form ilerlemiyordu. Adlar kaçışsız basılıyordu.
 // [HOW]: Liste ${COLLECTION_ROOT}/productTypes/items (window.data.productTypes) ve units'ten; tekil, sıralı, kaçışlı.
 //        Mevcut seçim korunur; boşsa nereden tanımlanacağı yazılır. Modal açıkken snapshot gelince yeniden doldurulur (dosya sonu).
+// [WHY]: EBYS-purchase havale eşlemesi (ebys-purchase-ui.js) birimi bu select'in değerinden (isim) adla arıyordu;
+//        aynı isimli iki birim veya ad küçük farkıyla yazılmış kayıt varsa yanlış birime havale riski vardı.
+// [HOW]: Birim kalıcı bir ID taşıyorsa (window.data.units[].id) her <option> üzerine data-unit-id yazılır; legacy
+//        value=ad davranışı (akis/birim metni) değişmez, yalnız EBYS tarafı artık seçili option'ın dataset'inden
+//        kalıcı ID'yi okuyabilir.
 function _fillNamedSelect(select, items, placeholder, emptyText) {
     if (!select) return;
     const current = select.value;
+    const idByName = new Map();
+    for (const item of items) {
+        if (item && typeof item === 'object' && item.id != null) {
+            const name = String(item.name || item.birimAdi || '').trim();
+            if (name && !idByName.has(name)) idByName.set(name, String(item.id));
+        }
+    }
     const names = [...new Set(items.map(x => String((x && typeof x === 'object' ? (x.name || x.birimAdi) : x) || '').trim()).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, 'tr'));
     select.innerHTML = (names.length ? `<option value="">${escapeHtml(placeholder)}</option>` : `<option value="">${escapeHtml(emptyText)}</option>`) +
-        names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+        names.map(n => `<option value="${escapeHtml(n)}"${idByName.has(n) ? ` data-unit-id="${escapeHtml(idByName.get(n))}"` : ''}>${escapeHtml(n)}</option>`).join('');
     if (!current) return;
     if (!names.includes(current)) select.add(new Option(current, current));
     select.value = current;
@@ -498,7 +510,7 @@ window.renderPurchaseModule = function (options = {}) {
                     return `
                     <tr class="align-middle ${isCancelled ? 'passive-row' : ''}">
                         <td>
-                            <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${escapeHtml(item.evrakNo || "-")}</div>
+                            <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${escapeHtml(item.evrakNo || "-")}${item.engineVersion === 'ebys-v1' ? ' <span class="badge-soft bg-primary text-white" style="font-size:9px;" title="Kurum içi sıralı EBYS onay rotasıyla yönetilir">EBYS</span>' : ''}</div>
                         </td>
                         <td>
                             <div style="font-size:12px; color:#64748b; font-weight:500;">${escapeHtml(item.tarih || "-")}</div>
@@ -520,7 +532,7 @@ window.renderPurchaseModule = function (options = {}) {
                                 <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'view')" class="btn-action btn-passive" title="Görüntüle">
                                     <i class="fas fa-eye fa-xs"></i>
                                 </button>
-            
+
                                 ${window.isAdminPanel ? `
                                     <!-- Düzenle (Admin için her zaman açık) -->
                                     <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'edit')" 
@@ -633,7 +645,7 @@ window.renderServicesModule = function () {
             return `
                 <tr ${rowStyle} class="align-middle ${isCancelled ? 'passive-row' : ''}">
                     <td>
-                        <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${escapeHtml(item.evrakNo || "-")}</div>
+                        <div style="font-weight:700; color:var(--color-primary); font-size:13px; font-family:monospace;">${escapeHtml(item.evrakNo || "-")}${item.engineVersion === 'ebys-v1' ? ' <span class="badge-soft bg-primary text-white" style="font-size:9px;" title="Kurum içi sıralı EBYS onay rotasıyla yönetilir">EBYS</span>' : ''}</div>
                     </td>
                     <td>
                         <div style="font-size:12px; color:#64748b; font-weight:500;">${escapeHtml(item.tarih || "-")}</div>

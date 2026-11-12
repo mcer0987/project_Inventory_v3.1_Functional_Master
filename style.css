@@ -887,6 +887,52 @@ button {
     color: #64748b;
 }
 
+.btn-action.btn-success {
+    background: var(--color-success-light, #d1fae5);
+    color: var(--color-success-dark, #16a34a);
+}
+
+/* Birim/Personel rehber tetikleyicileri: EBYS Rehberi'nin animasyonlu/mor tasarımından kasıtlı olarak
+   sade — küçük, nötr renkli ikon+metin bağlantısı. Modal/rehber içeriğine dokunmaz. */
+.section-guide-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border: 1px solid var(--color-border, #dde3ec);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--color-text-muted, #64748b);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.section-guide-link i { font-size: 11px; }
+.section-guide-link:hover { color: var(--color-primary, #2563eb); border-color: var(--color-primary, #2563eb); }
+.section-guide-link:focus-visible { outline: 2px solid var(--color-primary, #2563eb); outline-offset: 2px; }
+
+/* Birim yönetimi tablosu: gerçek (personel.unitId) bağlı personel listesi — bkz. edm-workflow.js _unitPersonnelCellHtml */
+.unit-personnel-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 12px;
+}
+
+.unit-personnel-details summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--color-primary);
+}
+
+.unit-personnel-details .unit-personnel-list {
+    margin-top: 6px;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
 /* Admin panel butonu */
 .btn-admin-panel {
     position: relative;
