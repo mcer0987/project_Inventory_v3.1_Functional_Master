@@ -34,6 +34,8 @@
     <link rel="stylesheet" href="src/ui/purchase-print.css">
     <link rel="stylesheet" href="src/ui/ebys-documents.css">
     <link rel="stylesheet" href="src/ui/ebys-showcase-modal.css">
+    <link rel="stylesheet" href="src/ui/unit-showcase-modal.css">
+    <link rel="stylesheet" href="src/ui/personnel-showcase-modal.css">
     <link rel="stylesheet" href="dark-theme.css">
     <link rel="stylesheet" href="admin-dark-fix.css">
     <script src="dark-mode-toggle.js"></script>
@@ -1483,22 +1485,31 @@
     <div id="definitionsTab" class="admin-tab-content" style="display: none;">
 
         <!-- Sekme Navigasyonu -->
-        <div class="mb-4 d-flex gap-2 p-1"
+        <div class="mb-4 d-flex flex-wrap gap-2 p-1"
             style="background: var(--color-surface, #fff); border-radius: 12px; border: 1px solid var(--color-border); width: fit-content;">
-            <button class="btn def-nav-btn active" onclick="switchDefTab('mahal')"
+            <button class="btn def-nav-btn active" onclick="switchDefTab('mahal', this)"
                 style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Mahaller</button>
-            <button class="btn def-nav-btn" onclick="switchDefTab('products')"
+            <button class="btn def-nav-btn" onclick="switchDefTab('products', this)"
                 style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Ürün
                 Türleri</button>
-            <button class="btn def-nav-btn" onclick="switchDefTab('documentTypes')"
+            <button class="btn def-nav-btn" onclick="switchDefTab('documentTypes', this)"
                 style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Belge
                 Türleri</button>
-            <button class="btn def-nav-btn" onclick="switchDefTab('units')"
+            <button class="btn def-nav-btn" onclick="switchDefTab('institution', this)"
+                style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Kurum
+                Künyesi</button>
+            <button class="btn def-nav-btn" onclick="switchDefTab('filePlans', this)"
+                style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Dosya
+                Planı</button>
+            <button class="btn def-nav-btn" onclick="switchDefTab('letterTemplates', this)"
+                style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Üst
+                Yazı Şablonları</button>
+            <button class="btn def-nav-btn" onclick="switchDefTab('units', this)"
                 style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Birimler</button>
-            <button class="btn def-nav-btn" onclick="switchDefTab('workflows')"
+            <button class="btn def-nav-btn" onclick="switchDefTab('workflows', this)"
                 style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">İş
                 Akışları</button>
-            <button class="btn def-nav-btn" onclick="switchDefTab('personnel')"
+            <button class="btn def-nav-btn" onclick="switchDefTab('personnel', this)"
                 style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">👥
                 Personel Tanımları</button>
         </div>
@@ -1593,25 +1604,31 @@
 
         <!-- 3. BİRİMLER SEKMESİ -->
         <div id="defTab-units" class="def-tab-content" style="display: none;">
-            <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
+            <div class="admin-section-header mb-2 d-flex justify-content-between align-items-end">
                 <div>
                     <h2 class="fw-bold mb-0">👥 Birim Yönetimi</h2>
                     <small class="text-muted">Departman ve Organizasyon Yapısı</small>
                 </div>
-                <button onclick="window.openUnitModal()"
-                    class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
-                    <i class="fas fa-plus me-2"></i>Yeni Birim Ekle
-                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="section-guide-link" data-unit-showcase aria-haspopup="dialog" title="Birim yönetiminin nasıl işlediğini örneklerle gösterir">
+                        <i class="fas fa-circle-question" aria-hidden="true"></i> Rehber
+                    </button>
+                    <button onclick="window.openUnitModal()"
+                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                        <i class="fas fa-plus me-2"></i>Yeni Birim Ekle
+                    </button>
+                </div>
             </div>
+            <p class="text-muted mb-4" style="font-size:13px;">Bir birime atanan kişi, EBYS onay/havale akışlarında o birimin personeli sayılır; birim adı ve kodu değişse de bu bağ kalıcı birim ID'sine göre korunur.</p>
             <div class="modern-card">
                 <div class="table-responsive" style="min-height: 400px;">
                     <table class="modern-table">
                         <thead>
                             <tr>
-                                <th style="width: 30%;">Birim Adı</th>
+                                <th style="width: 30%;">Birim</th>
                                 <th style="width: 20%;">Bağlı Bölüm</th>
-                                <th style="width: 40%;">Atanan Personeller</th>
-                                <th style="width: 10%;" class="text-end">İşlem</th>
+                                <th style="width: 35%;">Bağlı Personel</th>
+                                <th style="width: 15%;" class="text-end">İşlem</th>
                             </tr>
                         </thead>
                         <tbody id="adminDefUnitTableBody"></tbody>
@@ -1670,6 +1687,70 @@
             </div>
         </div>
 
+        <!-- v3.4 EBYS H6b · Kurum künyesi, dosya planı ve üst yazı şablonları (src/ui/ebys-catalog-ui.js). -->
+        <div id="defTab-institution" class="def-tab-content" style="display: none;">
+            <div class="admin-section-header mb-3">
+                <h2 class="fw-bold mb-0">Kurum Künyesi</h2>
+                <small class="text-muted">Evrakların başlığında görünen kurum adı, kodu ve iletişim bilgisi. Her yeni evrak açıldığı andaki
+                    künyenin kopyasını taşır.</small>
+            </div>
+            <button type="button" class="panel-help-trigger" data-panel-help aria-expanded="false" aria-controls="ebysInstitutionHelp">
+                <i class="fas fa-info-circle" aria-hidden="true"></i> Nasıl çalışır?</button>
+            <div id="ebysInstitutionHelp" class="panel-help" hidden>
+                <ul>
+                    <li><strong>Kopya:</strong> personel yeni evrak açtığında güncel künye evraka kopyalanır. Künyeyi sonradan değiştirmeniz
+                        açılmış taslakları ve dondurulmuş evrakları etkilemez; yalnız bundan sonra açılan evraklar yeni künyeyi alır.</li>
+                    <li><strong>Kurum kodu:</strong> evrak kayıt numarasında kullanılır (ör. EBYS-MED-…). 2–12 büyük harf veya rakam olmalıdır.
+                        Künye tanımlıyken evrak formunda kod değiştirilemez.</li>
+                    <li><strong>Geçmiş:</strong> her güncelleme yeni bir revizyon olarak saklanır ve silinemez. "Künye geçmişi" bölümünden
+                        hangi revizyonda neyin değiştiğini görebilirsiniz.</li>
+                </ul>
+            </div>
+            <div id="ebysInstitutionPanel" class="modern-card p-3 mt-3"></div>
+        </div>
+
+        <div id="defTab-filePlans" class="def-tab-content" style="display: none;">
+            <div class="admin-section-header mb-3">
+                <h2 class="fw-bold mb-0">Dosya Planı</h2>
+                <small class="text-muted">Personelin evrak yazarken seçeceği standart dosya planı kodları. Kullanılmayan plan silinmez,
+                    pasife alınır.</small>
+            </div>
+            <button type="button" class="panel-help-trigger" data-panel-help aria-expanded="false" aria-controls="ebysFilePlanHelp">
+                <i class="fas fa-info-circle" aria-hidden="true"></i> Nasıl çalışır?</button>
+            <div id="ebysFilePlanHelp" class="panel-help" hidden>
+                <ul>
+                    <li><strong>Ekle:</strong> kod (ör. 100 ya da 100.01) ve ad yazın. Kod sonradan değiştirilemez; yanlış kodu pasife alıp
+                        doğrusunu ekleyin.</li>
+                    <li><strong>Seçim:</strong> evrak formunda serbest metin yerine aktif planlar listelenir. Seçilen kod ve ad evraka kopyalanır.</li>
+                    <li><strong>Pasife al:</strong> plan yeni evraklarda seçilemez. Bu planı önceden seçmiş evraklar kodu ve adıyla görünmeye
+                        devam eder ve dondurulabilir.</li>
+                    <li><strong>Adı düzelt:</strong> yeni ad bundan sonraki seçimlerde kullanılır. Dondurulmuş evraklar eski adı korur; eski
+                        adı taşıyan bir taslak ise dondurulmadan önce planı formda yeniden seçmelidir (sistem bunu hatırlatır).</li>
+                </ul>
+            </div>
+            <div id="ebysFilePlanPanel" class="mt-3"></div>
+        </div>
+
+        <div id="defTab-letterTemplates" class="def-tab-content" style="display: none;">
+            <div class="admin-section-header mb-3">
+                <h2 class="fw-bold mb-0">Üst Yazı Şablonları</h2>
+                <small class="text-muted">Sık kullanılan yazışmalar için hazır metinler (ör. İzin Talebi, Satın Alma Üst Yazısı). Personel
+                    evrak formunda şablonu seçerek konu ve metni doldurur.</small>
+            </div>
+            <button type="button" class="panel-help-trigger" data-panel-help aria-expanded="false" aria-controls="ebysTemplateHelp">
+                <i class="fas fa-info-circle" aria-hidden="true"></i> Nasıl çalışır?</button>
+            <div id="ebysTemplateHelp" class="panel-help" hidden>
+                <ul>
+                    <li><strong>Sürüm:</strong> şablonu düzenleyip kaydetmek yeni bir sürüm açar. Eski sürümler silinmez ve değiştirilemez.</li>
+                    <li><strong>Kullanım:</strong> personel şablonu seçtiğinde metin evraka kopyalanır ve evrak hangi şablon sürümüyle
+                        hazırlandığını kaydeder. Şablon sonradan güncellense ya da pasife alınsa da o evrak ve başlatılmış süreci değişmez.</li>
+                    <li><strong>Pasife al:</strong> şablon yeni evraklarda seçilemez. Önceden seçilmiş taslaklar dondurulabilir.</li>
+                    <li>Metin düz yazıdır; etiket benzeri "&lt;" ifadeleri kabul edilmez.</li>
+                </ul>
+            </div>
+            <div id="ebysTemplatePanel" class="mt-3"></div>
+        </div>
+
         <!-- 5. PERSONEL TANIMLARI SEKMESİ -->
         <div id="defTab-personnel" class="def-tab-content" style="display: none;">
             <div class="admin-section-header mb-4 d-flex justify-content-between align-items-end">
@@ -1677,10 +1758,15 @@
                     <h2 class="fw-bold mb-0">👥 Personel Tanımları</h2>
                     <small class="text-muted">Personel Kayıtları ve Kurumsal Kimlik (PRI) Yönetimi</small>
                 </div>
-                <button onclick="window.openPersonelModal('add')"
-                    class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
-                    <i class="fas fa-plus me-2"></i>Personel Ekle
-                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="section-guide-link" data-personnel-showcase aria-haspopup="dialog" title="Personel kaydı, kalıcı ID/hesap ve birim ataması nasıl işler, örneklerle gösterir">
+                        <i class="fas fa-circle-question" aria-hidden="true"></i> Rehber
+                    </button>
+                    <button onclick="window.openPersonelModal('add')"
+                        class="btn btn-info btn-sm rounded-pill px-4 shadow-sm text-white">
+                        <i class="fas fa-plus me-2"></i>Personel Ekle
+                    </button>
+                </div>
             </div>
             <div class="modern-card">
                 <div class="table-responsive" style="min-height: 400px;">
@@ -1709,12 +1795,12 @@
         </style>
 
         <script>
-            function switchDefTab(tabId) {
+            function switchDefTab(tabId, trigger) {
                 document.querySelectorAll('.def-tab-content').forEach(el => el.style.display = 'none');
                 document.getElementById('defTab-' + tabId).style.display = 'block';
 
                 document.querySelectorAll('.def-nav-btn').forEach(btn => btn.classList.remove('active'));
-                event.target.classList.add('active');
+                if (trigger) trigger.classList.add('active');
 
                 // [FIX-BUG5]: Alt sekme geçişlerinde ilgili render fonksiyonlarını tetikle
                 if (tabId === 'workflows' && typeof window.renderTemplateList === 'function') {
@@ -1725,6 +1811,8 @@
                     window.renderProductTypesTable();
                 } else if (tabId === 'documentTypes' && typeof window.renderEBYSDocumentTypes === 'function') {
                     window.renderEBYSDocumentTypes();
+                } else if (['institution', 'filePlans', 'letterTemplates'].includes(tabId) && typeof window.renderEBYSCatalog === 'function') {
+                    window.renderEBYSCatalog(tabId);
                 } else if (tabId === 'mahal' && typeof window.renderLocationsTable === 'function') {
                     window.renderLocationsTable();
                 } else if (tabId === 'personnel' && typeof window.renderPersonelTable === 'function') {
@@ -2412,10 +2500,9 @@
 
                     <div class="mb-2" id="purFileInputArea">
                         <label class="modern-label">İÇERİK / DOSYA EKLE</label>
-                        <input type="file" id="purchaseFile" class="form-control modern-input" multiple
-                            accept=".pdf,.xlsx,.xls,.doc,.docx,.jpg,.png">
-                        <p style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Teknik şartname, proforma fatura
-                            ekleyebilirsiniz (çoklu seçim).</p>
+                        <button type="button" class="btn btn-outline-secondary" aria-haspopup="dialog"
+                            onclick="window.showDevelopmentNotice('purchaseFileUpload')">Dosya ekleme şu anda kullanılamıyor</button>
+                        <p class="small text-muted mt-1">Dosya eklemeden satın alma talebi gönderebilirsiniz.</p>
                     </div>
                     <!-- Mevcut dosyalar (görüntüleme/düzenleme modunda gösterilir) -->
                     <div id="purUploadedFilesList" style="display:none; margin-top:10px;"></div>
@@ -2424,6 +2511,12 @@
                 </div>
 
                 <div class="modern-modal-footer">
+                    <span id="purEbysStatus" role="status" class="small text-muted d-block mb-2" hidden></span>
+                    <button type="button" class="btn btn-outline-primary shadow-sm mb-2"
+                        title="Kurum içi sıralı onay rotasıyla ilerler; talep dondurulur ve sonradan düzenlenemez."
+                        onclick="window.AppModules.EBYSPurchaseUI.handleSubmitClick(this)">
+                        <i class="fas fa-route me-2"></i> EBYS süreciyle gönder
+                    </button>
                     <button type="submit" id="purSaveBtn" class="btn-modern-save shadow-sm">
                         <i class="fas fa-paper-plane me-2"></i> Talebi Kaydet
                     </button>
@@ -3006,11 +3099,16 @@
 
     <script src="src/utils/dialog-stack.js"></script>
     <script src="src/utils/alert.js"></script>
+    <script src="src/ui/development-notice.js"></script>
     <script src="src/modules/admin/system-tips.js"></script>
     <script src="src/utils/timer.js"></script>
     <script src="security.js"></script>
     <script type="module" src="src/modules/admin/admin-main.js"></script>
     <script type="module" src="src/ui/ebys-showcase-modal.js"></script>
+    <script type="module" src="src/ui/ebys-process-ui.js"></script>
+    <script type="module" src="src/ui/ebys-purchase-ui.js"></script>
+    <script type="module" src="src/ui/unit-showcase-modal.js"></script>
+    <script type="module" src="src/ui/personnel-showcase-modal.js"></script>
     <script src="script.js"></script>
     <script src="src/utils/admin-quick-unlock.js"></script>
     <script src="src/modules/admin/shelf-matrix.js"></script>

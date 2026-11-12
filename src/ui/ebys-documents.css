@@ -77,3 +77,22 @@ dialog.ebys-document-dialog{position:fixed;inset:0;margin:auto!important;width:m
 }
 .ebys-preview-verification figcaption { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
 .ebys-preview-verification figcaption p { margin: 4px 0; }
+
+/* v3.4 EBYS H6b · Tanımlar › Kurum Künyesi / Dosya Planı / Üst Yazı Şablonları ve evrak formundaki katalog alanları */
+.ebys-catalog-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; align-items: end; margin-bottom: 16px; }
+.ebys-catalog-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: var(--color-text, #1f2937); }
+.ebys-catalog-field textarea, .ebys-catalog-wide, .ebys-catalog-form h3 { grid-column: 1 / -1; }
+.ebys-catalog-field:has(textarea) { grid-column: 1 / -1; }
+.ebys-catalog-inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.ebys-catalog-inline .ebys-catalog-field { flex: 1 1 200px; }
+.ebys-catalog-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ebys-catalog-history { margin-top: 12px; font-size: 13px; }
+.ebys-catalog-history summary { cursor: pointer; font-weight: 600; }
+.ebys-catalog-pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 13px; margin: 6px 0 0;
+    padding: 8px 10px; border: 1px solid var(--color-border, #e2e8f0); border-radius: 8px; background: var(--color-surface-alt, #f8fafc); color: var(--color-text, #1f2937); }
+.ebys-catalog-detail:not(:empty) { margin-top: 16px; }
+.ebys-institution-note { grid-column: 1 / -1; margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+    border: 1px solid var(--color-border, #e2e8f0); background: var(--color-surface-alt, #f8fafc); color: var(--color-text, #1f2937); }
+.ebys-preview-institution { text-align: center; margin-bottom: 12px; }
+.ebys-preview-institution strong { display: block; font-size: 15px; }
+.ebys-preview-institution small { display: block; color: var(--color-text-muted, #64748b); }

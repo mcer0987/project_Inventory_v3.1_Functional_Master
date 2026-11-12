@@ -20,6 +20,8 @@
             content: text(input.content, 40000, 'Evrak gövdesi'), metadata: {
                 subject: text(metadata.subject, 240, 'Konu'), correspondent: text(metadata.correspondent, 240, 'Muhatap'), date,
                 filePlanCode: text(metadata.filePlanCode, 40, 'Dosya planı kodu'), confidentiality: metadata.confidentiality,
+                // H6b: katalogdan seçilen planın adı evraka kopyalanır (plan sonradan değişse/pasife alınsa da evrak aynı kalır).
+                ...(String(metadata.filePlanTitle ?? '').trim() ? { filePlanTitle: text(metadata.filePlanTitle, 160, 'Dosya planı adı') } : {}),
                 distribution: text(metadata.distribution, 2000, 'Dağıtım', false),
                 externalRegistrationNo: text(metadata.externalRegistrationNo, 120, 'Dış evrak numarası', false),
             } };
@@ -39,6 +41,22 @@
         const random = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
         return `EBYS-${code}-${day}-${random}`;
     }
+    // H6b · Evrakın taşıdığı katalog kopyaları (firestore.rules ecSnapshot / ecTemplateRefOk ile aynı biçim).
+    const SNAPSHOT_FIELDS = ['name', 'code', 'address', 'phone', 'email', 'web'];
+    function institutionSnapshot(profile) {
+        if (!profile) return null;
+        return { ...Object.fromEntries(SNAPSHOT_FIELDS.map(k => [k, String(profile[k] ?? '')])), revision: profile.revision };
+    }
+    function templateRef(value) {
+        if (value == null || value === '') return null;
+        const ref = { templateId: String(value.templateId || ''), revision: Number(value.revision), name: text(value.name, 120, 'Şablon adı') };
+        if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(ref.templateId) || !Number.isSafeInteger(ref.revision) || ref.revision < 1) {
+            throw new Error('Şablon bağı geçersiz.');
+        }
+        return ref;
+    }
+    const sameRef = (a, b) => (a == null && b == null) || (!!a && !!b && a.templateId === b.templateId && a.revision === b.revision && a.name === b.name);
     window.AppModules = window.AppModules || {};
-    window.AppModules.EBYSDocumentSchema = Object.freeze({ kinds, states, uuid, normalize, canonical, digest, registrationNo });
+    window.AppModules.EBYSDocumentSchema = Object.freeze({ kinds, states, uuid, normalize, canonical, digest, registrationNo,
+        institutionSnapshot, templateRef, sameRef });
 })();

@@ -1,5 +1,6 @@
 import '../services/ebys-document-service.js';
 import '../services/ebys-verification-service.js';
+import '../services/ebys-catalog-service.js';
 import { verificationNotice, verificationUrl } from '../utils/ebys-verification-schema.js';
 import { verificationQr } from '../utils/ebys-verification-qr.js';
 import './ebys-process-ui.js';
@@ -141,16 +142,65 @@ async function open(id = null) {
         let head = loaded?.head || { id: schema().uuid(), kind, revision: 0, unitId: '', organizationCode: 'MED', registrationNo: '', state: 'draft' };
         const data = loaded?.body || {}, metadata = data.metadataSnapshot || data.metadata || {};
         const frozen = !!head.currentVersionId;
+        // H6b: kurum künyesi, dosya planı ve şablon kataloğu (dondurulmuş evrak kendi kopyalarını gösterir; katalog okunmaz).
+        // Katalog yüklenemezse (modül yok / ağ hatası) form eski davranışla açılır: kod ve plan elle yazılır.
+        const cat = frozen ? null : await Promise.resolve(window.AppModules.EBYSCatalog?.loadCatalog()).catch(() => null) ?? null;
+        if (actor !== window.userAuth?.uid || epoch !== editorEpoch) return;
+        if (!loaded && cat?.profile) head = { ...head, organizationCode: cat.profile.code };
         dialog?.remove(); dialog = node('dialog', null, 'ebys-document-dialog');
         const editor = dialog; dismissable(editor);documentDialogs.get(editor).documentId=head.id;documentDialogs.get(editor).validate=async()=>{if(!loaded)return true;const current=await api().readDocument(head.id);return current.head.revision===head.revision;};
         const form = node('form', null, 'ebys-document-form'); form.method = 'dialog';
         const title = node('h3', `${labels[head.kind]} · ${head.registrationNo || 'Yeni taslak'}`, 'ebys-wide'); form.append(title);
         const unitOptions = [['', 'Birim seçin'], ...(window.data?.units || []).filter(u => u.active !== false || String(u.id) === head.unitId).map(u => [String(u.id), u.name || u.birimAdi || String(u.id)])];
         field(form, 'İlgili birim', 'unitId', head.unitId, unitOptions);
-        const code = field(form, 'Kurum kodu', 'organizationCode', head.organizationCode); code.readOnly = !!loaded;
+        const code = field(form, 'Kurum kodu', 'organizationCode', head.organizationCode); code.readOnly = !!loaded || !!cat?.profile;
+        const inst = loaded ? data.institutionSnapshot : cat?.profile;
+        if (inst) form.append(node('p', loaded
+            ? `Evrakın kurum künyesi: ${inst.name} · revizyon ${inst.revision}. Bu kopya sabittir; künye sonradan değişse de evrak etkilenmez.`
+            : `Kurum künyesi: ${inst.name} (${inst.code}). Kaydettiğinizde evraka kopyalanır.`, 'ebys-institution-note'));
+        else if (loaded && cat?.profile) form.append(node('p', 'Bu evrak kurum künyesi tanımlanmadan önce açıldı; künye kopyası taşımaz.', 'ebys-institution-note'));
+        // Şablon: seçilen sürümün konu ve metni forma kopyalanır; evrak hangi şablon sürümüyle hazırlandığını kaydeder.
+        let letterTemplate = data.letterTemplate || null, undo = null;
+        const templateNote = node('p', '', 'ebys-institution-note');
+        const renderTemplateNote = () => {
+            templateNote.replaceChildren();
+            templateNote.hidden = !letterTemplate && !undo;
+            if (letterTemplate) templateNote.append(`Şablon: ${letterTemplate.name} · sürüm ${letterTemplate.revision}${frozen ? '' : ' (metin evraka kopyalandı; düzenleyebilirsiniz)'}. `);
+            if (!frozen && undo) templateNote.append(button('Önceki metne dön', () => {
+                form.elements.subject.value = undo.subject; form.elements.content.value = undo.content; letterTemplate = undo.letterTemplate; undo = null; renderTemplateNote();
+            }, 'btn btn-sm btn-link p-0 me-2'));
+            if (!frozen && letterTemplate) templateNote.append(button('Şablon bağını kaldır', () => { letterTemplate = null; undo = null; renderTemplateNote(); }, 'btn btn-sm btn-link p-0'));
+        };
+        const usableTemplates = frozen ? [] : (cat?.templates || []).filter(t => t.active !== false).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+        if (usableTemplates.length) {
+            const chooser = field(form, 'Şablondan doldur (isteğe bağlı)', 'templateChoice', '',
+                [['', '— Şablon seçin —'], ...usableTemplates.map(t => [t.id, `${t.name} · sürüm ${t.currentRevision}`])]);
+            chooser.required = false;
+            chooser.addEventListener('change', async () => {
+                const t = usableTemplates.find(x => x.id === chooser.value);
+                if (!t) return;
+                chooser.disabled = true;
+                try {
+                    const rev = await window.AppModules.EBYSCatalog.getTemplateRevision(t.id, t.currentRevision);
+                    undo = { subject: form.elements.subject.value, content: form.elements.content.value, letterTemplate };
+                    const applied = window.AppModules.EBYSCatalogSchema.applyTemplate(rev, { subject: form.elements.subject.value });
+                    form.elements.subject.value = applied.subject; form.elements.content.value = applied.content; letterTemplate = applied.letterTemplate;
+                    if (!undo.content.trim() && !undo.subject.trim()) undo = null;
+                    renderTemplateNote();
+                } catch (error) { status.textContent = error.message; }
+                finally { chooser.value = ''; chooser.disabled = false; }
+            });
+        }
+        form.append(templateNote); renderTemplateNote();
         field(form, 'Konu', 'subject', metadata.subject || ''); field(form, 'Muhatap kurum / kişi', 'correspondent', metadata.correspondent || '');
         field(form, 'Evrak tarihi', 'date', metadata.date || new Date().toLocaleDateString('sv-SE'));
-        field(form, 'Dosya planı kodu', 'filePlanCode', metadata.filePlanCode || '');
+        // Dosya planı: katalog varsa yalnız aktif planlar (ve taslakta kayıtlı pasif/eski değer) seçilir; yoksa kod elle yazılır.
+        const planChoices = frozen || !cat ? [] : window.AppModules.EBYSCatalogSchema.filePlanOptions(cat.filePlans, metadata);
+        if (frozen) field(form, 'Dosya planı', 'filePlanDisplay', `${metadata.filePlanCode || ''}${metadata.filePlanTitle ? ` – ${metadata.filePlanTitle}` : ''}`);
+        else if (planChoices.length) {
+            const selected = planChoices.findIndex(p => p.code === metadata.filePlanCode && (!metadata.filePlanTitle || p.title === metadata.filePlanTitle));
+            field(form, 'Dosya planı', 'filePlanChoice', selected < 0 ? '' : String(selected), [['', 'Dosya planı seçin'], ...planChoices.map((p, i) => [String(i), p.label])]);
+        } else field(form, 'Dosya planı kodu', 'filePlanCode', metadata.filePlanCode || '');
         field(form, 'Gizlilik derecesi', 'confidentiality', metadata.confidentiality || 'Normal', ['Normal', 'Hizmete Özel', 'Gizli'].map(v => [v, v]));
         field(form, 'Dış evrak numarası', 'externalRegistrationNo', metadata.externalRegistrationNo || '');
         field(form, 'Dağıtım yerleri (her satıra bir yer)', 'distribution', metadata.distribution || '', null, true);
@@ -161,8 +211,12 @@ async function open(id = null) {
         let busy = false, pendingSave = null, pendingRegister = null, pendingFreeze = null;
         const input = () => {
             const values = Object.fromEntries(new FormData(form));
+            const plan = values.filePlanChoice !== undefined ? planChoices[Number(values.filePlanChoice)] : null;
+            if (plan) Object.assign(values, { filePlanCode: plan.code, filePlanTitle: plan.title });
             return { id: head.id, expectedRevision: head.revision, kind: head.kind, unitId: values.unitId, organizationCode: values.organizationCode,
-                content: values.content, metadata: Object.fromEntries(['subject','correspondent','date','filePlanCode','confidentiality','distribution','externalRegistrationNo'].map(k => [k, values[k]])) };
+                content: values.content, ...(letterTemplate ? { letterTemplate } : {}),
+                metadata: Object.fromEntries(['subject','correspondent','date','filePlanCode','confidentiality','distribution','externalRegistrationNo',
+                    ...(values.filePlanTitle ? ['filePlanTitle'] : [])].map(k => [k, values[k]])) };
         };
         async function act(action) {
             if (busy||document.hidden||actor!==window.userAuth?.uid||!documentDialogs.get(editor)?.ready) return; busy = true; actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
@@ -216,7 +270,7 @@ async function open(id = null) {
                 : 'Doğrulama QR’ı için evrakın kesin kayıt numarası bulunmalıdır.', 'small text-muted ebys-wide'));
             if (head.registrationNo) actions.append(button('Doğrulama QR’ı oluştur', () => act('issueVerification')));
         }
-        actions.append(button('Çıktı önizleme', () => preview(head, frozen ? data : input())));
+        actions.append(button('Çıktı önizleme', () => preview(head, frozen ? data : { ...input(), institutionSnapshot: loaded ? data.institutionSnapshot : schema().institutionSnapshot(cat?.profile) })));
         actions.append(button('Kapat', () => dialog.close(), 'btn btn-secondary'));
         form.append(actions); form.onsubmit = e => e.preventDefault(); dialog.append(form); document.body.append(dialog); dialog.showModal();
     } catch (error) { message(error.message); }
@@ -227,8 +281,17 @@ function preview(head, data) {
     documentDialogs.get(modal).documentId=head.id;
     documentDialogs.get(modal).validate=async()=>{if(!head.revision)return true;const current=await api().readDocument(head.id);return current.head.revision===head.revision;};
     const meta = data.metadataSnapshot || data.metadata || data;
+    // H6b: başlık evrakın kendi künye kopyasından çizilir (güncel künyeden değil); eski evrak künyesiz görünür.
+    const inst = data.institutionSnapshot;
+    if (inst) {
+        const header = node('header', null, 'ebys-preview-institution');
+        header.append(node('strong', inst.name), node('small', inst.address),
+            node('small', [inst.phone, inst.email, inst.web].filter(Boolean).join(' · ')));
+        body.append(header);
+    }
     body.append(node('h2', meta.subject || 'Üst yazı'), node('p', `Sayı: ${head.registrationNo || 'TASLAK'} · Tarih: ${meta.date || ''}`),
-        node('p', `Muhatap: ${meta.correspondent || ''}`), node('p', `Dosya planı: ${meta.filePlanCode || ''} · Gizlilik: ${meta.confidentiality || ''}`),
+        node('p', `Muhatap: ${meta.correspondent || ''}`),
+        node('p', `Dosya planı: ${meta.filePlanCode || ''}${meta.filePlanTitle ? ` – ${meta.filePlanTitle}` : ''} · Gizlilik: ${meta.confidentiality || ''}`),
         node('div', data.content || '', 'ebys-preview-content'), node('p', `Dağıtım:\n${meta.distribution || '—'}`, 'ebys-preview-content'));
     if (head.verificationToken) {
         const url = verificationUrl(head.verificationToken, window.location.href, window.AppEnv?.EMULATOR === true);

@@ -98,8 +98,42 @@ async function saveDocumentDraft(input, mode) {
         purchaseOrderId: id, documentTypeCode: 'PURCHASE_REQUEST', items: input.items, butce: input.butce,
         budgetMode: input.budgetMode, calculationVersion: 1
     }) : null;
+    // H6b: şablon bağı yalnız genel evrakta (satın alma taslağı kendi sözleşmesindedir).
+    const letterTemplate = mode ? null : S().templateRef(input.letterTemplate);
     const payloadDigest = await S().digest({ id, ...data, ...(mode ? { mode, purchaseSnapshot: proposal } : {}),
+        ...(letterTemplate ? { letterTemplate } : {}),
         expectedRevision: input.expectedRevision ?? null, reopen: input.reopen === true });
+
+    // [WHY]: H6b · Kurum künyesi, dosya planı adı ve şablon sürümü evraka KOPYA olarak girer; tanım sonradan değişse de evrak
+    //        ve dondurulmuş sürüm etkilenmez. [HOW]: Yeni taslak künyeyi transaction içinde okur ve kopyalar; mevcut taslak kendi
+    //        kopyasını korur. Değişen plan/şablon seçimi aktif tanımla doğrulanır (firestore.rules ecDraftCatalogOk ile aynı).
+    const catalogCopies = async (tx, draft) => {
+        if (mode) return {};
+        const previous = draft.exists() ? draft.data() : null;
+        let institutionSnapshot = previous ? previous.institutionSnapshot ?? null : null;
+        if (!previous) {
+            const profile = await tx.get(ref('ebysOrganizations', 'primary'));
+            institutionSnapshot = profile.exists() ? S().institutionSnapshot(profile.data()) : null;
+            if (institutionSnapshot && institutionSnapshot.code !== data.organizationCode) {
+                throw new Error(`Kurum kodu kurum künyesinden gelir (${institutionSnapshot.code}); formu kapatıp yeniden açın.`);
+            }
+        }
+        const m = data.metadata, old = previous?.metadata || {};
+        if (m.filePlanTitle && !(old.filePlanCode === m.filePlanCode && old.filePlanTitle === m.filePlanTitle)) {
+            const plan = await tx.get(ref('ebysFilePlans', m.filePlanCode));
+            if (!plan.exists() || plan.data().active === false || plan.data().title !== m.filePlanTitle) {
+                throw new Error('Seçilen dosya planı pasife alınmış ya da değişmiş; formu yeniden açıp güncel planı seçin.');
+            }
+        }
+        if (letterTemplate && !S().sameRef(letterTemplate, previous?.letterTemplate)) {
+            const [family, revision] = await Promise.all([tx.get(ref('ebysLetterTemplates', letterTemplate.templateId)),
+                tx.get(ref('ebysLetterTemplateRevisions', `${letterTemplate.templateId}_${letterTemplate.revision}`))]);
+            if (!family.exists() || family.data().active === false || !revision.exists() || revision.data().name !== letterTemplate.name) {
+                throw new Error('Seçilen şablon pasife alınmış ya da bulunamadı; başka bir şablon seçin.');
+            }
+        }
+        return { ...(institutionSnapshot ? { institutionSnapshot } : {}), ...(letterTemplate ? { letterTemplate } : {}) };
+    };
 
     const save = async (tx, old, draft, unit, marker) => {
         if (!unit.exists() || unit.data().active === false) throw new Error('Aktif bir birim seçin.');
@@ -126,6 +160,7 @@ async function saveDocumentDraft(input, mode) {
             } else if (!['draft', 'registered'].includes(previous.state)) throw new Error('Dondurulan evrak düzenlenemez.');
             if (previous.kind !== data.kind || previous.organizationCode !== data.organizationCode) throw new Error('Evrak yönü ve kurum kodu sabittir.');
         }
+        const copies = await catalogCopies(tx, draft);
         session?.assertCurrent();
         const next = { ...(previous || {}), id, ownerUid, kind: data.kind, unitId: data.unitId, organizationCode: data.organizationCode,
             ...(mode ? { purchaseOrderId: id } : {}),
@@ -139,7 +174,7 @@ async function saveDocumentDraft(input, mode) {
         }
         tx.set(ref('ebysDocuments', id), next);
         tx.set(ref('ebysDrafts', id), { id, documentId: id, ownerUid, revision: next.revision, content: data.content, metadata: data.metadata,
-            ...(mode ? { purchaseSnapshot: proposal } : {}), attachments: [], attachmentMode: 'none', updatedAt: serverTimestamp() });
+            ...(mode ? { purchaseSnapshot: proposal } : {}), ...copies, attachments: [], attachmentMode: 'none', updatedAt: serverTimestamp() });
         const output = { documentId: id, revision: next.revision };
         log(tx, next, operationId, 'saveDraft', payloadDigest, output);
         return output;
@@ -241,6 +276,14 @@ export async function freezeVersion({ documentId, expectedRevision, operationId 
     const before = await getDocFromServer(ref('ebysDrafts', documentId));
     if (!before.exists()) throw new Error('Taslak bulunamadı.');
     const source = before.data();
+    // H6b: sürüm yazılırken dosya planı katalogla eşleşmeli (firestore.rules ecVersionPlanOk); ret yerine açık mesaj.
+    const plan = source.metadata?.filePlanTitle ? await getDocFromServer(ref('ebysFilePlans', source.metadata.filePlanCode)) : null;
+    if (plan && (!plan.exists() || plan.data().title !== source.metadata.filePlanTitle)) {
+        throw new Error('Seçili dosya planının adı değişmiş; evrakı açıp dosya planını yeniden seçin.');
+    }
+    const tpl = source.letterTemplate;
+    const tplRev = tpl ? await getDocFromServer(ref('ebysLetterTemplateRevisions', `${tpl.templateId}_${tpl.revision}`)) : null;
+    if (tplRev && (!tplRev.exists() || tplRev.data().name !== tpl.name)) throw new Error('Bağlı şablon sürümü bulunamadı; şablonu kaldırıp yeniden deneyin.');
     const contentDigest = await S().digest({ content: source.content, metadata: source.metadata, attachments: source.attachments });
     const payloadDigest = await S().digest({ documentId, expectedRevision, contentDigest });
     const versionId = S().uuid();
@@ -251,7 +294,10 @@ export async function freezeVersion({ documentId, expectedRevision, operationId 
         if (Object.hasOwn(head, 'purchaseOrderId')) throw new Error('Bağlı talebi satın alma dondurma komutuyla sürüme alın.');
         if (!['draft', 'registered'].includes(head.state) || !draft || draft.revision !== source.revision) throw new Error('Taslak değişti veya zaten donduruldu; yeniden açın.');
         const version = { id: versionId, processId: versionId, documentId, ownerUid: head.ownerUid, versionNo: head.versionNo + 1, schemaVersion: 1,
-            content: draft.content, metadataSnapshot: draft.metadata, attachments: [], attachmentMode: 'none' };
+            content: draft.content, metadataSnapshot: draft.metadata, attachments: [], attachmentMode: 'none',
+            // H6b: taslağın künye ve şablon kopyası sürüme mühürlenir (ebysVersions değiştirilemez).
+            ...(draft.institutionSnapshot ? { institutionSnapshot: draft.institutionSnapshot } : {}),
+            ...(draft.letterTemplate ? { letterTemplate: draft.letterTemplate } : {}) };
         return writeFrozenVersion(tx, head, version, contentDigest, operationId, payloadDigest);
     });
 }
@@ -302,7 +348,7 @@ export async function readDocument(id) {
 }
 export async function reopenDraft({documentId,expectedRevision,operationId}) {
     const {head,body} = await readDocument(documentId);
-    return saveDraft({id:documentId,expectedRevision,operationId,reopen:true,kind:head.kind,unitId:head.unitId,organizationCode:head.organizationCode,content:body.content,metadata:body.metadataSnapshot || body.metadata});
+    return saveDraft({id:documentId,expectedRevision,operationId,reopen:true,kind:head.kind,unitId:head.unitId,organizationCode:head.organizationCode,content:body.content,metadata:body.metadataSnapshot || body.metadata,letterTemplate:body.letterTemplate});
 }
 export function listDocuments(onData, onError, cursor = null, kind = 'incoming') {
     const conditions = window.isDbAdmin?.() ? [] : [where('ownerUid', '==', uid())];

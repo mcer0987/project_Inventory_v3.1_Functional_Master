@@ -966,7 +966,7 @@ service cloud.firestore {
     function ebysText(v, max, required) { return v is string && v.size() <= max && (!required || v.trim().size() > 0) && noTag(v); }
     function ebysMetadata(m) {
       return m is map && m.keys().hasAll(['subject','correspondent','date','filePlanCode','confidentiality','distribution','externalRegistrationNo'])
-        && m.keys().hasOnly(['subject','correspondent','date','filePlanCode','confidentiality','distribution','externalRegistrationNo'])
+        && m.keys().hasOnly(['subject','correspondent','date','filePlanCode','confidentiality','distribution','externalRegistrationNo','filePlanTitle'])
         && ebysText(m.subject, 240, true) && ebysText(m.correspondent, 240, true)
         && m.date is string && m.date.matches('\\d{4}-\\d{2}-\\d{2}') && ebysText(m.filePlanCode, 40, true)
         && m.confidentiality in ['Normal','Hizmete Özel','Gizli'] && ebysText(m.distribution, 2000, false)
@@ -1096,9 +1096,10 @@ service cloud.firestore {
               : resource.data.ownerUid == request.auth.uid && ebysHeadUpdate(r,resource.data,request.resource.data));
       allow delete: if false;
     }
-    function ebysDraftOk(r, id, d) {
+    function ebysDraftOk(r, id, d, old) {
       let h = getAfter(ebysPath(r,'ebysDocuments',id)).data;
-      return d.keys().hasOnly(['id','documentId','ownerUid','revision','content','metadata','attachments','attachmentMode','updatedAt','purchaseSnapshot'])
+      return d.keys().hasOnly(['id','documentId','ownerUid','revision','content','metadata','attachments','attachmentMode','updatedAt','purchaseSnapshot','institutionSnapshot','letterTemplate'])
+        && ecDraftCatalogOk(r,h,d,old)
         && d.id == id && d.documentId == id && ebysOwn(r,d) && h.ownerUid == d.ownerUid && h.revision == d.revision
         && h.state in ['draft','registered'] && poDraftLink(r,h,d) && ebysCommand(r,h,'saveDraft')
         && ebysText(d.content,40000,true) && ebysMetadata(d.metadata) && d.attachments == [] && d.attachmentMode == 'none' && d.updatedAt == request.time;
@@ -1106,18 +1107,20 @@ service cloud.firestore {
     match /{r}/ebysDrafts/items/{id} {
       allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDrafts',id)) || resource.data.ownerUid == request.auth.uid);
       allow list: if ebysOwn(r,resource.data);
-      allow create: if ebysDraftOk(r,id,request.resource.data);
-      allow update: if ebysOwn(r,resource.data) && request.resource.data.ownerUid == resource.data.ownerUid && ebysDraftOk(r,id,request.resource.data)
+      allow create: if ebysDraftOk(r,id,request.resource.data,{});
+      allow update: if ebysOwn(r,resource.data) && request.resource.data.ownerUid == resource.data.ownerUid && ebysDraftOk(r,id,request.resource.data,resource.data)
         && request.resource.data.revision == getAfter(ebysPath(r,'ebysDocuments',id)).data.revision;
       allow delete: if false;
     }
     function ebysVersionOk(r, id, d) {
       let h = getAfter(ebysPath(r,'ebysDocuments',d.documentId)).data;
       let draft = get(ebysPath(r,'ebysDrafts',d.documentId)).data;
-      return d.keys().hasOnly(['id','processId','documentId','ownerUid','versionNo','schemaVersion','content','metadataSnapshot','attachments','attachmentMode','contentDigest','createdAt','purchaseSnapshot','unitSnapshot'])
+      return d.keys().hasOnly(['id','processId','documentId','ownerUid','versionNo','schemaVersion','content','metadataSnapshot','attachments','attachmentMode','contentDigest','createdAt','purchaseSnapshot','unitSnapshot','institutionSnapshot','letterTemplate'])
         && ebysOwn(r,d) && ebysId(id) && d.id == id && d.processId == id && poVersionShape(r,h,d,draft) && d.versionNo == h.versionNo
         && h.currentVersionId == id && h.state == 'in_review' && h.ownerUid == d.ownerUid && ebysCommand(r,h,'freezeVersion')
         && d.content == draft.content && d.metadataSnapshot == draft.metadata && draft.ownerUid == d.ownerUid
+        && d.get('institutionSnapshot', null) == draft.get('institutionSnapshot', null) && d.get('letterTemplate', null) == draft.get('letterTemplate', null)
+        && ecVersionPlanOk(r, d.metadataSnapshot) && ecVersionTemplateOk(r, d)
         && d.contentDigest.matches('[a-f0-9]{64}') && d.attachments == [] && d.attachmentMode == 'none' && d.createdAt == request.time;
     }
     match /{r}/ebysVersions/items/{id} {
@@ -1472,6 +1475,120 @@ service cloud.firestore {
         && request.resource.data.revision == 1 && epRoute(request.resource.data.routeSnapshot) && request.resource.data.createdAt == request.time;
       allow update,delete: if false;
     }
+    // ─── v3.4 EBYS H6b · Kurum künyesi, dosya planı, üst yazı şablonları (src/utils/ebys-catalog-schema.js ile aynı sınırlar) ───
+    // [WHY]: Ortak tanımlar yönetici tarafından yazılır, tüm personelce okunur. Evrak tanımın KOPYASINI taşır: künye, plan adı ve
+    //        şablon sürümü sonradan değişse ya da pasife alınsa da dondurulmuş sürüm (ebysVersions, update/delete kapalı) aynı kalır.
+    // [HOW]: Silme yok; pasifleştirme ve revizyon var. Künyenin her revizyonu (ebysOrganizationRevisions) ve şablonun her sürümü
+    //        (ebysLetterTemplateRevisions) create-only kayıttır. Yeni (satın almaya bağlı olmayan) taslak, künye tanımlıysa onun
+    //        birebir kopyasını almak ZORUNDADIR; kurum kodu künyeden gelir. Mevcut taslak kopyasını değiştiremez.
+    function ecProfilePath(r) { return ebysPath(r,'ebysOrganizations','primary'); }
+    function ecProfileData(p) { return {'name':p.name,'code':p.code,'address':p.address,'phone':p.phone,'email':p.email,'web':p.web}; }
+    function ecSnapshot(p) { return {'name':p.name,'code':p.code,'address':p.address,'phone':p.phone,'email':p.email,'web':p.web,'revision':p.revision}; }
+    function ecProfileOk(r, d, old) {
+      return d.keys().hasOnly(['id','name','code','address','phone','email','web','revision','updatedAt','updatedBy'])
+        && d.keys().hasAll(['id','name','code','address','phone','email','web','revision','updatedAt','updatedBy'])
+        && d.id == 'primary' && ebysText(d.name,240,true) && d.code is string && d.code.matches('[A-Z0-9]{2,12}')
+        && ebysText(d.address,500,true) && ebysText(d.phone,60,false) && ebysText(d.email,160,false) && ebysText(d.web,160,false)
+        && d.revision == old.get('revision',0) + 1 && d.updatedAt == request.time && d.updatedBy == request.auth.uid
+        && getAfter(ebysPath(r,'ebysOrganizationRevisions',string(d.revision))).data.revision == d.revision;
+    }
+    match /{r}/ebysOrganizations/items/{id} {
+      allow read: if validRoot(r) && member(r);
+      allow create: if validRoot(r) && isAdmin(r) && id == 'primary' && ecProfileOk(r,request.resource.data,{});
+      allow update: if validRoot(r) && isAdmin(r) && ecProfileOk(r,request.resource.data,resource.data);
+      allow delete: if false;
+    }
+    match /{r}/ebysOrganizationRevisions/items/{id} {
+      allow read: if validRoot(r) && member(r);
+      allow create: if validRoot(r) && isAdmin(r)
+        && request.resource.data.keys().hasOnly(['id','revision','profile','createdAt','createdBy'])
+        && request.resource.data.revision == getAfter(ecProfilePath(r)).data.revision && id == string(request.resource.data.revision)
+        && request.resource.data.id == id && request.resource.data.createdAt == request.time && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.profile == ecProfileData(getAfter(ecProfilePath(r)).data);
+      allow update, delete: if false;
+    }
+
+    function ecPlanCode(c) { return c is string && c.matches('[0-9A-Za-z][0-9A-Za-z.-]{0,39}'); }
+    function ecPlanOk(id, d, old) {
+      return d.keys().hasOnly(['id','code','title','active','revision','createdAt','updatedAt','updatedBy'])
+        && d.keys().hasAll(['id','code','title','active','revision','createdAt','updatedAt','updatedBy'])
+        && d.id == id && d.code == id && ecPlanCode(id) && ebysText(d.title,160,true) && d.active is bool
+        && d.revision == old.get('revision',0) + 1 && d.createdAt == old.get('createdAt', request.time)
+        && d.updatedAt == request.time && d.updatedBy == request.auth.uid;
+    }
+    match /{r}/ebysFilePlans/items/{id} {
+      allow read: if validRoot(r) && member(r);
+      allow create: if validRoot(r) && isAdmin(r) && ecPlanOk(id,request.resource.data,{});
+      allow update: if validRoot(r) && isAdmin(r) && ecPlanOk(id,request.resource.data,resource.data);
+      allow delete: if false;
+    }
+
+    function ecRevPath(r, tid, n) { return ebysPath(r,'ebysLetterTemplateRevisions',tid + '_' + string(n)); }
+    function ecTemplateOk(r, id, d, old) {
+      return d.keys().hasOnly(['id','name','active','currentRevision','revision','createdAt','updatedAt','updatedBy'])
+        && d.keys().hasAll(['id','name','active','currentRevision','revision','createdAt','updatedAt','updatedBy'])
+        && d.id == id && ebysId(id) && d.active is bool && d.currentRevision is int && d.currentRevision >= 1
+        && d.revision == old.get('revision',0) + 1 && d.createdAt == old.get('createdAt', request.time)
+        && d.updatedAt == request.time && d.updatedBy == request.auth.uid
+        && (d.currentRevision == old.get('currentRevision',0) || d.currentRevision == old.get('currentRevision',0) + 1)
+        && getAfter(ecRevPath(r,id,d.currentRevision)).data.name == d.name;
+    }
+    match /{r}/ebysLetterTemplates/items/{id} {
+      allow read: if validRoot(r) && member(r);
+      allow create: if validRoot(r) && isAdmin(r) && ecTemplateOk(r,id,request.resource.data,{});
+      allow update: if validRoot(r) && isAdmin(r) && ecTemplateOk(r,id,request.resource.data,resource.data);
+      allow delete: if false;
+    }
+    match /{r}/ebysLetterTemplateRevisions/items/{id} {
+      allow read: if validRoot(r) && member(r);
+      allow create: if validRoot(r) && isAdmin(r)
+        && request.resource.data.keys().hasOnly(['id','templateId','revision','name','subject','content','createdAt','createdBy'])
+        && request.resource.data.keys().hasAll(['id','templateId','revision','name','subject','content','createdAt','createdBy'])
+        && ebysId(request.resource.data.templateId) && request.resource.data.revision is int && request.resource.data.revision >= 1
+        && id == request.resource.data.templateId + '_' + string(request.resource.data.revision) && request.resource.data.id == id
+        && getAfter(ebysPath(r,'ebysLetterTemplates',request.resource.data.templateId)).data.currentRevision == request.resource.data.revision
+        && ebysText(request.resource.data.name,120,true) && ebysText(request.resource.data.subject,240,false)
+        && ebysText(request.resource.data.content,40000,true)
+        && request.resource.data.createdAt == request.time && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Taslağın katalog kopyaları. Satın almaya bağlı evrak bu pakette kopya taşımaz (sözleşmesi ayrı: poVersionShape).
+    // Bütçe: personelin taslak güncellemesi 1000 ifade sınırına yakın; değişmeyen kopya tek karşılaştırmayla geçer, katalog
+    // okuması yalnız yeni seçimde yapılır. Plan adı ve şablon adı katalog kaydına eşit olmak zorunda olduğundan ayrıca metin
+    // denetimine gerek yoktur (katalog kaydı ecPlanOk / şablon sürüm kuralında doğrulanmıştır).
+    function ecDraftCatalogOk(r, h, d, old) {
+      return h.get('purchaseOrderId','') != ''
+        ? !d.keys().hasAny(['institutionSnapshot','letterTemplate']) && !d.metadata.keys().hasAny(['filePlanTitle'])
+        : (old.keys().hasAny(['documentId']) ? d.get('institutionSnapshot', null) == old.get('institutionSnapshot', null) : ecInstitutionNew(r,h,d))
+          && (d.get('letterTemplate', null) == old.get('letterTemplate', null) || ecTemplateRefOk(r,d));
+    }
+    function ecInstitutionNew(r, h, d) {
+      return exists(ecProfilePath(r))
+        ? ecSnapshotOk(d.get('institutionSnapshot', null), get(ecProfilePath(r)).data, h.organizationCode)
+        : !d.keys().hasAny(['institutionSnapshot']);
+    }
+    // Şablon bağı: taslakta yalnız biçim (bütçe); sürüm yazılırken bağlı şablon sürümünün varlığı ve adı zorunlu (ecVersionTemplateOk).
+    // Aktif şablon zorunluluğu yeni seçimdedir (servis); seçimden sonra pasife alınan şablonla hazırlanan evrak dondurulabilir.
+    function ecTemplateRefOk(r, d) {
+      return !d.keys().hasAny(['letterTemplate'])
+        || (d.letterTemplate is map && d.letterTemplate.keys().hasOnly(['templateId','revision','name'])
+          && ebysId(d.letterTemplate.templateId) && d.letterTemplate.revision is int);
+    }
+    function ecVersionTemplateOk(r, d) {
+      return !d.keys().hasAny(['letterTemplate'])
+        || get(/databases/$(database)/documents/$(r)/ebysLetterTemplateRevisions/items/$(d.letterTemplate.templateId + '_' + string(d.letterTemplate.revision))).data.name == d.letterTemplate.name;
+    }
+    function ecSnapshotOk(s, p, code) { return s == ecSnapshot(p) && code == p.code; }
+    // Dosya planı: personelin taslak güncellemesi bütçeyi aştığından plan eşleşmesi taslakta değil, değiştirilemez sürüm
+    // yazılırken denetlenir. Katalogdan seçilmiş (filePlanTitle taşıyan) üstveri, plan kaydının kod ve adıyla birebir aynı olmalı.
+    // Plan sonradan pasife alınmışsa sürüm yine yazılabilir (seçim pasifleştirmeden önce yapılmıştır); yeni seçimi servis aktif
+    // planla sınırlar. Geçersiz kod yolu get() hatası verir ve istek reddedilir (fail-closed).
+    function ecVersionPlanOk(r, m) {
+      return !m.keys().hasAny(['filePlanTitle'])
+        || get(/databases/$(database)/documents/$(r)/ebysFilePlans/items/$(m.filePlanCode)).data.title == m.filePlanTitle;
+    }
+
     function epBase(p,id) {
       return ebysId(id) && p.id == id && p.versionId == id && p.keys().hasOnly(['id','documentId','versionId','ownerUid','routeSnapshot','templateId','templateRevision','currentStep','activeAssigneeUid','state','revision','lastOperationId','lastCommand','lastResult','lastReason','createdAt','updatedAt','purchaseOrderId'])
         && p.updatedAt == request.time && p.revision is int && ebysId(p.lastOperationId) && ebysText(p.lastReason,1000,false);
