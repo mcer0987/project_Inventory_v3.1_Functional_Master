@@ -1,6 +1,7 @@
 // [WHY]: v3.7 · İP-5 — script.js monolitinden ayrıştırıldı (SoC). Talep iş akışı: onay (öz-onay korumasıyla), red, silme,
 //        geri çekme / taslak, onay ve red pencereleri, arşiv e-postası, toplu talep seçimi ve silme. Talepler id ile bulunur;
-//        yazmalar servis köprülerinden geçer (window.runStockOps, applyItemOps, updateItem, saveData).
+//        yazmalar servis köprülerinden geçer (window.runStockOps, applyItemOps, updateItem; silme İP-7'den beri ID tabanlı
+//        removeItem / bulkRemove). window.data dizileri değiştirilmez.
 // [HOW]: Klasik betik; iki sayfada script.js'ten hemen sonra yüklenir (ES modüllerinden önce tanımlı olmalı: inline onclick,
 //        admin-dashboard.js, security.js ve inventory-logic.js bu adları çağırır). Gövde script.js'ten değiştirilmeden taşındı
 //        (yalnız IIFE girintisi); taşıma öncesi global olan adlar aynı adlarla window'da kalır, AppModules.RequestActions aynı
@@ -367,8 +368,10 @@
         if (!request) { showAppAlert('Talep bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
         const onay = await showCustomConfirm("Kaydı Sil", "Bu talep kaydını tamamen silmek istediğinize emin misiniz? Bu işlem geri alınamaz.");
         if (onay !== true) return;
-        const remaining = (window.data.requests || []).filter(r => String(r.id) !== String(requestId));
-        if (!(await window.writeOk(window.saveData('requests', remaining)))) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
+        // [WHY]: v3.7 · İP-7 (Anayasa §5) — saveData('requests', kalanlar) yazmadan ÖNCE window.data.requests'i süzülmüş kopyayla
+        //        değiştiriyordu; yazma reddedilince talep ekranda silinmiş görünüyordu.
+        // [HOW]: Yalnız bu talebin id'si silinir (removeItem → applyItemOps); yerel liste yazma başarılı olunca güncellenir.
+        if (!(await window.writeOk(window.removeItem('requests', request.id)))) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
         _refreshRequestTables();
         showAppAlert("Talep kaydı kalıcı olarak silindi.", "info");
     };
@@ -465,11 +468,21 @@
         const idsToDelete = new Set(Array.from(checkboxes).map(cb => String(cb.value)));
         const onay = await showCustomConfirm("Toplu Silme", `${idsToDelete.size} adet kaydı kalıcı olarak silmek istediğinize emin misiniz?`);
         if (onay) {
-            const remaining = (window.data.requests || []).filter(r => !idsToDelete.has(String(r.id)));
-            // Kullanıcı onaylı toplu silme: saveData v2 toplu silme kilidi bilinçli olarak açılır (Faz 3.1).
-            if (!(await window.writeOk(window.saveData('requests', remaining, { allowBulkDelete: true })))) { showAppAlert('Silme kaydedilemedi.', 'error'); return; }
+            // [WHY]: v3.7 · İP-7 (Anayasa §5) — saveData('requests', kalanlar) window.data.requests'i yazmadan önce değiştiriyor ve
+            //        ayna ile yerel liste arasındaki başka farkları da yazabiliyordu; seçilen ama listede olmayan kutu da sayılıyordu.
+            // [HOW]: Yalnız seçili ve listede bulunan talep id'leri bulkRemove ile silinir (atomik işlem başına en fazla 490 kayıt,
+            //        fazlası sırayla); yerel liste her parça yazıldıktan sonra güncellenir.
+            const ids = (window.data.requests || []).filter(r => idsToDelete.has(String(r.id))).map(r => r.id);
+            if (ids.length === 0) { showAppAlert('Seçili talepler listede bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+            for (let i = 0; i < ids.length; i += 490) {
+                if (!(await window.writeOk(window.bulkRemove('requests', ids.slice(i, i + 490))))) {
+                    if (i > 0) renderRequestsTable();   // önceki parçalar silindi; tablo güncel kalsın
+                    showAppAlert(i > 0 ? `${i} kayıt silindi; kalan ${ids.length - i} kayıt silinemedi.` : 'Silme kaydedilemedi.', 'error');
+                    return;
+                }
+            }
             renderRequestsTable();
-            showAppAlert(`${idsToDelete.size} kayıt başarıyla silindi.`, "success");
+            showAppAlert(`${ids.length} kayıt başarıyla silindi.`, "success");
             const headerCheck = document.querySelector('.select-all-header input');
             if (headerCheck) headerCheck.checked = false;
         }
