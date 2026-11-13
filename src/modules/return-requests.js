@@ -355,7 +355,7 @@
         });
     }
 
-    // Kişi Envanteri satırının işlem hücresi (script.js renderPersonnelInventoryTable çağırır)
+    // Kişi Envanteri satırının işlem hücresi (src/ui/request-tables.js renderPersonnelInventoryTable çağırır)
     function staffActionCell(assignment) {
         const td = el('td');
         if (!RS().isReturnable(assignment)) return td;

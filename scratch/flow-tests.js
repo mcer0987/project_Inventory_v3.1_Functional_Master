@@ -3872,7 +3872,7 @@ const SCENARIOS = {
             noMonkeyPatch: !/originalConfirmRequest|originalApproveStep|_isSecured/.test(sar),
             noSessionStorageLog: !/self_approval_audit_logs/.test(sar + src('src/utils/session-store.js')),
             noFallbackPrompt: !/function _fallbackChallenge|\bprompt\(/.test(src('security-biometrics.js')),
-            guardInConfirmRequest: /guardSelfApproval/.test(src('script.js')),
+            guardInConfirmRequest: /guardSelfApproval/.test(src('src/modules/request-actions.js')),   // v3.7 · İP-5: script.js'ten taşındı
             guardInApproveStep: /guardSelfApproval/.test(src('src/modules/edm-workflow.js')),
             backupLimitedToCollections: /_backupKeys/.test(src('src/modules/admin/admin-backup.js')),
             reporterOnAdminPage: /self-approval-reporter\.js/.test(src('src/modules/admin/admin-main.js')),

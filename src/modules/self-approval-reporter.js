@@ -6,7 +6,7 @@
  * [WHY]: Faz 4 · J4 (EBYS-04, EBYS-05, M12) — bu modül window.confirmRequest / window.approveStep'i sarmalıyordu (monkey-patch):
  *        kontrol yalnız index'te ve yalnız çağrı window üzerinden gelirse çalışıyordu, admin.html'de hiç yoktu; günlük
  *        sessionStorage'daydı (sekme kapanınca kayboluyordu); admin onayı "biyometrik imza" diye 5 karakterlik prompt'a düşüyordu.
- * [HOW]: Kural artık iş mantığında: confirmRequest (script.js) ve approveStep (edm-workflow.js) SecurityConfig.guardSelfApproval
+ * [HOW]: Kural artık iş mantığında: confirmRequest (src/modules/request-actions.js) ve approveStep (edm-workflow.js) SecurityConfig.guardSelfApproval
  *        çağırır; politika Schema.isSelfApproval, günlük firebase-handler appendAuditLog (${ROOT}/auditLogs, yalnız ekleme).
  *        Bu modül yalnız RAPOR arayüzüdür: günlüğü açılışta tek seferlik okur (fetchAuditLogs, son 200) ve gösterir.
  *        Buton iki sayfada da yalnız Firebase admin oturumunda: index navbar'ı (onNavbarRendered) ve admin.html üst çubuğu.

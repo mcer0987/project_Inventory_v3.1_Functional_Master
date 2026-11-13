@@ -1,6 +1,6 @@
 // [WHY]: Personel tablosu ve silme dizi indeksiyle çalışıyordu (snapshot sonrası yanlış kişi silinir), silme onaysızdı ve
 //        tüm veritabanını yazıyordu; ad/kod HTML'e kaçışsız basılıyordu (ITSM-07, DATA-06, DATA-01, SEC-01).
-// [HOW]: Satırlar id taşır; silme onaylı ve tek doküman (removeItem). Ekleme/düzenleme script.js openPersonelModal'da.
+// [HOW]: Satırlar id taşır; silme onaylı ve tek doküman (removeItem). Ekleme/düzenleme src/ui/personnel-modal.js openPersonelModal'da.
 window.renderPersonelTable = function () {
     const tbody = document.querySelector('#tablePersonel tbody');
     if (!tbody) return;
