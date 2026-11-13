@@ -76,7 +76,8 @@ async function openPage(browser, mode, width = 1280) {
     await page.addScriptTag({ type: 'module', url: 'http://127.0.0.1/src/modules/inventory-logic.js' });
     await page.waitForFunction(() => typeof window.openExitModal === 'function' && typeof window.saveExit === 'function');
     // v3.7: script.js'ten ayrıştırılan klasik dosyalar sayfalardaki sırayla script.js'ten hemen sonra yüklenir.
-    for (const s of ['script.js', 'src/ui/stock-exit-cart.js', 'src/ui/movement-table.js', 'src/ui/personnel-modal.js']) await page.addScriptTag({ url: `http://127.0.0.1/${s}` });
+    for (const s of ['script.js', 'src/ui/stock-exit-cart.js', 'src/ui/movement-table.js', 'src/ui/personnel-modal.js',
+        'src/ui/request-tables.js']) await page.addScriptTag({ url: `http://127.0.0.1/${s}` });
     await page.evaluate(() => window.StaffGuards.refresh());
     return { page, errors };
 }
