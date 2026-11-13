@@ -7,6 +7,17 @@
  *        ilgili ESM modüllerine taşınmış ve bu monolith dosyası küçültülmüştür.
  * [HOW]: Tüm göç ettirilen fonksiyonlar için rollback/fallback köprüleri (bridge)
  *        tanımlanmış ve local state ile config ayarları muhafaza edilmiştir.
+ *
+ * v3.7 SoC ayrıştırması: kalan iş mantığı klasik dosyalara taşındı. Hepsi iki sayfada bu dosyadan HEMEN SONRA,
+ * aşağıdaki sırayla yüklenir; taşıma öncesi window.* adları aynen korunur (tests/unit/script-bridge-contract.test.mjs).
+ *   src/ui/stock-exit-cart.js       → AppModules.ExitCart          (Sepet / Toplu Çıkış, çıkış araması)
+ *   src/ui/movement-table.js        → AppModules.MovementTable     (B3 tablo/kart, B3 PDF, toplu silme)
+ *   src/ui/personnel-modal.js       → AppModules.PersonnelModal    (personel penceresi ve kaydı)
+ *   src/ui/request-tables.js        → AppModules.RequestTables     (talep tabloları, talep araması)
+ *   src/modules/request-actions.js  → AppModules.RequestActions    (onay, red, silme, geri çekme, pencereler)
+ *   src/ui/stock-import-export.js   → AppModules.StockImportExport (PDF/Excel dışa aktarma, Excel içe aktarma)
+ * Burada kalanlar: window.data ilk değeri, INV_CONFIG ve diğer modüllerin okuduğu paylaşılan let/const'lar,
+ * AdminTabs kanca sicili, _dx giriş maskesi, ESM yedek köprüleri, switchTab ve ürün modalı kapatma.
  */
 
 (function () {

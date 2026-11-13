@@ -10,6 +10,7 @@
 | İP-1 Raf yönetimi ve sayım kilidi | [İP-1 Raf Yönetimi ve Sayım - Implementation Walkthrough.md](./İP-1%20Raf%20Yönetimi%20ve%20Sayım%20-%20Implementation%20Walkthrough.md) | `78c4149` | birim 367 · kural 392 · defter emü. 31 · tarayıcı 19/19 |
 | İP-2 Envanter No plakası ve değişim aracı | [İP-2 Envanter No Kilidi ve Değişim Aracı - Implementation Walkthrough.md](./İP-2%20Envanter%20No%20Kilidi%20ve%20Değişim%20Aracı%20-%20Implementation%20Walkthrough.md) | `d51ab28` | birim 375 · kural 398 · defter emü. 32 · tarayıcı 15/15 |
 | İP-3 Mobil ve dokunmatik ürün formu | [İP-3 Mobil Ürün Formu - Implementation Walkthrough.md](./İP-3%20Mobil%20Ürün%20Formu%20-%20Implementation%20Walkthrough.md) | İP-3 commit'i | birim 382 · kural 398 · tarayıcı 11/11 |
+| İP-5 script.js SoC ayrıştırması | [İP-5 script.js SoC Ayrıştırması - Genel Rapor.md](./İP-5%20script.js%20SoC%20Ayrıştırması%20-%20Genel%20Rapor.md) | henüz yok (çalışma ağacında) | birim 395 · kural 407 · e2e 36 · eşdeğerlik 30/30 (+2 bilinçli fark) |
 
 ---
 
@@ -230,6 +231,16 @@ Yalnız `admin.html` ekranındaki VIP Sistem Kontrol Merkezi; `admin.html` ve `i
 - **D. Heatmap:** `createElementNS` + `DocumentFragment` + `svg.replaceChildren(frag)`; `<title>` metni `textContent`; yay matematiği aynen.
 - **E. CSS:** `#userActivityPanel:not(.panel-open) .uap-live-dot { animation-play-state: paused }`.
 - **F. Kanıt:** gerçek Chrome DOM birim testi (sayaç iptali, log tavanı ve kesme, heatmap'in `innerHTML` kullanmaması, CSS duraklatma); `npm run lint:xss` İZİNSİZ 0 ve sink düşüşü; `npm run test:unit`; walkthrough: *İP-4 VIP Konsol ve Heatmap Yaşam Döngüsü - Implementation Walkthrough.md*.
+
+## İP-5 — script.js SoC ayrıştırması (13.11.2026, sohbette onaylanan plan)
+
+Her iki ekran (ortak). `script.js` içinde gömülü kalan Sepet, B3 tablosu, Personel, Talep ve İçe/Dışa aktarma mantığı ayrı klasik dosyalara taşınır; full rewrite yok, doğrudan Firebase SDK çağrısı yok, `window.*` köprüleri korunur. Dilimler:
+
+- **D0:** köprü sözleşmesi testi (taşıma öncesi global adlar, iki sayfadaki yükleme sırası, ad alanları).
+- **D1–D6:** `src/ui/stock-exit-cart.js`, `src/ui/movement-table.js`, `src/ui/personnel-modal.js`, `src/ui/request-tables.js`, `src/modules/request-actions.js`, `src/ui/stock-import-export.js`. Klasik betik; iki sayfada `script.js`'ten hemen sonra. Gövde token düzeyinde birebir taşınır. Başka dosyanın ezdiği `getRandomCode` ve `exportTableToExcel` üst düzeyde kalır.
+- **D7 (davranış):** talep silme `saveData('requests', kalanlar)` yerine ID tabanlı `removeItem` / `bulkRemove` (Anayasa §5).
+- **D8:** `script.js` başlık haritası ve belgeler.
+- **Kapılar (her dilimde):** `lint:xss`, `test:unit`, `smoke`, hosting, ekran testleri; sonda `test:rules` ve HEAD ↔ yeni davranış eşdeğerliği. Riskli dilimler (D4, D5, D7) nedeniyle commit kullanıcı onayına bırakıldı.
 
 ## Kritik dosyalar
 `src/utils/schema.js`, `src/services/stock-ledger.js`, `src/services/firebase-handler.js`, `firestore.rules`, `src/modules/admin/shelf-matrix.js`, `admin.html`, `index.html`, `src/ui/table-engine.js`, `src/ui/ui-components.js`, `src/modules/inventory-logic.js`, `script.js`, `src/utils/stock-import.js`, `src/services/assignment-service.js`, `style.css`, `mobile-responsive.css`, `dark-theme.css`, `scratch/hosting-files.js`.

@@ -1,0 +1,245 @@
+İP-5 script.js SoC Ayrıştırması — Test Kanıtları (13.11.2026, dal feat/v3.6-raf-sayim-envanter-no-mobil-form, taban 0a40263)
+Değişiklikler commit edilmedi; aşağıdaki çıktılar çalışma ağacındaki koddan alındı.
+
+== TABAN (değişiklik öncesi, aynı gün)
+npm run test:unit: ℹ pass 389 ℹ fail 0 (önceki turda, 306aa10 üzerinde; arada yalnız belge commit'i 0a40263)
+npm run lint:xss: 209 sink · izinli (xss-ok) 19 · İZİNSİZ 0 · hosting 120/120 · smoke: iki sayfada pageerror 0
+Taban script.js'in window'a eklediği adlar (Chrome): 119 function, 6 object, 2 boolean; yükleme hatası yok.
+ebys-stage2-ui: "status": "passed", pageerrors 0
+staff-exit-ui: ilk denemede ekran görüntüsü klasörü oluşturulmadığı için (düzenek hatası) düştü; klasörle yeniden deneme:
+Kural tekrarı: arayüzün ürettiği personel tekil + toplu çıkışı GEÇTİ; başka kişi adına, demirbaş ve yönetici biçimli kayıt REDDEDİLDİ. pageerror=0
+request-flow-e2e (taban, çıktının bir kısmı):
+✔ B-3: Kişi Envanteri — 2 laptop "⏳ Teslim Bekliyor" rozetiyle listenin başında; üstte "Taleplerim'e git" notu; tutanakta 0 kalem, 2 teslim bekleyen
+✔ Teslim Aldım: iki talep de completed; Kişi Envanteri yalnız 2 demirbaş (SN/Env.No ile); zimmet tutanağı 2 kalem, sarf 0
+✔ Personel kendi talebini onaylayamaz (arayüz durdurur)
+✔ İade tabloları (Gelen Talepler + admin Talep ve Süreçler) boşken ne işe yaradıklarını anlatan metni gösterir
+✔ İade talebi (personel): gerekçe/durum seçmeden ve "Diğer"+boş açıklamayla gönderilmez; gönderilince kayıt ret_<zimmet> Beklemede, satır "İade Onayı Bekliyor"
+kj6-delegation-check (TABANDA KIRIK, bu işle ilgisiz): ReferenceError: _renderCountLockNotice is not defined (table-engine.js AST seçimi eksik)
+b3-responsive-ui (taban script.js ile): B3 responsive: telefon kart+gün grubu+arama+seçim, tablet sticky uçlar, masaüstü tablo. pageerror=0
+
+== D0 köprü sözleşmesi testinin yakalama gücü (konsoldan aktarıldı)
+D1'de sepet taşındıktan sonra, zincir teste eklenmeden: ✖ ... wrongType: [ 'addToCart: undefined (beklenen function)', 'openCartModal: undefined', 'removeFromCart', 'renderCartItems', 'saveCartExit', 'searchForCart', 'searchForExit', 'updateCartQty' ] → zincir eklenince 3/3 geçti.
+
+== Taşıma aracı token kanıtı (her dilimde yazmadan önce; eşleşmezse yazmaz)
+D1 2909 · D2 2293 · D3 1944 · D4 1934 · D5 4815 · D6 3684 token (toplam 17579); script.js'ten çıkan token = taşınan token.
+
+== Dilim kapıları D1
+[D1] crlf: 
+[D1] hosting: ✔ Yalnız uygulama dosyaları yayınlanacak.
+[D1] lint:xss: xss-lint · 96 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade 
+[D1] test:unit: ℹ pass 392 ℹ fail 0 
+[D1] smoke: pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none CSP uygulanıyor (pozitif kontrol): ✔ · CSP ihlali: 0 · nginx = firebase.json: CSP ✔ · diğer başlıklar ✔ 
+[D1] ebys-stage2-ui:   "status": "passed",   "pageerrors": 0 exit=0 
+[D1] staff-exit-ui: 0 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D1] request-flow-e2e: 36 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[exited with code 0]
+
+== Dilim kapıları D2
+[D2] eol (index↔worktree uyumsuz, değişmiş dosyalar): 
+[D2] hosting: ✔ Yalnız uygulama dosyaları yayınlanacak.
+[D2] lint:xss: xss-lint · 97 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade   güvenli 1003 · izinli (xss-ok) 19 · İZİNSİZ 0 
+[D2] test:unit: ℹ pass 392 ℹ fail 0 
+[D2] smoke: pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none CSP uygulanıyor (pozitif kontrol): ✔ · CSP ihlali: 0 · nginx = firebase.json: CSP ✔ · diğer başlıklar ✔ 
+[D2] ebys-stage2-ui:   "status": "passed",   "pageerrors": 0 exit=0 
+[D2] staff-exit-ui: 0 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D2] request-flow-e2e: 36 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D2] b3-responsive-ui: B3 responsive: telefon kart+gün grubu+arama+seçim, tablet sticky uçlar, masaüstü tablo. pageerror=0 exit=0 
+[exited with code 0]
+
+== Dilim kapıları D3
+[D3] eol (index↔worktree uyumsuz, değişmiş dosyalar): 
+[D3] hosting: ✔ Yalnız uygulama dosyaları yayınlanacak.
+[D3] lint:xss: xss-lint · 98 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade   güvenli 1003 · izinli (xss-ok) 19 · İZİNSİZ 0 
+[D3] test:unit: ℹ pass 392 ℹ fail 0 
+[D3] smoke: pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none CSP uygulanıyor (pozitif kontrol): ✔ · CSP ihlali: 0 · nginx = firebase.json: CSP ✔ · diğer başlıklar ✔ 
+[D3] ebys-stage2-ui:   "status": "passed",   "pageerrors": 0 exit=0 
+[D3] staff-exit-ui: 0 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D3] request-flow-e2e: 36 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D3] b3-responsive-ui: B3 responsive: telefon kart+gün grubu+arama+seçim, tablet sticky uçlar, masaüstü tablo. pageerror=0 exit=0 
+[exited with code 0]
+
+== Dilim kapıları D4
+[D4] eol (index↔worktree uyumsuz, değişmiş dosyalar): 
+[D4] hosting: ✔ Yalnız uygulama dosyaları yayınlanacak.
+[D4] lint:xss: xss-lint · 99 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade   güvenli 1003 · izinli (xss-ok) 19 · İZİNSİZ 0 
+[D4] test:unit: ℹ pass 392 ℹ fail 0 
+[D4] smoke: pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none CSP uygulanıyor (pozitif kontrol): ✔ · CSP ihlali: 0 · nginx = firebase.json: CSP ✔ · diğer başlıklar ✔ 
+[D4] ebys-stage2-ui:   "status": "passed",   "pageerrors": 0 exit=0 
+[D4] staff-exit-ui: 0 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D4] request-flow-e2e: 36 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D4] b3-responsive-ui: B3 responsive: telefon kart+gün grubu+arama+seçim, tablet sticky uçlar, masaüstü tablo. pageerror=0 exit=0 
+[exited with code 0]
+
+== Dilim kapıları D5
+[D5] eol (index↔worktree uyumsuz, değişmiş dosyalar): 
+[D5] hosting: ✔ Yalnız uygulama dosyaları yayınlanacak.
+[D5] lint:xss: xss-lint · 100 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade   güvenli 1003 · izinli (xss-ok) 19 · İZİNSİZ 0 
+[D5] test:unit: ℹ pass 392 ℹ fail 0 
+[D5] smoke: pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none CSP uygulanıyor (pozitif kontrol): ✔ · CSP ihlali: 0 · nginx = firebase.json: CSP ✔ · diğer başlıklar ✔ 
+[D5] ebys-stage2-ui:   "status": "passed",   "pageerrors": 0 exit=0 
+[D5] staff-exit-ui: 0 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D5] request-flow-e2e: 36 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D5] b3-responsive-ui: B3 responsive: telefon kart+gün grubu+arama+seçim, tablet sticky uçlar, masaüstü tablo. pageerror=0 exit=0 
+[exited with code 0]
+
+== Dilim kapıları D6
+[D6] eol (index↔worktree uyumsuz, değişmiş dosyalar): 
+[D6] hosting: ✔ Yalnız uygulama dosyaları yayınlanacak.
+[D6] lint:xss: xss-lint · 101 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade   güvenli 1003 · izinli (xss-ok) 19 · İZİNSİZ 0 
+[D6] test:unit: ℹ pass 392 ℹ fail 0 
+[D6] smoke: 
+[D6] ebys-stage2-ui:   "status": "passed",   "pageerrors": 0 exit=0 
+[D6] staff-exit-ui: 0 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D6] request-flow-e2e: 36 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D6] b3-responsive-ui: B3 responsive: telefon kart+gün grubu+arama+seçim, tablet sticky uçlar, masaüstü tablo. pageerror=0 exit=0 
+[exited with code 0]
+  NOT: D6 smoke ilk denemede 'Navigation timeout of 30000 ms exceeded' (exit=1); aynı kodla yeniden deneme: iki sayfada pageerror 0, console.error 0, failed requests none, CSP ✔.
+
+== Dilim kapıları D7
+[D7] eol (index↔worktree uyumsuz, değişmiş dosyalar): 
+[D7] hosting: ✔ Yalnız uygulama dosyaları yayınlanacak.
+[D7] lint:xss: xss-lint · 101 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade   güvenli 1003 · izinli (xss-ok) 19 · İZİNSİZ 0 
+[D7] test:unit: ℹ pass 395 ℹ fail 0 
+[D7] smoke: pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none CSP uygulanıyor (pozitif kontrol): ✔ · CSP ihlali: 0 · nginx = firebase.json: CSP ✔ · diğer başlıklar ✔ 
+[D7] ebys-stage2-ui:   "status": "passed",   "pageerrors": 0 exit=0 
+[D7] staff-exit-ui: 0 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D7] request-flow-e2e: 36 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[D7] b3-responsive-ui: B3 responsive: telefon kart+gün grubu+arama+seçim, tablet sticky uçlar, masaüstü tablo. pageerror=0 exit=0 
+[exited with code 0]
+
+== D6 davranış eşdeğerliği (HEAD script.js ↔ yeni zincir, konsoldan aktarıldı)
+yükleme hataları A=["emailjs.init is not a function"] B=["emailjs.init is not a function"]  (taklit ortamı; iki tarafta aynı)
+32 senaryo: switchTab b3, renderExitTable, toggleB3CardView, renderRequestsTable, renderMyRequestsTable, renderPersonnelInventoryTable, searchForRequest, onReqTypeChange, openCartModal, searchForCart, searchForExit, openPersonelModal add/edit, closePersonelModal, composeRejectReason, requestOutcome, showRequestRejectModal, showRequestApprovalModal, withdrawInventoryRequest, sendDraftInventoryRequest, rejectRequest, deleteRequest, deleteSelectedRequests, sendArchiveEmail, exportToExcel b1/b3, exportPDF b1/b3, showImportFormatHelp, importExcel csv, getRandomCode, exportTableToExcel
+SONUÇ: 32 senaryonun hepsi eşdeğer
+
+== D7 birim testi düzeltme ÖNCESİ kodla (konsoldan aktarıldı)
+✖ deleteRequest ... actual: [ [ 'saveData', 'requests', [Array] ] ]
+✖ deleteSelectedRequests ... actual: [ [ 'saveData', 'requests', [Array], [Object] ], [ 'render' ] ]
+ℹ pass 0 ℹ fail 3
+
+== D7 eşdeğerlik (düzeltme SONRASI, atlama yok)
+✖ deleteRequest  FARK: log  A: [["saveData","requests",[<kalan liste>]]]  B: [["removeItem","requests","r2"]]
+✖ deleteSelectedRequests  FARK: log  A: [["saveData","requests",[...],{"allowBulkDelete":true}]]  B: [["bulkRemove","requests",["r1","r2"]]]
+Diğer 30 senaryo eşdeğer; uyarılar, DOM ve window.data iki silmede de aynı.
+
+== SON KOŞU (D8 sonrası)
+[FINAL] eol (index↔worktree uyumsuz, değişmiş dosyalar): 
+[FINAL] hosting: ✔ Yalnız uygulama dosyaları yayınlanacak.
+[FINAL] lint:xss: xss-lint · 101 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade   güvenli 1003 · izinli (xss-ok) 19 · İZİNSİZ 0 
+[FINAL] test:unit: ℹ pass 395 ℹ fail 0 
+[FINAL] smoke: pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none pageerror: 0 | console.error: 0 | "Veri Çekildi": 0 failed requests: none CSP uygulanıyor (pozitif kontrol): ✔ · CSP ihlali: 0 · nginx = firebase.json: CSP ✔ · diğer başlıklar ✔ 
+[FINAL] ebys-stage2-ui:   "status": "passed",   "pageerrors": 0 exit=0 
+[FINAL] staff-exit-ui: 0 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[FINAL] request-flow-e2e: 36 ✔, 0 hata, +  Script exited successfully (code 0) exit=0 
+[FINAL] b3-responsive-ui: B3 responsive: telefon kart+gün grubu+arama+seçim, tablet sticky uçlar, masaüstü tablo. pageerror=0 exit=0 
+[FINAL] test:rules: ℹ tests 407 ℹ pass 407 ℹ fail 0 exit=0 
+[FINAL] equiv: SONUÇ: 30 senaryonun hepsi eşdeğer exit=0 
+[exited with code 0]
+
+-- test:unit (yeni testler)
+✔ deleteRequest: yalnız removeItem(requests, id); saveData yok, window.data.requests değiştirilmez (13041.2508ms)
+✔ deleteSelectedRequests: seçili ve bilinen id'ler bulkRemove ile; seçilmeyen ve bilinmeyen id gönderilmez (9545.0501ms)
+✔ deleteSelectedRequests: 490'dan fazla seçimde atomik parçalara bölünür (7504.1269ms)
+✔ index.html: klasik zincir script.js'ten hemen sonra ve aynı sırayla yüklenir (4.8938ms)
+✔ admin.html: klasik zincir script.js'ten hemen sonra ve aynı sırayla yüklenir (3.2397ms)
+✔ script.js + klasik zincir: taşıma öncesi global sözleşme, paylaşılan let/const ve ad alanları korunur (12369.2432ms)
+ℹ tests 395
+ℹ pass 395
+ℹ fail 0
+-- test:rules (yeni test ve özet)
+▶ talep silme (İP-7: removeItem / bulkRemove)
+  ✔ yönetici tek talebi id ile siler (removeItem) (1567.7471ms)
+  ✔ yönetici seçili talepleri tek batch'te siler (bulkRemove) (1353.8424ms)
+  ✔ personel kendi talebini tekil ya da toplu silemez (1250.3363ms)
+✔ talep silme (İP-7: removeItem / bulkRemove) (18039.8788ms)
+  ✔ personel kendi talebini okur ve kendi süzgeçli sorgusunu dinler; başkasınınkini ve tüm listeyi okuyamaz (675.3824ms)
+ℹ tests 407
+ℹ pass 407
+ℹ fail 0
+-- lint:xss
+xss-lint · 101 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade
+  güvenli 1003 · izinli (xss-ok) 19 · İZİNSİZ 0
+-- smoke
+===== smoke
+=== index.html → index.html (root: inventory_demo) ===
+pageerror: 0 | console.error: 0 | "Veri Çekildi": 0
+duplicate load logs: {}
+dual-URL modules: none
+failed requests: none
+=== admin.html → admin.html (root: inventory_demo) ===
+pageerror: 0 | console.error: 0 | "Veri Çekildi": 0
+duplicate load logs: {}
+dual-URL modules: none
+failed requests: none
+CSP uygulanıyor (pozitif kontrol): ✔ · CSP ihlali: 0 · nginx = firebase.json: CSP ✔ · diğer başlıklar ✔
+xss-lint: izinsiz 0 · gerekçeli istisna 19 · 209 sink
+-- request-flow-e2e (36 senaryo)
+✔ Gelen Talepler: 3 bekleyen talep Onayla/Reddet düğmeleriyle listelenir; başlık "ITSM / Seri No"
+✔ B-4: Taslak talep listelenmiyor; üstte "gönderilmemiş 1 taslak talebi var" bilgi satırı
+✔ B-4: Admin "Bekleyen Envanter Talepleri" taslağı listelemiyor; kart göstergeleri Bekleyen 3 / Teslim Bekliyor 0 / Teslim Alındı 0 / Reddedilen 0
+✔ Demirbaş onayı: cihaz kimliği girilmeden onay verilmez — "Seri No veya Envanter No" uyarısı
+✔ Demirbaş onayı: talep approved, stok 5 → 3, cihaz başına 1 zimmet kaydı (b3 tip zimmet, personelId s1, SN + Env. No)
+✔ B-1: Sarf onayı penceresi sonucu söylüyor ("tüketim çıkışı"); kayıt tip cikis (adet 3, talebe ve kişiye bağlı), stok 20 → 17
+✔ B-2: Red penceresi — seçimsiz, "Diğer"+boş açıklama ve etiketli metin reddedilir; gerekçe "Seçim — açıklama" olarak kaydedilir
+✔ B-5: Red yalnız 4 alanı (durum, redGerekcesi, rejectedBy, rejectedAt) günceller; tam kayıt yazılmaz; stok/zimmet değişmez
+✔ Red penceresinde Esc / Vazgeç: talep bekleyen kalır
+✔ İşlenmiş talep tekrar onaylanamaz / reddedilemez
+✔ B-6: Talebe bağlı kayıt zaten varsa onay penceresi açılmaz, yazma yok, stok değişmez, uyarı gösterilir
+✔ Gelen Talepler: durumlar Onaylandı / Onaylandı / Reddedildi; reddedilen satırda gerekçe görünür
+✔ Admin kart göstergeleri karardan sonra: Bekleyen 0 / Teslim Bekliyor 2 / Teslim Alındı 0 / Reddedilen 1
+✔ B-3: Zimmet ekranı — onaylanan 2 laptop "⏳ Teslim Bekliyor" rozetiyle; sarf (tüketim) ve reddedilen talep yok
+✔ B-3: Zimmet ekranı durum filtresi — "Zimmetli" 0, "Teslim Bekliyor" 2
+✔ Rozet: 0 iken gizli/pasif; yeni talep gelince 1, nabız + ekran okuyucu duyurusu; tıklayınca Talep ve Süreçler kartına gider; taslak sayılmaz
+✔ B-2: Personel Taleplerim'de red gerekçesini görüyor
+✔ B-1: Taleplerim'de onaylanan sarf talebinde "Tüketim çıkışı — envanterinize eklenmez" notu
+✔ B-3: Kişi Envanteri — 2 laptop "⏳ Teslim Bekliyor" rozetiyle listenin başında; üstte "Taleplerim'e git" notu; tutanakta 0 kalem, 2 teslim bekleyen
+✔ Teslim Aldım: iki talep de completed; Kişi Envanteri yalnız 2 demirbaş (SN/Env.No ile); zimmet tutanağı 2 kalem, sarf 0
+✔ Personel kendi talebini onaylayamaz (arayüz durdurur)
+✔ İade tabloları (Gelen Talepler + admin Talep ve Süreçler) boşken ne işe yaradıklarını anlatan metni gösterir
+✔ İade talebi (personel): gerekçe/durum seçmeden ve "Diğer"+boş açıklamayla gönderilmez; gönderilince kayıt ret_<zimmet> Beklemede, satır "İade On
+✔ İade talebi (personel): Geri Çek → "Geri Çekildi"; Yeniden Gönder önceki seçimlerle açılır ve talebi tekrar bekleyene alır
+✔ İade talepleri (yönetici): Gelen Talepler ve admin Talep ve Süreçler tablolarında 2 bekleyen talep Onayla/Reddet ile
+✔ İade reddi: iadeye özgü gerekçe seçenekleri; gerekçe personelin "İade Taleplerim" bölümünde görünür, Yeniden Gönder açılır
+✔ Reddedilen iade talebi önceki red gerekçesi gösterilerek yeniden gönderilebilir
+✔ İade onayı (arızalı, teslim alındı, stoğa eklenmedi): zimmet B1 iadesiyle kapanır, stok 3 kalır, talep (ikinci cihaz açık) kapanmaz
+✔ Zimmetten Düş (bekleyen iade talebi olan cihaz): iade onayı penceresi açılır; sağlam + stoğa ekle → B1 3 → 4; son cihazla talep iade edildi olur
+✔ Karara bağlanan iadeler listede kalır ("Karara bağlanan" süzgeci); Görüntüle tüm kararı (teslim, depo, stok, cihaz durumu) gösterir
+✔ İade kaydı silme iki adımlı: onay + Env. No yazma (yanlış ifade reddedilir); silme zimmet kapanışını geri almaz
+✔ B-1: Sarf dönüşüm aracı — yalnız açık sarf zimmeti çevrilir; iade edilmiş ve belirsiz kayda dokunulmaz; Kişi Envanteri 2 → 1; ikinci çalış
+✔ Zimmetten Düş (talepsiz, teslim alınmadı): kapanış açıklaması zorunlu; zimmet iadeDepo boş kapanır, stok değişmez, iade kaydı oluşmaz
+✔ Kural tekrarı: arayüzün ürettiği tüm yazmalar kimliğiyle kurallardan GEÇTİ — 25 yazma (onay+stok+zimmet, red, teslim, iade talebi gönder/geri ç
+✔ Kural: personel kendi iade talebini onaylayamaz / reddedemez / kaydı silemez
+✔ Kural: personel kendi talebini onaylayamaz / reddedemez / onaysız teslim alamaz / zimmet yazamaz / iade işaretleyemez / red gerekçesini değiştiremez
+-- eşdeğerlik (D7'nin iki bilinçli senaryosu atlanarak)
+yükleme hataları A=["emailjs.init is not a function"] B=["emailjs.init is not a function"]
+✔ switchTab b3                   log=0 uyarı=0 dom=bac39c20116e
+✔ renderExitTable                log=0 uyarı=0 dom=bac39c20116e
+✔ toggleB3CardView               log=0 uyarı=0 dom=fad6a11028f7
+✔ renderRequestsTable            log=0 uyarı=0 dom=8d65ee221fa4
+✔ renderMyRequestsTable          log=0 uyarı=0 dom=8d65ee221fa4
+✔ renderPersonnelInventoryTable  log=0 uyarı=0 dom=8d65ee221fa4
+✔ searchForRequest               log=0 uyarı=0 dom=43b0908c2223
+✔ onReqTypeChange                log=0 uyarı=0 dom=43b0908c2223
+✔ openCartModal                  log=0 uyarı=0 dom=8ee8d995f45f
+✔ searchForCart                  log=0 uyarı=0 dom=d242e583f047
+✔ searchForExit                  log=0 uyarı=0 dom=13a2945b350d
+✔ openPersonelModal add          log=0 uyarı=0 dom=6c8e6e56e3db
+✔ openPersonelModal edit         log=0 uyarı=0 dom=b460759a1899
+✔ closePersonelModal             log=0 uyarı=0 dom=2a8abee36d9b
+✔ composeRejectReason            log=0 uyarı=0 dönüş={"reason":"metin"} dom=2a8abee36d9b
+✔ requestOutcome                 log=0 uyarı=0 dönüş="zimmet" dom=2a8abee36d9b
+✔ showRequestRejectModal         log=0 uyarı=0 dom=179b0257e52c
+✔ showRequestApprovalModal       log=0 uyarı=0 dom=11631d3a1537
+✔ withdrawInventoryRequest       log=0 uyarı=1[Talep bulunamadı; liste güncellenmiş olabilir.] dom=11631d3a1537
+✔ sendDraftInventoryRequest      log=0 uyarı=1[Talep bulunamadı; liste güncellenmiş olabilir.] dom=11631d3a1537
+✔ rejectRequest                  log=0 uyarı=0 dönüş="__beklemede__" dom=f0a7be82a4e3
+✔ sendArchiveEmail               log=1[emailjs.send] uyarı=0 dom=f0a7be82a4e3
+✔ exportToExcel b1               log=1[XLSX.writeFile] uyarı=1[B1 Raporu oluşturuldu.] dom=f0a7be82a4e3
+✔ exportToExcel b3               log=1[XLSX.writeFile] uyarı=1[B3 Raporu oluşturuldu.] dom=f0a7be82a4e3
+✔ exportPDF b1                   log=1[window.open.write] uyarı=0 dom=f0a7be82a4e3
+✔ exportPDF b3                   log=1[window.open.write] uyarı=0 dom=f0a7be82a4e3
+✔ showImportFormatHelp           log=0 uyarı=0 dom=f0a7be82a4e3
+✔ importExcel csv                log=0 uyarı=1[İçe aktarma durduruldu, hiçbir kayıt yazılmadı. Sa] dom=f0a7be82a4e3
+✔ getRandomCode                  log=0 uyarı=0 dönüş="ytebh" dom=f0a7be82a4e3
+✔ exportTableToExcel             log=0 uyarı=0 dom=f0a7be82a4e3
+SONUÇ: 30 senaryonun hepsi eşdeğer
