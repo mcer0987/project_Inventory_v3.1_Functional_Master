@@ -1,0 +1,305 @@
+// [WHY]: v3.7 · İP-2 — script.js monolitinden ayrıştırıldı (SoC). B3 (Giriş-Çıkış hareketleri) tablosu ve mobil kart görünümü,
+//        B3 PDF'i, toplu silme ve "Tümünü Seç" dinleyicisi tek arayüz modülünde. Okuma Schema.normalizeB3'ten, silme servis
+//        köprüsüyle (window.bulkRemove / window.removeItem) ID tabanlı yapılır; window.data değiştirilmez.
+// [HOW]: Klasik betik; iki sayfada script.js'ten hemen sonra yüklenir (ES modüllerinden önce tanımlı olmalı: inline onclick
+//        ve modüller bu adları çağırır). Gövde script.js'ten değiştirilmeden taşındı (yalnız IIFE girintisi); taşıma öncesi
+//        global olan adlar aynı adlarla window'da kalır, AppModules.MovementTable aynı fonksiyonları taşır
+//        (sözleşme: tests/unit/script-bridge-contract.test.mjs).
+
+(function () {
+    // [WHY]: b3'te birden çok şema vardı; tablo, Excel ve PDF'ler farklı alt kümelerini okuyordu (Tur 2.5'te yalnız bu okuyucu
+    //        yamanmıştı, ürün taşınınca/silinince tür yine boşalıyordu).
+    // [HOW] (3.6): Tüm okuyucular Schema.normalizeB3'ten okur. normalizeB3Row eski çağıranlar için aynı anahtarları döner.
+    window.normalizeB3Row = function (item) {
+        const n = window.Schema.normalizeB3(item);
+        return { raf: n.rafNo, tur: n.urunTuru, urun: n.urunAciklama, sn: n.sn, adet: n.adet, not: n.not, alanKisi: n.alanKisi, tarih: n.tarih };
+    };
+
+    // b3 PDF'i stok tablosu sütunlarıyla (Sütun/Raf/Ürün/Marka/Durum) basılıyordu; çıkış kayıtlarında hepsi "-" çıkıyordu.
+    function _exportB3PDF() {
+        const rows = (window.data.b3 || []).map(item => window.Schema.normalizeB3(item));
+        const cell = v => `<td>${escapeHtml(v)}</td>`;
+        const html = `<html><head><title>B3 Çıkış Raporu</title><style>
+        body { font-family: "Roboto", Arial, sans-serif; margin: 0; padding: 20px; color: #222; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th, td { border: 1px solid #cfd6dc; padding: 5px 6px; text-align: left; vertical-align: top; }
+        th { background: #2c3e50; color: white; font-weight: 600; }
+        tr:nth-child(even) { background: #f7f9fb; }
+    </style></head><body><div style="font-size:18px; font-weight:bold; margin-bottom:6px;">B3 ENVANTER ÇIKIŞ KAYITLARI</div>
+    <div style="font-size:12px; margin-bottom:14px;">Rapor Tarihi: ${escapeHtml(getTurkiyeSaati())}</div>
+    <table><thead><tr><th>#</th><th>Raf No</th><th>Ürün Türü</th><th>Ürün Açıklama</th><th>SN</th><th>Envanter No</th><th>Adet</th><th>Not</th><th>Alan Kişi</th><th>Tarih</th><th>Hareket</th></tr></thead><tbody>
+    ${rows.map((n, i) => `<tr>${[i + 1, n.rafNo, n.urunTuru, n.urunAciklama, n.sn, n.envanterNo, n.adet, n.not, n.alanKisi, n.tarih, n.tip === 'zimmet' ? 'Zimmet' : 'Çıkış'].map(cell).join('')}</tr>`).join('')}
+    </tbody></table></body></html>`;
+        const win = window.open('', '', 'width=1400,height=900');
+        if (!win) { showAppAlert('Açılır pencere engellendi; PDF için izin verin.', 'warning'); return; }
+        win.document.write(html);
+        win.document.close();
+        setTimeout(() => { win.print(); win.close(); }, 300);
+    }
+
+    // [WHY]: B3 bir depo listesi değil, hareket/zimmet kütüğüdür; mobilde tablo yatay kaydırmayla okunamıyordu.
+    // [HOW]: renderExitTable() arama süzgecini uygular ve etkin görünüme göre tabloyu ya da gün gruplu kartları çizer.
+    //        Telefon genişliğinde (≤768px) kart modu otomatik açılır; kullanıcı #viewToggleB3 ile tabloya geçebilir.
+    window._cardViewActive = window._cardViewActive || {};
+    const B3_CARD_MQ = window.matchMedia('(max-width: 768px)');
+
+    function _b3SearchText(row) {
+        return [row.rafNo, row.urunTuru, row.urunAciklama, row.marka, row.sn, row.envanterNo, row.not, row.alanKisi, row.tarih]
+            .join(' ').toLocaleLowerCase('tr-TR');
+    }
+
+    function _getB3Rows() {
+        const term = (document.getElementById('searchB3')?.value || '').trim().toLocaleLowerCase('tr-TR');
+        return (window.data.b3 || []).map(item => ({ item, row: window.Schema.normalizeB3(item) }))
+            .filter(({ row }) => !term || _b3SearchText(row).includes(term));
+    }
+
+    function _b3ActionButtons(id) {
+        return `<button type="button" class="table-action-btn pdf-btn btn-pdf" title="Zimmet Tutanağı Yazdır" aria-label="Zimmet tutanağı yazdır" onclick="generateZimmetPDF(${jsArg(id)})">
+                <i class="fas fa-file-pdf"></i> <span>PDF</span>
+            </button>
+            <button type="button" class="table-action-btn undo-btn btn-undo" title="Çıkışı Geri Al" aria-label="Çıkışı geri al" onclick="window.showUndoNotice()">
+                <i class="fas fa-rotate-left"></i> <span>Geri Al</span>
+            </button>
+            <button type="button" class="table-action-btn delete-btn btn-delete" title="Kaydı Sil" aria-label="Kaydı sil" onclick="if(validateAdminAction()) deleteB3Row(${jsArg(id)})">
+                <i class="fas fa-trash-alt"></i> <span>Sil</span>
+            </button>`;
+    }
+
+    function _applyB3ViewState() {
+        const active = !!window._cardViewActive.b3;
+        const section = document.getElementById('b3');
+        const tableWrapper = document.querySelector('#b3 .table-responsive-wrapper');
+        const cardContainer = document.getElementById('cardViewB3');
+        const toggleBtn = document.getElementById('viewToggleB3');
+        if (section) section.classList.toggle('b3-cards-active', active);
+        if (tableWrapper) tableWrapper.style.display = active ? 'none' : '';
+        if (cardContainer) cardContainer.style.display = active ? 'block' : 'none';
+        if (toggleBtn) {
+            const label = active ? 'Tablo Görünümüne Geç' : 'Kart Görünümüne Geç';
+            toggleBtn.innerHTML = active ? '<i class="fas fa-table"></i>' : '<i class="fas fa-th-large"></i>';
+            toggleBtn.title = label;
+            toggleBtn.setAttribute('aria-label', label);
+            toggleBtn.classList.toggle('view-toggle-active', active);
+        }
+        const selectAll = document.getElementById('selectAllB3');
+        if (selectAll) selectAll.checked = false;
+    }
+
+    function _renderB3Table(rows) {
+        const tbody = document.querySelector('#tableB3 tbody');
+        if (!tbody) return;
+        if (rows.length === 0) {
+            const msg = (window.data.b3 || []).length ? 'Aramanızla eşleşen çıkış kaydı yok.' : 'Çıkış kaydı bulunamadı.';
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${msg}</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = rows.map(({ item, row }) => {
+            const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+            const envNo = row.envanterNo !== '-' ? `<div class="b3-env-sub">Env. No: ${escapeHtml(row.envanterNo)}</div>` : '';
+            return `<tr class="${isPassive ? 'passive-row' : ''}">
+            <td style="text-align:center;"><input type="checkbox" class="row-select b3-row-select" data-id="${escapeHtml(item.id)}" aria-label="Kaydı seç"></td>
+            <td${row.stokDisi ? ' style="color:var(--color-text-muted); font-style:italic;"' : ''}>${escapeHtml(row.rafNo)}</td>
+            <td>${escapeHtml(row.urunTuru)}</td>
+            <td>${escapeHtml(row.urunAciklama)}</td>
+            <td><span class="b3-mono">${escapeHtml(row.sn)}</span>${envNo}</td>
+            <td>${escapeHtml(row.adet)}</td>
+            <td>${escapeHtml(row.not)}</td>
+            <td>${escapeHtml(row.alanKisi)}</td>
+            <td>${escapeHtml(row.tarih)}</td>
+            <td class="action-cell">
+                <div class="table-row-actions">${_b3ActionButtons(item.id) /* xss-ok: id jsArg ile kaçırılır, geri kalan sabit */}</div>
+            </td>
+        </tr>`;
+        }).join('');
+    }
+
+    // Tarih "03.11.2026 14:22:11" biçimindedir; gün ve saat ayrılır. Tarih yoksa kaydın zaman damgası kullanılır.
+    function _b3DayParts(row) {
+        let raw = row.tarih !== '-' ? row.tarih : (row.ts ? tsToTurkiye(row.ts) : '');
+        raw = String(raw || '').replace(',', '').trim();
+        const [day = '', time = ''] = raw.split(/\s+/);
+        return { day: day || 'Tarihsiz', time: time ? time.slice(0, 5) : '' };
+    }
+
+    function _b3DayLabel(day) {
+        const today = getTurkiyeTarihi();
+        const y = new Date(Date.now() - 864e5).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
+        if (day === today) return 'Bugün';
+        if (day === y) return 'Dün';
+        return day;
+    }
+
+    function _renderB3Cards(rows) {
+        const container = document.getElementById('cardViewB3');
+        if (!container) return;
+        if (rows.length === 0) {
+            const searching = (window.data.b3 || []).length > 0;
+            container.innerHTML = `<div class="card-empty-state">
+                <i class="fas ${searching ? 'fa-search' : 'fa-box-open'}"></i>
+                <p>${searching ? 'Aramanızla eşleşen çıkış kaydı yok.' : 'Çıkış kaydı bulunamadı.'}</p>
+            </div>`;
+            return;
+        }
+        const sorted = [...rows].sort((a, b) => (b.row.ts || 0) - (a.row.ts || 0));
+        const groups = [];
+        sorted.forEach(entry => {
+            const parts = _b3DayParts(entry.row);
+            let g = groups[groups.length - 1];
+            if (!g || g.day !== parts.day) { g = { day: parts.day, items: [] }; groups.push(g); }
+            g.items.push({ ...entry, time: parts.time });
+        });
+
+        const tipLabel = { zimmet: 'Zimmet', hurda: 'Hurda', cikis: 'Çıkış' };
+        const cardHtml = ({ item, row, time }) => {
+            const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
+            const tip = tipLabel[row.tip] ? row.tip : 'cikis';
+            const chips = [
+                row.alanKisi !== '-' ? `<span class="b3-chip b3-chip-person"><i class="fas fa-user" aria-hidden="true"></i> ${escapeHtml(row.alanKisi)}</span>` : '',
+                row.envanterNo !== '-' ? `<span class="b3-chip b3-chip-env"><i class="fas fa-barcode" aria-hidden="true"></i> ${escapeHtml(row.envanterNo)}</span>` : '',
+                row.adet > 0 ? `<span class="b3-chip b3-chip-qty"><i class="fas fa-box" aria-hidden="true"></i> ${escapeHtml(row.adet)} Adet</span>` : ''
+            ].join('');
+            const detail = (label, value, cls = '') => `<div class="b3-drawer-row"><dt>${escapeHtml(label)}</dt><dd class="${escapeHtml(cls)}">${escapeHtml(value)}</dd></div>`;
+            return `<article class="b3-card-item b3-tip-${escapeHtml(tip)}${isPassive ? ' card-item-passive' : ''}">
+                <header class="b3-card-header">
+                    <label class="b3-card-select">
+                        <input type="checkbox" class="row-select b3-row-select" data-id="${escapeHtml(item.id)}" aria-label="Kaydı seç">
+                    </label>
+                    <div class="b3-card-title">
+                        <span class="b3-card-name">${escapeHtml(row.urunAciklama)}</span>
+                        <span class="b3-card-sub">${escapeHtml(row.urunTuru)}${row.marka ? ` · ${escapeHtml(row.marka)}` : ''}</span>
+                    </div>
+                    <div class="b3-card-stamp">
+                        <span class="b3-tip-badge">${escapeHtml(tipLabel[tip])}</span>
+                        ${time ? `<span class="b3-card-time"><i class="far fa-clock" aria-hidden="true"></i> ${escapeHtml(time)}</span>` : ''}
+                    </div>
+                </header>
+                ${chips ? `<div class="b3-card-hero">${chips}</div>` : ''}
+                <details class="b3-card-drawer">
+                    <summary><span>Detaylar</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+                    <dl>
+                        ${detail('Raf / Konum', row.rafNo) /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                        ${detail('ITSM / Gerekçe', row.sn, 'b3-mono') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                        ${detail('Tarih', row.tarih) /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                        ${detail('Açıklama / Not', row.not, 'b3-note') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
+                    </dl>
+                </details>
+                <footer class="b3-card-actions">${_b3ActionButtons(item.id) /* xss-ok: id jsArg ile kaçırılır, geri kalan sabit */}</footer>
+            </article>`;
+        };
+
+        container.innerHTML = `
+        <div class="b3-card-toolbar">
+            <label class="b3-card-selectall"><input type="checkbox" id="selectAllB3Cards"> Tümünü Seç</label>
+            <span class="b3-card-total">${rows.length} kayıt</span>
+        </div>
+        ${groups.map(g => `
+            <section class="b3-day-group">
+                <h3 class="b3-day-header">
+                    <span><i class="far fa-calendar" aria-hidden="true"></i> ${escapeHtml(_b3DayLabel(g.day))}</span>
+                    <span class="b3-day-count">${g.items.length} işlem</span>
+                </h3>
+                <div class="b3-day-body">${g.items.map(cardHtml).join('')}</div>
+            </section>`).join('')}`;
+    }
+
+    function renderExitTable() {
+        if (window._cardViewActive.b3 === undefined) window._cardViewActive.b3 = B3_CARD_MQ.matches;
+        _applyB3ViewState();
+        const rows = _getB3Rows();
+        if (window._cardViewActive.b3) {
+            _renderB3Cards(rows);
+            const tbody = document.querySelector('#tableB3 tbody');
+            if (tbody) tbody.innerHTML = '';
+        } else {
+            _renderB3Table(rows);
+            const cards = document.getElementById('cardViewB3');
+            if (cards) cards.innerHTML = '';
+        }
+    }
+    window.renderExitTable = renderExitTable;
+
+    window.toggleB3CardView = function () {
+        window._cardViewActive.b3 = !window._cardViewActive.b3;
+        renderExitTable();
+    };
+
+    B3_CARD_MQ.addEventListener('change', () => {
+        window._cardViewActive.b3 = B3_CARD_MQ.matches;
+        renderExitTable();
+    });
+
+    window.toggleB3Help = function () {
+        const btn = document.getElementById('b3HelpToggle');
+        const panel = document.getElementById('b3HelpPanel');
+        if (!btn || !panel) return;
+        const open = panel.hidden;
+        panel.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+    };
+
+    // [WHY]: Çıkış geri alma özelliği için kullanıcı bilgilendirmesi
+    // [HOW]: Henüz fonksiyon yazılmadan mini bildirim (toast) gösterir
+    window.showUndoNotice = function () {
+        if (typeof showAppAlert === 'function') {
+            showAppAlert('Geri alma özelliği geliştirme aşamasındadır.', 'info');
+        } else {
+            alert('Geri alma özelliği geliştirme aşamasındadır.');
+        }
+    };
+
+    // [WHY]: B3 çıkış kayıtlarının aylık raporlama sonrasında toplu temizlenmesi
+    // [HOW]: Seçili satır ID'lerini toplar, yönetici onayından sonra atomic window.bulkRemove('b3', ids) ile siler
+    window.bulkDeleteB3 = async function () {
+        if (typeof validateAdminAction === 'function' && !validateAdminAction()) return;
+        const checked = Array.from(document.querySelectorAll('.b3-row-select:checked'));
+        if (checked.length === 0) {
+            if (typeof showAppAlert === 'function') showAppAlert('Lütfen silinecek çıkış kayıtlarını seçin.', 'warning');
+            return;
+        }
+        const ids = [...new Set(checked.map(cb => cb.dataset.id).filter(Boolean))];
+        const confirmed = typeof window.showCustomConfirm === 'function'
+            ? await window.showCustomConfirm('Toplu Çıkış Kaydı Silme', `${ids.length} adet çıkış kaydı kalıcı olarak silinecek. (Stok değişmez). Onaylıyor musunuz?`)
+            : confirm(`${ids.length} adet çıkış kaydı silinsin mi?`);
+        if (!confirmed) return;
+
+        try {
+            if (typeof window.bulkRemove === 'function') {
+                await window.bulkRemove('b3', ids);
+            } else if (typeof window.removeItem === 'function') {
+                for (const id of ids) {
+                    await window.removeItem('b3', id);
+                }
+            }
+            if (typeof renderExitTable === 'function') renderExitTable();
+            if (typeof showAppAlert === 'function') showAppAlert(`${ids.length} adet çıkış kaydı başarıyla silindi.`, 'success');
+        } catch (err) {
+            console.error('[bulkDeleteB3] Toplu silme hatası:', err);
+            if (typeof showAppAlert === 'function') showAppAlert('Toplu silme sırasında bir hata oluştu.', 'error');
+        }
+    };
+
+    // [WHY]: B3 çıkış tablosu "Tümünü Seç" kutusu dinleyicisi
+    // [HOW]: Delegated change dinleyicisi; tablo (selectAllB3) ve kart (selectAllB3Cards) kutuları yalnız kendi
+    //        görünümündeki .b3-row-select elemanlarını işaretler (yalnız etkin görünüm çizilir).
+    document.addEventListener('change', (e) => {
+        const scopes = { selectAllB3: '#tableB3', selectAllB3Cards: '#cardViewB3' };
+        const scope = e.target && scopes[e.target.id];
+        if (scope) {
+            const isChecked = e.target.checked;
+            document.querySelectorAll(`${scope} .b3-row-select`).forEach(cb => { cb.checked = isChecked; });
+        }
+    });
+
+    // Taşıma öncesi script.js'te global olan bildirimler aynı adlarla window'da kalır (ör. exportPDF('b3') → _exportB3PDF).
+    Object.assign(window, {
+        _exportB3PDF, _b3SearchText, _getB3Rows, _b3ActionButtons, _applyB3ViewState, _renderB3Table, _b3DayParts, _b3DayLabel,
+        _renderB3Cards
+    });
+
+    window.AppModules = window.AppModules || {};
+    window.AppModules.MovementTable = Object.freeze({
+        normalizeB3Row: window.normalizeB3Row, renderExitTable, toggleB3CardView: window.toggleB3CardView,
+        toggleB3Help: window.toggleB3Help, showUndoNotice: window.showUndoNotice, bulkDeleteB3: window.bulkDeleteB3
+    });
+})();

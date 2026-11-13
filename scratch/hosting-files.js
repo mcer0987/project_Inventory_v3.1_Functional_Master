@@ -66,8 +66,8 @@ const expected = f => /^(index|admin|404|verify)\.html$/.test(f) || /^[^/]+\.(cs
 // v3.4 EBYS H6b: katalog şeması, katalog servisi, Tanımlar katalog arayüzü (3).
 // EBYS H6a hotfix: satın alma arayüzü, birim ve personel tanıtım modalları + stilleri (5).
 // Geliştirme bildirimi penceresi src/ui/development-notice.js (1).
-// v3.7 · script.js SoC ayrıştırması: İP-1 sepet / toplu çıkış (1).
-const EXPECTED_COUNT = 121;
+// v3.7 · script.js SoC ayrıştırması: İP-1 sepet / toplu çıkış (1), İP-2 B3 hareket tablosu (1).
+const EXPECTED_COUNT = 122;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {
