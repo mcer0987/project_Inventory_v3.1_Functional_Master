@@ -75,7 +75,8 @@ async function openPage(browser, mode, width = 1280) {
     await page.addScriptTag({ type: 'module', url: 'http://127.0.0.1/src/ui/ui-components.js' });
     await page.addScriptTag({ type: 'module', url: 'http://127.0.0.1/src/modules/inventory-logic.js' });
     await page.waitForFunction(() => typeof window.openExitModal === 'function' && typeof window.saveExit === 'function');
-    await page.addScriptTag({ url: 'http://127.0.0.1/script.js' });
+    // v3.7: script.js'ten ayrıştırılan klasik dosyalar sayfalardaki sırayla script.js'ten hemen sonra yüklenir.
+    for (const s of ['script.js', 'src/ui/stock-exit-cart.js']) await page.addScriptTag({ url: `http://127.0.0.1/${s}` });
     await page.evaluate(() => window.StaffGuards.refresh());
     return { page, errors };
 }

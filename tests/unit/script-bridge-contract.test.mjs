@@ -41,10 +41,13 @@ const SHARED_LEXICALS = { TZ: 'string', currentSortColumn: 'string', isAscending
     currentExitRepo: 'string', currentExitIndex: 'string', pageSize: 'number', INV_CONFIG: 'object' };
 
 // script.js'ten hemen sonra, iki sayfada da bu sırayla yüklenen klasik dosyalar.
-const CLASSIC_CHAIN = ['script.js'];
+const CLASSIC_CHAIN = ['script.js', 'src/ui/stock-exit-cart.js'];
 
 // Yeni ad alanı → köprü adları. Her anahtar window'daki köprüyle aynı fonksiyon referansıdır (tek kaynak).
-const NAMESPACES = {};
+const NAMESPACES = {
+    ExitCart: ['openCartModal', 'searchForCart', 'addToCart', 'removeFromCart', 'renderCartItems', 'updateCartQty', 'saveCartExit',
+        'searchForExit'],
+};
 
 function localClassicScripts(file) {
     const html = readFileSync(file, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
