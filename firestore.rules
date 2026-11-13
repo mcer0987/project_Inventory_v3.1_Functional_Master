@@ -116,10 +116,13 @@ service cloud.firestore {
     // Personelin yazabildiği iş akışı koleksiyonları. assignments/serviceRecords yalnız admin (T7).
     function staffWritable(c) { return c in ['purchaseOrders', 'requests', 'tasks']; }
 
-    // RULE-05: bakım modu sunucu tarafında. Personel yazması başına +1 doküman okuması.
+    // [WHY]: RULE-05 + Faz 5 P0 (Vektör A) — bakım modu ya da aktif toplu yazma / geri yükleme kilidi (restoreLock) sürerken
+    //        personel yazmaları sunucu tarafında durdurulur; aksi hâlde paralel sekme veya doğrudan SDK çağrısıyla yarıda olan
+    //        geri yüklemenin üstüne yazılabilir.
+    // [HOW]: Aynı admin_settings dokümanı okunduğu için ek get() maliyeti 0'dır.
     function maintenanceOn(r) {
       let p = /databases/$(database)/documents/$(r)/system_config/items/admin_settings;
-      return exists(p) && get(p).data.get('maintenance', false) == true;
+      return exists(p) && (get(p).data.get('maintenance', false) == true || get(p).data.get('restoreLock', null) != null);
     }
 
     // XSS savunma derinliği: "<harf", "</", "<!", "<?" reddedilir; "<5mm", "a < b" serbest (istemci: html.js hasTagLike).
@@ -316,10 +319,9 @@ service cloud.firestore {
       return (!old.keys().hasAny(['exchangeRate'])
             || (!started
                 && !changed.hasAny(['items', 'totals', 'urun', 'adet', 'butce', 'budgetMode', 'budgetEstimateRates', 'documentTypeCode', 'aciklama', 'birim', 'tur', 'evrakNo', 'files', 'oncelik'])))
-        && (!changed.hasAny(['items', 'totals', 'exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])
-            || (poItemsOk(d) && !changed.hasAny(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'])))
+        && (!changed.hasAny(['items', 'totals']) || poItemsOk(d))
         && wf.get('started', false) != true
-        && !changed.hasAny(['createdBy', 'createdByName', 'talepEden'])
+        && !changed.hasAny(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY', 'createdBy', 'createdByName', 'talepEden'])
         && old.get('durum', '') in ['Onay Bekliyor', 'Taslak', '']
         && status in ['Onay Bekliyor', 'Taslak', 'İptal Edildi']
         && (started
@@ -1729,11 +1731,11 @@ service cloud.firestore {
             && after.get('steps',[]).size() > 0 && after.steps[0].get('status','') == 'approved' && poFxFieldsOk(d));
     }
     function poLegacyStaffCreate(r,id,d) {
-      return validRoot(r) && regularStaff(r) && !maintenanceOn(r) && textOk('purchaseOrders',d)
+      return validRoot(r) && isStaff(r) && !maintenanceOn(r) && textOk('purchaseOrders',d)
         && poPathId(id,d) && poCreateOk(r,d);
     }
     function poLegacyStaffUpdate(r,id,old,d) {
-      return validRoot(r) && regularStaff(r) && !maintenanceOn(r)
+      return validRoot(r) && isStaff(r) && !maintenanceOn(r)
         && d.get('createdByUid',null) == old.get('createdByUid',null) && poPathId(id,d)
         && (old.get('createdByUid','') == request.auth.uid
           ? (!d.diff(old).affectedKeys().hasAny(['id','urun','aciklama','talepEden','birim','tur','evrakNo','oncelik','createdByName'])
@@ -1746,7 +1748,7 @@ service cloud.firestore {
       let pd = get(/databases/$(database)/documents/$(r)/personel/items/$(pid)).data;
       let n1 = pd.get('name', '');
       let n2 = pd.get('adSoyad', '');
-      let nm = (n1 is string && n1 != '') ? n1 : ((n2 is string && n2 != '') ? n2 : pd.get('ad', ''));
+      let nm = (n1 != '') ? n1 : ((n2 != '') ? n2 : pd.get('ad', ''));
       return nm is string ? nm.trim() : '';
     }
     function poIsLegacy(d) { return d.get('engineVersion','legacy') == 'legacy' && !d.keys().hasAny(['ebysDocumentId','purchaseOrderId']); }

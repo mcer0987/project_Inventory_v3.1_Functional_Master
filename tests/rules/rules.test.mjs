@@ -1141,6 +1141,24 @@ describe('Bakım modu (RULE-05)', () => {
         await assertFails(getDoc(item(ctx.anon(), LIVE, 'system_config', 'admin_settings')));
         await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'system_config', 'admin_settings'), { maintenance: true }));
     });
+    test('Faz 5 P0 · Vektör A: restoreLock doluyken (maintenance:false olsa bile) personel yazamaz; restoreLock:null olunca açılır', async () => {
+        await seed(db => setDoc(item(db, LIVE, 'system_config', 'admin_settings'), {
+            maintenance: false,
+            restoreLock: { id: 'job-1', kind: 'restore', uid: 'admin-uid', collections: ['b1', 'requests', 'tasks', 'purchaseOrders'] },
+        }));
+        const req = { id: 'rl_req', ürün: 'Klavye', adet: 1, durum: 'Beklemede', personelUid: 'uid-s1', personel: 'Ayşe Yılmaz', personelId: 's1' };
+        const tsk = { id: 'rl_tsk', title: 'Görev', creatorUid: 'uid-s1', creatorId: 'Ayşe Yılmaz' };
+        const po = { id: 'rl_po', urun: 'Kağıt', aciklama: 'A4', durum: 'Onay Bekliyor', ...OWNER, akis, workflow: { started: false, currentStep: 0, steps: [], history: [] } };
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'requests', 'rl_req'), req));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'tasks', 'rl_tsk'), tsk));
+        await assertFails(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'rl_po'), po));
+        await assertFails(deleteDoc(item(ctx.s1(), LIVE, 'tasks', 't1')));
+        // restoreLock: null olduğunda personel yazmaları yeniden açılır
+        await seed(db => setDoc(item(db, LIVE, 'system_config', 'admin_settings'), { maintenance: false, restoreLock: null }));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'requests', 'rl_req'), req));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'tasks', 'rl_tsk'), tsk));
+        await assertSucceeds(setDoc(item(ctx.s1(), LIVE, 'purchaseOrders', 'rl_po'), po));
+    });
 });
 
 describe('Etiket reddi (RULE-02 savunma derinliği)', () => {
