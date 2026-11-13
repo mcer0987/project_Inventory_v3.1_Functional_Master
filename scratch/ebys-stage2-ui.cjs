@@ -20,8 +20,8 @@ const assert = require('assert/strict');
             window.showAppAlert = () => {};
             window.AppModules.EBYSDefinitions = { saveUnit: async input => { window.capturedUnit = input; } };
         });
-        const personnelSource = fs.readFileSync('script.js', 'utf8');
-        await page.addScriptTag({ content: personnelSource.slice(personnelSource.indexOf('function _fillUnitSelect('), personnelSource.indexOf('// 🔷 Gelen Talepler')) });
+        // v3.7 · İP-3: personel penceresi script.js'ten src/ui/personnel-modal.js'e taşındı; dosya bütün olarak yüklenir.
+        await page.addScriptTag({ content: fs.readFileSync('src/ui/personnel-modal.js', 'utf8') });
         const unitSource = fs.readFileSync('src/modules/edm-workflow.js', 'utf8');
         await page.addScriptTag({ content: unitSource.slice(0, unitSource.indexOf('// [BUGFIX] Bug 2: Normalization helper')).replace(/^import .*$/gm, '') });
         const result = await page.evaluate(async () => {
