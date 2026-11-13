@@ -42,7 +42,7 @@ const SHARED_LEXICALS = { TZ: 'string', currentSortColumn: 'string', isAscending
 
 // script.js'ten hemen sonra, iki sayfada da bu sırayla yüklenen klasik dosyalar.
 const CLASSIC_CHAIN = ['script.js', 'src/ui/stock-exit-cart.js', 'src/ui/movement-table.js', 'src/ui/personnel-modal.js',
-    'src/ui/request-tables.js', 'src/modules/request-actions.js'];
+    'src/ui/request-tables.js', 'src/modules/request-actions.js', 'src/ui/stock-import-export.js'];
 
 // Yeni ad alanı → köprü adları. Her anahtar window'daki köprüyle aynı fonksiyon referansıdır (tek kaynak).
 const NAMESPACES = {
@@ -54,6 +54,7 @@ const NAMESPACES = {
     RequestActions: ['confirmRequest', 'rejectRequest', 'deleteRequest', 'withdrawInventoryRequest', 'editPersonnelInventoryRequest',
         'sendDraftInventoryRequest', 'showRequestApprovalModal', 'showRequestRejectModal', 'composeRejectReason', 'requestOutcome',
         'isDraftRequest', 'sendArchiveEmail', 'toggleAllRequests', 'deleteSelectedRequests'],
+    StockImportExport: ['exportPDF', 'showImportFormatHelp', 'importExcel', 'exportToExcel'],
 };
 
 function localClassicScripts(file) {

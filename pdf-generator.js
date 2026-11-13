@@ -379,7 +379,7 @@ window.exportPDF=function (depo) {
 
 // [Faz 5 denetimi · P1]: Buradaki ikinci importExcel kaldırıldı — eski takma adlarla (name/type/shelf/status/qty) yalnız
 // belleğe yazıyordu ve admin.html'de script.js'ten SONRA yüklendiği için oradaki kanonik içe aktarmanın üzerine biniyordu.
-// Tek içe aktarma yolu: script.js importExcel → StockImport + atomicImportStock.
+// Tek içe aktarma yolu: src/ui/stock-import-export.js importExcel → StockImport + atomicImportStock.
 
 // Excel Export (Kütüphanesiz, Saf JS Çözümü)
 window.exportTableToExcel=function (tableID, filename = ''){

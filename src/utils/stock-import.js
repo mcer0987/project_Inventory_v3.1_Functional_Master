@@ -1,6 +1,6 @@
 /**
  * utils/stock-import.js — CSV/Excel stok içe aktarmanın saf katmanı (Faz 5 denetimi · P1)
- * Klasik script; index.html <head>'de schema.js'ten sonra. script.js importExcel bunu kullanır → tests/unit/stock-import.test.mjs.
+ * Klasik script; index.html <head>'de schema.js'ten sonra. src/ui/stock-import-export.js importExcel bunu kullanır → tests/unit/stock-import.test.mjs.
  *
  * [WHY]: İçe aktarma iki ayrı yerde (script.js ve pdf-generator.js) iki farklı biçim üretiyordu: kanonik b1/b2 alanı 'raf'
  *        yerine "rafNo", İngilizce takma adlar (name/type/shelf/qty), isDemirbas hiç yok, sabit "Unbranded"/"Sarf" uydurmaları;

@@ -133,7 +133,8 @@ async function openPage(browser) {
     await page.waitForFunction(() => typeof window.receiveProduct === 'function' && window.inventoryManagementModule);
     // v3.7: script.js'ten ayrıştırılan klasik dosyalar sayfalardaki sırayla script.js'ten hemen sonra yüklenir.
     for (const s of ['script.js', 'src/ui/stock-exit-cart.js', 'src/ui/movement-table.js', 'src/ui/personnel-modal.js',
-        'src/ui/request-tables.js', 'src/modules/request-actions.js']) await page.addScriptTag({ url: `http://127.0.0.1/${s}` });
+        'src/ui/request-tables.js', 'src/modules/request-actions.js',
+        'src/ui/stock-import-export.js']) await page.addScriptTag({ url: `http://127.0.0.1/${s}` });
     return { page, errors };
 }
 
