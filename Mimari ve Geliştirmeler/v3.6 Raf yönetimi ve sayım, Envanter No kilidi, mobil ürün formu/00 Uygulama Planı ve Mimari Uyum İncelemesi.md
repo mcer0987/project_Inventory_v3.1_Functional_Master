@@ -220,6 +220,17 @@ Onaylanan kararlar:
 
 ---
 
+## İP-4 — VIP Konsol ve Heatmap yaşam döngüsü (13.11.2026, sohbette onaylanan plan)
+
+Yalnız `admin.html` ekranındaki VIP Sistem Kontrol Merkezi; `admin.html` ve `index.html` dosyalarına dokunulmaz; dış kütüphane ve doğrudan Firebase SDK çağrısı yok; full rewrite yok.
+
+- **A. Animasyon yaşam döngüsü (JS):** öğe başına rAF tutamacı; aynı öğede yeni animasyon öncekini `cancelAnimationFrame` ile keser; sekme gizliyse animasyonsuz son değer; sekme çıkışı ve `document.hidden` tüm sayaçları iptal eder; `AppModules.VipHealth` teşhisine aktif sayaç sayısı.
+- **B. Konsol akışı (JS):** `_appendLog` `innerHTML` yerine `createElement`/`textContent`; mesaj 2000 karakterde kesilir; 150 tavanı `childElementCount` + `firstElementChild.remove()`; kaydırma yalnız sekme görünürken, dönüşte bir kez; `vipClearTerminal` → `replaceChildren()`; `_runtimeErrors` son 50.
+- **C. Sağlık tiki:** çalışma süresi ve oturum sayacı saniyede bir, veri boyutu ve DOM düğüm sayısı 5 saniyede bir; `resize` dinleyicisi sekme gizliyken erken döner, dönüşte platform bilgisi bir kez tazelenir.
+- **D. Heatmap:** `createElementNS` + `DocumentFragment` + `svg.replaceChildren(frag)`; `<title>` metni `textContent`; yay matematiği aynen.
+- **E. CSS:** `#userActivityPanel:not(.panel-open) .uap-live-dot { animation-play-state: paused }`.
+- **F. Kanıt:** gerçek Chrome DOM birim testi (sayaç iptali, log tavanı ve kesme, heatmap'in `innerHTML` kullanmaması, CSS duraklatma); `npm run lint:xss` İZİNSİZ 0 ve sink düşüşü; `npm run test:unit`; walkthrough: *İP-4 VIP Konsol ve Heatmap Yaşam Döngüsü - Implementation Walkthrough.md*.
+
 ## Kritik dosyalar
 `src/utils/schema.js`, `src/services/stock-ledger.js`, `src/services/firebase-handler.js`, `firestore.rules`, `src/modules/admin/shelf-matrix.js`, `admin.html`, `index.html`, `src/ui/table-engine.js`, `src/ui/ui-components.js`, `src/modules/inventory-logic.js`, `script.js`, `src/utils/stock-import.js`, `src/services/assignment-service.js`, `style.css`, `mobile-responsive.css`, `dark-theme.css`, `scratch/hosting-files.js`.
 

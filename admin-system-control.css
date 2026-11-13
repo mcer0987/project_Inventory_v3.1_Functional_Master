@@ -1429,6 +1429,11 @@
     background: var(--vip-matrix);
     animation: uapLivePulse 1.2s ease infinite;
 }
+/* [WHY] (v3.6 · İP-4 · VIP-15): #userActivityPanel VIP sekmesinin dışında, ekran dışına park edilmiş ve display:flex;
+   kapalıyken bile canlı nokta animasyonu her karede tikliyordu. [HOW]: Panel açık değilken animasyon duraklatılır. */
+#userActivityPanel:not(.panel-open) .uap-live-dot {
+    animation-play-state: paused;
+}
 @keyframes uapLivePulse {
     0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--vip-matrix); }
     50%       { opacity: 0.4; box-shadow: none; }

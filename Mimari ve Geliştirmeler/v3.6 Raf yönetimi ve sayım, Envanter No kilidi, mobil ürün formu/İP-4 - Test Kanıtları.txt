@@ -1,0 +1,32 @@
+İP-4 VIP Konsol ve Heatmap Yaşam Döngüsü — Test Kanıtları (13.11.2026, dal feat/v3.6-raf-sayim-envanter-no-mobil-form)
+
+== npm run lint:xss (değişiklik ÖNCESİ, aynı gün)
+xss-lint · 94 dosya · 212 sink · 292 HTML şablonu · 1026 dinamik ifade
+  güvenli 1007 · izinli (xss-ok) 19 · İZİNSİZ 0
+
+== npm run lint:xss (değişiklik SONRASI)
+> lint:xss
+> node scratch/xss-lint.js
+xss-lint · 94 dosya · 209 sink · 291 HTML şablonu · 1022 dinamik ifade
+  güvenli 1003 · izinli (xss-ok) 19 · İZİNSİZ 0
+
+== node --test tests/unit/vip-console-lifecycle.test.mjs (tam paket içindeki satırlar)
+✔ VIP-08/12: sekme kapalıyken döngü ve sayaç yok; açılınca başlar; kapanınca interval + rAF iptal (8454.3967ms)
+✔ VIP-11: konsol akışı — 150 tavanı, 2000 karakter kesme, innerHTML yok (HTML metin kalır), hata dizisi tavanı (5006.6436ms)
+✔ VIP-14: heatmap innerHTML kullanmadan DocumentFragment ile çizilir (4901.5081ms)
+✔ VIP-15: aktivite paneli kapalıyken canlı nokta animasyonu duraklatılır (5479.2806ms)
+
+== npm run test:unit
+ℹ tests 389
+ℹ suites 0
+ℹ pass 389
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63088.02
+
+== git diff --stat (kod)
+ admin-system-control.css                  |   5 +
+ src/modules/admin/admin-system-control.js | 156 +++++++++++++++++++++++-------
+ 2 files changed, 126 insertions(+), 35 deletions(-)

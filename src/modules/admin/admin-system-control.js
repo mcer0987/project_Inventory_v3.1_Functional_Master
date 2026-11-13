@@ -21,6 +21,20 @@
     let _logCount = { info: 0, warn: 0, error: 0, success: 0 };
     let _runtimeErrors = [];
 
+    // [WHY] (v3.6 · İP-4 · VIP-11): Konsol akışı sayfa genelinde her console.* çağrısında çalışır (VIP sekmesi hiç açılmamış
+    //        olsa bile). Mesaj uzunluğu sınırsızdı (büyük nesneler JSON olarak DOM'a basılıyordu), çalışma zamanı hataları
+    //        sınırsız dizide birikiyordu, 150 tavanı her eklemede querySelectorAll ile taranıyordu ve scrollHeight okunuyordu.
+    // [HOW]: Sabit tavanlar; kayıt sayısı childElementCount ile; kaydırma yalnız VIP sekmesi görünürken, dönüşte bir kez.
+    const _MAX_LOG_ENTRIES = 150;
+    const _MAX_LOG_MSG_CHARS = 2000;
+    const _MAX_RUNTIME_ERRORS = 50;
+    let _terminalScrollPending = false;
+
+    function _pushRuntimeError(err) {
+        _runtimeErrors.push(err);
+        if (_runtimeErrors.length > _MAX_RUNTIME_ERRORS) _runtimeErrors.splice(0, _runtimeErrors.length - _MAX_RUNTIME_ERRORS);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // 1. GELİŞMİŞ KONSOL INTERCEPTOR
     // ═══════════════════════════════════════════════════════════════
@@ -50,7 +64,8 @@
         const terminal = _getTerminal();
         if (!terminal) return;
 
-        const msg = Array.from(args).map(_formatArg).join(' ');
+        let msg = Array.from(args).map(_formatArg).join(' ');
+        if (msg.length > _MAX_LOG_MSG_CHARS) msg = msg.slice(0, _MAX_LOG_MSG_CHARS) + ' … [' + (msg.length - _MAX_LOG_MSG_CHARS) + ' karakter kısaltıldı]';
         const time = new Date().toLocaleTimeString('tr-TR', { hour12: false });
 
         const icons = {
@@ -60,14 +75,19 @@
             success: 'fa-circle-check'
         };
 
+        // VIP-11: innerHTML sink'i yok; düğümler createElement/textContent ile kurulur (aynı sınıflar, aynı görünüm).
         const div = document.createElement('div');
         div.className = `log-entry ${type}`;
         div.setAttribute('data-type', type);
-        div.innerHTML = `
-            <i class="fas ${escapeHtml(icons[type] || icons.info)} log-icon"></i>
-            <span class="timestamp">${time}</span>
-            <span class="log-msg">${_escapeHtml(msg)}</span>
-        `;
+        const icon = document.createElement('i');
+        icon.className = `fas ${icons[type] || icons.info} log-icon`;
+        const ts = document.createElement('span');
+        ts.className = 'timestamp';
+        ts.textContent = time;
+        const body = document.createElement('span');
+        body.className = 'log-msg';
+        body.textContent = msg;
+        div.append(icon, ts, body);
 
         // Filter kontrolü
         if (_logFilter !== 'all' && type !== _logFilter) {
@@ -78,19 +98,24 @@
         _logCount[type] = (_logCount[type] || 0) + 1;
         _updateLogCountBadges();
 
-        // Max 150 log tut
-        const logEntries = terminal.querySelectorAll('.log-entry');
-        if (logEntries.length > 150) {
-            terminal.removeChild(logEntries[0]);
+        // Tavan: en eski kayıtlar düşer (tarama yok)
+        while (terminal.childElementCount > _MAX_LOG_ENTRIES && terminal.firstElementChild) {
+            terminal.firstElementChild.remove();
         }
 
-        // Otomatik scroll
-        terminal.scrollTop = terminal.scrollHeight;
+        // Otomatik scroll: yalnız VIP sekmesi görünürken (gizliyken layout okuması yapılmaz; dönüşte bir kez kaydırılır)
+        if (_isVipTabVisible()) {
+            terminal.scrollTop = terminal.scrollHeight;
+        } else {
+            _terminalScrollPending = true;
+        }
     }
 
-    function _escapeHtml(str) {
-        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-        return str.replace(/[&<>"']/g, c => map[c]);
+    function _flushTerminalScroll() {
+        if (!_terminalScrollPending) return;
+        const terminal = _getTerminal();
+        if (terminal) terminal.scrollTop = terminal.scrollHeight;
+        _terminalScrollPending = false;
     }
 
     // Kanca
@@ -118,7 +143,7 @@
     window.addEventListener('error', function (e) {
         const errMsg = `${e.message} — ${e.filename || 'unknown'}:${e.lineno || '?'}`;
         _appendLog('error', ['[RUNTIME ERROR]', errMsg]);
-        _runtimeErrors.push({
+        _pushRuntimeError({
             message: e.message,
             file: e.filename,
             line: e.lineno,
@@ -128,7 +153,7 @@
 
     window.addEventListener('unhandledrejection', function (e) {
         _appendLog('error', ['[UNHANDLED PROMISE]', e.reason || 'Unknown rejection']);
-        _runtimeErrors.push({
+        _pushRuntimeError({
             message: String(e.reason),
             file: 'Promise',
             line: '-',
@@ -144,7 +169,7 @@
     window.vipClearTerminal = function () {
         const terminal = _getTerminal();
         if (terminal) {
-            terminal.innerHTML = '';
+            terminal.replaceChildren();
             _logCount = { info: 0, warn: 0, error: 0, success: 0 };
             _updateLogCountBadges();
             _appendLog('success', ['🧹 Terminal temizlendi.']);
@@ -184,7 +209,13 @@
     // 3. SİSTEM SAĞLIK MONİTÖRÜ
     // ═══════════════════════════════════════════════════════════════
 
-    function _updateSystemHealth() {
+    // [WHY] (v3.6 · İP-4 · VIP-13): Veri boyutu (JSON.stringify(window.data) + Blob) ve DOM düğüm sayısı (querySelectorAll('*'))
+    //        her saniye hesaplanıyordu; sekme görünürken sürekli CPU.
+    // [HOW]: `full` yalnız her _HEAVY_HEALTH_EVERY tikte bir ve açık tazelemelerde true; diğer tiklerde ağır ölçümler atlanır.
+    const _HEAVY_HEALTH_EVERY = 5;
+
+    function _updateSystemHealth(full) {
+        if (full === undefined) full = true;
         // Uptime
         const uptimeEl = document.getElementById('vipUptime');
         if (uptimeEl) {
@@ -233,7 +264,9 @@
             fbText.style.color = navigator.onLine ? 'var(--vip-matrix)' : 'var(--vip-danger)';
         }
 
-        // Data Size (window.data analizi)
+        if (!full) return;
+
+        // Data Size (window.data analizi) — ağır ölçüm (VIP-13)
         const dataEl = document.getElementById('vipDataSize');
         if (dataEl && window.data) {
             try {
@@ -259,9 +292,28 @@
     // 4. OPERASYON RAPORU — COUNT-UP ANİMASYONLU
     // ═══════════════════════════════════════════════════════════════
 
+    // [WHY] (v3.6 · İP-4 · VIP-12): Her sekme girişinde 6 rAF döngüsü açılıyor, tutamaç saklanmıyordu; hızlı tekrar girişte
+    //        aynı öğeye iki döngü yazıyor, sekme kapanınca da döngü bitene kadar sürüyordu.
+    // [HOW]: Öğe başına rAF tutamacı (_countUpFrames); yeni animasyon öncekini iptal eder. Sekme görünmüyorsa animasyonsuz
+    //        son değer yazılır. Sekme çıkışı / sayfa gizlenmesi _cancelCountUps ile tüm döngüleri keser.
+    const _countUpFrames = new Map();
+
+    function _cancelCountUps() {
+        _countUpFrames.forEach(function (handle) { cancelAnimationFrame(handle); });
+        _countUpFrames.clear();
+    }
+
     function _animateCountUp(elementId, targetValue, duration) {
         const el = document.getElementById(elementId);
         if (!el) return;
+        const prev = _countUpFrames.get(elementId);
+        if (prev !== undefined) { cancelAnimationFrame(prev); _countUpFrames.delete(elementId); }
+
+        if (!_isVipTabVisible()) {
+            el.textContent = Number(targetValue).toLocaleString('tr-TR');
+            return;
+        }
+
         const start = 0;
         const startTime = performance.now();
 
@@ -271,9 +323,13 @@
             // Ease-out cubic
             const eased = 1 - Math.pow(1 - progress, 3);
             el.textContent = Math.floor(start + (targetValue - start) * eased).toLocaleString('tr-TR');
-            if (progress < 1) requestAnimationFrame(tick);
+            if (progress < 1) {
+                _countUpFrames.set(elementId, requestAnimationFrame(tick));
+            } else {
+                _countUpFrames.delete(elementId);
+            }
         }
-        requestAnimationFrame(tick);
+        _countUpFrames.set(elementId, requestAnimationFrame(tick));
     }
 
     function _updateOpsReport() {
@@ -610,29 +666,43 @@
         if (_healthInterval !== null || !_isVipTabVisible()) return;
         _healthInterval = setInterval(() => {
             _healthTicks++;
-            _updateSystemHealth();
+            _updateSystemHealth(_healthTicks % _HEAVY_HEALTH_EVERY === 0);   // VIP-13: ağır ölçüm 5 tikte bir
             _updateSessionInfo();
         }, 1000);
     }
     function _stopHealthLoop() {
+        _cancelCountUps();   // VIP-12: sekme/sayfa gizlenince sayaç animasyonları da durur
         if (_healthInterval === null) return;
         clearInterval(_healthInterval);
         _healthInterval = null;
     }
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) { _stopHealthLoop(); return; }
-        if (_vipInitialized && _isVipTabVisible()) { _updateSystemHealth(); _updateSessionInfo(); _startHealthLoop(); }
+        if (_vipInitialized && _isVipTabVisible()) { _updateSystemHealth(); _updateSessionInfo(); _flushTerminalScroll(); _startHealthLoop(); }
     });
+    // VIP-11: platform bilgisi yalnız VIP sekmesi görünürken yeniden hesaplanır; dönüşte _initVipPanel bir kez tazeler.
+    function _onViewportResize() {
+        if (!_isVipTabVisible()) return;
+        _updatePlatformInfo();
+    }
     window.AppModules = window.AppModules || {};
-    window.AppModules.VipHealth = { isRunning: () => _healthInterval !== null, ticks: () => _healthTicks };
+    window.AppModules.VipHealth = {
+        isRunning: () => _healthInterval !== null,
+        ticks: () => _healthTicks,
+        countUpsActive: () => _countUpFrames.size,
+        terminalEntries: () => { const t = _getTerminal(); return t ? t.childElementCount : 0; },
+        runtimeErrors: () => _runtimeErrors.length
+    };
 
     function _initVipPanel() {
         if (_vipInitialized) {
             // Zaten başlatılmış, sadece güncelle
             _updateOpsReport();
+            _updatePlatformInfo();
             _updateSystemHealth();
             _updateSessionInfo();
             _renderDebugPanel();
+            _flushTerminalScroll();   // VIP-11: gizliyken biriken loglar için tek kaydırma
             _startHealthLoop();   // VIP-08: sekmeye geri dönüşte döngü yeniden başlar
             return;
         }
@@ -658,7 +728,7 @@
         }, 300);
 
         // Viewport değişimlerini dinle
-        window.addEventListener('resize', _updatePlatformInfo);
+        window.addEventListener('resize', _onViewportResize);   // VIP-11: sekme gizliyken erken döner
         
         // [WHY]: Her 15 sn gerçek terminale sahte "X kullanıcısı talep onayladı" logu basılıyordu (VIP-03); kaldırıldı.
         //        God-Eye radarı gerçek presence gelene kadar DEMO olarak etiketli (Karar K8-b).
@@ -2049,7 +2119,15 @@ function _renderHeatmap(data) {
         ].join(' ');
     };
 
-    let svgContent = '';
+    // [WHY] (v3.6 · İP-4 · VIP-14): SVG, string birleştirme + innerHTML ile basılıyordu (escapeHtml'e bağımlı sink).
+    // [HOW]: createElementNS + DocumentFragment ile düğümler kurulur, <title> metni textContent'tir, tek replaceChildren.
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const frag = document.createDocumentFragment();
+    const _svgEl = function(tag, attrs) {
+        const el = document.createElementNS(SVG_NS, tag);
+        Object.keys(attrs).forEach(function(k) { el.setAttribute(k, String(attrs[k])); });
+        return el;
+    };
 
     slices.forEach(function(s) {
         const endAngle   = startAngle + s.angle;
@@ -2059,13 +2137,17 @@ function _renderHeatmap(data) {
         const ly         = labelR * Math.sin(midAngle);
         const colorCls   = _colorClass(s.intensity);
 
-        svgContent += '<path d="' + escapeHtml(_arcPath(startAngle, endAngle)) + '" class="hm-slice ' + escapeHtml(colorCls) + '">' +
-            '<title>' + escapeHtml(s.label) + ': ' + escapeHtml(s.count) + ' kayit (%' + Math.round(s.ratio * 100) + ')</title>' +
-        '</path>';
+        const path = _svgEl('path', { d: _arcPath(startAngle, endAngle), 'class': 'hm-slice ' + colorCls });
+        const title = _svgEl('title', {});
+        title.textContent = s.label + ': ' + s.count + ' kayit (%' + Math.round(s.ratio * 100) + ')';
+        path.appendChild(title);
+        frag.appendChild(path);
 
         // Yeterince büyük dilimde etiket göster
         if (s.ratio > 0.08) {
-            svgContent += '<text class="hm-label" x="' + lx + '" y="' + ly + '">' + escapeHtml(s.label) + '</text>';
+            const label = _svgEl('text', { 'class': 'hm-label', x: lx, y: ly });
+            label.textContent = s.label;
+            frag.appendChild(label);
         }
 
         startAngle = endAngle;
@@ -2073,10 +2155,14 @@ function _renderHeatmap(data) {
 
     // Merkez bilgi metni
     const totalCount = data.reduce(function(a, d) { return a + d.count; }, 0);
-    svgContent += '<text class="hm-center-text" x="0" y="-6">' + escapeHtml(totalCount) + '</text>';
-    svgContent += '<text class="hm-center-text" x="0" y="8">kayit</text>';
+    const centerCount = _svgEl('text', { 'class': 'hm-center-text', x: 0, y: -6 });
+    centerCount.textContent = String(totalCount);
+    const centerUnit = _svgEl('text', { 'class': 'hm-center-text', x: 0, y: 8 });
+    centerUnit.textContent = 'kayit';
+    frag.appendChild(centerCount);
+    frag.appendChild(centerUnit);
 
-    svg.innerHTML = svgContent;
+    svg.replaceChildren(frag);
 }
 
 // ═══════════════════════════════════════════════════════════════════
