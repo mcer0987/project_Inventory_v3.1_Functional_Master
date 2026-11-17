@@ -102,6 +102,7 @@ async function _uploadOrAsk(files) {
 window.openNewPurchaseModal = function () {
     const modal = document.getElementById('purchaseModal');
     if (!modal) return;
+    window.AppModules?.EBYSPurchaseUI?.clearPending?.();   // A-2/A-5: önceki EBYS düzenleme/tekrar deneme durumu taşınmasın
 
     const form = document.getElementById('purchaseForm');
     const saveBtn = document.getElementById('purSaveBtn');
@@ -335,7 +336,46 @@ window.changePurchasePage = function (dir) {
 };
 
 // DURUM BADGE HELPER - EBYS State Machine Uyumlu
+// [WHY]: A-4 — EBYS motorundaki satın alma işaretçisi (engineVersion 'ebys-v1') evrak no/tarih/ürün ve workflow taşımaz;
+//        satır "-" alanlar, kalıcı DRAFT rozeti ve Rules'un reddettiği eski motor düğmeleriyle görünüyordu.
+// [HOW]: Gösterim için kaydın kopyası doldurulur (window.data değişmez); işlem sütununda yalnız tıklama anında tek okuma
+//        yapan "EBYS Süreci / Görüntüle" düğmesi kalır. Sürekli dinleyici eklenmez.
+const _isEbysPurchase = item => item?.engineVersion === 'ebys-v1';
+function _ebysPurchaseDisplay(item) {
+    const updated = typeof item.updatedAt?.toDate === 'function' ? item.updatedAt.toDate()
+        : Number.isFinite(item.updatedAt?.seconds) ? new Date(item.updatedAt.seconds * 1000) : null;
+    return { ...item, evrakNo: item.evrakNo || `EBYS · ${String(item.id).slice(0, 8)}`,
+        tarih: item.tarih || (updated ? updated.toLocaleDateString('tr-TR') : '-'), urun: item.urun || 'EBYS Satın Alma Evrakı' };
+}
+function _ebysPurchaseActionsHtml(item) {
+    return `
+                                <button onclick="window.openEbysPurchaseRow(${jsArg(String(item.id))})" class="btn-action btn-buy" title="EBYS Süreci / Görüntüle" aria-label="EBYS Süreci / Görüntüle">
+                                    <i class="fas fa-route fa-xs"></i>
+                                </button>
+                            `;
+}
+// [WHY]: A-4 — EBYS satırından evrakın onay sürecine ya da dondurulmamış taslağın düzenlemesine tek yol.
+// [HOW]: Başlık sunucudan bir kez okunur: sürüm varsa süreç penceresi, yazarın dondurulmamış taslağıysa EBYS düzenleme kipi açılır.
+window.openEbysPurchaseRow = async function (id) {
+    try {
+        const { head } = await window.AppModules.EBYSDocuments.readDocument(String(id));
+        if (head.currentVersionId) {
+            window.AppModules.EBYSProcessUI.open(head.currentVersionId, head.id, head.ownerUid === window.userAuth?.uid);
+        } else if (head.ownerUid === window.userAuth?.uid) {
+            await window.AppModules.EBYSPurchaseUI.openForRevision(head.id);
+        } else {
+            window.showAppAlert?.('Bu EBYS talebi henüz yazarı tarafından onaya sunulmadı.', 'info');
+        }
+    } catch (error) {
+        window.showAppAlert?.(error.message, 'error');
+    }
+};
+window.AppModules = window.AppModules || {};
+// Admin tablosu (admin-purchase-render.js) aynı satır sözleşmesini kullanır.
+window.AppModules.EBYSPurchaseRows = Object.freeze({ isLinked: _isEbysPurchase, display: _ebysPurchaseDisplay, actionsHtml: _ebysPurchaseActionsHtml });
+
 function getStatusBadge(item) {
+    if (_isEbysPurchase(item)) return `<span class="badge-soft bg-primary text-white"><i class="fas fa-route me-1"></i>EBYS Süreci</span>`;
     if (!item.workflow) return `<span class="badge-soft badge-secondary"><i class="fas fa-file-draft me-1"></i>DRAFT</span>`;
 
     const currentState = item.workflow.currentState;
@@ -503,6 +543,8 @@ window.renderPurchaseModule = function (options = {}) {
         pagedData.length > 0
             ? pagedData.map(item => {
                 try {
+                    const ebys = _isEbysPurchase(item);
+                    if (ebys) item = _ebysPurchaseDisplay(item);
                     const durumHTML = getStatusBadge(item);
                     const isCancelled = item.durum === "İptal Edildi";
                     const isStarted = item.workflow?.started === true;
@@ -527,7 +569,7 @@ window.renderPurchaseModule = function (options = {}) {
                         </td>
                         <td>${durumHTML}</td>
                         <td class="text-end">
-                            <div class="d-flex justify-content-end gap-1">
+                            <div class="d-flex justify-content-end gap-1">${ebys ? _ebysPurchaseActionsHtml(item) : `
                                 <!-- Görüntüle -->
                                 <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'view')" class="btn-action btn-passive" title="Görüntüle">
                                     <i class="fas fa-eye fa-xs"></i>
@@ -592,7 +634,7 @@ window.renderPurchaseModule = function (options = {}) {
                                         </button>
                                     ` : ''}
                                 `}
-                            </div>
+                            `}</div>
                         </td>
                     </tr>
                     `;
@@ -634,6 +676,8 @@ window.renderServicesModule = function () {
         const pData = window.data.purchaseOrders ? Object.values(window.data.purchaseOrders) : [];
 
         pBody.innerHTML = pData.length > 0 ? pData.map(item => {
+            const ebys = _isEbysPurchase(item);
+            if (ebys) item = _ebysPurchaseDisplay(item);
             const isStarted = item.workflow?.started === true;
             const isCancelled = item.durum === 'İptal Edildi';
             const durumHTML = getStatusBadge(item);
@@ -662,7 +706,7 @@ window.renderServicesModule = function () {
                     </td>
                     <td>${durumHTML}</td>
                     <td class="text-end">
-                        <div class="d-flex justify-content-end gap-1">
+                        <div class="d-flex justify-content-end gap-1">${ebys ? _ebysPurchaseActionsHtml(item) : `
                             <!-- Görüntüle -->
                             <button onclick="window.openPurchaseDetail(${jsArg(item.id)}, 'view')" class="btn-action btn-passive" title="Görüntüle">
                                 <i class="fas fa-eye fa-xs"></i>
@@ -727,7 +771,7 @@ window.renderServicesModule = function () {
                                     </button>
                                 ` : ''}
                             `}
-                        </div>
+                        `}</div>
                     </td>
                 </tr>
             `;
@@ -1735,6 +1779,7 @@ window.closePurchaseModal = function () {
     const wfDiv = document.getElementById('purWorkflowSection');
     const fileArea = document.getElementById('purFileInputArea');
 
+    window.AppModules?.EBYSPurchaseUI?.clearPending?.();   // A-2/A-5: EBYS düzenleme kipi ve bekleyen işlem kimlikleri sıfırlanır
     if (modal) modal.style.display = 'none';
     const printBtn = document.getElementById('purPrintBtn');
     if (printBtn) printBtn.style.display = 'none';

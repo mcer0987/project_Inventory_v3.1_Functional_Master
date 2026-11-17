@@ -291,4 +291,4 @@ export function subscribeMyReturnedDocuments(callback, onError, cursor = null) {
         snap => callback(snap.docs.map(d => ({ ...d.data(), _cursor: d }))), onError);
 }
 window.AppModules = window.AppModules || {};
-window.AppModules.EBYSProcesses = { startProcess, decideTask, withdrawProcess, delegateTask, getProcess, getVersion, subscribeMyTasks, listMyProcesses, subscribeMyReturnedDocuments,createRouteTemplate,listRouteTemplates,watchTaskContext };
+window.AppModules.EBYSProcesses = { startProcess, decideTask, withdrawProcess, delegateTask, getProcess, getVersion, subscribeMyTasks, listMyProcesses, subscribeMyReturnedDocuments,createRouteTemplate,listRouteTemplates,watchTaskContext, getPurchaseApprovalPreview };

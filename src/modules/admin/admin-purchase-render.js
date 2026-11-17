@@ -5,6 +5,8 @@ window.renderAdminDashboard = function () {
     if (!tbody) return;
 
     const allRequests = window.data.purchaseOrders || [];
+    // A-4: EBYS satır sözleşmesi purchase-servises.js'ten (EBYSPurchaseRows) gelir.
+    const ebysRows = window.AppModules?.EBYSPurchaseRows;
 
     // [WHY]: Render fonksiyonu içinde veritabanı kaydı atmak Anti-Pattern'dir.
     // [HOW]: Veri onarımı (Data Sanitization) artık edm-workflow.js içerisinde onInventoryDataUpdated event'iyle Firebase'den veri ilk çekildiğinde arka planda sadece 1 kez yapılıyor.
@@ -24,6 +26,8 @@ window.renderAdminDashboard = function () {
 
     // Workflow durum helper fonksiyonu
     function getWorkflowStatus(item) {
+        // A-4: EBYS motorundaki talebin durumu eski workflow'da değil; ayrıntı süreç penceresinde.
+        if (ebysRows?.isLinked(item)) return { text: 'EBYS Süreci', bg: '#dbeafe', color: '#1e40af', icon: 'fa-route' };
         const currentState = item.workflow?.currentState;
         const isStarted = item.workflow?.started;
         const steps = item.workflow?.steps || [];
@@ -63,6 +67,8 @@ window.renderAdminDashboard = function () {
 
     tbody.innerHTML = filteredData.length > 0
         ? filteredData.map(item => {
+            const ebys = !!ebysRows?.isLinked(item);
+            if (ebys) item = ebysRows.display(item);
             const status = getWorkflowStatus(item);
             const isCancelled = item.durum === "İptal Edildi";
             const isStarted = item.workflow?.started === true;
@@ -85,7 +91,7 @@ window.renderAdminDashboard = function () {
                         </span>
                     </td>
                     <td class="text-end">
-                        <div class="d-flex justify-content-end gap-1">
+                        <div class="d-flex justify-content-end gap-1">${ebys ? ebysRows.actionsHtml(item) : `
                             <!-- Görüntüle -->
                             <button onclick="window.openPurchaseDetail(${jsArg(item.id)},'view')" 
                                 class="btn-action btn-passive" title="Görüntüle">
@@ -132,7 +138,7 @@ window.renderAdminDashboard = function () {
                                     <i class="fas fa-trash-alt fa-xs"></i>
                                 </button>
                             ` : ''}
-                        </div>
+                        `}</div>
                     </td>
                 </tr>
             `;

@@ -5,6 +5,32 @@ const n=(tag,text,cls)=>{const x=document.createElement(tag);if(text!=null)x.tex
 const btn=(text,fn)=>{const b=n('button',text,'btn btn-sm btn-outline-primary');b.type='button';b.onclick=fn;return b;};
 const states={active:'Aktif',completed:'Kurum içi onay tamamlandı',returned:'İade edildi',rejected:'Reddedildi',withdrawn:'Geri çekildi'};
 const kinds={paraf:'Paraf',approval:'Onay',consent:'Olur'};
+// [WHY]: A-1 — Satın alma sürümünde gövde yalnız "Satın alma talebi: konu" metnidir; onaycı kalemleri ve tutarı görmeden karar veriyordu.
+// [HOW]: Dondurulmuş purchaseSnapshot kalemleri, para birimi toplamları ve ödenek yalnız textContent ile tabloya çizilir.
+const money2=v=>Number.isFinite(Number(v))?Number(v).toFixed(2):'—';
+function purchaseLines(snapshot){
+    const wrap=n('div',null,'ebys-purchase-lines'),scroller=n('div',null,'table-responsive'),table=n('table',null,'table table-sm align-middle'),head=n('tr');
+    for(const title of ['Mal / hizmet','Miktar','Birim','Birim fiyat','Para','KDV %','Toplam'])head.append(n('th',title,'small text-nowrap'));
+    const thead=n('thead'),body=n('tbody');thead.append(head);
+    for(const line of snapshot.items||[]){
+        const row=n('tr');
+        for(const value of [line.description,String(line.quantity),line.unit,money2(line.unitPrice),line.currency,String(line.taxRate),money2(line.totalPrice)])row.append(n('td',value??'—','small'));
+        body.append(row);
+    }
+    table.append(thead,body);scroller.append(table);wrap.append(n('h4','Satın alma kalemleri'),scroller);
+    const totals=snapshot.totals||{},used=new Set((snapshot.items||[]).map(line=>line.currency));
+    for(const currency of ['TRY','USD','EUR'])if(used.has(currency)&&totals[currency])wrap.append(n('p',`${currency}: Ara ${money2(totals[currency].subtotal)} · KDV ${money2(totals[currency].tax)} · Genel ${money2(totals[currency].total)}`,'small mb-1'));
+    if(snapshot.butce!=null)wrap.append(n('p',`Ödenek: ${money2(snapshot.butce)} TRY (${snapshot.budgetMode==='manual'?'elle girildi':'kalemlerden hesaplandı'})`,'small mb-0'));
+    return wrap;
+}
+// [WHY]: A-1 — İlk olumlu kararda kur talebe sabitlenir; onaycı hangi kurla ve hangi TL toplamıyla onayladığını görmeli.
+// [HOW]: getPurchaseApprovalPreview sonucundan kur kaynağı, tarih, yalnız kullanılan dövizler ve TL karşılığı yazılır.
+function purchaseQuote(preview,snapshot){
+    if(!preview.rateSource)return n('p',`Tüm kalemler TRY; kur gerekmez. TL toplamı: ${money2(preview.reportingTotalTRY)} TRY.`,'small mb-0');
+    const used=new Set((snapshot?.items||[]).map(line=>line.currency));
+    const rates=['USD','EUR'].filter(c=>used.has(c)).map(c=>`${c} ${preview.rateSource.rates?.[c]??'—'}`).join(' · ');
+    return n('p',`Kur: ${rates} · Tarih: ${preview.rateSource.date||'—'} · Kaynak: ${preview.rateSource.source||'—'} · TL karşılığı: ${money2(preview.reportingTotalTRY)} TRY. Onayladığınızda bu kur talebe sabitlenir.`,'small mb-0');
+}
 const people=()=> (window.data?.personel||[]).filter(p=>p.active!==false&&p.uid);
 function selectPerson(value='') {
     const select=n('select',null,'form-select');
@@ -101,12 +127,40 @@ async function open(versionId,documentId,allowStart=true,owner='process') {
             const label=(parent,text,input)=>{const wrap=n('label',null,'ebys-process-field');wrap.append(n('span',text),input);parent.append(wrap);return input;};
             const reasonField=(parent,text)=>{const reason=n('textarea',null,'form-control');reason.rows=2;reason.maxLength=1000;reason.setAttribute('aria-label',text);label(parent,text,reason);return reason;};
             if(p.state==='active'&&p.activeAssigneeUid===actor){
+                // [WHY]: A-1 — Dövizli satın almada ilk olumlu karar fxPreview olmadan servis tarafından reddediliyordu.
+                // [HOW]: İlk adımda önizleme okunur ve Onayla ile aynı kur kaynağı gönderilir. Önizleme yoksa yalnız Onayla kapanır;
+                //        kur değiştiyse önizleme tazelenir ve kullanıcı güncel tutarla yeniden karar verir.
+                let preview=null,snapshot=null,approve=null;
+                const firstStep=!!p.purchaseOrderId&&p.currentStep===0;
+                const quoteBox=n('div'),quoteStatus=n('p','','small text-danger mb-0');quoteStatus.setAttribute('role','alert');quoteStatus.hidden=true;
+                const loadPreview=async()=>{
+                    quoteBox.replaceChildren(n('p','Güncel kur ve TL toplamı kontrol ediliyor…','small mb-0'));quoteStatus.hidden=true;
+                    try{preview=await api().getPurchaseApprovalPreview({purchaseOrderId:p.purchaseOrderId,versionId:p.id});quoteBox.replaceChildren(purchaseQuote(preview,snapshot));}
+                    catch(e){preview=null;quoteBox.replaceChildren();quoteStatus.textContent=e.message;quoteStatus.hidden=false;}
+                    if(approve)approve.disabled=!preview;
+                };
+                if(p.purchaseOrderId){
+                    const purchaseBox=n('section',null,'ebys-process-panel ebys-purchase-summary');d.append(purchaseBox);
+                    try{snapshot=(await api().getVersion(p.id)).purchaseSnapshot||null;if(snapshot)purchaseBox.append(purchaseLines(snapshot));}
+                    catch(e){purchaseBox.append(n('p','Satın alma kalemleri okunamadı: '+e.message,'small text-danger'));}
+                    if(firstStep){purchaseBox.append(n('h4','Kur ve TL karşılığı'),quoteBox,quoteStatus);await loadPreview();}
+                    if(!d.isConnected||actor!==window.userAuth?.uid)return;
+                }
                 const box=n('section',null,'ebys-process-panel');box.append(n('h4','Kararınız'));
                 const reason=reasonField(box,'Karar notu · İade ve red için gerekçe zorunludur');
                 const actions=n('div',null,'ebys-process-actions');
                 for(const [result,title]of [['approved','Onayla'],['rejected','Reddet'],['returned','Yazara iade et']]){
-                    const action=btn(title,()=>run(async()=>{await api().decideTask({processId:p.id,expectedRevision:p.revision,result,reason:reason.value,operationId:crypto.randomUUID()});if(result==='returned')window.showAppAlert?.('Evrak gerekçenizle yazara iade edildi.','success');},result!=='returned'));
-                    if(result==='approved')action.classList.add('ebys-process-primary');actions.append(action);
+                    const fx=p.purchaseOrderId&&result==='approved';
+                    const action=btn(title,async()=>{
+                        await run(async()=>{
+                            try{await api().decideTask({processId:p.id,expectedRevision:p.revision,result,reason:reason.value,...(fx?{fxPreview:preview?.rateSource||null}:{}),operationId:crypto.randomUUID()});}
+                            catch(e){if(e.code==='purchase-rates-changed'&&firstStep)await loadPreview();throw e;}
+                            if(result==='returned')window.showAppAlert?.('Evrak gerekçenizle yazara iade edildi.','success');
+                        },result!=='returned');
+                        if(fx&&firstStep&&action.isConnected)action.disabled=!preview;
+                    });
+                    if(result==='approved'){action.classList.add('ebys-process-primary');approve=action;if(firstStep)action.disabled=!preview;}
+                    actions.append(action);
                 }
                 box.append(actions);d.append(box);
             }
@@ -133,7 +187,9 @@ async function open(versionId,documentId,allowStart=true,owner='process') {
                 form.onsubmit=e=>{e.preventDefault();if(form.reportValidity())run(()=>api().withdrawProcess({processId:p.id,expectedRevision:p.revision,reason:reason.value,operationId:crypto.randomUUID()}));};
                 box.append(form);d.append(box);
             }
-            if(p.ownerUid===actor&&['returned','rejected','withdrawn'].includes(p.state))d.append(btn('Yeni sürüm hazırla',()=>run(async()=>{const data=await window.AppModules.EBYSDocuments.readDocument(p.documentId);if(data.head.currentVersionId!==p.id)throw new Error('Bu evrak için daha yeni bir sürüm hazırlanmış.');await window.AppModules.EBYSDocuments.reopenDraft({documentId:p.documentId,expectedRevision:data.head.revision,operationId:crypto.randomUUID()});window.AppModules.EBYSDocumentsUI?.open(p.documentId);},false)));
+            // A-2: satın almaya bağlı evrak genel taslak komutuyla açılamaz; satın alma formunun EBYS düzenleme kipine gider.
+            if(p.ownerUid===actor&&['returned','rejected','withdrawn'].includes(p.state)&&p.purchaseOrderId)d.append(btn('Yeni sürüm hazırla',()=>run(async()=>{const form=window.AppModules.EBYSPurchaseUI;if(!form?.openForRevision)throw new Error('Satın alma formu yüklenemedi; sayfayı yenileyin.');await form.openForRevision(p.documentId,p.id);},false)));
+            else if(p.ownerUid===actor&&['returned','rejected','withdrawn'].includes(p.state))d.append(btn('Yeni sürüm hazırla',()=>run(async()=>{const data=await window.AppModules.EBYSDocuments.readDocument(p.documentId);if(data.head.currentVersionId!==p.id)throw new Error('Bu evrak için daha yeni bir sürüm hazırlanmış.');await window.AppModules.EBYSDocuments.reopenDraft({documentId:p.documentId,expectedRevision:data.head.revision,operationId:crypto.randomUUID()});window.AppModules.EBYSDocumentsUI?.open(p.documentId);},false)));
         }
         const footer=n('footer',null,'ebys-process-footer');footer.append(n('small',p?.state==='active'?'Bu pencereyi kapatmak süreci iptal etmez.':'Pencereyi kapatabilirsiniz.'),btn('Kapat',()=>d.close()));d.append(footer);
         guardDialog(d,async()=>{
@@ -163,7 +219,9 @@ function renderTasks(tasks,section) {
                 const epoch=viewEpoch;const v=await api().getVersion(t.versionId);
                 if(!alive||!row.isConnected||actor!==window.userAuth?.uid||epoch!==viewEpoch)return;
                 const view=modal((v.metadataSnapshot?.subject||'Evrak')+' · Sürüm '+(v.versionNo||'—'),'ebysMyTasks');guardDialog(view,async()=>{await api().getVersion(t.versionId);return true;});
-                view.append(n('p',history?'Bu, karar verdiğiniz sürümdür.':'Bu, size atanmış görevin sürümüdür.','ebys-process-help'),n('p',(v.metadataSnapshot?.correspondent||'')+' · '+(v.metadataSnapshot?.date||'')),n('div',v.content,'ebys-preview-content'),btn('Kapat',()=>view.close()));
+                view.append(n('p',history?'Bu, karar verdiğiniz sürümdür.':'Bu, size atanmış görevin sürümüdür.','ebys-process-help'),n('p',(v.metadataSnapshot?.correspondent||'')+' · '+(v.metadataSnapshot?.date||'')),n('div',v.content,'ebys-preview-content'));
+                if(Array.isArray(v.purchaseSnapshot?.items))view.append(purchaseLines(v.purchaseSnapshot));
+                view.append(btn('Kapat',()=>view.close()));
             }catch(e){if(!alive||!row.isConnected||actor!==window.userAuth?.uid)return;closeOwned('ebysMyTasks');title.textContent='Evrak';meta.textContent='Sürüm bilgisi alınamadı.';window.showAppAlert?.(e.message,'warning');}
         });
         read.disabled=!history&&Date.now()>=end;actions.append(read);row.append(actions);section.append(row);

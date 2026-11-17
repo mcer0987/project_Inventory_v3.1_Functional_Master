@@ -1069,6 +1069,50 @@
                     </table>
                 </div>
             </div>
+
+            <!-- A-3: Personelin kendi evrak çalışma alanı (oluştur → düzenle → dondur → rota başlat).
+                 admin.html'deki #ebysDocumentRegistry (1182-1227 satırları) ile aynı DOM kimlikleri; tek kaynak src/ui/ebys-documents-ui.js. -->
+            <div class="premium-card mt-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="ebys-guide-head">
+                        <h3 class="mb-0" style="color: var(--color-secondary); font-weight: 700; letter-spacing: -0.5px;">Evraklarım (EBYS)</h3>
+                        <button type="button" class="ebys-guide-link" data-ebys-showcase="books" aria-haspopup="dialog"
+                            title="Gelen/giden/iç yazışma taslağı hazırlama, dondurup onay rotası başlatma ve evrak kopyası indirmeyi örneklerle gösterir">
+                            <span class="ebys-guide-spark" aria-hidden="true"><i class="fas fa-wand-magic-sparkles"></i></span><span class="ebys-guide-text">EBYS Rehberi</span>
+                        </button>
+                    </div>
+                </div>
+                <p class="small text-muted mb-3">Kendi gelen, giden ve iç yazışma taslaklarınızı burada hazırlar, metni dondurup onay rotası başlatır ve kendi evraklarınızın kişisel kopyasını indirebilirsiniz.</p>
+
+                <section id="ebysDocumentSummary" class="mb-4" aria-label="Evrak kayıt defteri özeti">
+                    <div class="kpi-container req-kpi-container" aria-label="Tüm evrakların göstergeleri">
+                        <div class="dashboard-card card-blue"><i class="fas fa-file-alt" aria-hidden="true"></i><div class="dashboard-info"><span class="dashboard-title">Toplam Evrak</span><span id="ebysCount-total" class="dashboard-value" data-ebys-count>—</span></div></div>
+                        <div class="dashboard-card card-yellow"><i class="fas fa-pen" aria-hidden="true"></i><div class="dashboard-info"><span class="dashboard-title">📝 Taslaklar</span><span id="ebysCount-draft" class="dashboard-value" data-ebys-count>—</span></div></div>
+                        <div class="dashboard-card card-green"><i class="fas fa-clipboard-check" aria-hidden="true"></i><div class="dashboard-info"><span class="dashboard-title">📋 Kayıtlı Evraklar</span><span id="ebysCount-registered" class="dashboard-value" data-ebys-count>—</span></div></div>
+                        <div class="dashboard-card card-blue"><i class="fas fa-lock" aria-hidden="true"></i><div class="dashboard-info"><span class="dashboard-title">🔒 Dondurulan / İncelemede</span><span id="ebysCount-in_review" class="dashboard-value" data-ebys-count>—</span></div></div>
+                    </div>
+                    <p id="ebysCountScope" class="small text-muted">Evrak toplamları, giriş yaptıktan sonra gösterilir.</p>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <button id="ebysCountRefresh" type="button" class="btn btn-sm btn-outline-primary">Toplamları yenile</button>
+                        <span id="ebysCountStatus" role="status" class="small"></span>
+                    </div>
+                </section>
+                <section id="ebysDocumentRegistry" class="modern-card mb-0" aria-label="Evrak kayıt defteri">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                        <h3 class="m-0">Evrak Kayıt Defteri</h3>
+                        <div class="d-flex flex-wrap gap-2"><button id="ebysDocumentNew" type="button" class="btn btn-primary">Yeni evrak</button><button id="ebysDocumentExport" type="button" class="btn btn-outline-secondary">Evrak kopyasını indir</button></div>
+                    </div>
+                    <p class="small text-muted">Kendi evraklarınızı ve yetkili olduğunuz ilgili kayıtları kişisel dosya olarak indirebilirsiniz. Kurum kurtarma paketi ayrı hazırlanır.</p>
+                    <p class="small text-muted">Arama ve evrak durumu filtresi yalnız bu sayfadaki en fazla 50 kaydı kapsar. Onay adımları için Süreç durumu, işin kabulü, iadesi ve tamamlanması için İcra İşlerim bölümüne bakın.</p>
+                    <div id="ebysDocumentKinds" class="d-flex flex-wrap gap-2 mb-3"></div>
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        <select id="ebysStateFilter" class="form-select" aria-label="Evrak durumu" style="width:auto"><option value="">Tüm durumlar</option></select>
+                        <input id="ebysDocumentSearch" class="form-control" aria-label="Bu sayfada evrak numarası ara" placeholder="Bu sayfada evrak numarası ara" style="width:auto">
+                    </div>
+                    <div class="table-responsive"><table class="modern-table"><thead><tr><th>Kayıt / Taslak No</th><th>Birim</th><th>Evrak durumu</th><th>Güncelleme</th><th>İşlem</th></tr></thead><tbody id="ebysDocumentRows"></tbody></table></div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mt-3"><button id="ebysDocumentFirst" type="button" class="btn btn-sm btn-outline-secondary">Başa dön</button><button id="ebysDocumentNext" type="button" class="btn btn-sm btn-outline-secondary">Sonraki 50</button><span id="ebysDocumentStatus" role="status" class="small text-muted"></span></div>
+                </section>
+            </div>
         </div>
     </div> <!-- /inventory-screen -->
 

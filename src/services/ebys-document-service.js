@@ -543,4 +543,5 @@ export async function exportOwnDocuments() {
     };
 }
 window.AppModules = window.AppModules || {};
-window.AppModules.EBYSDocuments = { saveDraft, freezeVersion, registerDocument, readDocument, listDocuments, countDocuments, exportOwnDocuments, reopenDraft };
+window.AppModules.EBYSDocuments = { saveDraft, freezeVersion, registerDocument, readDocument, listDocuments, countDocuments, exportOwnDocuments, reopenDraft,
+    createPurchaseDocument, savePurchaseDraft, freezePurchaseVersion, getPurchaseView };

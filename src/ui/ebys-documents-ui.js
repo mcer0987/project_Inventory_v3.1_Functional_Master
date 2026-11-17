@@ -13,7 +13,6 @@ const node = (tag, text, css) => { const n = document.createElement(tag); if (te
 const button = (text, action, css = 'btn btn-sm btn-outline-primary') => { const b = node('button', text, css); b.type = 'button'; b.onclick = action; return b; };
 let kind = 'incoming', rows = [], cursor = null, unsubscribe = null, dialog = null, syncAllowed = false, countsRevision = 0, listRevision = 0, editorEpoch = 0, countsLoaded = false, countsBusy = false;
 const documentDialogs=new Map();let sessionActor=null;
-const registryVisible=()=>!document.hidden&&getComputedStyle(document.getElementById('purchaseTab')).display!=='none';
 function clearDocumentDialogs(documentId=null){for(const [d,r] of documentDialogs)if(!documentId||r.documentId===documentId){d.remove();documentDialogs.delete(d);}if(!documentId)dialog=null;}
 function pauseEditors(){for(const [d,r] of documentDialogs){r.ready=false;r.generation++;if(!r.saved)r.saved=[...d.querySelectorAll('button')].filter(b=>b.textContent!=='Kapat'&&!b.classList.contains('ebys-dialog-close')&&b!==r.retry).map(b=>[b,b.disabled]);r.saved.forEach(([b])=>b.disabled=true);}}
 async function resumeEditors(){
@@ -37,6 +36,11 @@ async function resumeEditors(){
     }
 }
 const host = document.getElementById('ebysDocumentRegistry');
+// [WHY]: registryVisible sabit #purchaseTab'ı varsayıyordu; index.html'de bu panel #purchaseTab yerine kendi
+//        premium-card'ındadır (.tab-content ile aynı görünürlük mantığını paylaşır). admin.html'de panel .admin-tab-content'tir.
+// [HOW]: Host'un en yakın .tab-content/.admin-tab-content kapsayıcısı baz alınır; kapsayıcı yoksa (host sayfada değilse) her zaman görünür kabul edilmez.
+const panel = host?.closest('.tab-content, .admin-tab-content');
+const registryVisible = () => Boolean(host) && !document.hidden && (!panel || getComputedStyle(panel).display !== 'none');
 const countScope = document.getElementById('ebysCountScope');
 const countStatus = document.getElementById('ebysCountStatus');
 const countRefresh = document.getElementById('ebysCountRefresh');
@@ -115,7 +119,14 @@ function render() {
         const date = head.updatedAt?.toDate?.().toLocaleString('tr-TR') || '—';
         for (const text of [head.registrationNo || `Taslak · ${head.id.slice(0, 8)}`, unit?.name || head.unitId, states[head.state] || head.state, date]) row.append(node('td', text));
         const action = node('td'), actions = node('div',null,'ebys-registry-actions');
-        if (head.ownerUid === window.userAuth?.uid) actions.append(button('Aç', () => open(head.id)));
+        // A-3: satın almaya bağlı, henüz dondurulmamış veya revizyon bekleyen evrak genel metin formunda açılamaz
+        // (servis bu kaydı reddeder); satın alma formunun EBYS düzenleme kipine yönlendirilir.
+        const purchaseRevision = Object.hasOwn(head, 'purchaseOrderId') && (!head.currentVersionId || ['returned', 'rejected', 'withdrawn'].includes(head.state));
+        if (head.ownerUid === window.userAuth?.uid) actions.append(button('Aç', () => {
+            const target = purchaseRevision && window.AppModules.EBYSPurchaseUI?.openForRevision
+                ? window.AppModules.EBYSPurchaseUI.openForRevision(head.id) : open(head.id);
+            Promise.resolve(target).catch(error => message(error.message));
+        }));
         else actions.append(node('span', 'Yazarına özel içerik', 'small text-muted'));
         if(head.currentVersionId)actions.append(button('Süreç durumu',()=>window.AppModules.EBYSProcessUI.open(head.currentVersionId,head.id,head.ownerUid===window.userAuth?.uid)));
         action.append(actions);
@@ -293,6 +304,23 @@ function preview(head, data) {
         node('p', `Muhatap: ${meta.correspondent || ''}`),
         node('p', `Dosya planı: ${meta.filePlanCode || ''}${meta.filePlanTitle ? ` – ${meta.filePlanTitle}` : ''} · Gizlilik: ${meta.confidentiality || ''}`),
         node('div', data.content || '', 'ebys-preview-content'), node('p', `Dağıtım:\n${meta.distribution || '—'}`, 'ebys-preview-content'));
+    // A-3: Satın almaya bağlı dondurulmuş sürüm yalnız "Satın alma talebi: konu" metnini taşır; onaycı dışındaki
+    // okuyucular (ör. yazar kendi çıktı önizlemesinde) kalemleri ve toplamları burada da görsün.
+    if (Array.isArray(data.purchaseSnapshot?.items)) {
+        const money = v => Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '—';
+        const scroller = node('div', null, 'table-responsive'), table = node('table', null, 'table table-sm align-middle'), head2 = node('tr');
+        for (const title of ['Mal / hizmet', 'Miktar', 'Birim', 'Birim fiyat', 'Para', 'KDV %', 'Toplam']) head2.append(node('th', title, 'small text-nowrap'));
+        const thead = node('thead'), tbody2 = node('tbody'); thead.append(head2);
+        for (const line of data.purchaseSnapshot.items) {
+            const row = node('tr');
+            for (const value of [line.description, String(line.quantity), line.unit, money(line.unitPrice), line.currency, String(line.taxRate), money(line.totalPrice)]) row.append(node('td', value ?? '—', 'small'));
+            tbody2.append(row);
+        }
+        table.append(thead, tbody2); scroller.append(table);
+        body.append(node('h3', 'Satın alma kalemleri'), scroller);
+        const totals = data.purchaseSnapshot.totals || {}, used = new Set(data.purchaseSnapshot.items.map(line => line.currency));
+        for (const currency of ['TRY', 'USD', 'EUR']) if (used.has(currency) && totals[currency]) body.append(node('p', `${currency}: Ara ${money(totals[currency].subtotal)} · KDV ${money(totals[currency].tax)} · Genel ${money(totals[currency].total)}`, 'small mb-1'));
+    }
     if (head.verificationToken) {
         const url = verificationUrl(head.verificationToken, window.location.href, window.AppEnv?.EMULATOR === true);
         const box = node('figure', null, 'ebys-preview-verification');
@@ -357,7 +385,11 @@ if (host) {
         subscribe();
         return () => { syncAllowed = false; sessionActor = null; stop(); clear(); };
     });
-    window.AppModules.AdminTabs.onAny(tab => { if (tab === 'purchaseTab') {if(!unsubscribe)subscribe();} else { stop(); clear(); } });
+    // index.html'de sekme geçişi window.switchTab ile .tab-content üzerindeki 'active' sınıfını değiştirir (AdminTabs yalnız
+    // admin.html'de tetiklenir); panel üzerindeki style/class değişimini izleyip sekmeye göre akışı başlat/durdur.
+    if (panel) new MutationObserver(() => { if (registryVisible()) { if (!unsubscribe) subscribe(); } else { stop(); clear(); } })
+        .observe(panel, { attributes: true, attributeFilter: ['style', 'class'] });
+    window.AppModules.AdminTabs?.onAny(tab => { if (tab === 'purchaseTab') {if(!unsubscribe)subscribe();} else { stop(); clear(); } });
     document.addEventListener('visibilitychange',()=>{
         if(!syncAllowed)return;
         if(sessionActor!==window.userAuth?.uid){syncAllowed=false;stop();clear();return;}
