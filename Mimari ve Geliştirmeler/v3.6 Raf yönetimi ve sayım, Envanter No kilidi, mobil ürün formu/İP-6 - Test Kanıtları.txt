@@ -1,0 +1,54 @@
+İP-6 Çıkışı Geri Al ve Kritik Stok Düzeltmesi — Test Kanıtları (16.11.2026, dal refactor/v3.7-script-soc-ayristirmasi)
+
+== node --check (sözdizimi)
+OK: src/services/assignment-service.js
+OK: src/ui/movement-table.js
+OK: src/services/purchase-servises.js
+OK: src/modules/admin/admin-dashboard.js
+OK: tests/unit/script-bridge-contract.test.mjs
+
+== npm run lint:xss (değişiklik SONRASI)
+> lint:xss
+> node scratch/xss-lint.js
+xss-lint · 101 dosya · 209 sink · 291 HTML şablonu · 1023 dinamik ifade
+  güvenli 1004 · izinli (xss-ok) 19 · İZİNSİZ 0
+
+== node --test tests/unit/script-bridge-contract.test.mjs (undoExit adı dahil)
+✔ index.html: klasik zincir script.js'ten hemen sonra ve aynı sırayla yüklenir (3.8506ms)
+✔ admin.html: klasik zincir script.js'ten hemen sonra ve aynı sırayla yüklenir (3.6317ms)
+✔ script.js + klasik zincir: taşıma öncesi global sözleşme, paylaşılan let/const ve ad alanları korunur (2571.6924ms)
+tests 3
+pass 3
+fail 0
+
+== npm run test:unit (tam paket)
+tests 395
+suites 0
+pass 395
+fail 0
+cancelled 0
+skipped 0
+todo 0
+duration_ms 50657.6847
+
+== npm run test:rules (regresyon — bu iş Rules'a dokunmuyor)
+suites 38
+pass 407
+fail 0
+cancelled 0
+skipped 0
+todo 0
+duration_ms 56900.3172
+
+== git diff --stat (kod)
+ src/modules/admin/admin-dashboard.js       |  9 ++++-
+ src/services/assignment-service.js         | 34 +++++++++++++++++-
+ src/services/purchase-servises.js          |  5 ++-
+ src/ui/movement-table.js                   | 57 ++++++++++++++++++++++++++----
+ tests/unit/script-bridge-contract.test.mjs |  6 ++--
+ 5 files changed, 98 insertions(+), 13 deletions(-)
+
+Not: admin-dashboard.js ve assignment-service.js ilk düzenleme sonrası çalışma kopyasında CRLF'ye dönmüştü
+(repo'daki kayıtlı biçim LF); `git ls-files --eol -m` ile tespit edilip yalnız satır sonları LF'ye geri
+çevrildi (içerik değişmedi) — bu olmasaydı diff binlerce satır "değişmiş" gösterecekti (proje hafızası:
+mixed CRLF/LF notu).

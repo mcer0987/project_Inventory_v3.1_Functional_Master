@@ -11,6 +11,7 @@
 | İP-2 Envanter No plakası ve değişim aracı | [İP-2 Envanter No Kilidi ve Değişim Aracı - Implementation Walkthrough.md](./İP-2%20Envanter%20No%20Kilidi%20ve%20Değişim%20Aracı%20-%20Implementation%20Walkthrough.md) | `d51ab28` | birim 375 · kural 398 · defter emü. 32 · tarayıcı 15/15 |
 | İP-3 Mobil ve dokunmatik ürün formu | [İP-3 Mobil Ürün Formu - Implementation Walkthrough.md](./İP-3%20Mobil%20Ürün%20Formu%20-%20Implementation%20Walkthrough.md) | İP-3 commit'i | birim 382 · kural 398 · tarayıcı 11/11 |
 | İP-5 script.js SoC ayrıştırması | [İP-5 script.js SoC Ayrıştırması - Genel Rapor.md](./İP-5%20script.js%20SoC%20Ayrıştırması%20-%20Genel%20Rapor.md) | henüz yok (çalışma ağacında) | birim 395 · kural 407 · e2e 36 · eşdeğerlik 30/30 (+2 bilinçli fark) |
+| İP-8 EBYS katalog seed verisi | [İP-8 EBYS Katalog Seed Verisi - Implementation Walkthrough.md](./İP-8%20EBYS%20Katalog%20Seed%20Verisi%20-%20Implementation%20Walkthrough.md) | yok — veri script'i, `scratch/` gitignore | emülatör: dosya planı 20/20 · şablon 5/5 · pageerror 0 |
 
 ---
 

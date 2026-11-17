@@ -54,11 +54,25 @@
             .filter(({ row }) => !term || _b3SearchText(row).includes(term));
     }
 
-    function _b3ActionButtons(id) {
+    // [WHY]: "Çıkışı Geri Al" butonu her satırda aktifti ama onclick yalnız bir "geliştirme aşamasında" bildirimine
+    //        bağlıydı (window.showUndoNotice); artık window.undoExit ile gerçek işlemi yapıyor. Yalnız demirbaş
+    //        tip:'cikis' kayıtları geri alınabilir (sarf iade edilmez, hurda bilinçli olarak tek yönlü, zimmet
+    //        kendi "Zimmetten Düş" akışını kullanır) — uygun olmayan satırlarda buton nedeni açıklayan title ile pasif.
+    // [HOW]: row, normalizeB3'ten (_getB3Rows zaten üretiyor); AssignmentService.planUndoExit ile aynı kurallar.
+    function _b3UndoDisabledReason(row) {
+        if (row.tip !== 'cikis') return 'Yalnız çıkış kayıtları buradan geri alınır (zimmet: "Zimmetten Düş").';
+        if (row.iadeEdildi) return 'Bu çıkış zaten geri alınmış.';
+        if (!row.isDemirbas) return 'Sarf malzeme çıkışı geri alınamaz.';
+        if (row.stokDisi || !row.productId) return 'Stok dışı girilmiş kayıt; geri alınacak depo satırı yok.';
+        return '';
+    }
+    function _b3ActionButtons(id, row) {
+        const reason = row ? _b3UndoDisabledReason(row) : '';
+        const undoAttrs = reason ? `disabled title="${escapeHtml(reason)}" aria-disabled="true"` : `title="Çıkışı Geri Al" onclick="window.undoExit(${jsArg(id)})"`;
         return `<button type="button" class="table-action-btn pdf-btn btn-pdf" title="Zimmet Tutanağı Yazdır" aria-label="Zimmet tutanağı yazdır" onclick="generateZimmetPDF(${jsArg(id)})">
                 <i class="fas fa-file-pdf"></i> <span>PDF</span>
             </button>
-            <button type="button" class="table-action-btn undo-btn btn-undo" title="Çıkışı Geri Al" aria-label="Çıkışı geri al" onclick="window.showUndoNotice()">
+            <button type="button" class="table-action-btn undo-btn btn-undo" aria-label="Çıkışı geri al" ${undoAttrs}>
                 <i class="fas fa-rotate-left"></i> <span>Geri Al</span>
             </button>
             <button type="button" class="table-action-btn delete-btn btn-delete" title="Kaydı Sil" aria-label="Kaydı sil" onclick="if(validateAdminAction()) deleteB3Row(${jsArg(id)})">
@@ -108,7 +122,7 @@
             <td>${escapeHtml(row.alanKisi)}</td>
             <td>${escapeHtml(row.tarih)}</td>
             <td class="action-cell">
-                <div class="table-row-actions">${_b3ActionButtons(item.id) /* xss-ok: id jsArg ile kaçırılır, geri kalan sabit */}</div>
+                <div class="table-row-actions">${_b3ActionButtons(item.id, row) /* xss-ok: id jsArg ile kaçırılır, geri kalan sabit */}</div>
             </td>
         </tr>`;
         }).join('');
@@ -184,7 +198,7 @@
                         ${detail('Açıklama / Not', row.not, 'b3-note') /* xss-ok: detail() tüm parçaları escapeHtml ile kaçırır */}
                     </dl>
                 </details>
-                <footer class="b3-card-actions">${_b3ActionButtons(item.id) /* xss-ok: id jsArg ile kaçırılır, geri kalan sabit */}</footer>
+                <footer class="b3-card-actions">${_b3ActionButtons(item.id, row) /* xss-ok: id jsArg ile kaçırılır, geri kalan sabit */}</footer>
             </article>`;
         };
 
@@ -238,14 +252,42 @@
         btn.setAttribute('aria-expanded', String(open));
     };
 
-    // [WHY]: Çıkış geri alma özelliği için kullanıcı bilgilendirmesi
-    // [HOW]: Henüz fonksiyon yazılmadan mini bildirim (toast) gösterir
+    // [WHY]: Çıkış geri alma özelliği için kullanıcı bilgilendirmesi (eski placeholder; buton artık window.undoExit
+    //        çağırıyor). Köprü sözleşmesi (script-bridge-contract.test.mjs) adı listelediği için fonksiyon korunuyor.
     window.showUndoNotice = function () {
         if (typeof showAppAlert === 'function') {
             showAppAlert('Geri alma özelliği geliştirme aşamasındadır.', 'info');
         } else {
             alert('Geri alma özelliği geliştirme aşamasındadır.');
         }
+    };
+
+    // [WHY]: AssignmentService.planClose ("Zimmetten Düş") deseninin çıkış kayıtlarındaki eşi; buildB3Entry zaten
+    //        her çıkışa iadeEdildi alanlarını koyuyordu, yalnız bunu kullanan bir işlem yoktu.
+    // [HOW]: planUndoExit (saf plan) başarısızsa kullanıcıya nedeni gösterilir; başarılıysa runStockOps ile stok
+    //        +adet ve b3 kaydı iadeEdildi:true tek transaction'da yazılır, tablo ve ilgili depo yeniden çizilir.
+    window.undoExit = async function (b3Id) {
+        if (typeof validateAdminAction === 'function' && !validateAdminAction()) return;
+        const item = (window.data.b3 || []).find(x => x && String(x.id) === String(b3Id));
+        const row = item && window.Schema.normalizeB3(item);
+        if (!row) { if (typeof showAppAlert === 'function') showAppAlert('Çıkış kaydı bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
+        const label = `"${row.urunAciklama}"${row.envanterNo !== '-' ? ` (${row.envanterNo})` : (row.sn !== '-' ? ` (SN: ${row.sn})` : '')}`;
+        const confirmed = typeof window.showCustomConfirm === 'function'
+            ? await window.showCustomConfirm('Çıkışı Geri Al', `${label} çıkışı geri alınacak; ${row.kaynakDepo?.toUpperCase() || 'depo'}ya +${row.adet} adet olarak eklenecek. Onaylıyor musunuz?`)
+            : confirm(`${label} çıkışı geri alınsın mı?`);
+        if (!confirmed) return;
+        const now = typeof getTurkiyeSaati === 'function' ? getTurkiyeSaati() : new Date().toLocaleString('tr-TR');
+        const plan = window.AssignmentService.planUndoExit(b3Id, { tarih: now });
+        if (!plan.ok) { if (typeof showAppAlert === 'function') showAppAlert(plan.error, 'error'); return; }
+        try {
+            await window.runStockOps({ stock: plan.stock, writes: plan.writes }, { forbiddenMessage: 'Çıkışı geri alma yalnızca sistem yöneticisi tarafından yapılabilir.' });
+        } catch (e) {
+            if (typeof showAppAlert === 'function') showAppAlert(`Geri alma kaydedilemedi; kayıt yerinde bırakıldı. ${e.message || ''}`, 'error');
+            return;
+        }
+        if (typeof renderExitTable === 'function') renderExitTable();
+        if (typeof window.renderTable === 'function') window.renderTable(plan.view.kaynakDepo);
+        if (typeof showAppAlert === 'function') showAppAlert(`${label} çıkışı geri alındı.`, 'success');
     };
 
     // [WHY]: B3 çıkış kayıtlarının aylık raporlama sonrasında toplu temizlenmesi
@@ -300,6 +342,7 @@
     window.AppModules = window.AppModules || {};
     window.AppModules.MovementTable = Object.freeze({
         normalizeB3Row: window.normalizeB3Row, renderExitTable, toggleB3CardView: window.toggleB3CardView,
-        toggleB3Help: window.toggleB3Help, showUndoNotice: window.showUndoNotice, bulkDeleteB3: window.bulkDeleteB3
+        toggleB3Help: window.toggleB3Help, showUndoNotice: window.showUndoNotice, bulkDeleteB3: window.bulkDeleteB3,
+        undoExit: window.undoExit
     });
 })();

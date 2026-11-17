@@ -825,7 +825,10 @@ window.receiveFromService = async function (serviceId) {
         [statusField]: 'Kullanıma Hazır',
         açıklama: "Servisten Döndü: " + (record.not || ""),
     };
-    delete recovered.sn; delete recovered.envanterNo;   // cihaz kimliği stok satırına değil hareket kayıtlarına aittir
+    // [WHY]: sn/envanterNo eskiden siliniyordu ("cihaz kimliği stok satırına değil hareket kayıtlarına aittir");
+    //        ama satır normalde hiç silinmediği için (runStockOps her zaman tx.update) bu alan yalnız satırın
+    //        GERÇEKTEN silinip createIfMissing ile yeniden oluşturulduğu nadir durumda kullanılır — o durumda da
+    //        kilitli envanterNo'nun (v3.6 Envanter No kilidi) kaybolmaması gerekir.
     delete recovered.rafPasif;   // v3.6: sayım bayrağını yalnız raf kilidi yazar
 
     // v3.6: rafı sayımdaki kayda stok eklenmez (defter de reddeder); servis kaydı açık kalır.

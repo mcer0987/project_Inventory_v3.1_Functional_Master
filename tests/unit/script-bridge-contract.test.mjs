@@ -30,8 +30,8 @@ const WINDOW_CONTRACT = {
         'sendDraftInventoryRequest', 'setupRowSelection', 'setupUI', 'showImportFormatHelp', 'showMobileBottomSheet', 'showMobileTooltip',
         'showRequestApprovalModal', 'showRequestRejectModal', 'showRowTooltip', 'showStaffCodeOnce', 'showUndoNotice', 'sortTable',
         'startWorkflow', 'switchTab', 'toggleAllRequests', 'toggleB3CardView', 'toggleB3Help', 'toggleCardView', 'toggleSelectAll',
-        'toggleWatch', 'tsToTurkiye', 'updateCartQty', 'updateFloatingBar', 'updateNavbarUI', 'updateStock', 'validateAdminAction',
-        'viewWorkflow', 'withdrawInventoryRequest', 'onclick'],
+        'toggleWatch', 'tsToTurkiye', 'undoExit', 'updateCartQty', 'updateFloatingBar', 'updateNavbarUI', 'updateStock',
+        'validateAdminAction', 'viewWorkflow', 'withdrawInventoryRequest', 'onclick'],
     object: ['AppModules', 'REQUEST_REJECT_REASONS', '_cardViewActive', '_dx', 'currentUser', 'data'],
     boolean: ['isAdminPanel', 'isFirebaseLoaded']
 };
@@ -48,7 +48,7 @@ const CLASSIC_CHAIN = ['script.js', 'src/ui/stock-exit-cart.js', 'src/ui/movemen
 const NAMESPACES = {
     ExitCart: ['openCartModal', 'searchForCart', 'addToCart', 'removeFromCart', 'renderCartItems', 'updateCartQty', 'saveCartExit',
         'searchForExit'],
-    MovementTable: ['normalizeB3Row', 'renderExitTable', 'toggleB3CardView', 'toggleB3Help', 'showUndoNotice', 'bulkDeleteB3'],
+    MovementTable: ['normalizeB3Row', 'renderExitTable', 'toggleB3CardView', 'toggleB3Help', 'showUndoNotice', 'bulkDeleteB3', 'undoExit'],
     PersonnelModal: ['openPersonelModal', 'closePersonelModal', 'addPersonel', 'editPersonel', 'openPersonelAccount', 'showStaffCodeOnce'],
     RequestTables: ['renderRequestsTable', 'renderMyRequestsTable', 'renderPersonnelInventoryTable', 'searchForRequest', 'onReqTypeChange'],
     RequestActions: ['confirmRequest', 'rejectRequest', 'deleteRequest', 'withdrawInventoryRequest', 'editPersonnelInventoryRequest',

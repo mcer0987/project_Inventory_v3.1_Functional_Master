@@ -168,6 +168,38 @@
         return { ok: true, qty, product, stock, writes, view };
     }
 
+    // [WHY]: "Çıkışı Geri Al" butonu b3 çıkış satırlarında zaten vardı ama onclick yalnız bir placeholder
+    //        bildirimine ("geliştirme aşamasında") bağlıydı; buildB3Entry her çıkış kaydına iadeEdildi/
+    //        iadeEdildiTarihi/iadeDepo alanlarını zaten koyuyordu (veri modeli beklemiş, servis hiç yazılmamış).
+    // [HOW]: planClose ile aynı plan-nesnesi kalıbı. Yalnız demirbaş tip:'cikis' kayıtları geri alınabilir
+    //        (sarf iade edilmez; hurda bilinçli olarak tek yönlü kalır — mevcut tasarımla tutarlı). Satır hiç
+    //        silinmediği için (runStockOps her zaman tx.update) +adet doğrudan aynı productId'ye, dolayısıyla
+    //        aynı kilitli envanterNo'ya geri yazılır.
+    /**
+     * @param {string|number} b3Id  tip:'cikis' b3 kaydı
+     * @param {{tarih:string}} o
+     * @returns {{ok:true, stock:object[], writes:object[], view:object} | {ok:false, error:string}}
+     */
+    function planUndoExit(b3Id, { tarih } = {}) {
+        const fail = error => ({ ok: false, error });
+        const data = window.data || {};
+        const item = (data.b3 || []).find(x => x && String(x.id) === String(b3Id));
+        if (!item) return fail('Çıkış kaydı bulunamadı; liste güncellenmiş olabilir.');
+        const view = S().normalizeB3(item);
+        if (view.tip !== 'cikis') return fail('Bu kayıt bir çıkış değil.');
+        if (view.iadeEdildi) return fail('Bu çıkış zaten geri alınmış.');
+        if (!view.isDemirbas) return fail('Sarf malzeme çıkışı geri alınamaz; yalnız demirbaş çıkışları geri alınabilir.');
+        if (view.stokDisi || !view.productId) return fail('Bu kayıt stok dışı girilmiş; geri alınacak bir depo satırı yok.');
+        const product = (data[view.kaynakDepo] || []).find(p => p && String(p.id) === String(view.productId));
+        if (!product) return fail('Kaynak depo satırı bulunamadı; liste güncellenmiş olabilir.');
+        if (S().isRowCountLocked && S().isRowCountLocked(product)) {
+            return fail('Ürünün rafı sayımda; geri alma sayım bitince yapılabilir.');
+        }
+        const writes = [{ op: 'update', col: 'b3', id: item.id, fields: { iadeEdildi: true, iadeEdildiTarihi: tarih, iadeDepo: view.kaynakDepo } }];
+        const stock = [{ col: view.kaynakDepo, id: view.productId, delta: view.adet }];
+        return { ok: true, stock, writes, view };
+    }
+
     // Kişinin teslim almayı beklediği (onaylanmış, iade edilmemiş) zimmetleri.
     function getPendingDeliveries(user) {
         if (!user) return [];
@@ -535,7 +567,7 @@
 
     const AssignmentService = {
         getAssignments, getPersonInventory, matchesPerson, isMyRequest, resolvePersonelId, planSarfConsumption,
-        assignmentState, getPendingDeliveries, stateBadgeHtml, STATE_LABELS, planClose, findReturnProduct,
+        assignmentState, getPendingDeliveries, stateBadgeHtml, STATE_LABELS, planClose, planUndoExit, findReturnProduct,
         activeDeviceUses, checkDeviceIds, isOpenService, serviceRecordsFor, getDeviceHistory,
         invalidateDeviceUses, usesStats,
         generatePersonnelZimmetData, generateB3MovementData, generateReturnData, ZIMMET_BELGE_SEMA, ZIMMET_KALEM_KEYS,

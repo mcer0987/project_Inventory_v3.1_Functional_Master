@@ -1,5 +1,5 @@
 // 1. EN ÜSTE İTHALATLAR GELMELİ
-import { fireDb } from '../../services/firebase-handler.js';
+import { fireDb, STOCK_AUTO_EMPTY } from '../../services/firebase-handler.js';
 import { getFirestore, updateDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ── 🚨 KRİTİK STOK FİLTRE VE YARDIMCI FONKSİYONLAR ──
@@ -1017,6 +1017,13 @@ window.renderCriticalStockTable = function () {
     tumUrunler.forEach(item => {
         // [FİLTRE] Pasif ürünleri saymıyoruz (Eski kayıtlar veya depoda olmayanlar)
         if (item.durumu === 'Pasif' || item.status === 'Pasif') return;
+        // [WHY]: Demirbaş satırları tür+durum ile gruplanıyor; tek bir birim çıkış/sevk/zimmet/hurda ile adet 0'a
+        //        inince computeStockPatch durumu otomatik 'Tükendi' yapıyor. Bu satır KENDİ başına ayrı bir grup
+        //        oluşturup (mevcut her zaman 0) gerçekte stoklu bir ürünü yanlışlıkla "TÜKENDİ" diye alarma
+        //        düşürüyordu — aynı türün başka durumdaki sağlam birimleri varken bile.
+        // [HOW]: Otomatik "gitti" durumundaki satırlar toplamdan tamamen çıkarılır (zaten 0 katkıları vardı,
+        //        yalnız kendi fantom grubunu oluşturmasınlar). Elle girilmiş "Arızalı" gibi durumlar etkilenmez.
+        if (STOCK_AUTO_EMPTY.includes(item.durumu) || STOCK_AUTO_EMPTY.includes(item.status)) return;
 
         const type = (item.tür || item.type || item.prodType || "").trim();
         const name = (item.ürün || item.name || "İsimsiz").trim();
