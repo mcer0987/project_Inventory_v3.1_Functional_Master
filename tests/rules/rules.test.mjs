@@ -4,11 +4,15 @@
 //        zorunlu; onay adımı yalnız sırası gelmiş onaylayıcının karar alanları (GPT-6 kötü niyetli senaryolar dahil).
 // [HOW]: `npm run test:rules` → firebase emulators:exec içinde node:test. RULES_FILE ile başka bir kural dosyası denenebilir.
 import { test, before, after, beforeEach, describe } from 'node:test';
+import nodeAssert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, serverTimestamp, setLogLevel, collection, query, orderBy, limit, getDocs, writeBatch } from 'firebase/firestore';
+import * as firestoreSdk from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, serverTimestamp, setLogLevel, collection, query, where, orderBy, startAfter, limit, getDocs, writeBatch } from 'firebase/firestore';
 
 // Beklenen her ret SDK'da PERMISSION_DENIED uyarısı basar; sonuçlar node:test raporunda.
 setLogLevel('silent');
@@ -1560,4 +1564,322 @@ test('canlı yönetici rolü bağlı personel UID’si ve canlı kökle sınırl
     await put('accessGate', 'staff', { staffAccessEnabled: false });
     await assertFails(setDoc(item(authorized, LIVE, 'system_config', 'role-test'), { ok: true }));
     await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'system_config', 'role-test'), { ok: true }));
+});
+
+// ─── v3.4 EBYS H7 · D0/D2/D3/D4/D5 — Yazışma ve Takip Kuralları + Sunucu Filtreleri ─────────────────────────────────────────
+describe('EBYS H7 · Yazışma ve Takip (ebysReplyLinks, ebysIncomingKeys, ebysDispatches, D5 sunucu filtreleri)', () => {
+    const plainVal = v => {
+        if (Array.isArray(v)) return Array.from(v, plainVal);
+        if (v && v.constructor?.name === 'Object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plainVal(x)]));
+        return v;
+    };
+    const stripEsm = file => readFileSync(resolve(ROOT_DIR, file), 'utf8')
+        .replace(/^import .*;\r?\n/gm, '')
+        .replace(/^export \{[^}]*\};?\r?\n/gm, '')
+        .replace(/export /g, '');
+
+    function h7Services(db, uid, isAdmin = false) {
+        const window = { AppModules: {}, AppEnv: { COLLECTION_ROOT: DEMO }, userAuth: { uid }, isDbAdmin: () => isAdmin };
+        const makeCtx = () => vm.createContext({
+            window, crypto: webcrypto, TextEncoder, console, fireDb: db, ...firestoreSdk,
+            runTransaction: (d, fn) => firestoreSdk.runTransaction(d, tx => fn({
+                get: r => tx.get(r),
+                set: (r, v) => tx.set(r, plainVal(v)),
+                update: (r, v) => tx.update(r, plainVal(v))
+            }))
+        });
+        const schemaCtx = makeCtx();
+        for (const f of ['src/utils/ebys-document-schema.js', 'src/utils/ebys-catalog-schema.js', 'src/utils/ebys-correspondence-schema.js']) {
+            vm.runInContext(readFileSync(resolve(ROOT_DIR, f), 'utf8'), schemaCtx);
+        }
+        vm.runInContext(stripEsm('src/services/ebys-document-service.js'), makeCtx());
+        vm.runInContext(stripEsm('src/services/ebys-correspondence-service.js'), makeCtx());
+        return {
+            docs: window.AppModules.EBYSDocuments,
+            corr: window.AppModules.EBYSCorrespondence,
+            schema: window.AppModules.EBYSCorrespondenceSchema
+        };
+    }
+
+    beforeEach(async () => {
+        await put('units', 'u-bt', { id: 'u-bt', name: 'Bilgi Teknolojileri', active: true }, DEMO);
+        await put('units', 'u-idari', { id: 'u-idari', name: 'İdari İşler', active: true }, DEMO);
+    });
+
+    test('D2 · ebysReplyLinks: gelen evrak sahibi, yönetici ve aktif icra sorumlusu bağ kurar; yetkisiz kişi, dondurulmamış hedef, bozuk özet ve update/delete reddedilir', async () => {
+        const s1 = h7Services(ctx.s1(), 'uid-s1', false);
+        const s2 = h7Services(ctx.s2(), 'uid-s2', false);
+        const s3 = h7Services(ctx.s3(), 'uid-s3', false);
+        const admin = h7Services(ctx.admin(), 'admin-uid', true);
+
+        const incId = webcrypto.randomUUID();
+        const savedInc = await s1.docs.saveDraft({
+            id: incId, kind: 'incoming', unitId: 'u-bt', organizationCode: 'MED', expectedRevision: 0,
+            content: 'Gelen resmi yazı metni.',
+            metadata: { subject: 'Denetim Talebi', correspondent: 'Sağlık Bakanlığı', date: '2026-11-10',
+                filePlanCode: '100', confidentiality: 'Normal', distribution: '', externalRegistrationNo: 'SB-2026-99' }
+        });
+        const regInc = await s1.docs.registerDocument({ documentId: incId, expectedRevision: savedInc.revision });
+
+        // Cevap taslağı (s1 kendi gelen evrakına cevap hazırlıyor)
+        const reply1Id = webcrypto.randomUUID();
+        await s1.docs.saveDraft({
+            id: reply1Id, kind: 'outgoing', unitId: 'u-bt', organizationCode: 'MED', expectedRevision: 0,
+            content: 'İlgi: 2026-11-10 tarihli ve SB-2026-99 sayılı yazınız (Sağlık Bakanlığı).\n\nCevabımızdır.',
+            metadata: { subject: 'Cevap: Denetim Talebi', correspondent: 'Sağlık Bakanlığı', date: '2026-11-15',
+                filePlanCode: '100', confidentiality: 'Normal', distribution: '', externalRegistrationNo: '' }
+        });
+
+        // CTO B-1: Hedef gelen evrak henüz dondurulmadıysa (currentVersionId == '') bağ kurulamaz!
+        await nodeAssert.rejects(s1.corr.createReplyLink({ replyDocumentId: reply1Id, replyToDocumentId: incId }), /dondurulmuş/);
+        const fakeVerId = webcrypto.randomUUID();
+        await assertFails(setDoc(item(ctx.s1(), DEMO, 'ebysReplyLinks', reply1Id), {
+            id: reply1Id, replyDocumentId: reply1Id, replyToDocumentId: incId,
+            replyOwnerUid: 'uid-s1', replyToOwnerUid: 'uid-s1', replyToVersionId: fakeVerId,
+            replyToSummary: { registrationNo: regInc.registrationNo, externalRegistrationNo: 'SB-2026-99',
+                date: '2026-11-10', correspondent: 'Sağlık Bakanlığı', subject: 'Denetim Talebi' },
+            createdAt: serverTimestamp()
+        }));
+
+        // Hedef gelen evrak dondurulur
+        const frozenInc = await s1.docs.freezeVersion({ documentId: incId, expectedRevision: regInc.revision });
+
+        // Yetkisiz 3. kişi (s3) kendi taslağını başkasının gelen evrakına bağlayamaz
+        const unauthorizedReplyId = webcrypto.randomUUID();
+        await s3.docs.saveDraft({
+            id: unauthorizedReplyId, kind: 'outgoing', unitId: 'u-bt', organizationCode: 'MED', expectedRevision: 0,
+            content: 'Yetkisiz cevap.',
+            metadata: { subject: 'Cevap', correspondent: 'Sağlık Bakanlığı', date: '2026-11-15',
+                filePlanCode: '100', confidentiality: 'Normal', distribution: '', externalRegistrationNo: '' }
+        });
+        await nodeAssert.rejects(s3.corr.createReplyLink({ replyDocumentId: unauthorizedReplyId, replyToDocumentId: incId }), /permission|PERMISSION/i);
+
+        // Özet hedef sürümün üstverisinden tek alanda sapsa Rules reddeder
+        await assertFails(setDoc(item(ctx.s1(), DEMO, 'ebysReplyLinks', reply1Id), {
+            id: reply1Id, replyDocumentId: reply1Id, replyToDocumentId: incId,
+            replyOwnerUid: 'uid-s1', replyToOwnerUid: 'uid-s1', replyToVersionId: frozenInc.versionId,
+            replyToSummary: { registrationNo: regInc.registrationNo, externalRegistrationNo: 'SAHTE-SAYI',
+                date: '2026-11-10', correspondent: 'Sağlık Bakanlığı', subject: 'Denetim Talebi' },
+            createdAt: serverTimestamp()
+        }));
+
+        // Sahip (s1) doğru özetle bağı kurar (idempotent tekrar çağrı aynı sonucu döner)
+        const link1 = await s1.corr.createReplyLink({ replyDocumentId: reply1Id, replyToDocumentId: incId });
+        assert(link1.replyToVersionId === frozenInc.versionId);
+        const link1Again = await s1.corr.createReplyLink({ replyDocumentId: reply1Id, replyToDocumentId: incId });
+        assert(link1Again.id === reply1Id);
+
+        // Aktif icra sorumlusu (s2) gelen evraka cevap bağı kurabilir
+        await put('ebysExecutionJobs', frozenInc.versionId, {
+            id: frozenInc.versionId, processId: frozenInc.versionId, versionId: frozenInc.versionId,
+            documentId: incId, ownerUid: 'uid-s1', assigneeUid: 'uid-s2', state: 'in_progress'
+        }, DEMO);
+        const execReplyId = webcrypto.randomUUID();
+        await s2.docs.saveDraft({
+            id: execReplyId, kind: 'internal', unitId: 'u-bt', organizationCode: 'MED', expectedRevision: 0,
+            content: 'İcra cevabı.',
+            metadata: { subject: 'Cevap', correspondent: 'Sağlık Bakanlığı', date: '2026-11-15',
+                filePlanCode: '100', confidentiality: 'Normal', distribution: '', externalRegistrationNo: '' }
+        });
+        await s2.corr.createReplyLink({ replyDocumentId: execReplyId, replyToDocumentId: incId });
+
+        // getReplyContext hem cevaptan hedefi hem de gelen evraktan cevapları döner
+        const fromReply = await s2.corr.getReplyContext(execReplyId);
+        assert(fromReply.replyTo?.replyToDocumentId === incId);
+        const fromIncomingOwner = await s1.corr.getReplyContext(incId);
+        assert(fromIncomingOwner.replies.length === 2);
+        const fromAdmin = await admin.corr.getReplyContext(incId);
+        assert(fromAdmin.replies.length === 2);
+
+        // Yetkisiz 3. kişi (s3) bağı okuyamaz, kimse güncelleyemez veya silemez
+        await assertFails(getDoc(item(ctx.s3(), DEMO, 'ebysReplyLinks', reply1Id)));
+        await assertFails(updateDoc(item(ctx.s1(), DEMO, 'ebysReplyLinks', reply1Id), { replyToOwnerUid: 'uid-s3' }));
+        await assertFails(deleteDoc(item(ctx.admin(), DEMO, 'ebysReplyLinks', reply1Id)));
+    });
+
+    test('D3 · ebysIncomingKeys: ilk yazan kazanır; sahte anahtar, ikinci yazım, listeleme ve update/delete reddedilir', async () => {
+        const s1 = h7Services(ctx.s1(), 'uid-s1', false);
+        const s2 = h7Services(ctx.s2(), 'uid-s2', false);
+
+        const docId = webcrypto.randomUUID();
+        const meta = { subject: 'Yazı', correspondent: 'İstanbul İl Sağlık Müdürlüğü', date: '2026-11-12',
+            filePlanCode: '100', confidentiality: 'Normal', distribution: '', externalRegistrationNo: 'E-900/1' };
+        const saved = await s1.docs.saveDraft({
+            id: docId, kind: 'incoming', unitId: 'u-bt', organizationCode: 'MED', expectedRevision: 0,
+            content: 'Gelen yazı.', metadata: meta
+        });
+
+        // Kayıt numarası alınmadan mükerrer anahtarı yazılamaz (CTO B-2)
+        const key = await s1.schema.incomingDuplicateKey(meta);
+        await assertFails(setDoc(item(ctx.s1(), DEMO, 'ebysIncomingKeys', key), {
+            id: key, documentId: docId, ownerUid: 'uid-s1', unitId: 'u-bt', registrationNo: 'EBYS-MED-261112-00000000000000000000000000000000',
+            createdAt: serverTimestamp()
+        }));
+
+        const reg = await s1.docs.registerDocument({ documentId: docId, expectedRevision: saved.revision });
+
+        // Başka personel (s2) s1'in evrakı adına anahtar yazamaz
+        await assertFails(setDoc(item(ctx.s2(), DEMO, 'ebysIncomingKeys', key), {
+            id: key, documentId: docId, ownerUid: 'uid-s2', unitId: 'u-bt', registrationNo: reg.registrationNo,
+            createdAt: serverTimestamp()
+        }));
+
+        // Sahip (s1) anahtarı kaydeder
+        const res1 = await s1.corr.registerIncomingKey({ documentId: docId, unitId: 'u-bt', registrationNo: reg.registrationNo, metadata: meta });
+        assert(res1.status === 'registered');
+
+        // Başka personel (s2) aynı kurum/sayı/tarih için mükerrer kontrolü yaptığında uyarı alır
+        const dupForS2 = await s2.corr.checkIncomingDuplicate({
+            correspondent: 'istanbul il sağlık müdürlüğü ',
+            externalRegistrationNo: 'e 900 1',
+            date: '2026-11-12'
+        });
+        assert(dupForS2.duplicate === true && dupForS2.record.unitId === 'u-bt' && dupForS2.record.registrationNo === reg.registrationNo);
+
+        // Aynı evrak kendi kontrolünde mükerrer sayılmaz
+        const selfCheck = await s1.corr.checkIncomingDuplicate({ ...meta, excludeDocumentId: docId });
+        assert(selfCheck.duplicate === false);
+
+        // İkinci bir gelen evrak aynı anahtarı ezemez (Rules setDoc'u reddeder, servis already-taken döner)
+        const doc2Id = webcrypto.randomUUID();
+        const saved2 = await s2.docs.saveDraft({
+            id: doc2Id, kind: 'incoming', unitId: 'u-idari', organizationCode: 'MED', expectedRevision: 0,
+            content: 'İkinci kayıt.', metadata: meta
+        });
+        const reg2 = await s2.docs.registerDocument({ documentId: doc2Id, expectedRevision: saved2.revision });
+        await assertFails(setDoc(item(ctx.s2(), DEMO, 'ebysIncomingKeys', key), {
+            id: key, documentId: doc2Id, ownerUid: 'uid-s2', unitId: 'u-idari', registrationNo: reg2.registrationNo,
+            createdAt: serverTimestamp()
+        }));
+        const res2 = await s2.corr.registerIncomingKey({ documentId: doc2Id, unitId: 'u-idari', registrationNo: reg2.registrationNo, metadata: meta });
+        assert(res2.status === 'already-taken');
+
+        // Koleksiyon listeleme, güncelleme ve silme kapalıdır
+        await assertFails(getDocs(collection(ctx.admin(), DEMO, 'ebysIncomingKeys', 'items')));
+        await assertFails(updateDoc(item(ctx.s1(), DEMO, 'ebysIncomingKeys', key), { unitId: 'u-idari' }));
+        await assertFails(deleteDoc(item(ctx.admin(), DEMO, 'ebysIncomingKeys', key)));
+    });
+
+    test('D4 · ebysDispatches: onaylı ve kayıt numaralı giden evraka sahip, yönetici ve aktif icra sorumlusu gönderim yazar; gelecek tarih, yetkisiz kişi ve update/delete reddedilir', async () => {
+        const s1 = h7Services(ctx.s1(), 'uid-s1', false);
+        const s2 = h7Services(ctx.s2(), 'uid-s2', false);
+        const s3 = h7Services(ctx.s3(), 'uid-s3', false);
+        const admin = h7Services(ctx.admin(), 'admin-uid', true);
+
+        const outId = webcrypto.randomUUID();
+        const saved = await s1.docs.saveDraft({
+            id: outId, kind: 'outgoing', unitId: 'u-bt', organizationCode: 'MED', expectedRevision: 0,
+            content: 'Giden resmi yazı.',
+            metadata: { subject: 'Cihaz Listesi', correspondent: 'Valilik', date: '2026-11-15',
+                filePlanCode: '100', confidentiality: 'Normal', distribution: '', externalRegistrationNo: '' }
+        });
+        const reg = await s1.docs.registerDocument({ documentId: outId, expectedRevision: saved.revision });
+        const frozen = await s1.docs.freezeVersion({ documentId: outId, expectedRevision: reg.revision });
+
+        // Henüz in_review durumundayken (onaylanmadan) gönderim kaydı yazılamaz
+        await nodeAssert.rejects(s1.corr.recordDispatch({
+            documentId: outId, versionId: frozen.versionId, channel: 'kep',
+            sentDate: '2026-11-15', externalRef: 'KEP-1', note: '', entryKind: 'initial'
+        }), /onayı tamamlanmış/);
+
+        // Evrak internally_approved durumuna geçer ve s2 aktif icra sorumlusu olur
+        await put('ebysDocuments', outId, {
+            ...(await rd('ebysDocuments', outId, DEMO)),
+            state: 'internally_approved'
+        }, DEMO);
+        await put('ebysExecutionJobs', frozen.versionId, {
+            id: frozen.versionId, processId: frozen.versionId, versionId: frozen.versionId,
+            documentId: outId, ownerUid: 'uid-s1', assigneeUid: 'uid-s2', state: 'in_progress'
+        }, DEMO);
+
+        // Gelecek tarihli gönderim hem serviste hem doğrudan Rules'ta reddedilir
+        const futureOpId = webcrypto.randomUUID();
+        await assertFails(setDoc(item(ctx.s1(), DEMO, 'ebysDispatches', futureOpId), {
+            id: futureOpId, documentId: outId, versionId: frozen.versionId,
+            ownerUid: 'uid-s1', actorUid: 'uid-s1', channel: 'kep',
+            sentDate: '2099-01-01', externalRef: 'KEP-99', note: '', entryKind: 'initial',
+            createdAt: serverTimestamp()
+        }));
+
+        // Yetkisiz 3. kişi (s3) başkasının evrakına gönderim kaydı yazamaz
+        await nodeAssert.rejects(s3.corr.recordDispatch({
+            documentId: outId, versionId: frozen.versionId, channel: 'post',
+            sentDate: '2026-11-15', externalRef: 'PTT-1', note: '', entryKind: 'initial'
+        }), /permission|PERMISSION/i);
+
+        // Sahip (s1), aktif icra sorumlusu (s2) ve yönetici (admin) gönderim / düzeltme kaydı yazabilir
+        const op1 = webcrypto.randomUUID();
+        const d1 = await s1.corr.recordDispatch({
+            operationId: op1, documentId: outId, versionId: frozen.versionId, channel: 'kep',
+            sentDate: '2026-11-15', externalRef: 'KEP-101', note: 'İlk gönderim', entryKind: 'initial'
+        });
+        assert(d1.id === op1);
+        // Aynı operationId ile tekrar çağrı idempotenttir
+        const d1Replay = await s1.corr.recordDispatch({
+            operationId: op1, documentId: outId, versionId: frozen.versionId, channel: 'kep',
+            sentDate: '2026-11-15', externalRef: 'KEP-101', note: 'İlk gönderim', entryKind: 'initial'
+        });
+        assert(d1Replay.id === op1);
+
+        await s2.corr.recordDispatch({
+            documentId: outId, versionId: frozen.versionId, channel: 'courier',
+            sentDate: '2026-11-16', externalRef: 'KARGO-202', note: 'Fiziksel ek gönderildi', entryKind: 'initial'
+        });
+        await admin.corr.recordDispatch({
+            documentId: outId, versionId: frozen.versionId, channel: 'kep',
+            sentDate: '2026-11-16', externalRef: 'KEP-101-REV', note: 'KEP referans numarası düzeltildi', entryKind: 'correction'
+        });
+
+        const ownerList = await s1.corr.listDispatches(outId);
+        const execList = await s2.corr.listDispatches(outId);
+        const adminList = await admin.corr.listDispatches(outId);
+        assert(ownerList.length === 3 && execList.length === 3 && adminList.length === 3);
+
+        // Güncelleme ve silme kapalıdır
+        await assertFails(updateDoc(item(ctx.s1(), DEMO, 'ebysDispatches', op1), { externalRef: 'DEĞİŞTİR' }));
+        await assertFails(deleteDoc(item(ctx.admin(), DEMO, 'ebysDispatches', op1)));
+    });
+
+    test('D5 · 60 kayıtla ikinci sayfada sunucu filtresi (state + unitId) ve tam kayıt numarası sorgusu doğru sonuç verir', async () => {
+        const s1 = h7Services(ctx.s1(), 'uid-s1', false);
+        let sampleRegNo = '';
+        await seed(async db => {
+            for (let i = 0; i < 65; i++) {
+                const id = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+                const matchFilter = i < 60;
+                const regNo = i === 42 ? 'EBYS-MED-261117-ABCDEF0123456789ABCDEF0123456789' : '';
+                if (regNo) sampleRegNo = regNo;
+                await setDoc(item(db, DEMO, 'ebysDocuments', id), {
+                    id, ownerUid: 'uid-s1', kind: 'incoming',
+                    unitId: matchFilter ? 'u-bt' : 'u-idari',
+                    organizationCode: 'MED',
+                    state: matchFilter ? 'registered' : 'draft',
+                    currentVersionId: '', versionNo: 0, registrationNo: regNo, revision: 1,
+                    lastOperationId: '00000000-0000-4000-8000-999999999999',
+                    createdAt: firestoreSdk.Timestamp.fromMillis(1700000000000 + i * 1000),
+                    updatedAt: firestoreSdk.Timestamp.fromMillis(1700000000000 + i * 1000)
+                });
+            }
+        });
+
+        const fetchPage = (cursor, filters) => new Promise((resolvePage, rejectPage) => {
+            const unsub = s1.docs.listDocuments(rows => {
+                unsub();
+                resolvePage(rows);
+            }, err => {
+                unsub();
+                rejectPage(err);
+            }, cursor, 'incoming', filters);
+        });
+
+        const page1 = await fetchPage(null, { unitId: 'u-bt', state: 'registered' });
+        assert(page1.length === 50);
+        const page2 = await fetchPage(page1.at(-1)._cursor, { unitId: 'u-bt', state: 'registered' });
+        assert(page2.length === 10);
+        assert(page2.every(r => r.unitId === 'u-bt' && r.state === 'registered'));
+
+        // CTO B-4: Tam kayıt numarası sorgusu orderBy olmadan tek eşleşmeyi bulur
+        const exactMatch = await fetchPage(null, { registrationNo: sampleRegNo });
+        assert(exactMatch.length === 1 && exactMatch[0].registrationNo === sampleRegNo);
+    });
 });

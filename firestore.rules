@@ -1709,6 +1709,88 @@ service cloud.firestore {
         && request.resource.data.revision == getAfter(ep(r,request.resource.data.processId)).data.revision;
       allow update,delete: if false;
     }
+
+    // ─── v3.4 EBYS H7 · Yazışma ve Takip (Gelen–cevap bağı, mükerrer anahtarı, manuel gönderim) ───
+    // [WHY]: ebysDraftOk, ebysVersionOk ve ebysDocuments kurallarına sıfır ifade eklenir (1000 AST bütçesi korunur).
+    // [HOW]: Üç yeni create-only koleksiyon ayrı transaction'larda yazılır; hedef evrak ve sürüm bağları get() ile doğrulanır.
+    function ebysSentDateOk(s) {
+      return s is string && s.matches('\\d{4}-\\d{2}-\\d{2}')
+        && int(s.split('-')[1]) >= 1 && int(s.split('-')[1]) <= 12
+        && int(s.split('-')[2]) >= 1 && int(s.split('-')[2]) <= 31
+        && int(s.split('-')[0]) * 10000 + int(s.split('-')[1]) * 100 + int(s.split('-')[2])
+           <= request.time.year() * 10000 + request.time.month() * 100 + request.time.day();
+    }
+    function ebysReplyLinkOk(r, id, d) {
+      let replyHead = get(ebysPath(r, 'ebysDocuments', id)).data;
+      let targetHead = get(ebysPath(r, 'ebysDocuments', d.replyToDocumentId)).data;
+      let targetVer = get(ebysPath(r, 'ebysVersions', d.replyToVersionId)).data;
+      return d.keys().hasOnly(['id','replyDocumentId','replyToDocumentId','replyOwnerUid','replyToOwnerUid','replyToVersionId','replyToSummary','createdAt'])
+        && d.keys().hasAll(['id','replyDocumentId','replyToDocumentId','replyOwnerUid','replyToOwnerUid','replyToVersionId','replyToSummary','createdAt'])
+        && ebysId(id) && ebysId(d.replyToDocumentId) && ebysId(d.replyToVersionId)
+        && d.id == id && d.replyDocumentId == id && d.replyDocumentId != d.replyToDocumentId
+        && d.replyOwnerUid == request.auth.uid && d.createdAt == request.time
+        && replyHead.ownerUid == request.auth.uid && replyHead.kind in ['outgoing','internal'] && replyHead.state in ['draft','registered']
+        && targetHead.kind == 'incoming' && targetHead.registrationNo != '' && targetHead.currentVersionId == d.replyToVersionId
+        && d.replyToOwnerUid == targetHead.ownerUid
+        && (targetHead.ownerUid == request.auth.uid || isAdmin(r) || ejVersionAccess(r, d.replyToVersionId))
+        && d.replyToSummary == {'registrationNo': targetHead.registrationNo,
+          'externalRegistrationNo': targetVer.metadataSnapshot.get('externalRegistrationNo', ''),
+          'date': targetVer.metadataSnapshot.date,
+          'correspondent': targetVer.metadataSnapshot.correspondent,
+          'subject': targetVer.metadataSnapshot.subject};
+    }
+    match /{r}/ebysReplyLinks/items/{id} {
+      allow get: if validRoot(r) && member(r)
+        && (!exists(ebysPath(r, 'ebysReplyLinks', id)) || isAdmin(r)
+          || resource.data.replyOwnerUid == request.auth.uid || resource.data.replyToOwnerUid == request.auth.uid
+          || ejVersionAccess(r, resource.data.replyToVersionId));
+      allow list: if validRoot(r) && member(r)
+        && (isAdmin(r) || resource.data.replyOwnerUid == request.auth.uid || resource.data.replyToOwnerUid == request.auth.uid
+          || ejVersionAccess(r, resource.data.replyToVersionId));
+      allow create: if validRoot(r) && member(r) && ebysReplyLinkOk(r, id, request.resource.data);
+      allow update, delete: if false;
+    }
+    function ebysIncomingKeyOk(r, keyId, d) {
+      let h = get(ebysPath(r, 'ebysDocuments', d.documentId)).data;
+      return d.keys().hasOnly(['id','documentId','ownerUid','unitId','registrationNo','createdAt'])
+        && d.keys().hasAll(['id','documentId','ownerUid','unitId','registrationNo','createdAt'])
+        && keyId.matches('[a-f0-9]{64}') && d.id == keyId && ebysId(d.documentId)
+        && d.ownerUid == request.auth.uid && d.createdAt == request.time
+        && h.ownerUid == request.auth.uid && h.kind == 'incoming' && h.registrationNo != ''
+        && d.registrationNo == h.registrationNo && d.unitId == h.unitId;
+    }
+    match /{r}/ebysIncomingKeys/items/{keyId} {
+      allow get: if validRoot(r) && member(r);
+      allow create: if validRoot(r) && member(r) && ebysIncomingKeyOk(r, keyId, request.resource.data);
+      allow list, update, delete: if false;
+    }
+    function ebysDispatchOk(r, id, d) {
+      let h = get(ebysPath(r, 'ebysDocuments', d.documentId)).data;
+      return d.keys().hasOnly(['id','documentId','versionId','ownerUid','actorUid','channel','sentDate','externalRef','note','entryKind','createdAt'])
+        && d.keys().hasAll(['id','documentId','versionId','ownerUid','actorUid','channel','sentDate','externalRef','note','entryKind','createdAt'])
+        && ebysId(id) && d.id == id && ebysId(d.documentId) && ebysId(d.versionId)
+        && d.actorUid == request.auth.uid && d.createdAt == request.time
+        && d.channel in ['hand','post','courier','kep','email','other']
+        && d.entryKind in ['initial','correction']
+        && ebysSentDateOk(d.sentDate)
+        && ebysText(d.externalRef, 120, true)
+        && ebysText(d.note, 500, d.entryKind == 'correction')
+        && h.kind == 'outgoing' && h.registrationNo != ''
+        && h.state in ['internally_approved','closed','archived']
+        && h.currentVersionId == d.versionId && d.ownerUid == h.ownerUid
+        && (h.ownerUid == request.auth.uid || isAdmin(r) || ejVersionAccess(r, d.versionId));
+    }
+    match /{r}/ebysDispatches/items/{id} {
+      allow get: if validRoot(r) && member(r)
+        && (!exists(ebysPath(r, 'ebysDispatches', id)) || isAdmin(r)
+          || resource.data.ownerUid == request.auth.uid || resource.data.actorUid == request.auth.uid
+          || ejVersionAccess(r, resource.data.versionId));
+      allow list: if validRoot(r) && member(r)
+        && (isAdmin(r) || resource.data.ownerUid == request.auth.uid || resource.data.actorUid == request.auth.uid
+          || ejVersionAccess(r, resource.data.versionId));
+      allow create: if validRoot(r) && member(r) && ebysDispatchOk(r, id, request.resource.data);
+      allow update, delete: if false;
+    }
     // Bu dört dal yalnız purchaseOrders için çalışır. Rol seçimi match içindedir.
     function poLegacyAdminCreate(r,id,d) {
       return validRoot(r) && poPathId(id,d) && poItemsOk(d)

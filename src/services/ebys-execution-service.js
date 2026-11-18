@@ -219,6 +219,9 @@ export async function readExecutionHistory(id) {
     return snap.docs.map(d => d.data());
 }
 export const readExecutionHead = id => getDocFromServer(ref('ebysDocuments', id)).then(s => s.data());
+// [WHY]: H7 D4 — Giden evrak gönderim panelinde "aktif icra sorumlusu" yazma iznini göstermek için iş kaydı
+//        tek seferlik okunur (firestore.rules ebysExecutionJobs get kuralı assigneeUid/ownerUid/admin'e açıktır).
+export const readExecutionJob = id => getDocFromServer(ref('ebysExecutionJobs', id)).then(s => s.data());
 export const markNotificationRead = id => updateDoc(ref('ebysNotifications', id), { readAt: serverTimestamp() });
 
 window.AppModules = window.AppModules || {};
@@ -226,5 +229,5 @@ window.AppModules.EBYSExecution = {
     assignExecutionJob, acceptExecutionJob, returnExecutionJob, reassignExecutionJob, completeExecutionJob,
     archiveExecutionDocument, saveExecutionPolicy, watchExecutionJobs, watchReturnedExecutionJobs, readExecutionPolicy,
     linkExecutionStockOperation, readStockOperation,
-    readExecutionHistory, readExecutionHead, watchNotifications, markNotificationRead
+    readExecutionHistory, readExecutionHead, readExecutionJob, watchNotifications, markNotificationRead
 };

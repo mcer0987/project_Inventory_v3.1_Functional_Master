@@ -19,6 +19,12 @@ const BOOKS = [
     { id: 'internal', icon: 'fa-arrows-rotate', title: 'İç Yazışma', text: 'Birimler arası yazışmalar; kurum içinde dolaşır, dışarı çıkmaz.' },
 ];
 
+const CORRESPONDENCE_FACTS = [
+    { tone: 'indigo', icon: 'fa-reply', title: 'Gelen evraka cevap', text: 'Kayıt numarası alıp dondurulmuş bir gelen evraka karşılık, "İlgi:" satırı otomatik eklenen bir cevap taslağı hazırlayabilirsiniz.' },
+    { tone: 'amber', icon: 'fa-triangle-exclamation', title: 'Mükerrer uyarısı', text: 'Aynı kurum, dış sayı ve tarihle önceden kayıt varsa form sizi uyarır; onay kutusunu işaretlemeden kayıt tamamlanmaz.' },
+    { tone: 'sky', icon: 'fa-truck', title: 'Gönderim kaydı', text: 'Giden evrakın elden, posta, kargo, KEP veya e-posta ile gönderildiğini kanal, tarih ve referans numarasıyla manuel olarak kaydedersiniz.' },
+];
+
 const BOOK_STEPS = [
     { icon: 'fa-pen', title: 'Taslak', text: 'Konu, muhatap ve metin yazılır. Taslak istenildiği kadar düzenlenebilir.' },
     { icon: 'fa-lock', title: 'Onaya sun / Dondur', text: 'Metin mühürlenir. Bu sürüm artık değiştirilemez. Yeni sürüm aynı evraka eklenir ve evrak toplamını artırmaz.' },
@@ -62,7 +68,7 @@ const ORG_FACTS = [
 ];
 
 const FAQ = [
-    ['Belgeyi nereden açarım ve defter neyi gösterir?', 'Satın alma talebini Satın Alma ekranından, gelen ve giden evrakı veya iç yazışmayı ilgili Evrak Kayıt Defteri sekmesinden açın. Kurum içi onay tamamlandığında işin durumunu İcra Takibi bölümünden izleyin. Defter araması ve filtresi yalnız açık sayfadaki en fazla 50 kaydı kapsar. Güncel toplamlar için Toplamları yenile seçeneğini kullanın.'],
+    ['Belgeyi nereden açarım ve defter neyi gösterir?', 'Satın alma talebini Satın Alma ekranından, gelen ve giden evrakı veya iç yazışmayı ilgili Evrak Kayıt Defteri sekmesinden açın. Kurum içi onay tamamlandığında işin durumunu İcra Takibi bölümünden izleyin. Durum, birim ve tam kayıt numarası (EBYS-...) filtreleri tüm kayıtlarda sorgulanır; kısmi metin yalnız açık sayfadaki en fazla 50 kayıtta süzülür ve konu/tam metin araması desteklenmez. Güncel toplamlar için Toplamları yenile seçeneğini kullanın.'],
     ['Evrakı dondurduktan sonra yazım hatası fark ettim, ne yapmalıyım?', 'Dondurulan sürüm değişmez. İmzacılardan biri evrakı gerekçeyle yazara iade ettiğinde düzeltip yeni sürüm olarak yeniden sunabilirsiniz.'],
     ['Başkasına ait bir onay görevini neden göremiyorum?', 'Görevler kişiye özeldir. Sıra size gelmeden evrak listenizde görünmez; sıra geldiğinde "Bana Gelen Onaylar" ekranında açılır.'],
     ['İzne çıkacağım; bekleyen onaylarım ne olacak?', 'Yönetici bekleyen görevinizi en çok 90 gün için başka bir personele devredebilir. Kayıtta asıl görevli olarak adınız görünmeye devam eder.'],
@@ -162,7 +168,9 @@ function renderBooks() {
             el('div', { cls: 'ebys-sc-panel-head' }, [el('strong', { text: 'Taslaktan resmi kayda' }), button('Akışı oynat', 'fa-play', play, 'ebys-sc-btn ghost')]),
             flow,
         ]),
-        number);
+        number,
+        el('h4', { cls: 'ebys-sc-subtitle', text: 'Yazışma takibi' }),
+        el('div', { cls: 'ebys-sc-bento cols-3' }, CORRESPONDENCE_FACTS.map(miniCard)));
     select('incoming');
     root._cleanup = () => clearTimeout(timer);
     return root;

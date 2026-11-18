@@ -5,6 +5,7 @@ import { verificationNotice, verificationUrl } from '../utils/ebys-verification-
 import { verificationQr } from '../utils/ebys-verification-qr.js';
 import './ebys-process-ui.js';
 import './ebys-execution-ui.js';
+import './ebys-correspondence-ui.js';
 const api = () => window.AppModules.EBYSDocuments;
 const schema = () => window.AppModules.EBYSDocumentSchema;
 const labels = { incoming: 'Gelen Evrak Defteri', outgoing: 'Giden Evrak Defteri', internal: 'İç Yazışmalar' };
@@ -103,7 +104,10 @@ function subscribe() {
     if (!syncAllowed || !window.userAuth || !registryVisible()) return () => {};
     message('Evraklar yükleniyor…');
     if(!countsLoaded)refreshCounts();
-    const own = api().listDocuments(data => { if(revision!==listRevision||!syncAllowed||!registryVisible()||actor!==window.userAuth?.uid)return; rows=data;render();message(data.length+' kayıt · Sayfa başına en fazla 50 evrak · Arama ve durum filtresi yalnız bu sayfada'); },error=>{if(revision!==listRevision||actor!==window.userAuth?.uid)return;stop();clear();message('Evraklar yüklenemedi: '+error.message);},cursor,kind);
+    // H7 D5: durum, birim ve tam kayıt numarası sunucuda süzülür; kısmi metin açık sayfada süzülür (render()).
+    const filters = { state: document.getElementById('ebysStateFilter')?.value || '', unitId: document.getElementById('ebysUnitFilter')?.value || '',
+        registrationNo: document.getElementById('ebysDocumentSearch')?.value?.trim() || '' };
+    const own = api().listDocuments(data => { if(revision!==listRevision||!syncAllowed||!registryVisible()||actor!==window.userAuth?.uid)return; rows=data;render();message(data.length+' kayıt · Sayfa başına en fazla 50 evrak · Arama ve durum filtresi yalnız bu sayfada'); },error=>{if(revision!==listRevision||actor!==window.userAuth?.uid)return;stop();clear();message('Evraklar yüklenemedi: '+error.message);},cursor,kind,filters);
     unsubscribe = own;
     return () => { own(); if (unsubscribe === own) { unsubscribe = null; clear(); } };
 }
@@ -145,13 +149,18 @@ function field(form, label, name, value = '', options = null, multiline = false)
     if (max) input.maxLength = max;
     wrap.append(input); form.append(wrap); return input;
 }
-async function open(id = null) {
+async function open(id = null, replyContext = null) {
     try {
         const actor = window.userAuth?.uid, epoch=editorEpoch;
         const loaded = id ? await api().readDocument(id) : null;
         if (!actor || actor !== window.userAuth?.uid || epoch!==editorEpoch) return;
-        let head = loaded?.head || { id: schema().uuid(), kind, revision: 0, unitId: '', organizationCode: 'MED', registrationNo: '', state: 'draft' };
-        const data = loaded?.body || {}, metadata = data.metadataSnapshot || data.metadata || {};
+        // H7 D2: cevap taslağı daima giden evrak olarak ve hedef gelen evrakın birimiyle açılır.
+        let head = loaded?.head || { id: schema().uuid(), kind: replyContext ? 'outgoing' : kind, revision: 0,
+            unitId: replyContext?.unitId || '', organizationCode: 'MED', registrationNo: '', state: 'draft' };
+        const data = loaded?.body || {};
+        const metadata = { ...(data.metadataSnapshot || data.metadata || {}),
+            ...(!loaded && replyContext ? { correspondent: replyContext.summary.correspondent, subject: ('Cevap: ' + replyContext.summary.subject).slice(0, 240) } : {}) };
+        const replyLink = !loaded && replyContext ? { replyToDocumentId: replyContext.replyToDocumentId, linked: false } : null;
         const frozen = !!head.currentVersionId;
         // H6b: kurum künyesi, dosya planı ve şablon kataloğu (dondurulmuş evrak kendi kopyalarını gösterir; katalog okunmaz).
         // Katalog yüklenemezse (modül yok / ağ hatası) form eski davranışla açılır: kod ve plan elle yazılır.
@@ -214,8 +223,12 @@ async function open(id = null) {
         } else field(form, 'Dosya planı kodu', 'filePlanCode', metadata.filePlanCode || '');
         field(form, 'Gizlilik derecesi', 'confidentiality', metadata.confidentiality || 'Normal', ['Normal', 'Hizmete Özel', 'Gizli'].map(v => [v, v]));
         field(form, 'Dış evrak numarası', 'externalRegistrationNo', metadata.externalRegistrationNo || '');
+        // H7 D3: gelen evrak taslağında muhatap/dış sayı/tarih değiştikçe mükerrerlik tek okumayla kontrol edilir.
+        if (!frozen && head.kind === 'incoming') window.AppModules.EBYSCorrespondenceUI?.bindIncomingDuplicateGuard(form, head);
         field(form, 'Dağıtım yerleri (her satıra bir yer)', 'distribution', metadata.distribution || '', null, true);
-        field(form, 'Üst yazı / evrak gövdesi', 'content', data.content || '', null, true);
+        // H7 D2: cevap taslağında "İlgi:" satırı gövdeye otomatik eklenir.
+        const replyContent = !loaded && replyContext ? window.AppModules.EBYSCorrespondenceSchema.formatInterestLine(replyContext.summary) + '\n\n' : '';
+        field(form, 'Üst yazı / evrak gövdesi', 'content', data.content || replyContent, null, true);
         form.append(node('p', frozen ? `Dondurulmuş sürüm ${data.versionNo || head.versionNo} · SHA-256: ${data.contentDigest}` : 'Evrak gövdesi düz metindir. Dosya eki bu pilot evrakta kullanılmaz.', 'small text-muted ebys-wide'));
         const status = node('div', '', 'small ebys-wide'); status.setAttribute('role', 'status'); form.append(status);
         const actions = node('div', null, 'd-flex flex-wrap gap-2 ebys-wide');
@@ -229,6 +242,10 @@ async function open(id = null) {
                 metadata: Object.fromEntries(['subject','correspondent','date','filePlanCode','confidentiality','distribution','externalRegistrationNo',
                     ...(values.filePlanTitle ? ['filePlanTitle'] : [])].map(k => [k, values[k]])) };
         };
+        // H7 D3: mükerrerlik anahtarı güncel form değerleriyle yazılır (dondurulmuşsa sürüm metadataSnapshot'ı kullanılır).
+        const regKeyMetadata = () => frozen
+            ? { correspondent: metadata.correspondent, externalRegistrationNo: metadata.externalRegistrationNo, date: metadata.date }
+            : { correspondent: form.elements.correspondent.value, externalRegistrationNo: form.elements.externalRegistrationNo.value, date: form.elements.date.value };
         async function act(action) {
             if (busy||document.hidden||actor!==window.userAuth?.uid||!documentDialogs.get(editor)?.ready) return; busy = true; actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
             try {
@@ -244,6 +261,11 @@ async function open(id = null) {
                     pendingRegister ||= schema().uuid();
                     const saved = await api().registerDocument({ documentId: head.id, expectedRevision: head.revision, operationId: pendingRegister });
                     head = { ...head, ...saved }; pendingRegister = null;
+                    if (head.kind === 'incoming') {
+                        try {
+                            await window.AppModules.EBYSCorrespondence.registerIncomingKey({ documentId: head.id, unitId: head.unitId, registrationNo: head.registrationNo, metadata: regKeyMetadata() });
+                        } catch (error) { status.textContent = 'Kesin kayıt numarası alındı ancak mükerrerlik anahtarı kaydedilemedi: ' + error.message; }
+                    }
                 }
                 if (action === 'freeze') {
                     pendingFreeze ||= schema().uuid();
@@ -253,7 +275,23 @@ async function open(id = null) {
                 if (action === 'issueVerification') await window.AppModules.EBYSVerification.issueVerification(head.id);
                 if(!editor.isConnected||actor!==window.userAuth?.uid||epoch!==editorEpoch)return;
                 status.textContent = action === 'freeze' ? 'İçerik donduruldu ve incelemeye hazır.' : 'Evrak kaydedildi.';
-                if (action === 'save') { editor.close(); cursor = null; subscribe(); message('Taslak kaydedildi.'); }
+                if (action === 'save') {
+                    // H7 D2: cevap taslağının hedef gelen evraka bağı ilk kayıttan sonra kurulur; bağ kurulamazsa
+                    // pencere kapanmaz ve yeniden deneme düğmesi gösterilir (taslak zaten kaydedilmiştir).
+                    if (replyLink && !replyLink.linked) {
+                        try {
+                            await window.AppModules.EBYSCorrespondence.createReplyLink({ replyDocumentId: head.id, replyToDocumentId: replyLink.replyToDocumentId });
+                            replyLink.linked = true;
+                        } catch (error) {
+                            status.textContent = 'Taslak kaydedildi ancak cevap bağı kurulamadı: ' + error.message;
+                            if (editor.isConnected && !actions.querySelector('.ebys-reply-relink')) {
+                                actions.prepend(button('Bağı yeniden kur', () => act('save'), 'btn btn-sm btn-outline-danger ebys-reply-relink'));
+                            }
+                            return;
+                        }
+                    }
+                    editor.close(); cursor = null; subscribe(); message('Taslak kaydedildi.');
+                }
                 else if (editor.isConnected) await open(head.id);
             } catch (error) { if(error.code==='permission-denied'){clearDocumentDialogs();return;}status.textContent = error.message; }
             finally { busy = false; actions.querySelectorAll('button').forEach(b => { b.disabled = false; }); }
@@ -283,7 +321,10 @@ async function open(id = null) {
         }
         actions.append(button('Çıktı önizleme', () => preview(head, frozen ? data : { ...input(), institutionSnapshot: loaded ? data.institutionSnapshot : schema().institutionSnapshot(cat?.profile) })));
         actions.append(button('Kapat', () => dialog.close(), 'btn btn-secondary'));
-        form.append(actions); form.onsubmit = e => e.preventDefault(); dialog.append(form); document.body.append(dialog); dialog.showModal();
+        form.append(actions);
+        // H7 D2+D4: İlgi/Cevaplar ve (uygunsa) Gönderim Takibi bölümleri pencerenin altına eklenir.
+        window.AppModules.EBYSCorrespondenceUI?.mountDocumentPanel(form, head, data, targetId => open(targetId));
+        form.onsubmit = e => e.preventDefault(); dialog.append(form); document.body.append(dialog); dialog.showModal();
     } catch (error) { message(error.message); }
 }
 function preview(head, data) {
@@ -351,8 +392,30 @@ if (host) {
     const tabs = document.getElementById('ebysDocumentKinds');
     for (const [value, label] of Object.entries(labels)) { const b = button(label, () => { kind = value; cursor = null; subscribe(); }); b.dataset.kind = value; tabs.append(b); }
     for (const [value, label] of Object.entries(states)) { if (value === 'pending_execution') continue; const opt = node('option', label); opt.value = value; document.getElementById('ebysStateFilter').append(opt); }
-    document.getElementById('ebysStateFilter').onchange = render;
-    document.getElementById('ebysDocumentSearch').oninput = render;
+    document.getElementById('ebysStateFilter').onchange = () => { cursor = null; subscribe(); };
+    // H7 D5: birim filtresi sunucuda süzülür; seçenekler window.data.units'ten üretilir (aktif olmayan, seçili ise korunur).
+    const unitFilter = document.getElementById('ebysUnitFilter');
+    function refreshUnitFilterOptions() {
+        if (!unitFilter) return;
+        const current = unitFilter.value;
+        const keep = new Option('Tüm birimler', '');
+        unitFilter.replaceChildren(keep);
+        for (const u of (window.data?.units || []).filter(u => u.active !== false || String(u.id) === current)) {
+            unitFilter.append(new Option(u.name || u.birimAdi || String(u.id), String(u.id)));
+        }
+        if ([...unitFilter.options].some(o => o.value === current)) unitFilter.value = current;
+    }
+    refreshUnitFilterOptions();
+    if (unitFilter) unitFilter.onchange = () => { cursor = null; subscribe(); };
+    // H7 D5: arama kutusu tam kayıt numarasına (EBYS-...) dönüştüğünde/döndüğünde sunucudan yeniden sorgular;
+    // aksi halde yalnız bu sayfadaki kayıtları client-side süzer (render()).
+    let exactSearch = false;
+    document.getElementById('ebysDocumentSearch').oninput = () => {
+        const value = document.getElementById('ebysDocumentSearch').value.trim();
+        const isExact = window.AppModules.EBYSCorrespondenceSchema.isRegistrationNo(value);
+        if (isExact || exactSearch) { exactSearch = isExact; cursor = null; subscribe(); }
+        else render();
+    };
     document.getElementById('ebysDocumentNew').onclick = () => open();
     document.getElementById('ebysDocumentNext').onclick = () => { if (rows.length === 50) { cursor = rows.at(-1)._cursor; subscribe(); } };
     document.getElementById('ebysDocumentFirst').onclick = () => { cursor = null; subscribe(); };
@@ -397,6 +460,10 @@ if (host) {
         else if(registryVisible()){if(!unsubscribe)subscribe();resumeEditors();}
     });
     window.addEventListener('onAppLogout', () => { syncAllowed=false;stop();clear(); });
-    window.addEventListener('onInventoryDataUpdated', e => { if (e.detail?.collection === 'units') render(); });
+    window.addEventListener('onInventoryDataUpdated', e => { if (e.detail?.collection === 'units') { refreshUnitFilterOptions(); render(); } });
 }
-window.AppModules.EBYSDocumentsUI={open};
+// H7 D2: gelen evraka cevap, hedef evrak bilgisinden önceden doldurulmuş yeni bir giden taslak açar.
+function openReplyDraft({ replyToDocumentId, replyToVersionId, unitId, summary }) {
+    return open(null, { replyToDocumentId, replyToVersionId, unitId, summary });
+}
+window.AppModules.EBYSDocumentsUI={open,openReplyDraft};

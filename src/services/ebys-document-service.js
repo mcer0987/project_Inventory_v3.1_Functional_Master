@@ -17,7 +17,7 @@ const executionAdminScopes = Object.freeze({
 });
 export const EBYS_COLLECTION_REGISTRY = Object.freeze([
     ...ownerCollections, 'ebysExecutionJobs', 'ebysNotifications', ...Object.keys(executionAdminScopes),
-    'ebysVerifications', 'ebysVerificationTokens'
+    'ebysVerifications', 'ebysVerificationTokens', 'ebysReplyLinks', 'ebysIncomingKeys', 'ebysDispatches'
 ]);
 const EXPORT_DOCUMENT_LIMIT = 500;
 const EXPORT_REQUEST_LIMIT = 400;
@@ -350,10 +350,30 @@ export async function reopenDraft({documentId,expectedRevision,operationId}) {
     const {head,body} = await readDocument(documentId);
     return saveDraft({id:documentId,expectedRevision,operationId,reopen:true,kind:head.kind,unitId:head.unitId,organizationCode:head.organizationCode,content:body.content,metadata:body.metadataSnapshot || body.metadata,letterTemplate:body.letterTemplate});
 }
-export function listDocuments(onData, onError, cursor = null, kind = 'incoming') {
+// [WHY]: H7 D5 — Durum, birim ve tam kayıt numarası filtreleri yalnız açık sayfadaki 50 kaydı değil tüm sunucu
+//        koleksiyonunu süzmelidir.
+// [HOW]: Tam kayıt numarası (EBYS-...) sorgusunda orderBy kullanılmaz (ek bileşik indeks üretmez); normal sayfalı
+//        listede unitId ve state filtreleri firestore.indexes.json içindeki 6 bileşik indeksle çalışır.
+export function listDocuments(onData, onError, cursor = null, kind = 'incoming', filters = {}) {
     const conditions = window.isDbAdmin?.() ? [] : [where('ownerUid', '==', uid())];
-    // Yön, sahip ve zaman sırası için bileşik indeksler firestore.indexes.json içindedir.
-    const constraints = [...conditions, where('kind', '==', kind), orderBy('updatedAt', 'desc'), ...(cursor ? [startAfter(cursor)] : []), limit(50)];
+    const regNo = String(filters?.registrationNo ?? '').trim().toUpperCase();
+    if (/^EBYS-[A-Z0-9]{2,12}-\d{6}-[A-F0-9]{32}$/.test(regNo)) {
+        const exact = [...conditions, where('kind', '==', kind), where('registrationNo', '==', regNo), limit(5)];
+        return onSnapshot(query(collection(fireDb, root(), 'ebysDocuments', 'items'), ...exact),
+            snap => onData(snap.docs.map(d => ({ ...d.data(), _cursor: d }))), onError);
+    }
+    const unitId = String(filters?.unitId ?? '').trim();
+    const state = String(filters?.state ?? '').trim();
+    // Yön, sahip, birim, durum ve zaman sırası için bileşik indeksler firestore.indexes.json içindedir.
+    const constraints = [
+        ...conditions,
+        where('kind', '==', kind),
+        ...(unitId ? [where('unitId', '==', unitId)] : []),
+        ...(state ? [where('state', '==', state)] : []),
+        orderBy('updatedAt', 'desc'),
+        ...(cursor ? [startAfter(cursor)] : []),
+        limit(50)
+    ];
     return onSnapshot(query(collection(fireDb, root(), 'ebysDocuments', 'items'), ...constraints), snap => onData(snap.docs.map(d => ({ ...d.data(), _cursor: d }))), onError);
 }
 export async function countDocuments() {
@@ -469,6 +489,16 @@ export async function exportOwnDocuments() {
         referenceCount: verificationTokens.size, missingReferences
     });
     add('ebysVerificationTokens', [], 'private-reservations', { status: 'excluded', reason: 'private-operator-only' });
+
+    const uniqueRows = docs => [...new Map(docs.map(d => [d.id, identified(d)])).values()];
+    const authoredReplies = await read('ebysReplyLinks', where('replyOwnerUid', '==', ownerUid));
+    const targetReplies = await read('ebysReplyLinks', where('replyToOwnerUid', '==', ownerUid));
+    add('ebysReplyLinks', uniqueRows([...authoredReplies, ...targetReplies]), 'reply-or-target-owner');
+    // Gelen evrak anahtarları kayıtlı gelen evraktan türetilir ve listelenemez; kopyada yalnız manifest'te işaretlenir.
+    add('ebysIncomingKeys', [], 'derived-from-registered-incoming-documents', { status: 'excluded', reason: 'derived-lookup-key' });
+    const ownedDispatches = await read('ebysDispatches', where('ownerUid', '==', ownerUid));
+    const recordedDispatches = await read('ebysDispatches', where('actorUid', '==', ownerUid));
+    add('ebysDispatches', uniqueRows([...ownedDispatches, ...recordedDispatches]), 'owner-or-actor');
 
     const purchaseEntries = [], markers = [], finances = [];
     const linkedHeads = new Map(data.ebysDocuments.filter(head => Object.hasOwn(head, 'purchaseOrderId')).map(head => [head.id, head]));

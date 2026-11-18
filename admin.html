@@ -1216,10 +1216,11 @@
                 <div class="d-flex flex-wrap gap-2"><button id="ebysDocumentNew" type="button" class="btn btn-primary">Yeni evrak</button><button id="ebysDocumentExport" type="button" class="btn btn-outline-secondary">Evrak kopyasını indir</button></div>
             </div>
             <p class="small text-muted">Kendi evraklarınızı ve yetkili olduğunuz ilgili kayıtları kişisel dosya olarak indirebilirsiniz. Kurum kurtarma paketi ayrı hazırlanır.</p>
-            <p class="small text-muted">Arama ve evrak durumu filtresi yalnız bu sayfadaki en fazla 50 kaydı kapsar. Onay adımları için Süreç durumu, işin kabulü, iadesi ve tamamlanması için İcra Takibi bölümüne bakın.</p>
+            <p class="small text-muted">Durum, birim ve tam kayıt numarası (EBYS-...) sunucudan sorgulanır; kısmi metin açık sayfada süzülür. Konu/tam metin araması desteklenmez. Onay adımları için Süreç durumu, işin kabulü, iadesi ve tamamlanması için İcra Takibi bölümüne bakın.</p>
             <div id="ebysDocumentKinds" class="d-flex flex-wrap gap-2 mb-3"></div>
             <div class="d-flex flex-wrap gap-2 mb-3">
                 <select id="ebysStateFilter" class="form-select" aria-label="Evrak durumu" style="width:auto"><option value="">Tüm durumlar</option></select>
+                <select id="ebysUnitFilter" class="form-select" aria-label="Evrak birimi" style="width:auto"><option value="">Tüm birimler</option></select>
                 <input id="ebysDocumentSearch" class="form-control" aria-label="Bu sayfada evrak numarası ara" placeholder="Bu sayfada evrak numarası ara" style="width:auto">
             </div>
             <div class="table-responsive"><table class="modern-table"><thead><tr><th>Kayıt / Taslak No</th><th>Birim</th><th>Evrak durumu</th><th>Güncelleme</th><th>İşlem</th></tr></thead><tbody id="ebysDocumentRows"></tbody></table></div>

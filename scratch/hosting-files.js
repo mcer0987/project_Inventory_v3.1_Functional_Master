@@ -69,7 +69,8 @@ const expected = f => /^(index|admin|404|verify)\.html$/.test(f) || /^[^/]+\.(cs
 // v3.7 · script.js SoC ayrıştırması: İP-1 sepet / toplu çıkış (1), İP-2 B3 hareket tablosu (1),
 //        İP-3 personel penceresi (1), İP-4 talep tabloları (1), İP-5 talep işlemleri (1),
 //        İP-6 içe/dışa aktarma (1).
-const EXPECTED_COUNT = 126;
+// v3.7 · EBYS H7 yazışma takibi: yazışma şeması, servisi ve arayüzü (3).
+const EXPECTED_COUNT = 129;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

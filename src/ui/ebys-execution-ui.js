@@ -1,4 +1,6 @@
 import '../services/ebys-execution-service.js';
+import '../services/ebys-document-service.js';
+import './ebys-correspondence-ui.js';
 
 const api = () => window.AppModules.EBYSExecution;
 const adminPanel = document.getElementById('ebysExecutionAdmin');
@@ -132,6 +134,15 @@ async function openJob(job, admin) {
     if (job.note) d.append(node('p', job.note));
     if (job.evidenceRef) d.append(node('p', 'Kanıt · ' + job.evidenceRef));
     if (job.stockOperationId) d.append(node('p', 'Stok işlem referansı · ' + job.stockOperationId));
+    // H7 D2: icra sorumlusu veya yönetici, gelen evrak işinden doğrudan cevap taslağı başlatabilir.
+    if (job.kind === 'incoming' && (admin || (job.assigneeUid === window.userAuth?.uid && ['pending_acceptance', 'in_progress'].includes(job.state)))) {
+        d.append(button('Cevap yazısı hazırla', async () => {
+            try {
+                const { head, body } = await window.AppModules.EBYSDocuments.readDocument(job.documentId);
+                window.AppModules.EBYSCorrespondenceUI.startReplyFromIncoming(head, body);
+            } catch (error) { window.showAppAlert?.(error.message); }
+        }));
+    }
 
     if (admin) {
         const status = node('p', 'Evrak ve işlem geçmişi yükleniyor…');
