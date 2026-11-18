@@ -12,10 +12,13 @@ const legacyFormat = 'ebys-emulator-recovery-v1', purchaseFormat = 'ebys-emulato
 const purchaseCollections = ['purchaseOrders', 'purchaseFinance'];
 const window = { AppModules: {} };
 const sandbox = vm.createContext({ window, TextEncoder, crypto: webcrypto });
-for (const file of ['purchase-money.js', 'ebys-document-schema.js', 'ebys-purchase-schema.js']) {
+for (const file of ['purchase-money.js', 'ebys-document-schema.js', 'ebys-purchase-schema.js',
+    'ebys-catalog-schema.js', 'ebys-correspondence-schema.js']) {
     vm.runInContext(readFileSync(new URL('../src/utils/' + file, import.meta.url), 'utf8'), sandbox, { filename: file });
 }
 const purchaseSchema = window.AppModules.EBYSPurchaseSchema;
+const catalogSchema = window.AppModules.EBYSCatalogSchema;
+const correspondenceSchema = window.AppModules.EBYSCorrespondenceSchema;
 const contextFields = {
     units: ['id', 'name', 'active', 'parentUnitId', 'organizationId', 'code'],
     personel: ['id', 'name', 'uid', 'pri', 'unitId', 'active'],
@@ -28,7 +31,9 @@ export const recoveryCollections = Object.freeze([
     'ebysOperations', 'ebysEvents', 'ebysProcesses', 'ebysTasks',
     'ebysProcessOperations', 'ebysProcessEvents', 'ebysRouteTemplates',
     'ebysExecutionPolicies', 'ebysExecutionJobs', 'ebysExecutionEvents',
-    'ebysExecutionStockLinks', 'ebysNotifications', 'ebysVerifications', 'ebysVerificationTokens'
+    'ebysExecutionStockLinks', 'ebysNotifications', 'ebysVerifications', 'ebysVerificationTokens',
+    'ebysOrganizations', 'ebysOrganizationRevisions', 'ebysFilePlans', 'ebysLetterTemplates', 'ebysLetterTemplateRevisions',
+    'ebysReplyLinks', 'ebysIncomingKeys', 'ebysDispatches'
 ]);
 
 function check(condition, message) {
@@ -192,7 +197,7 @@ function indexRows(rows, includePurchases) {
     return index;
 }
 
-function validateLinks(index) {
+async function validateLinks(index) {
     const stock = new Set();
     const all = name => index.get(name);
     const requireRecord = (name, id) => {
@@ -292,7 +297,128 @@ function validateLinks(index) {
         'QR durum veya iptal tarihi geçersiz.');
     }
     for (const token of all('ebysVerifications').keys()) requireRecord('ebysVerificationTokens', token);
+    validateCatalog(index, requireRecord);
+    await validateCorrespondence(index, requireRecord, head, version);
     return [...stock].sort();
+}
+
+const uuidPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const revisionNo = value => Number.isSafeInteger(value) && value >= 1;
+const valid = (normalize, value) => {
+    try {
+        normalize(value);
+        return true;
+    } catch {
+        return false;
+    }
+};
+const sameFields = (a, b, fields) => isMap(a) && isMap(b) && fields.every(field => a[field] === b[field]);
+
+// H6b: kurum tanımları kendi revizyon geçmişiyle, evrak kopyaları bu geçmişle tutarlı olmalıdır (firestore.rules ec*).
+function validateCatalog(index, requireRecord) {
+    const all = name => index.get(name);
+    const fields = catalogSchema.PROFILE_FIELDS;
+    for (const [id, org] of all('ebysOrganizations')) {
+        check(id === catalogSchema.PROFILE_ID && timestamp(org.updatedAt) && revisionNo(org.revision) &&
+            valid(catalogSchema.normalizeProfile, org), 'Kurum künyesi geçersiz.');
+        for (let r = 1; r <= org.revision; r++) requireRecord('ebysOrganizationRevisions', String(r));
+    }
+    for (const [id, rev] of all('ebysOrganizationRevisions')) {
+        check(revisionNo(rev.revision) && id === String(rev.revision) && timestamp(rev.createdAt) &&
+            valid(catalogSchema.normalizeProfile, rev.profile), 'Kurum künyesi revizyonu geçersiz.');
+        const primary = requireRecord('ebysOrganizations', catalogSchema.PROFILE_ID);
+        check(primary.revision >= rev.revision && (rev.revision !== primary.revision || sameFields(rev.profile, primary, fields)),
+            'Kurum künyesi revizyonu güncel künyeyle uyuşmuyor.');
+    }
+    for (const [id, plan] of all('ebysFilePlans')) {
+        check(id === plan.code && timestamp(plan.createdAt) && timestamp(plan.updatedAt) && revisionNo(plan.revision) &&
+            valid(catalogSchema.normalizeFilePlan, plan), 'Dosya planı geçersiz.');
+    }
+    for (const [id, tpl] of all('ebysLetterTemplates')) {
+        check(uuidPattern.test(id) && id === tpl.id && timestamp(tpl.createdAt) && timestamp(tpl.updatedAt) &&
+            revisionNo(tpl.currentRevision) && revisionNo(tpl.revision), 'Üst yazı şablonu geçersiz.');
+        for (let r = 1; r <= tpl.currentRevision; r++) {
+            const rev = requireRecord('ebysLetterTemplateRevisions', catalogSchema.revisionId(id, r));
+            check(r !== tpl.currentRevision || rev.name === tpl.name, 'Şablonun güncel sürüm adı uyuşmuyor.');
+        }
+    }
+    for (const [id, rev] of all('ebysLetterTemplateRevisions')) {
+        check(uuidPattern.test(rev.templateId ?? '') && revisionNo(rev.revision) && id === catalogSchema.revisionId(rev.templateId, rev.revision) &&
+            timestamp(rev.createdAt) && valid(catalogSchema.normalizeTemplate, rev), 'Şablon sürümü geçersiz.');
+        check(requireRecord('ebysLetterTemplates', rev.templateId).currentRevision >= rev.revision, 'Şablon sürümü üst şablonu aşıyor.');
+    }
+    const copies = (record, metadata, versioned) => {
+        const snapshot = record.institutionSnapshot;
+        if (snapshot !== undefined) {
+            check(isMap(snapshot) && Number.isSafeInteger(snapshot.revision), 'Evrakın künye kopyası geçersiz.');
+            const rev = requireRecord('ebysOrganizationRevisions', String(snapshot.revision));
+            check(sameFields(snapshot, rev.profile, fields), 'Evrakın künye kopyası revizyonla uyuşmuyor.');
+        }
+        const template = record.letterTemplate;
+        if (template !== undefined) {
+            check(isMap(template) && Number.isSafeInteger(template.revision), 'Evrakın şablon bağı geçersiz.');
+            const rev = requireRecord('ebysLetterTemplateRevisions', catalogSchema.revisionId(template.templateId, template.revision));
+            check(rev.name === template.name, 'Evrakın şablon bağı sürümle uyuşmuyor.');
+        }
+        if (metadata?.filePlanTitle) {
+            const plan = requireRecord('ebysFilePlans', metadata.filePlanCode);
+            check(valid(catalogSchema.normalizeFilePlan, { code: metadata.filePlanCode, title: metadata.filePlanTitle }),
+                'Sürümün dosya planı adı geçersiz.');
+            // Plan güncellenmemişse (revision === 1) sürümdeki ad katalogla birebir aynı olmalı; plan sonradan güncellendiyse
+            // (revision > 1) sürümün tarihsel plan adı zaten contentDigest ile mühürlüdür.
+            check(!versioned || plan.revision > 1 || plan.title === metadata.filePlanTitle, 'Sürümün dosya planı katalogla uyuşmuyor.');
+        }
+    };
+    for (const draft of all('ebysDrafts').values()) copies(draft, draft.metadata, false);
+    for (const v of all('ebysVersions').values()) {
+        if ((v.schemaVersion ?? 1) === 1) copies(v, v.metadataSnapshot, true);
+    }
+}
+
+// H7: cevap bağı, gelen evrak anahtarı ve gönderim kaydı bağlı evrak/sürümle tutarlı olmalıdır (firestore.rules ebys*Ok).
+async function validateCorrespondence(index, requireRecord, head, version) {
+    const all = name => index.get(name);
+    for (const [id, link] of all('ebysReplyLinks')) {
+        check(timestamp(link.createdAt) && valid(correspondenceSchema.normalizeReplyLink, link) && id === link.replyDocumentId,
+            'Cevap bağı geçersiz.');
+        const replyHead = head(link.replyDocumentId), targetHead = head(link.replyToDocumentId);
+        check(['outgoing', 'internal'].includes(replyHead.kind) && replyHead.ownerUid === link.replyOwnerUid, 'Cevap evrakı bağı geçersiz.');
+        check(targetHead.kind === 'incoming' && targetHead.ownerUid === link.replyToOwnerUid &&
+            Boolean(targetHead.registrationNo) && Boolean(targetHead.currentVersionId), 'Cevaplanan gelen evrak bağı geçersiz.');
+        const target = version(link.replyToVersionId), meta = target.metadataSnapshot ?? {};
+        check(target.documentId === link.replyToDocumentId && canonical(link.replyToSummary) === canonical({
+            registrationNo: targetHead.registrationNo, externalRegistrationNo: meta.externalRegistrationNo || '',
+            date: meta.date, correspondent: meta.correspondent, subject: meta.subject
+        }), 'Cevap bağının İlgi özeti hedef sürümle uyuşmuyor.');
+    }
+    const versionsByDocument = new Map();
+    for (const v of all('ebysVersions').values()) {
+        if (!versionsByDocument.has(v.documentId)) versionsByDocument.set(v.documentId, []);
+        versionsByDocument.get(v.documentId).push(v.metadataSnapshot);
+    }
+    for (const [key, rec] of all('ebysIncomingKeys')) {
+        check(/^[a-f0-9]{64}$/.test(key) && rec.id === key && timestamp(rec.createdAt), 'Gelen evrak anahtarı biçimi geçersiz.');
+        const inHead = head(rec.documentId);
+        check(inHead.kind === 'incoming' && inHead.ownerUid === rec.ownerUid && inHead.unitId === rec.unitId &&
+            Boolean(rec.registrationNo) && inHead.registrationNo === rec.registrationNo, 'Gelen evrak anahtarı evrakla uyuşmuyor.');
+        const sources = [all('ebysDrafts').get(rec.documentId)?.metadata, ...(versionsByDocument.get(rec.documentId) ?? [])];
+        let matched = false;
+        for (const meta of sources) {
+            if (isMap(meta) && await correspondenceSchema.incomingDuplicateKey(meta) === key) {
+                matched = true;
+                break;
+            }
+        }
+        check(matched, 'Gelen evrak anahtarı evrakın üstverisinden üretilmemiş.');
+    }
+    for (const [id, d] of all('ebysDispatches')) {
+        check(timestamp(d.createdAt) && d.id === id &&
+            valid(input => correspondenceSchema.normalizeDispatch(input, d.createdAt.slice(0, 10)), d), 'Gönderim kaydı geçersiz.');
+        const outHead = head(d.documentId);
+        check(outHead.kind === 'outgoing' && outHead.ownerUid === d.ownerUid && Boolean(outHead.registrationNo) &&
+            ['internally_approved', 'closed', 'archived'].includes(outHead.state), 'Gönderim kaydının evrakı geçersiz.');
+        check(version(d.versionId).documentId === d.documentId, 'Gönderim kaydının sürüm bağı geçersiz.');
+    }
 }
 
 function linkedPath(collection, id, purchaseOrderId) {
@@ -382,7 +508,7 @@ export async function captureRecovery(options) {
     check(options.quiescent === true, 'Kaynak yazmaları durdurulduktan sonra prova başlatılmalı.');
     const first = await scan(db);
     const index = indexRows(first, first.some(row => row.collection === 'purchaseOrders'));
-    const stockIds = validateLinks(index);
+    const stockIds = await validateLinks(index);
     const purchases = purchaseRecovery(index);
     const stockRequirements = await stockDigests(db, stockIds);
     const second = await scan(db);
@@ -408,7 +534,7 @@ export async function restoreRecovery(options, bundle) {
     check(payload.consistency === 'operator-quiescence-and-two-matching-scans' && timestamp(payload.exportedAt) &&
         expected === digest(payload), 'Paket özeti veya manifestosu doğrulanamadı.');
     const index = indexRows(payload.rows, payload.format === purchaseFormat);
-    const stockIds = validateLinks(index);
+    const stockIds = await validateLinks(index);
     const purchases = purchaseRecovery(index);
     check(purchases ? payload.format === purchaseFormat && canonical(purchases) === canonical(payload.purchaseManifest)
         : payload.format === legacyFormat && !Object.hasOwn(payload, 'purchaseManifest'), 'Satın alma kurtarma manifestosu uyuşmuyor.');

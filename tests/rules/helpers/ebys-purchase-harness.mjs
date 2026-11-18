@@ -13,7 +13,7 @@ export function contextDb(env,uid) {
     return env.authenticatedContext(uid,{ email:uid === 'admin' ? 'admin@medipol.local' : uid+'.test@staff.medipol.local', firebase:{sign_in_provider:'password'} }).firestore();
 }
 export function actor(env, uid, { transform = (_path, data) => data, r = root, onRead, lostResponse = false } = {}) {
-    const db = contextDb(env, uid), metrics = { reads: [], writes: [], committed: [], attempts: 0 };
+    const db = contextDb(env, uid), metrics = { reads: [], writes: [], committed: [], attempts: 0, queries: [] };
     const window = { userAuth: { uid }, AppEnv: { COLLECTION_ROOT: r }, AppModules: {}, isDbAdmin: () => uid === 'admin' };
     const read = async (path, action) => {
         metrics.reads.push(path.path);
@@ -44,13 +44,21 @@ export function actor(env, uid, { transform = (_path, data) => data, r = root, o
     };
     const context = vm.createContext({ window, console, crypto: webcrypto, TextEncoder, Date, fireDb: db, ...sdk,
         getDocFromServer: path => read(path, sdk.getDocFromServer), runTransaction: run,
+        // Spark ölçümü: sorgu dönen belge başına, boş sorgu en az 1 okuma sayılır.
+        getDocsFromServer: async q => {
+            const snapshot = await sdk.getDocsFromServer(q);
+            metrics.queries.push(snapshot.size);
+            return snapshot;
+        },
         where: (field, op, value) => sdk.where(field, op, plain(value)) });
     const verificationSchema = 'src/utils/ebys-verification-schema.js';
     vm.runInContext(readFileSync(verificationSchema, 'utf8').replace(/^export /gm, ''), context, { filename: verificationSchema });
     const modules = [
         'utils/ebys-document-schema.js', 'utils/ebys-process-schema.js', 'utils/purchase-money.js',
-        'utils/ebys-purchase-schema.js', 'services/ebys-document-service.js', 'services/ebys-execution-service.js',
-        'services/ebys-verification-service.js', 'services/ebys-process-service.js'
+        'utils/ebys-purchase-schema.js', 'utils/ebys-catalog-schema.js', 'utils/ebys-correspondence-schema.js',
+        'services/ebys-document-service.js', 'services/ebys-execution-service.js',
+        'services/ebys-verification-service.js', 'services/ebys-process-service.js',
+        'services/ebys-catalog-service.js', 'services/ebys-correspondence-service.js'
     ];
     for (const module of modules) {
         const file = 'src/' + module;
@@ -67,8 +75,9 @@ export function actor(env, uid, { transform = (_path, data) => data, r = root, o
         freeze: async input => plain(await commands.freezePurchaseVersion(input)),
         view: commands.getPurchaseView, preview: window.purchasePreview, processes: window.AppModules.EBYSProcesses,
         documents: window.AppModules.EBYSDocuments, execution: window.AppModules.EBYSExecution,
-        verification: window.AppModules.EBYSVerification,
-        reset: () => { metrics.reads = []; metrics.writes = []; metrics.committed = []; metrics.attempts = 0; }
+        verification: window.AppModules.EBYSVerification, catalog: window.AppModules.EBYSCatalog,
+        correspondence: window.AppModules.EBYSCorrespondence,
+        reset: () => { metrics.reads = []; metrics.writes = []; metrics.committed = []; metrics.attempts = 0; metrics.queries = []; }
     };
 }
 

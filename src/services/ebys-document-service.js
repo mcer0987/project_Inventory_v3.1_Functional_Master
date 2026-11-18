@@ -17,7 +17,8 @@ const executionAdminScopes = Object.freeze({
 });
 export const EBYS_COLLECTION_REGISTRY = Object.freeze([
     ...ownerCollections, 'ebysExecutionJobs', 'ebysNotifications', ...Object.keys(executionAdminScopes),
-    'ebysVerifications', 'ebysVerificationTokens', 'ebysReplyLinks', 'ebysIncomingKeys', 'ebysDispatches'
+    'ebysVerifications', 'ebysVerificationTokens', 'ebysReplyLinks', 'ebysIncomingKeys', 'ebysDispatches',
+    'ebysOrganizations', 'ebysOrganizationRevisions', 'ebysFilePlans', 'ebysLetterTemplates', 'ebysLetterTemplateRevisions'
 ]);
 const EXPORT_DOCUMENT_LIMIT = 500;
 const EXPORT_REQUEST_LIMIT = 400;
@@ -499,6 +500,10 @@ export async function exportOwnDocuments() {
     const ownedDispatches = await read('ebysDispatches', where('ownerUid', '==', ownerUid));
     const recordedDispatches = await read('ebysDispatches', where('actorUid', '==', ownerUid));
     add('ebysDispatches', uniqueRows([...ownedDispatches, ...recordedDispatches]), 'owner-or-actor');
+    // H6b kurum tanımları kişisel değildir; evrak kopyası kendi taslak/sürümündeki künye, plan ve şablon kopyasını taşır.
+    for (const name of ['ebysOrganizations', 'ebysOrganizationRevisions', 'ebysFilePlans', 'ebysLetterTemplates', 'ebysLetterTemplateRevisions']) {
+        add(name, [], 'institutional-catalog', { status: 'excluded', reason: 'institutional-catalog-definition' });
+    }
 
     const purchaseEntries = [], markers = [], finances = [];
     const linkedHeads = new Map(data.ebysDocuments.filter(head => Object.hasOwn(head, 'purchaseOrderId')).map(head => [head.id, head]));
