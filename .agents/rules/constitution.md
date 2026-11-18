@@ -49,10 +49,13 @@ All code must align with our future decentralized/sovereign vision:
 ## 4. Directory Structure
 
 ```
-/services/          → Firebase CRUD, queries, batch operations
-/ui/  or /components/ → Tables, forms, modals, layout, rendering
-/utils/             → Shared helper functions (formatting, validation)
-app.js              → Main orchestrator — imports and wires all modules
+/services/               → Firebase CRUD, queries, batch operations
+/ui/  or /components/    → Tables, forms, modals, layout, rendering
+/utils/                  → Shared helper functions (formatting, validation)
+app.js                   → Main orchestrator — imports and wires all modules
+/audits/                 → ONLY independent audit reports (audit-reports/) & official security test baselines (test-baselines/) proving production readiness. NO implementation plans, walkthroughs, or task prompts allowed here.
+/Mimari ve Geliştirmeler/ → Versioned architectural designs, Implementation Plans, development process docs, and Walkthroughs.
+/scratch/                → Local verification scripts, raw test evidence, and temporary agent task/prompt files (scratch/tasks/).
 ```
 
 ## 5. Mutation-Free State Management
