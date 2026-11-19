@@ -362,6 +362,7 @@ html.ebys-sc-locked body {
 .ebys-sc-btn:focus-visible,
 .ebys-sc-book:focus-visible,
 .ebys-sc-close:focus-visible,
+.ebys-sc-input:focus-visible,
 .ebys-sc-faq-item summary:focus-visible,
 .ebys-sc-stage:focus-visible {
     outline: 2px solid var(--sc-accent);
@@ -466,6 +467,24 @@ html.ebys-sc-locked body {
 .ebys-sc-btn.ghost { background: transparent; color: var(--sc-accent); }
 .ebys-sc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
+/* İP-9 · 9c: icra simülasyonunun örnek metin alanları; ışık/koyu tema token'larıyla uyumlu sade giriş stili. */
+.ebys-sc-fields { display: flex; flex-wrap: wrap; gap: 12px; }
+.ebys-sc-field { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; font-size: 12px; color: var(--sc-muted); }
+
+.ebys-sc-input {
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--sc-border);
+    border-radius: 8px;
+    background: var(--sc-surface);
+    color: var(--sc-text);
+    font-size: 13px;
+    font-family: inherit;
+}
+
+.ebys-sc-input::placeholder { color: var(--sc-muted); }
+.ebys-sc-input:disabled { opacity: 0.55; cursor: not-allowed; background: var(--sc-surface-2); }
+
 .ebys-sc-sim-log {
     margin: 0;
     padding: 10px 12px;
@@ -527,6 +546,8 @@ html.ebys-sc-locked body {
 
 .ebys-sc-flow-step { position: relative; display: flex; flex-direction: column; gap: 10px; }
 
+/* İP-9 · 9a: "akışı oynat" animasyonu kaldırıldı; adımlar artık durum geçişi değil, her zaman net/okunur bir
+   sıralama gösterir. Bağlantı çizgisi ve nokta bu yüzden sabit, canlı renkte (is-active/is-done'a bağlı değil). */
 .ebys-sc-flow-step:not(:last-child)::after {
     content: '';
     position: absolute;
@@ -535,11 +556,8 @@ html.ebys-sc-locked body {
     right: -6px;
     height: 2px;
     border-radius: 2px;
-    background: var(--sc-border);
-    transition: background 0.4s ease;
+    background: linear-gradient(90deg, #16a34a, var(--sc-accent));
 }
-
-.ebys-sc-flow-step.is-done::after { background: linear-gradient(90deg, #16a34a, var(--sc-accent)); }
 
 .ebys-sc-flow-dot {
     position: relative;
@@ -548,10 +566,9 @@ html.ebys-sc-locked body {
     width: 44px;
     height: 44px;
     border-radius: 50%;
-    border: 2px solid var(--sc-border);
-    background: var(--sc-surface);
-    color: var(--sc-muted);
-    transition: all 0.3s ease;
+    border: 2px solid var(--sc-accent);
+    background: var(--sc-accent-soft);
+    color: var(--sc-accent);
 }
 
 .ebys-sc-flow-num {
@@ -570,13 +587,6 @@ html.ebys-sc-locked body {
     color: var(--sc-muted);
 }
 
-.ebys-sc-flow-step.is-active .ebys-sc-flow-dot {
-    border-color: var(--sc-accent);
-    color: var(--sc-accent);
-    box-shadow: 0 0 0 5px var(--sc-accent-soft);
-}
-
-.ebys-sc-flow-step.is-done .ebys-sc-flow-dot { border-color: #16a34a; background: #16a34a; color: #fff; }
 .ebys-sc-flow-body strong { display: block; font-size: 14px; margin-bottom: 2px; }
 .ebys-sc-flow-body p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--sc-muted); }
 
@@ -726,9 +736,10 @@ html.ebys-sc-locked body {
 
 .ebys-sc-invoice-foot strong { font-size: 18px; color: var(--sc-text); font-variant-numeric: tabular-nums; }
 
+/* İP-9 · 9b: işlevsiz "canlı kur" sütunu kaldırıldı; satır artık yalnız sabitlenen kuru gösterir (2 sütun). */
 .ebys-sc-rate {
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto 1fr;
     align-items: center;
     gap: 12px;
     padding: 10px 12px;
@@ -738,8 +749,6 @@ html.ebys-sc-locked body {
 
 .ebys-sc-rate small { display: block; font-size: 11px; color: var(--sc-muted); }
 .ebys-sc-rate strong { font-variant-numeric: tabular-nums; }
-.ebys-sc-rate-now { font-size: 12px; color: var(--sc-muted); font-variant-numeric: tabular-nums; transition: color 0.3s ease; }
-.ebys-sc-rate-now.is-changed { color: var(--tone-amber-fg); font-weight: 600; }
 
 /* ---- 4 · Kurumsal yapı ---- */
 .ebys-sc-tree,
@@ -829,8 +838,7 @@ html.ebys-sc-locked body {
 
     .ebys-sc-flow { grid-template-columns: 1fr; gap: 0; }
     .ebys-sc-flow-step { flex-direction: row; gap: 14px; padding-bottom: 16px; }
-    .ebys-sc-flow-step:not(:last-child)::after { top: 48px; bottom: 2px; left: 21px; right: auto; width: 2px; height: auto; }
-    .ebys-sc-flow-step.is-done::after { background: linear-gradient(180deg, #16a34a, var(--sc-accent)); }
+    .ebys-sc-flow-step:not(:last-child)::after { top: 48px; bottom: 2px; left: 21px; right: auto; width: 2px; height: auto; background: linear-gradient(180deg, #16a34a, var(--sc-accent)); }
     .ebys-sc-flow-dot { flex-shrink: 0; }
 
     .ebys-sc-chain { grid-template-columns: 1fr; gap: 10px; }
@@ -846,8 +854,6 @@ html.ebys-sc-locked body {
     .ebys-sc-chain-node.is-active .ebys-sc-chain-icon { animation: none; }
     .ebys-sc-overlay,
     .ebys-sc-dialog,
-    .ebys-sc-flow-dot,
-    .ebys-sc-flow-step::after,
     .ebys-sc-chain-node,
     .ebys-sc-book { transition: none; }
 }

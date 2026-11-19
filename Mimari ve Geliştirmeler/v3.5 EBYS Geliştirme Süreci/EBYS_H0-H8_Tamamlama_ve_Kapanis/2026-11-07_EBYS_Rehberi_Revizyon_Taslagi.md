@@ -1,12 +1,12 @@
 # EBYS Rehberi — sade kullanım metni taslağı
 
-Tarih: 7 Kasım 2026. Bu metin mevcut rehberin yerini bugün değiştirmez; paketlerle birlikte uygulanacak içerik taslağıdır. “Planlanan” bölümler geliştirme/test tamamlanmadan ürün içinde gösterilmez. Düğme adları yayın öncesi gerçek arayüzle tekrar eşleştirilir.
+Tarih: 7 Kasım 2026, 18 Kasım 2026'da İP-9 ile güncellendi. H0–H8 kapsamı tamamlandı (bkz. `2026-11-18_EBYS_H8_Birlesik_Kabul_ve_Kurtarma_Walkthrough.md`); bu metin artık **gerçekleşmiş ve çalışan** ürünü anlatır, planlanan/gelecek özellik yoktur. Her bölüm gerçek ekran, sekme ve düğme adlarıyla hizalanmıştır; düğme adları yine de her yayın öncesi gerçek arayüzle tekrar eşleştirilmelidir (ekran metinleri zamanla değişebilir).
 
 ## Anlatım düzeni
 
-Her bölümde önce tek cümle amaç, ardından ekran yolu ve kısa adımlar bulunur. Ayrıntılar “Nasıl kullanırım?” düğmesiyle açılır. Teknik kimlik, koleksiyon, transaction ve token anlatımları son kullanıcı metnine girmez. Mevcut görseller ve örnek akış korunur; örneklerin gerçek işlem yapmadığı görünür yazılır.
+Her bölümde önce tek cümle amaç, ardından ekran yolu ve kısa adımlar bulunur. Ayrıntılar “Nasıl kullanırım?” düğmesiyle açılır. Teknik kimlik, koleksiyon, transaction ve token anlatımları son kullanıcı metnine girmez. Mevcut görseller ve örnek akış korunur; örneklerin gerçek işlem yapmadığı görünür yazılır. İP-9 ölçütü: interaktiflik yalnız gerçekten işlevselse eklenir — işlevsel olmayacaksa hiç eklenmez (bkz. Aşama 5/6 simülasyonları, aşağıda).
 
-## 1. Birim ve personel — mevcut, H3 ile tamamlanacak
+## 1. Birim ve personel — mevcut (H3-A/H3-B tamamlandı)
 
 **Bu bölüm ne için?** Evrakın hangi birime ait olduğunu ve işi kimin yapacağını doğru seçmenizi sağlar.
 
@@ -19,58 +19,44 @@ Her bölümde önce tek cümle amaç, ardından ekran yolu ve kısa adımlar bul
 3. Personelin aktif olduğunu ve giriş hesabının açıldığını kontrol edin.
 4. Havale tanımında önce icra birimini, sonra o birimdeki uygun personeli seçin.
 
-**Sonuç:** Birim ve personel uygun seçim listelerinde görünür. Yeni birim eklemek, o birime otomatik icra sorumlusu atamaz; havale tanımı ayrıca kaydedilir.
+**Sonuç:** Birim ve personel uygun seçim listelerinde görünür. Yeni birim eklemek, o birime otomatik icra sorumlusu atamaz; havale tanımı ayrıca kaydedilir. Birimin veya personelin adı sonradan değişse de kayıt bağlantısı (kalıcı kimlik) korunur; eski evrakın üzerinde o tarihteki birim/personel adı kalır.
 
 **Personel görünmüyorsa:** Aktiflik, giriş hesabı ve seçilen birime bağlılık kontrol edilmelidir. Daha önce bir evrakı onaylamış olması şart değildir.
 
-**Planlanan H3 açıklaması:** Birimin adı sonradan değişse de kayıt bağlantısı korunur. Eski evrakın üzerinde o tarihteki birim adı kalır.
+## 2. Satın alma talebi ve revizyon — mevcut, evrak bağı aynı talep üzerinden
 
-### H3/H4/H5 sonrası uygulanacak kısa yardım — henüz ürün özelliği değil
-
-**Nereden?** Satın Alma Talepleri → Yeni Talep. Bu adımlar planlanan kullanım içindir.
-
-1. İlgili birimi ortak listeden seçin. Aynı adı taşıyan birimler varsa yanındaki kodu ve bağlı olduğu birimi kontrol edin.
-2. Mal veya hizmetleri, miktarı, fiyatı ve vergiyi girin. Kalem toplamını ve ödenek önerisini kontrol edin. Daha yüksek ödenek gerekiyorsa tutarı ve gerekçesini yazın.
-3. Kaydettiğiniz talebin bağlı evrakını açın. Metni ve teklifi kontrol edip bir kez onaya gönderin. İade gelirse gerekçeye göre yeni sürüm hazırlayın.
-4. Sıranız geldiğinde size açılan sürümü inceleyin. İlk olumlu kararda döviz kuru sabitlenir. Kur değişikliği uyarısında güncel tutarı kontrol edip yeniden karar verin.
-5. Son onaydan sonra açılan icra görevinden işin durumunu izleyin. Önceki sürümün metni, birim adı ve varsa kesinleşmiş tutarı geçmişte korunur.
-
-**Sonuç** Talep, bağlı evrakı ve tek onay rotası üzerinden ilerler. Son onay işi sorumluya iletir.
-
-**Takılırsanız** Birim listede yoksa yöneticinizden Birim Yönetimi'ni kontrol etmesini isteyin. Kur eksikse yönetici Operasyon Merkezi'nden tamamlar. İcra görevi açılamıyorsa havale sorumlusunu kontrol ettirin.
-
-## 2. Satın alma talebi — mevcut; evrak bağı H4/H5 sonrasında
-
-**Bu bölüm ne için?** Alınmasını istediğiniz mal veya hizmetleri ve ayırmak istediğiniz ödeneği bildirirsiniz.
+**Bu bölüm ne için?** Alınmasını istediğiniz mal veya hizmetleri, ayırmak istediğiniz ödeneği ve bu talebe bağlı resmi evrakı tek akışta ilerletirsiniz.
 
 **Nereden?** Satın Alma Talepleri (EBYS) → Yeni Talep.
 
-1. İlgili birimi ve talep konusunu seçin/yazın.
-2. Her mal veya hizmeti ayrı kalem olarak ekleyin. Miktar, birim fiyat, para birimi ve vergiyi kontrol edin.
-3. Ekrandaki kalem toplamına bakın. Daha yüksek ödenek istiyorsanız ödenek alanını düzenleyin ve gerekçesini açıklayın.
-4. Talebi kaydedin. Listede kendi talebinizi açıp bilgileri kontrol edin.
+1. İlgili birimi ve talep konusunu seçin/yazın. Aynı adı taşıyan birimler varsa yanındaki kodu ve bağlı olduğu birimi kontrol edin.
+2. Her mal veya hizmeti ayrı kalem olarak ekleyin: miktar, birim fiyat, para birimi (TRY/USD/EUR karışık olabilir) ve vergi. Kalem toplamına ve ödenek önerisine bakın; daha yüksek ödenek istiyorsanız tutarı ve gerekçesini yazın.
+3. Talebi kaydedin; bağlı evrakını aynı talebin içinden açıp metni ve teklifi kontrol edip bir kez onaya gönderin (dondurun).
+4. Sıranız geldiğinde size açılan sürümü inceleyin. İlk olumlu kararda döviz kuru belgeye sabitlenir; sonraki kur güncellemeleri bu talebin TL karşılığını etkilemez.
+5. İade gelirse gerekçeye göre **aynı talebe** yeni bir sürüm hazırlarsınız — talep kimliği değişmez, önceki sürümün metni, birim adı ve kesinleşmiş tutarı geçmişte korunur.
+6. Son onaydan sonra açılan icra görevinden işin durumunu izleyin.
 
-**Sonuç:** Kalem hesabı ile istediğiniz ödenek ayrı görünür. Döviz kuru yönetici tarafından Operasyon Merkezi'nden sağlanır; mevcut akışta ilk onayda sabitlenir.
+**Sonuç:** Talep, bağlı evrakı ve tek onay rotası üzerinden ilerler. Son onay işi sorumluya iletir; evrak kapanana kadar iş icradadır (bkz. bölüm 6.5 "İcra nedir?").
 
-**Kur eksikse:** Yönetici kur, tarih ve kaynak bilgisini tamamlamalıdır. Rastgele kur girerek ilerlemeyin.
+**Kur eksikse:** Yönetici kur, tarih ve kaynak bilgisini Operasyon Merkezi'nden tamamlamalıdır. Rastgele kur girerek ilerlemeyin; kur eksikken verilecek ilk olumlu karar reddedilir.
 
-**Planlanan H4/H5 açıklaması:** Yeni bağlı talebin içinden evrakını açabileceksiniz. Aynı talep için ikinci bir onay başlatmanız gerekmeyecek. Bu özellik tamamlanana kadar mevcut satın alma talebinin İç Yazışmalar'da kendiliğinden görünmesi beklenmez.
+**Takılırsanız:** Birim listede yoksa yöneticinizden Birim Yönetimi'ni kontrol etmesini isteyin. İcra görevi açılamıyorsa havale sorumlusunu kontrol ettirin.
 
-## 3. Evrak hazırlama — mevcut yönetici yolu
+## 3. Evrak hazırlama — yönetici yolu ve personelin kendi çalışma alanı
 
 **Bu bölüm ne için?** Gelen yazıyı kaydetmek, giden yazı hazırlamak veya kurum içinde yazışmak için kullanılır.
 
-**Nereden?** Yönetici → Talepler ve Süreçler → Evrak Kayıt Defteri.
+**Personel için (`index.html` → "Evraklarım (EBYS)"):** Kendi gelen, giden ve iç yazışma taslaklarınızı "Evrak Kayıt Defteri" bölümünde **Yeni evrak** ile hazırlar, metni dondurup onay rotası başlatır ve **Evrak kopyasını indir** ile kendi evraklarınızın kişisel kopyasını alırsınız.
+
+**Yönetici için:** Talepler ve Süreçler → Evrak Kayıt Defteri.
 
 1. Gelen Evrak, Giden Evrak veya İç Yazışmalar defterini seçin.
-2. Yeni taslağı açın. Birim, konu, muhatap ve evrak metnini doldurun.
+2. Yeni taslağı açın. Birim, konu, muhatap ve evrak metnini doldurun. Kurum künyesi tanımlıysa yeni taslak bu künyeyi otomatik kopyalar (bkz. bölüm 13); dosya planı veya üst yazı şablonu seçebilirsiniz.
 3. Hazırlığa sonra devam edecekseniz Taslağı Kaydet seçeneğini kullanın.
 4. Kayıt numarası gerekiyorsa Kesin kayıt numarası al seçeneğini kullanın.
-5. Metin hazır olduğunda Onaya Sun / Dondur seçeneğini kullanın.
+5. Metin hazır olduğunda Onaya sun / Dondur seçeneğini kullanın.
 
 **Sonuç:** Dondurduğunuz metin değişmez. Bu işlem tek başına onay rotasını başlatmaz; sonraki bölümden onaylayacak kişileri seçmeniz gerekir. Evrak numarası alınması dış kurum onayı anlamına gelmez.
-
-**Planlanan H6a yolu:** Personel kendi taslaklarını ayrı bir çalışma alanından açabilecek. Ekran kullanıma girmeden mevcut rehberde bu yol gösterilmez.
 
 ## 4. Onay rotasını başlatma — Aşama 5
 
@@ -98,7 +84,7 @@ Her bölümde önce tek cümle amaç, ardından ekran yolu ve kısa adımlar bul
 3. Uygunsa Onayla; düzeltme gerekiyorsa gerekçenizi yazıp Yazara iade et; uygun değilse gerekçenizi yazıp Reddet seçeneğini kullanın.
 4. İşlem sonucunu ve görev kartının yeni durumunu kontrol edin.
 
-**Sonuç:** Onay sıradaki kişiye geçer. Son onaydan sonra işi yapacak sorumluya icra görevi açılır. Evrak bu anda henüz iş tamamlandı anlamında kapanmış değildir.
+**Sonuç:** Onay sıradaki kişiye geçer. Son onaydan sonra işi yapacak sorumluya icra görevi açılır. Evrak bu anda henüz iş tamamlandı anlamında kapanmış değildir (bkz. bölüm 6.5).
 
 **“Havale tanımı yok” uyarısı:** Sistem işi kime vereceğini bilmiyor. Yönetici, evrakın türü ve bağlı birimi için havale sorumlusunu tanımlamalıdır. Sonra aynı onay yeniden denenebilir.
 
@@ -113,6 +99,14 @@ Her bölümde önce tek cümle amaç, ardından ekran yolu ve kısa adımlar bul
 **Vekâlet:** Yönetici, aktif görevin Süreç durumu ekranındaki Süreli vekâlet / yeniden atama alanını kullanır. Kişi, bitiş tarihi ve gerekçe girerek görevi devreder. Bu işlem rotaya yeni bir onay adımı eklemez; mevcut adımı geçici olarak başka kişiye verir.
 
 **Süre dolarsa:** Otomatik olarak başka bir onay adımı açıldığını varsaymayın; yönetici görev durumunu kontrol etmelidir. Kurum genelindeki tüm görevler için toplu izin vekâleti bu ekranın kapsamı değildir.
+
+## 6.5. Kavram: Onay/İmza ile İcra farkı; Havale nedir? (İP-9)
+
+Rehberde (Aşama 6) standart kullanıcı için açıkça tanımlanır, burada da aynı dille özetlenir:
+
+- **Onay/imza**, evrakın içeriğini uygun bulduğunuzu gösterir.
+- **İcra**, onaylanan işin gerçekte yapılmasıdır — ürünün teslim edilmesi ya da talep edilen işlemin tamamlanması gibi. Evrak, icra bitmeden kapanmaz.
+- **Havale**, son onaydan sonra işi kimin yürüteceğinin belirlenmesidir: yönetim işi ilgili birime veya sorumluya yönlendirir. Standart kullanıcı olarak yalnız bu seçimin sonucunu — size atanan işi — görürsünüz; havale tanımının kendisini (birim/sorumlu eşleştirmesi) yalnız yönetici yapar.
 
 ## 7. Havale sorumlusunu belirleme — Aşama 6, yönetici
 
@@ -143,6 +137,8 @@ Her bölümde önce tek cümle amaç, ardından ekran yolu ve kısa adımlar bul
 **Sonuç:** Kabul ettiğiniz iş sizde devam eder. İade edilen iş yeniden havale için yönetime gider; sessizce kaybolmaz.
 
 **Yönetici için:** Yeni onaylanan iş genel İcra Takibi tablosunda Kabul bekliyor olarak görünür. Havale Bekleyen İadeler yalnız iade edilmiş işler içindir; yeni işin bu listede olmaması normaldir.
+
+**Rehberde deneyin:** EBYS Rehberi → İcra ve Kapanış sekmesindeki "Örnek icra simülasyonu" bu üç durumu (Kabul bekliyor → İcrada → Tamamlandı, alternatif dal: İade edildi) gerçek düğme adlarıyla deneyimletir (İP-9, 9c).
 
 ## 9. İade edilen işi yeniden havale — Aşama 6, yönetici
 
@@ -190,32 +186,53 @@ Her bölümde önce tek cümle amaç, ardından ekran yolu ve kısa adımlar bul
 
 **Belge sahibi:** **Evrak kopyasını indir** ile kendi evraklarınızı ve yetkili olduğunuz ilgili kayıtları alabilirsiniz. Dosyayı kurumunuzun izin verdiği güvenli yerde saklayın.
 
-**Kapsam:** Kişisel dosyada dahil edilen ve eksik kalan kayıtlar belirtilir. Kurum kurtarma paketi ayrı hazırlanır ve yetkili operatör tarafından kullanılır.
+**Kapsam:** Kişisel dosyada dahil edilen ve eksik kalan kayıtlar belirtilir. Kurum künyesi, dosya planı ve üst yazı şablonu tanımları kişisel kopyaya dahil edilmez (bunlar kurumsal tanımlardır; evrağınız zaten o tanımın kopyasını taşır). Kurum kurtarma paketi ayrı hazırlanır ve yetkili operatör tarafından kullanılır.
 
 **Evrak toplamları:** Bir evrakın yeni sürümü toplamı artırmaz. **Toplamları yenile** ile güncel sayıları ve son kontrol saatini görün.
 
-## 13. Planlanan kurum künyesi ve yazışma ilişkileri — H6b/H7
+## 13. Kurum künyesi, dosya planı ve üst yazı şablonları — H6b
 
-Bu bölüm ilgili geliştirme tamamlanmadan mevcut ürün rehberinde görünmeyecek.
+**Bu bölüm ne için?** Kurum adı/adresi, resmi dosya planı ve hazır üst yazı metinlerini tek yerden tanımlarsınız; evraklar bunları yazıldıkları andaki haliyle kopyalar.
 
-**Kurum bilgisi:** Yönetici ortak kurum bilgisini düzenler ve kaydeder. Yeni evraklarda yeni bilgi kullanılır; eski evraklar değişmez.
+**Nereden?** Yönetici → Tanımlar → **Kurum Künyesi** / **Dosya Planı** / **Üst Yazı Şablonları**.
 
-**Gelen evraka cevap:** Gelen evrakı açın, cevap oluşturma işlemini seçin, giden yazıyı hazırlayın. İki evrakın birbirine bağlı göründüğünü kontrol edin.
+1. Kurum Künyesi sekmesinde kurum adı, kurum kodu, adres ve iletişim bilgilerini girip kaydedin.
+2. Dosya Planı sekmesinde yeni bir plan kodu ve adı ekleyin ya da pasifleştirin (silme yok).
+3. Üst Yazı Şablonları sekmesinde yeni bir şablon adı ve metni girin; var olan bir şablonu güncellediğinizde bu yeni bir sürüm olarak kaydedilir, eski sürüm değişmez.
 
-**Gönderimi kaydetme:** Yazıyı gerçekten gönderdikten sonra kanal, tarih ve gönderim referansını kaydedin. Bu kayıt işlemi kendi başına e-posta veya KEP göndermez.
+**Sonuç:** Yeni evraklar bu güncel künye/plan/şablonu kopyalar. Künye veya plan sonradan değişse ya da pasife alınsa da daha önce dondurulmuş evraklar ve başlatılmış onay süreçleri aynı kalır.
+
+**Personel için:** Evrak formunda dosya planını ve (varsa) hazır üst yazı şablonunu listeden seçersiniz; şablonu seçtiğinizde metin otomatik doldurulur ve istediğiniz gibi düzenleyebilirsiniz.
+
+## 14. Gelen evraka cevap, mükerrer uyarısı ve manuel gönderim — H7
+
+**Bu bölüm ne için?** Kurum dışından gelen bir yazıya resmi cevap hazırlamanızı, aynı yazının iki kez kaydedilmesini önlemenizi ve giden evrakın fiilen nasıl gönderildiğini (elden, posta, KEP vb.) kayıt altına almanızı sağlar.
+
+**Gelen evraka cevap hazırlama:**
+
+1. Kesin kayıt numarası almış ve dondurulmuş bir gelen evrakı açın.
+2. **Cevap yazısı hazırla** düğmesini kullanın; açılan giden evrak taslağının metnine, hedef evrakın tarihi/sayısı/muhatabıyla biçimlendirilmiş bir **"İlgi:"** satırı otomatik eklenir.
+3. Taslağı normal şekilde tamamlayıp dondurup onaya gönderin. Gelen evrakın penceresinde bu cevabı **"İlgi (Bağlı Gelen Evrak)"** bölümünden görebilirsiniz.
+
+**Mükerrer (tekrar) kayıt uyarısı:** Gelen evrak formunda muhatap, dış evrak sayısı ve tarihi girdiğinizde sistem aynı üçlüyle önceden kayıt olup olmadığını kontrol eder. Varsa kayıt numarası, birim ve tarih gösterilir (içerik/konu/kişi bilgisi gösterilmez) ve **"Mükerrer olabileceğini kontrol ettim, yine de kaydet"** onay kutusunu işaretlemeden kayıt tamamlanmaz. Bu bir uyarıdır, engel değildir.
+
+**Manuel gönderim kaydı:** Kesin kayıt numarası almış ve kurum içi onayı tamamlanmış bir giden evrakın penceresinde **Gönderim Takibi** bölümü açılır. Gönderim kanalını (Elden teslim, Posta/PTT, Kurye/Kargo, KEP — manuel beyan, E-posta — manuel beyan, Diğer), gönderim tarihini, dış referans/takip numarasını ve varsa notu girip **Gönderimi kaydet** seçeneğini kullanın. Yanlış girilen bir kayıt silinmez; gerekçeli bir **Düzeltme Beyanı** olarak yeni bir kayıt eklenir. Bu kayıt sistemin kendisinin e-posta veya KEP göndermesi anlamına gelmez; yalnız sizin fiilen yaptığınız gönderimin beyanıdır.
+
+**Defterde arama ve filtreleme:** Evrak Kayıt Defteri'nde **Evrak durumu** ve **Evrak birimi** açılır listeleri ile tam **EBYS-...** kayıt numarası araması sunucudan, kayıtların tamamı üzerinde çalışır (yalnız açık sayfadaki 50 kayıtla sınırlı değildir). "Bu sayfada evrak numarası ara" kutusu ise yalnız o an ekrandaki sayfayı süzer; konu veya tam metin araması desteklenmez.
 
 ## Yayın öncesi içerik kontrolü
 
 - Anlatılan her yol ve düğme gerçek ekranla eşleşiyor mu?
 - Kullanıcı bir adımı tamamlayınca ne göreceğini biliyor mu?
 - İade/red/geri çekme ve icra iadesi birbirinden ayırt ediliyor mu?
-- Örnekler, gelecekteki özellikler ve bugünkü çalışan özellikler karışıyor mu?
+- Onay/imza ile icra farkı ve "havale" kavramı en az bir yerde açıkça tanımlanıyor mu?
+- Her interaktif öğe (rehberdeki simülasyonlar dahil) gerçekten işlevsel mi? İşlevsel değilse rehberde yer almamalı (İP-9 ölçütü).
 - Yönetici ve personel yalnız kendilerine uygun yönergeleri kolayca bulabiliyor mu?
 - Yardım klavyeyle açılıyor/kapanıyor, dar ekranda ve koyu temada okunuyor mu?
 - Rehber görüntülemek ek veritabanı veya model çağrısı oluşturmuyor mu?
 
 Bu kontroller paketin walkthrough belgesinde sonuçlarıyla yer alır; yalnız metin taslağının varlığı testin geçtiği anlamına gelmez.
 
-## H2 ekran kullanımı
+## H2/H7 ekran kullanımı (defter filtreleri)
 
-Satın alma talebini Satın Alma ekranından, gelen ve giden evrakı veya iç yazışmayı ilgili Evrak Kayıt Defteri sekmesinden açın. Kurum içi onay tamamlandığında işin durumunu İcra Takibi bölümünden izleyin. Defter araması ve filtresi yalnız açık sayfadaki en fazla 50 kaydı kapsar. Güncel toplamlar için Toplamları yenile seçeneğini kullanın. Yeni sürüm aynı evraka aittir. Karar geçmişi karar verdiğiniz sürümü açar.
+Satın alma talebini Satın Alma ekranından, gelen ve giden evrakı veya iç yazışmayı ilgili Evrak Kayıt Defteri sekmesinden açın. Kurum içi onay tamamlandığında işin durumunu İcra Takibi bölümünden izleyin. **Evrak durumu**, **Evrak birimi** ve tam kayıt numarası (**EBYS-...**) filtreleri sunucudan, kayıtların tamamı üzerinde sorgulanır; yalnız kısmi/serbest metin araması açık sayfadaki en fazla 50 kayıtla sınırlıdır ve konu/tam metin araması desteklenmez (H7 D5). Güncel toplamlar için Toplamları yenile seçeneğini kullanın. Yeni sürüm aynı evraka aittir. Karar geçmişi karar verdiğiniz sürümü açar.

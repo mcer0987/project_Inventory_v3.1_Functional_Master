@@ -3,13 +3,15 @@
 // [HOW]: Modal ilk açılışta kurulur. Tüm düğümler createElement + textContent ile üretilir (innerHTML yok).
 //        Erişilebilirlik: role=dialog, dikey tablist (ok tuşları), Escape ile kapanma, odak hapsi ve odağın geri dönüşü.
 
+// İP-9 · sekmeler iş akışının gerçek kronolojik sırasına dizilmiştir (bkz. Rehber Revizyon Taslağı). openShowcase(id)
+// id bazlı çalıştığı için index.html/admin.html çağrıları bu sıradan etkilenmez.
 const SECTIONS = [
+    { id: 'org', icon: 'fa-sitemap', title: 'Kurumsal Yapı', tag: 'Aşama 2' },
+    { id: 'purchase', icon: 'fa-cart-shopping', title: 'Satın Alma', tag: 'Aşama 3' },
     { id: 'books', icon: 'fa-book', title: 'Evrak Defterleri', tag: 'Aşama 4' },
     { id: 'sign', icon: 'fa-signature', title: 'İmza Süreci', tag: 'Aşama 5' },
     { id: 'execution', icon: 'fa-clipboard-check', title: 'İcra ve Kapanış', tag: 'Aşama 6' },
     { id: 'verification', icon: 'fa-qrcode', title: 'QR ve Doğrulama', tag: 'Aşama 7' },
-    { id: 'purchase', icon: 'fa-cart-shopping', title: 'Satın Alma', tag: 'Aşama 3' },
-    { id: 'org', icon: 'fa-sitemap', title: 'Kurumsal Yapı', tag: 'Aşama 2' },
     { id: 'faq', icon: 'fa-circle-question', title: 'SSS', tag: 'Yardım' },
 ];
 
@@ -124,28 +126,14 @@ function renderBooks() {
         return { book, card };
     });
 
-    const flow = el('ol', { cls: 'ebys-sc-flow', attrs: { 'aria-label': 'Taslaktan resmi kayda' } });
-    const stepNodes = BOOK_STEPS.map((s, i) => {
-        const li = el('li', { cls: 'ebys-sc-flow-step' }, [
+    // İP-9 · 9a: işlevsiz "akışı oynat" animasyonu kaldırıldı. Adımlar her zaman net ve doğrudan okunur biçimde
+    //        gösterilir (bkz. .ebys-sc-flow-dot varsayılan stili); seçim yalnız defter kartının durumunu günceller.
+    const flow = el('ol', { cls: 'ebys-sc-flow', attrs: { 'aria-label': 'Taslaktan resmi kayda' } },
+        BOOK_STEPS.map((s, i) => el('li', { cls: 'ebys-sc-flow-step' }, [
             el('span', { cls: 'ebys-sc-flow-dot' }, [icon(s.icon), el('span', { cls: 'ebys-sc-flow-num', text: i + 1 })]),
             el('div', { cls: 'ebys-sc-flow-body' }, [el('strong', { text: s.title }), el('p', { text: s.text })]),
-        ]);
-        flow.append(li);
-        return li;
-    });
+        ])));
 
-    let timer = null;
-    const setStage = stage => stepNodes.forEach((n, i) => {
-        n.classList.toggle('is-done', i < stage);
-        n.classList.toggle('is-active', i === stage);
-    });
-    const play = () => {
-        clearTimeout(timer);
-        if (reducedMotion()) { setStage(BOOK_STEPS.length - 1); return; }
-        let stage = 0;
-        const tick = () => { setStage(stage); if (stage++ < BOOK_STEPS.length - 1) timer = setTimeout(tick, 900); };
-        tick();
-    };
     function select(id) {
         cards.forEach(({ book, card }) => {
             const on = book.id === id;
@@ -153,7 +141,6 @@ function renderBooks() {
             card.setAttribute('aria-pressed', String(on));
             if (on) detail.textContent = `${book.title} defteri seçildi: ${book.text}`;
         });
-        play();
     }
 
     const number = el('div', { cls: 'ebys-sc-regno', attrs: { 'aria-label': 'Örnek kayıt numarası: EBYS-MED-261104 ve benzersiz ek' } }, [
@@ -165,14 +152,13 @@ function renderBooks() {
 
     root.append(grid, detail,
         el('div', { cls: 'ebys-sc-panel' }, [
-            el('div', { cls: 'ebys-sc-panel-head' }, [el('strong', { text: 'Taslaktan resmi kayda' }), button('Akışı oynat', 'fa-play', play, 'ebys-sc-btn ghost')]),
+            el('div', { cls: 'ebys-sc-panel-head' }, [el('strong', { text: 'Taslaktan resmi kayda' }), badge('3 adım', 'slate')]),
             flow,
         ]),
         number,
         el('h4', { cls: 'ebys-sc-subtitle', text: 'Yazışma takibi' }),
         el('div', { cls: 'ebys-sc-bento cols-3' }, CORRESPONDENCE_FACTS.map(miniCard)));
     select('incoming');
-    root._cleanup = () => clearTimeout(timer);
     return root;
 }
 
@@ -243,7 +229,6 @@ function renderPurchase() {
 
     const fmt = (v, cur) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: cur, maximumFractionDigits: 2 }).format(v);
     const frozenTotal = INVOICE.reduce((s, r) => s + r.qty * r.unit * FROZEN_RATES[r.cur], 0);
-    let current = { ...FROZEN_RATES };
 
     const rows = el('tbody');
     INVOICE.forEach(r => rows.append(el('tr', {}, [
@@ -264,26 +249,18 @@ function renderPurchase() {
         el('div', { cls: 'ebys-sc-invoice-foot' }, [el('span', { text: 'Belgedeki toplam' }), el('strong', { text: fmt(frozenTotal, 'TRY') })]),
     ]);
 
-    const rateRow = cur => {
-        const val = el('strong', { text: fmt(FROZEN_RATES[cur], 'TRY') });
-        const now = el('span', { cls: 'ebys-sc-rate-now', text: `Güncel: ${fmt(FROZEN_RATES[cur], 'TRY')}` });
-        return { cur, node: el('div', { cls: 'ebys-sc-rate' }, [badge(cur, 'sky'), el('div', {}, [el('small', { text: 'Sabitlenen kur' }), val]), now]), now };
-    };
-    const rates = ['USD', 'EUR'].map(rateRow);
-    const live = el('p', { cls: 'ebys-sc-sim-log', attrs: { 'aria-live': 'polite' }, text: 'Kur değişse bile bu talebin TL toplamı aynı kalır.' });
-    const bump = button('Kur güncellemesini simüle et', 'fa-chart-line', () => {
-        current = { ...current, USD: +(current.USD * 1.035).toFixed(2), EUR: +(current.EUR * 1.028).toFixed(2) };
-        rates.forEach(r => { r.now.textContent = `Güncel: ${fmt(current[r.cur], 'TRY')}`; r.now.classList.add('is-changed'); });
-        const liveTotal = INVOICE.reduce((s, r) => s + r.qty * r.unit * current[r.cur], 0);
-        live.textContent = `Güncel kurla toplam ${fmt(liveTotal, 'TRY')} olurdu; belgede ${fmt(frozenTotal, 'TRY')} olarak kalır.`;
-    }, 'ebys-sc-btn ghost');
+    // İP-9 · 9b: işlevsiz "kur güncellemesini simüle et" butonu, canlı kur satırı ve state kaldırıldı. Aynı gerçek
+    //        (kur ilk onayda sabitlenir) zaten statik fatura damgasında, mini-kartta ve SSS'te net anlatılıyor.
+    const rateRow = cur => el('div', { cls: 'ebys-sc-rate' }, [badge(cur, 'sky'),
+        el('div', {}, [el('small', { text: 'Sabitlenen kur' }), el('strong', { text: fmt(FROZEN_RATES[cur], 'TRY') })])]);
+    const live = el('p', { cls: 'ebys-sc-sim-log', text: 'Kur değişse bile bu talebin TL toplamı aynı kalır.' });
 
     root.append(
         el('div', { cls: 'ebys-sc-bento cols-split' }, [
             invoice,
             el('div', { cls: 'ebys-sc-panel' }, [
                 el('div', { cls: 'ebys-sc-panel-head' }, [el('strong', { text: 'Kur sabitleme' }), badge('İlk onay anı', 'indigo')]),
-                ...rates.map(r => r.node), live, bump,
+                ...['USD', 'EUR'].map(rateRow), live,
             ]),
         ]),
         el('div', { cls: 'ebys-sc-bento cols-3' }, [
@@ -315,12 +292,77 @@ function renderOrg() {
     return root;
 }
 
+// İP-9 · 9c: Aşama 5 (renderSign) kalıbıyla aynı yardımcılar ve CSS sınıfları yeniden kullanılır (innerHTML yok).
+// Durum sırası: Kabul bekliyor → İcrada → Tamamlandı; alternatif dal: İade edildi.
+const EXECUTION_STAGES = [
+    { icon: 'fa-inbox', title: 'Kabul bekliyor' },
+    { icon: 'fa-gears', title: 'İcrada' },
+    { icon: 'fa-circle-check', title: 'Tamamlandı' },
+];
+function renderExecutionSimulation() {
+    const panel = el('div', { cls: 'ebys-sc-panel' });
+    const chain = el('ol', { cls: 'ebys-sc-chain', attrs: { 'aria-label': 'Örnek icra durumu' } });
+    const nodes = EXECUTION_STAGES.map(stage => {
+        const status = el('span', { cls: 'ebys-sc-chain-status' });
+        const li = el('li', { cls: 'ebys-sc-chain-node' }, [
+            el('span', { cls: 'ebys-sc-chain-icon' }, icon(stage.icon)), el('strong', { text: stage.title }), status,
+        ]);
+        chain.append(li);
+        return { li, status };
+    });
+    const live = el('p', { cls: 'ebys-sc-sim-log', attrs: { 'aria-live': 'polite' } });
+    const resultField = el('input', { cls: 'ebys-sc-input', attrs: { type: 'text', placeholder: 'Örn. Teslim edildi', 'aria-label': 'Örnek işlem sonucu' } });
+    const evidenceField = el('input', { cls: 'ebys-sc-input', attrs: { type: 'text', placeholder: 'Örn. Tutanak No: 2026/41', 'aria-label': 'Örnek kanıt referansı' } });
+    let step = 0, outcome = null;
+    const paint = () => {
+        nodes.forEach(({ li, status }, i) => {
+            const done = i < step, active = i === step && !outcome, returned = outcome === 'returned' && i === step;
+            li.className = 'ebys-sc-chain-node' + (done ? ' is-done' : '') + (active ? ' is-active' : '') + (returned ? ' is-returned' : '');
+            status.textContent = done ? 'Tamamlandı' : returned ? 'İade edildi' : active ? 'Şu an bu aşamada' : 'Bekliyor';
+        });
+        if (outcome === 'returned') live.textContent = 'İşi yürütemediniz; iş gerekçeyle yöneticiye geri döndü. Yönetici işi yeniden havale eder.';
+        else if (step >= EXECUTION_STAGES.length) {
+            live.textContent = `İş tamamlandı; evrak kapandı ve yazara bildirim gitti. Sonuç: ${resultField.value.trim() || 'Teslim edildi'}. Kanıt referansı: ${evidenceField.value.trim() || 'Tutanak No: 2026/41'}.`;
+        } else if (step === 1) live.textContent = 'İş şu an sizde ve İcrada durumunda. İşlemi yaptıktan sonra sonucu yazıp Tamamla deyin; yürütemiyorsanız gerekçeyle iade edin.';
+        else live.textContent = 'Bu iş size yeni atandı ve Kabul bekliyor durumunda. İnceleyip Kabul Et deyin.';
+        accept.disabled = step !== 0 || !!outcome;
+        complete.disabled = step !== 1 || !!outcome;
+        returnJob.disabled = step !== 1 || !!outcome;
+        resultField.disabled = step !== 1 || !!outcome;
+        evidenceField.disabled = step !== 1 || !!outcome;
+    };
+    const accept = button('Kabul Et', 'fa-clipboard-check', () => { step = 1; paint(); }, 'ebys-sc-btn primary');
+    const complete = button('Tamamla', 'fa-circle-check', () => { step = EXECUTION_STAGES.length; paint(); }, 'ebys-sc-btn primary');
+    const returnJob = button('Gerekçeyle iade et', 'fa-rotate-left', () => { outcome = 'returned'; paint(); }, 'ebys-sc-btn warn');
+    const reset = button('Baştan başlat', 'fa-arrow-rotate-right', () => {
+        step = 0; outcome = null; resultField.value = ''; evidenceField.value = ''; paint();
+    }, 'ebys-sc-btn ghost');
+
+    panel.append(
+        el('div', { cls: 'ebys-sc-panel-head' }, [el('strong', { text: 'Örnek icra simülasyonu' }), badge('Örnek', 'slate')]),
+        chain, live,
+        el('div', { cls: 'ebys-sc-fields' }, [
+            el('label', { cls: 'ebys-sc-field' }, [el('span', { text: 'İşlem sonucu' }), resultField]),
+            el('label', { cls: 'ebys-sc-field' }, [el('span', { text: 'Kanıt referansı' }), evidenceField]),
+        ]),
+        el('div', { cls: 'ebys-sc-actions' }, [accept, complete, returnJob, reset]));
+    paint();
+    return panel;
+}
+
 function renderExecution() {
     const root = el('div', { cls: 'ebys-sc-section' });
-    root.append(sectionHead('Aşama 6 · İcra ve Kapanış', 'Son onaydan evrakın kapanışına',
-        'Son onayla sorumluya bir iş açılır. Sorumlu işi kabul edip tamamladığında evrak kapanır ve yazara bildirim gider.'));
+    const isAdmin = !!document.getElementById('ebysExecutionAdmin');
+    // İP-9 · 9d: Onay/imza ile icra arasındaki fark ve "havale" kavramı her iki kitleye de açıkça tanımlanır.
+    root.append(sectionHead('Aşama 6 · İcra ve Kapanış', 'Onay nedir, icra nedir?',
+        'Onay/imza, evrakın içeriğini uygun bulduğunuzu gösterir. İcra ise onaylanan işin gerçekte yapılmasıdır — ürünün teslim edilmesi ya da talep edilen işlemin tamamlanması gibi. Evrak, icra bitmeden kapanmaz.'));
+    root.append(el('div', { cls: 'ebys-sc-feature' }, [
+        badge('Kavram', 'indigo'),
+        el('strong', { text: 'Havale nedir?' }),
+        el('p', { text: 'Son onaydan sonra işi kimin yürüteceği havale ile belirlenir: yönetim, işi ilgili birime veya sorumluya yönlendirir. Standart kullanıcı olarak yalnız bu seçimin sonucunu — size atanan işi — görürsünüz.' }),
+    ]));
 
-    const cards = document.getElementById('ebysExecutionAdmin') ? [
+    const cards = isAdmin ? [
         { tone: 'indigo', icon: 'fa-sitemap', title: 'Havale tanımını hazırlayın',
             text: 'Talep ve Süreçler → İcra Takibi → Havale tanımları bölümünde evrak türü ve bağlı birim için icra birimini ve sorumluyu seçin. Sorumlu, seçtiğiniz icra birimine bağlı ve giriş hesabı aktif olmalıdır.' },
         { tone: 'amber', icon: 'fa-rotate-left', title: 'İşleri ve iadeleri izleyin',
@@ -340,6 +382,8 @@ function renderExecution() {
             text: 'Evrak sahibi, iş tamamlandığında Görevlerim → Evrak Bildirimlerim bölümünde kapanış bildirimini görür.' },
     ];
     root.append(el('div', { cls: 'ebys-sc-bento cols-2' }, cards.map(miniCard)));
+    // 9c: standart personel tarafında işlevsel icra karar simülasyonu her zaman görünür.
+    if (!isAdmin) root.append(el('h4', { cls: 'ebys-sc-subtitle', text: 'Deneyin: örnek icra kararı' }), renderExecutionSimulation());
     return root;
 }
 
@@ -440,7 +484,8 @@ function build() {
     overlay.addEventListener('keydown', e => {
         if (e.key === 'Escape') { e.stopPropagation(); closeShowcase(); return; }
         if (e.key !== 'Tab') return;
-        const focusable = [...dialog.querySelectorAll('button:not([disabled]), summary, [tabindex="0"], a[href]')].filter(n => n.offsetParent !== null);
+        // İP-9 · 9c: icra simülasyonu <input> alanları ekledi; odak hapsi bunları da dolaşmalı.
+        const focusable = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), summary, [tabindex="0"], a[href]')].filter(n => n.offsetParent !== null);
         if (!focusable.length) return;
         const first = focusable[0], last = focusable[focusable.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
