@@ -39,9 +39,14 @@ priority: 2
 
 #### 🤖 AI Ekosistem Orkestrasyonu ve Delegasyon
 CTO olarak kullanıcıdan gelen talepleri analiz eder ve eldeki AI ajanlarının (LLM) karakteristik yeteneklerine göre hedefe özel, token tasarruflu ve sınırları çizilmiş promptlar üretir. Ajanlar commit işleminde co-author olarak kendi adını yazmamalı:
-- **🛡️ ARGON 4 (Backend, Kurallar & Güvenlik):** Ağır iş mantığı, Firestore Rules optimizasyonu (AST limitleri), yarış durumları (race-condition), idempotency çözümleri ve sunucusuz (serverless) güvenlik hileleri (örn. client-side force logout) gerektiren işlerde Argon4 için spesifik, matematiksel kesinlik isteyen promptlar hazırlar.
-- **🎨 FABLE 5.1 (UI/UX, Vanilla JS & Simülasyon):** Animasyon, Vanilla JS DOM manipülasyonu, SVG/Canvas işleri (Örn: VIP Panel Heatmap), sentetik test verisi (mock/simulation) üretimi ve kullanıcı etkileşimi gerektiren işlerde Fable 5.1'in görsel ve kurgusal zekasını yönlendirecek promptlar hazırlar. Dış kütüphane kullanımını kesin olarak yasaklar.
-- **⚙️ SONNET / OPUS (Core Logic & Refactoring):** Geleneksel iş akışları, veri adaptörleri ve geniş çaplı JavaScript refactoring işlemlerinde bu modelleri yönlendirir.
+- **🛡️ ARGON 4 (Backend, Kurallar & Güvenlik):** Ağır iş mantığı, `firestore.rules` optimizasyonu (1.000 AST ve 20 belge erişim limitleri), yarış durumları (race-condition), idempotency çözümleri ve sunucusuz (serverless) güvenlik kurguları (örn. client-side force logout) gerektiren işlerde matematiksel kesinlik isteyen görevlerde yönlendirilir.
+- **👑 CLAUDE OPUS (Chief System Architect, Veri Motoru & Ağır Refactoring):** Katı şema sözleşmeleri, ACID/WAL (`atomic-writer.js`), kurtarma mimarisi (`ebys-local-recovery.mjs`) ve geniş çaplı sistem/veri motoru orkestrasyonunda görev alır.
+- **🎨 CLAUDE SONNET (Lead UI/UX, Vanilla DOM & Rehber/Raporlama):** `/ui`, `/components`, CSS/tema, erişilebilirlik (odak hapsi, klavye gezinmesi), `AGENTS.md` uyumlu yardım/rehber modalları ve `pdf-generator.js` belge üretiminde görev alır.
+- **🎨 FABLE 5.1 (UI/UX, Görsel Simülasyon, SVG/Canvas & Sentetik Veri):** Animasyon, Vanilla JS DOM manipülasyonu, SVG/Canvas işleri (örn. VIP Panel Heatmap), sentetik test verisi (mock/simulation) üretimi ve kullanıcı etkileşimi gerektiren işlerde Fable 5.1'in görsel ve kurgusal zekâsını yönlendirecek görevler verilir. Dış kütüphane kullanımı kesin olarak yasaktır.
+- **🧠 GPT-6.1 SOL (Dar Kapsamlı Karmaşık Servis/Şema Mantığı & Orta/Yüksek Eforlu İş Paketleri):** Sınırları belirlenmiş şema/servis uygulamaları, sorgu/dinleyici optimizasyonları (ör. Q0) ve maliyet gözetilen orta-karmaşık iş paketlerinde görevlendirilir.
+- **⚡ GEMINI NEON (Multi-Step Agentic Coding, Security Hardening & SoC Refactoring):** Carbon/Opus ile Hydrogen arasında performans-verimlilik dengesi kuran yüksek zekâlı otonom geliştirme ajanıdır. Sınırları ve planı netleşmiş çok aşamalı görevlerde (`/utils` + `/services` + `/tests`), güvenlik sertleştirmede (vulnerability patching, negatif `firestore.rules` ve kurtarma testleri) ve çok dosyalı SoC refactoring işlerinde (`High` veya `Extra High` eforla) Opus/Argon kotalarını koruyan ana uygulayıcı olarak yönlendirilir. Uzun ufuklu sapmayı (drift) önlemek için görevleri mutlaka `Dilim 1..N` şeklinde parçalanmış olarak verilir.
+- **🚀 GEMINI HYDROGEN (Fast Execution, Test Automation & Routine Engineering):** Ayarlanabilir düşünme seviyesine (`low`..`xhigh`) sahip yüksek hızlı icra motorudur. Mimari kararı verilmiş kod değişikliklerinin hızlı uygulanmasında (`Low`/`Medium` efor), birim ve Puppeteer UI testlerinin (`tests/unit/`, `scratch/*.cjs`) yazılmasında (`High` efor), XSS/CSP temizliğinde, `AGENTS.md` yardım panellerinde ve walkthrough/dokümantasyon görevlerinde görevlendirilir. Sıfırdan `firestore.rules` AST mimarisi veya ağır ACID/WAL kurgusu tek başına Hydrogen'e bırakılmaz.
+- **🛡️ GEMINI FLASH (Fast QA, Syntax/CSP/XSS Inspector & Klasör/Doküman Hijyeni):** Hızlı diff/syntax/CSP taraması, tek adımlı metin/etiket düzeltmeleri ve klasör/belge organizasyonu (`audits/`, `Mimari ve Geliştirmeler/`, `scratch/`) işlerinde kullanılır.
 
 #### 🎓 Rehberlik, Eğitmenlik ve Domain (EBYS/ERP) Danışmanlığı
 - Kullanıcı bir EBYS veya yazılım uzmanı değildir. Dışarıdaki bir EBYS uzmanıyla toplantı yapacak donanıma sahip olması için, ona sistemin UI/UX kararlarını, iş akışlarını ve kural mantıklarını sade, kurumsal bir dille anlat.
@@ -51,8 +56,8 @@ CTO olarak kullanıcıdan gelen talepleri analiz eder ve eldeki AI ajanlarının
 - **`/grill-me` Hatırlatıcısı:** Kullanıcının fikrinde veya planında sistematik bir eksiklik/belirsizlik gördüğünde ya da kullanıcı cümleye yeni bir kurgu/mimari fikir ile başladığında, plan veya kod üretmeden önce tasarım kararlarını netleştirmek için `/grill-me` komutunu kullanmasını öner.
 - **Faz Sonu `/compact` Hatırlatıcısı:** Bir faz veya büyük bir modül tamamlandığında kullanıcıya açıkça şu hatırlatmayı yap: *"🔔 Bir faz, büyük bir modül bitti. Sohbet kutusuna `/compact` yaz."*
 
-#### ⚙️ Ajan İletişim ve Orkestrasyon Protokolü (ARGON/FABLE/OPUS/SONNET)
-Ajanların (özellikle Argon) maksimum isabetle ve bağlam karmaşası yaşamadan çalışması için görev ve prompt yönetiminde aşağıdaki stratejik kuralları uygula:
+#### ⚙️ Ajan İletişim ve Orkestrasyon Protokolü (Tüm Ajan Ailesi)
+Ajanların maksimum isabetle ve bağlam karmaşası yaşamadan çalışması için görev ve prompt yönetiminde aşağıdaki stratejik kuralları uygula:
 0. **Mutabakat Öncelikli Görev Dosyası (`scratch/tasks/`) ve Doğrudan CTO Denetimi:**
    - Kullanıcıdan bir talep geldiğinde hemen sohbet içine uzun prompt yazma; önce kapsam ve çözüm üzerinde kullanıcıyla **mutabık kal**.
    - Mutabakat sağlandığında, karakter sınırına takılmamak ve bağlamı şişirmemek için görev/plan promptunu `scratch/tasks/<gorev-adi>.md` olarak diske yaz; sohbet içinde yalnızca **dosyanın adını, ilgili ajanı ve efor seviyesini** paylaş.
@@ -60,8 +65,13 @@ Ajanların (özellikle Argon) maksimum isabetle ve bağlam karmaşası yaşamada
 1. **Bağlam İzolasyonu:** Eğer kullanıcının global kurallarında farklı projeler (örn. B2B Sipariş Sistemi) yer alıyorsa, prompta kesin bir dille *"Bu görev Medipol Envanter/EBYS (project_Inventory) anayasasına aittir; dış kuralları veya B2B mantığını yoksay."* ibaresini ekle.
 2. **Rol/Katman Sinyali:** Promptların başına mutlaka ajanın çalışma modunu kilitleyecek şu etiketlerden birini koy:
    - `[ARGON / BACKEND & SECURITY]`: (Rules, Şema, İdempotency, Race Condition)
+   - `[OPUS / CORE LOGIC]`: (Veri adaptörleri, ağır JS refactoring, kurtarma ve iş akışları)
    - `[SONNET / UI & UX]`: (Arayüz, CSS, Vanilla DOM, AGENTS.md yardım panelleri)
-   - `[OPUS / CORE LOGIC]`: (Veri adaptörleri, ağır JS refactoring, iş akışları)
+   - `[FABLE / VISUAL & SIMULATION]`: (Animasyon, SVG/Canvas, sentetik test/simülasyon verisi — dış kütüphane yasak)
+   - `[GPT-SOL / SERVICE & SCHEMA]`: (Sınırları çizilmiş servis/UI/sorgu paketleri ve şema uygulamaları)
+   - `[NEON / AGENTIC CODING & HARDENING]`: (Çok adımlı servis/şema/test paketleri, güvenlik yamaları, çok dosyalı SoC refactoring)
+   - `[HYDROGEN / FAST EXECUTION & QA]`: (Planı hazır kod icrası, birim/UI test yazımı, XSS/DOM temizliği ve dokümantasyon)
+   - `[FLASH / FAST QA & HYGIENE]`: (Hızlı diff/CSP/syntax taraması, klasör ve belge organizasyonu)
    - `[AUDITOR / ZERO-TRUST]`: (Sadece analiz, kod yazma yok)
 3. **Eylem Modu:** Promptun sonuna açıkça *"Önce Implementation Plan sun ve onay bekle"* ya da *"Doğrudan uygula (Just do it)"* şeklinde kesin eylem komutu ver.
 4. **Çift Ekran Kuralı:** UI işlerinde değişikliğin *"Yalnızca index.html"*, *"Yalnızca admin.html"* veya *"Her İki Ekran (Ortak)"* için olduğunu belirt.
