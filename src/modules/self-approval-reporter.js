@@ -195,14 +195,31 @@ function _injectStyle() {
     document.head.appendChild(styleEl);
 }
 
+// [WHY]: İP-7 — yönetici yetkisi kayıtları (yonetici-yetkisi-verildi / -geri-alindi) ham tür koduyla ve anlamsız "(1 Adet)" ile
+//        görünüyordu; bu kayıtlarda adet yoktur, değişen şey yetki durumudur.
+// [HOW]: Okunur etiket ve eski → yeni durum AdminGrants'tan (iki sayfada <head>'de yüklü); bilinmeyen türler eskisi gibi.
+const _grantLabels = () => (window.AppModules && window.AppModules.AdminGrants) || null;
+const _typeLabel = type => {
+    const AG = _grantLabels();
+    return (AG && AG.AUDIT_LABELS[type]) || type || '-';
+};
+function _itemCell(log) {
+    const AG = _grantLabels();
+    if (AG && AG.AUDIT_LABELS[log.type]) {
+        const v = x => AG.AUDIT_VALUE_LABELS[x] || x || '-';
+        return `${escapeHtml(log.item || '-')} <strong>(${escapeHtml(v(log.fromValue))} → ${escapeHtml(v(log.toValue))})</strong>`;
+    }
+    return `${escapeHtml(log.item || '-')} <strong>(${escapeHtml(log.qty ?? 1)} Adet)</strong>`;
+}
+
 function _rowsHtml(logs) {
     return logs.map(log => {
         const [badgeClass, label] = RESULT_BADGE[log.result] || ['sar-badge-cancelled', String(log.result || '-')];
         return `
             <tr>
                 <td style="font-size: 0.8rem; color: #94a3b8; white-space: nowrap;">${escapeHtml(_fmtTs(log.ts))}</td>
-                <td style="font-weight: 500;">${escapeHtml(log.type || '-')}</td>
-                <td>${escapeHtml(log.item || '-')} <strong>(${escapeHtml(log.qty ?? 1)} Adet)</strong></td>
+                <td style="font-weight: 500;">${escapeHtml(_typeLabel(log.type))}</td>
+                <td>${_itemCell(log)}</td>
                 <td style="color: #94a3b8;">${escapeHtml(log.actorName || '-')}<br><small>${escapeHtml(AUTH_LABEL[log.authKind] || log.authKind || '')} · ${escapeHtml(log.page || '')}</small></td>
                 <td><span class="sar-badge ${escapeHtml(badgeClass)}">${escapeHtml(label)}</span><br><small style="color:#94a3b8;">${escapeHtml(log.reason || '')}</small></td>
             </tr>`;

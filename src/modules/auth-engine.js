@@ -217,6 +217,24 @@ export const updateNavbarUI = function (user) {
 // doğrudan updateNavbarUI() çağırır.
 window.updateNavbarUI = updateNavbarUI;
 
+// [WHY]: İP-7 — yönetici yetkisi oturum açıkken verilebilir ya da geri alınabilir (firebase-handler kendi eşlemesini dinler).
+//        "Panele Geç" düğmesi ve .admin-only öğeleri yalnız girişte kuruluyordu; yetki düşse de görünür kalırdı.
+// [HOW]: 'onAdminGrantChanged' gelince giriş yapmış kullanıcı için navbar ve setupUI yeniden çizilir. Yetki verildiyse yönetici
+//        vizesi yazılır (admin.html girişte vizeyi arar — handleLogin'deki "isDbAdmin → grantAdminVisa" ile aynı); düştüyse silinir.
+window.addEventListener('onAdminGrantChanged', ev => {
+    const user = window.getActiveUser();
+    if (!user || !document.body.classList.contains('logged-in')) return;
+    const granted = !!(ev && ev.detail && ev.detail.isAdmin);
+    const Session = window.AppModules.Session;
+    if (granted) Session.grantAdminVisa(); else Session.clearAdminVisa();
+    updateNavbarUI(user);
+    setupUI();
+    if (typeof window.showAppAlert === 'function') {
+        window.showAppAlert(granted ? 'Hesabınıza yönetici yetkisi verildi; "Panele Geç" ile yönetici paneline geçebilirsiniz.'
+            : 'Hesabınızın yönetici yetkisi geri alındı ya da askıya alındı.', granted ? 'success' : 'warning');
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // checkAuth
 // ─────────────────────────────────────────────────────────────────────────────

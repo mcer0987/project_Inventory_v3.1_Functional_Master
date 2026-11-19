@@ -25,12 +25,21 @@ service cloud.firestore {
         && request.auth.token.firebase.sign_in_provider == 'password';
     }
 
+    // İP-7 (Aşama A): yönetici = ana yönetici || (geçiş) inventoryLiveAdmin claim'i || ana yöneticinin verdiği belge yetkisi.
+    // [WHY]: Ek yönetici yetkisi betikle yazılan claim'deydi: panelden verilemiyor, geri alınamıyor, iz bırakmıyordu.
+    // [HOW]: Yetki, isStaff'ın ZATEN okuduğu staffAccounts/{uid} belgesinde (adminGranted). Aynı yolun ikinci get()'i ek belge
+    //        erişimi sayılmaz. Yetki isStaff zinciriyle birlikte geçerlidir: erişim kilidi kapanır, personel pasifleşir ya da
+    //        uid / PRI bağı koparsa yetki kendiliğinden askıya alınır. Kök başına ayrıdır (K3). Claim dalı Aşama B'de kalkar.
+    //        isStaff → staffIdentity → staffPersonOk zinciri isAdmin'i çağırmaz (döngü yok).
+    //        Bütçe (emülatör ölçümü, personel oturumu, çağrı başına): eski biçim ≈ 45 ifade, bu biçim ≈ 59. Ana yönetici kontrolü
+    //        önce, claim dalı jetonla erken düşer, eşleme get()'i tek kez; sağlayıcı / e-posta deseni isStaff içinde denetlenir.
+    //        Sıcak personel yollarında isAdmin ucuz koşullardan SONRA çağrılır (bkz. purchaseOrders, purchaseHistory/Access).
     function isAdmin(root) {
-      return signedIn() && request.auth.token.firebase.sign_in_provider == 'password'
-        && (request.auth.token.get('email','') == 'admin@medipol.local'
-          || (root == 'lifeserver_master' && request.auth.token.get('inventoryLiveAdmin','') != ''
-            && request.auth.token.inventoryLiveAdmin == get(staffAccount(root)).data.get('personelId','')
-            && isStaff(root)));
+      return isPrimaryAdmin()
+        || ((request.auth.token.get('inventoryLiveAdmin','') != '' && root == 'lifeserver_master'
+              && request.auth.token.inventoryLiveAdmin == get(staffAccount(root)).data.get('personelId',''))
+            || get(staffAccount(root)).data.get('adminGranted', false) == true)
+          && isStaff(root);
     }
 
 
@@ -75,10 +84,15 @@ service cloud.firestore {
     }
     function isStaff(root) { return staffAccessOpen(root) && staffIdentity(root); }
     // isStaff zaten ana yönetici e-postasını dışlar. Yetki iddiası yoksa yönetici kontrolü tekrarlanmaz.
+    // İP-7: belge yetkili personel (adminGranted) yönetici yolundan yazar; aynı eşleme belgesi, ek belge erişimi yok.
     function regularStaff(root) {
-      return isStaff(root) && (!request.auth.token.keys().hasAny(['inventoryLiveAdmin']) || !isAdmin(root));
+      return isStaff(root) && get(staffAccount(root)).data.get('adminGranted', false) != true
+        && (!request.auth.token.keys().hasAny(['inventoryLiveAdmin']) || !isAdmin(root));
     }
-    function member(root) { return isAdmin(root) || isStaff(root); }
+    // isAdmin'in ana yönetici dışındaki iki dalı (claim, İP-7 belge yetkisi) isStaff'ı zaten gerektirir; bu yüzden
+    // isAdmin || isStaff ≡ isPrimaryAdmin || isStaff. Personel isteklerinde yetki dalının get()'i hiç değerlendirilmez
+    // (işlem başına 1000 ifade bütçesi — çok belgeli EBYS transaction'ları).
+    function member(root) { return isPrimaryAdmin() || isStaff(root); }
 
     // T1: canlı kök lifeserver_master (28.09.2026'dan beri) + localhost/demo kökü. inventory_v2 aşağıda ayrı (KJ-2).
     function validRoot(r) { return r in ['lifeserver_master', 'inventory_demo']; }
@@ -713,6 +727,21 @@ service cloud.firestore {
       allow delete: if validRoot(root) && isAdmin(root) && resource.data.get('durum', '') in ['approved', 'rejected', 'withdrawn'];
     }
 
+    // ─── İP-7 · K1: yetkili kişinin kimlik alanlarını yalnız ana yönetici değiştirir ─────────────────────────────────
+    // [WHY]: Ek yönetici, başka bir yöneticinin personel kaydını pasifleştirerek ya da PRI / hesap e-postasını değiştirerek
+    //        onun yetkisini dolaylı yoldan düşürebilirdi (yetki isStaff zincirine bağlı).
+    // [HOW]: pri / authEmail / active değişiyorsa ve kaydın uid'sinin eşlemesi yetkiliyse (adminGranted == true) yalnız
+    //        isPrimaryAdmin(). Belge erişimi yalnız bu üç alan değişirken yapılır; diğer personel yazımlarının bütçesi değişmez.
+    function grantedAccount(r, uid) {
+      let p = /databases/$(database)/documents/$(r)/staffAccounts/items/$(uid);
+      return exists(p) && get(p).data.get('adminGranted', false) == true;
+    }
+    function personelGrantGuardOk(r, d, old) {
+      return !d.diff(old).affectedKeys().hasAny(['pri', 'authEmail', 'active'])
+        || isPrimaryAdmin() || !(old.get('uid', '') is string) || old.get('uid', '') == ''
+        || !grantedAccount(r, old.uid);
+    }
+
     match /{root}/{col}/items/{docId} {
       // Ek D "Ziyaretçi ✗": oturumsuz / anonim / personele bağlı olmayan hesap hiçbir şey okuyamaz.
       allow read: if validRoot(root) && knownCol(col) && member(root)
@@ -752,6 +781,7 @@ service cloud.firestore {
         && (!(col in ['units', 'personel']) || request.resource.data.get('id', null) == resource.data.get('id', null))
         && (col != 'personel' || resource.data.get('uid', '') == ''
             || request.resource.data.get('uid', '') == resource.data.uid)
+        && (col != 'personel' || personelGrantGuardOk(root, request.resource.data, resource.data))
         && (col != 'units' || resource.data.get('organizationId', '') == ''
             || request.resource.data.get('organizationId', '') == resource.data.organizationId)
         && (col != 'personel' || personelCodeOk(request.resource.data))
@@ -793,11 +823,52 @@ service cloud.firestore {
         && resource.data.get('creatorUid', '') == request.auth.uid;
     }
 
-    // J10 · personel hesap eşlemesi (uid → personelId, pri): isStaff'ın dayanağı. Yalnız yönetici okur / yazar; personel kendi
-    // eşlemesini yazamaz (kendine hesap açan biri kendini personele bağlayamaz). Kurallar get() ile okur (okuma izninden bağımsız).
+    // J10 · personel hesap eşlemesi (uid → personelId, pri): isStaff'ın dayanağı. Yalnız yönetici yazar; personel kendi
+    // eşlemesini yazamaz (kendine hesap açan biri kendini personele bağlayamaz). İP-7: kişi yalnız KENDİ eşlemesini okuyabilir.
+    // Kurallar get() ile okur (okuma izninden bağımsız).
     // Oturumsuz giriş rehberi (staffDirectory) KALDIRILDI: eşleşen kural yok → herkese kapalı.
+    // İP-7 (Aşama A): yönetici yetkisi aynı eşleme belgesinde (adminGranted + iz alanları). Okuma: yönetici ya da kişinin KENDİ
+    // eşlemesi (istemci yetkisini böyle öğrenir). Oluşturma yetki alanı taşıyamaz. Yetki alanlarını yalnız ana yönetici, aynı
+    // commit'teki denetim kaydıyla değiştirir; ek yönetici yetkili bir eşlemeyi güncelleyemez ve silemez (K1).
+    function grantFieldsChanged(d, old) {
+      return d.diff(old).affectedKeys().hasAny(['adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId']);
+    }
+    // [WHY]: Yetki değişikliği iz bırakmalı, inkâr edilememeli ve açık bırakılmış bir oturumdan yapılamamalı.
+    // [HOW]: Şekil (bilinen alanlar, beş yetki alanı birlikte), sunucu saati ve yazan uid; gerekçe / denetim kimliği sınırları;
+    //        eşleme (personelId / pri / linkedAt) aynı yazımda kaydırılamaz; oturum en çok 10 dakika önce parolayla açılmış ya
+    //        da yeniden doğrulanmış (auth_time, saniye); denetim kaydı commit öncesinde YOK, commit sonrasında doğru tür /
+    //        refId / yazan / sonuçla VAR (envanterNoAuditOk deseni). Verilirken personel kaydı taze: aynı uid, aynı PRI, aktif.
+    function adminGrantWriteOk(root, uid, d, old) {
+      return d.keys().hasOnly(['personelId', 'pri', 'linkedAt', 'adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId'])
+        && d.keys().hasAll(['adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId'])
+        && d.adminGranted is bool
+        && d.adminChangedAt == request.time && d.adminChangedBy == request.auth.uid
+        && d.adminReason is string && d.adminReason.size() >= 5 && d.adminReason.size() <= 300 && noTag(d.adminReason)
+        && d.adminAuditId is string && d.adminAuditId.size() >= 1 && d.adminAuditId.size() <= 80 && noTag(d.adminAuditId)
+        && d.personelId == old.personelId && d.pri == old.pri && d.get('linkedAt', null) == old.get('linkedAt', null)
+        && request.time.toMillis() - request.auth.token.get('auth_time', 0) * 1000 <= 600000
+        && grantAuditOk(root, uid, d)
+        && (!d.adminGranted || grantPersonOk(root, uid, d));
+    }
+    function grantAuditOk(root, uid, d) {
+      let a = getAfter(auditDoc(root, d.adminAuditId)).data;
+      return !exists(auditDoc(root, d.adminAuditId))
+        && a.get('type', '') == (d.adminGranted ? 'yonetici-yetkisi-verildi' : 'yonetici-yetkisi-geri-alindi')
+        && a.get('refCol', '') == 'staffAccounts' && a.get('refId', '') == uid
+        && a.get('uid', '') == request.auth.uid && a.get('result', '') == 'approved';
+    }
+    function grantPersonOk(root, uid, d) {
+      let p = get(/databases/$(database)/documents/$(root)/personel/items/$(d.personelId)).data;
+      return p.get('uid', '') == uid && p.get('pri', '') == d.pri && p.get('active', true) == true;
+    }
     match /{root}/staffAccounts/items/{uid} {
-      allow read, write: if validRoot(root) && isAdmin(root);
+      allow read: if validRoot(root) && ((signedIn() && request.auth.uid == uid) || isAdmin(root));
+      allow create: if validRoot(root) && isAdmin(root)
+        && !request.resource.data.keys().hasAny(['adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId']);
+      allow update: if validRoot(root) && (grantFieldsChanged(request.resource.data, resource.data)
+        ? isPrimaryAdmin() && adminGrantWriteOk(root, uid, request.resource.data, resource.data)
+        : isPrimaryAdmin() || (isAdmin(root) && resource.data.get('adminGranted', false) != true));
+      allow delete: if validRoot(root) && (isPrimaryAdmin() || (isAdmin(root) && resource.data.get('adminGranted', false) != true));
     }
 
     // J11 · P0 erişim kilidi. Okuma: yönetici ve (kilit kapalıyken de) kimliği doğrulanmış personel — yalnız durum + sayılar, kişisel
@@ -1084,8 +1155,8 @@ service cloud.firestore {
 
 
     match /{r}/ebysDocuments/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDocuments',id)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid || epAccess(r,resource.data.currentVersionId) || ejVersionAccess(r,resource.data.currentVersionId));
-      allow list: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.ownerUid == request.auth.uid);
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDocuments',id)) || resource.data.ownerUid == request.auth.uid || isAdmin(r) || epAccess(r,resource.data.currentVersionId) || ejVersionAccess(r,resource.data.currentVersionId));
+      allow list: if validRoot(r) && member(r) && (resource.data.ownerUid == request.auth.uid || isAdmin(r));
       allow create: if ebysOwn(r, request.resource.data) && ebysHead(request.resource.data, id)
         && request.resource.data.state == 'draft' && request.resource.data.versionNo == 0 && request.resource.data.revision == 1 && request.resource.data.registrationNo == ''
         && request.resource.data.createdAt == request.time && poHeadCreate(r,id,request.resource.data) && ebysDraftHead(r, request.resource.data);
@@ -1132,7 +1203,7 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     match /{r}/ebysRegistrationIds/items/{number} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysRegistrationIds',number)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid);
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysRegistrationIds',number)) || resource.data.ownerUid == request.auth.uid || isAdmin(r));
       allow list: if ebysOwn(r,resource.data);
       allow create: if ebysOwn(r,request.resource.data) && number.matches('EBYS-[A-Z0-9]{2,12}-[0-9]{6}-[A-F0-9]{32}')
         && request.resource.data.keys().hasOnly(['id','documentId','ownerUid','operationId','createdAt'])
@@ -1226,7 +1297,7 @@ service cloud.firestore {
         || (d.get('durum','') == 'Taslak' && wf.get('started',true) == false && lpFrozenRead(r,docId,d,wf,who));
     }
     match /{r}/purchaseHistory/items/{id} {
-      allow get: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.snapshot.get('createdByUid','') == request.auth.uid
+      allow get: if validRoot(r) && member(r) && (resource.data.snapshot.get('createdByUid','') == request.auth.uid || isAdmin(r)
         || lpDecided(resource.data.snapshot.workflow.steps,request.auth.uid));
       allow create: if validRoot(r) && member(r) && poHistoryCreate(r,id,request.resource.data);
       allow update,delete,list: if false;
@@ -1236,7 +1307,7 @@ service cloud.firestore {
       let old = get(path).data;
       let next = getAfter(path).data;
       return d.keys().hasOnly(['purchaseId','snapshot','createdAt']) && d.createdAt == request.time
-        && (isAdmin(r) || old.createdByUid == request.auth.uid) && d.snapshot == old
+        && (old.createdByUid == request.auth.uid || isAdmin(r)) && d.snapshot == old
         && poWithdrawTransition(old,next) && next.workflow.steps.size() == 0
         && next.workflow.history.size() == old.workflow.get('history',[]).size()+1
         && next.workflow.history[next.workflow.history.size()-1].action == 'withdraw'
@@ -1248,18 +1319,18 @@ service cloud.firestore {
     function lpHistoryProof(r,d) {
       let archive = getAfter(ebysPath(r,'purchaseHistory',d.historyId)).data;
       return archive.purchaseId == d.purchaseId && lpDecided(archive.snapshot.workflow.steps,d.assigneeUid)
-        && (isAdmin(r) || archive.snapshot.get('createdByUid','') == request.auth.uid || request.auth.uid == d.assigneeUid);
+        && (archive.snapshot.get('createdByUid','') == request.auth.uid || request.auth.uid == d.assigneeUid || isAdmin(r));
     }
     match /{r}/purchaseAccess/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'purchaseAccess',id)) || isAdmin(r) || resource.data.assigneeUid == request.auth.uid || lpProofRead(r,resource.data,request.auth.uid));
-      allow list: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.assigneeUid == request.auth.uid);
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'purchaseAccess',id)) || resource.data.assigneeUid == request.auth.uid || isAdmin(r) || lpProofRead(r,resource.data,request.auth.uid));
+      allow list: if validRoot(r) && member(r) && (resource.data.assigneeUid == request.auth.uid || isAdmin(r));
       allow create: if validRoot(r) && member(r) && request.resource.data.keys().hasOnly(['purchaseId','assigneeUid','createdAt','updatedAt','historyId'])
         && id == request.resource.data.purchaseId+'__'+request.resource.data.assigneeUid && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
         && (request.resource.data.get('historyId','') != '' ? lpHistoryProof(r,request.resource.data)
-          : (isAdmin(r) || lpProofRead(r,request.resource.data,request.auth.uid)) && lpProofRead(r,request.resource.data,request.resource.data.assigneeUid));
+          : (isPrimaryAdmin() || lpProofRead(r,request.resource.data,request.auth.uid) || isAdmin(r)) && lpProofRead(r,request.resource.data,request.resource.data.assigneeUid));
       allow update: if validRoot(r) && member(r) && request.resource.data.updatedAt == request.time
         && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
-          ? (isAdmin(r) || lpProofRead(r,resource.data,request.auth.uid)) && lpProofRead(r,resource.data,resource.data.assigneeUid)
+          ? (isPrimaryAdmin() || lpProofRead(r,resource.data,request.auth.uid) || isAdmin(r)) && lpProofRead(r,resource.data,resource.data.assigneeUid)
           : request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt','historyId']) && lpHistoryProof(r,request.resource.data));
       allow delete: if false;
     }
@@ -1614,6 +1685,8 @@ service cloud.firestore {
         && after.state == (p.state == 'completed' ? 'internally_approved' : p.state)
         && (p.state != 'completed' || getAfter(ej(r,p.id)).data.createdAt == request.time);
     }
+    // İP-7 bütçe: devretme dalı koşullu ifadede — hatalı (reddedilecek) karar transaction'ında motor && zincirini kısa devre
+    // etmeden değerlendirebiliyor; isAdmin yalnız gerçekten 'delegate' komutunda çalışır (ölçüm: walkthrough §Bütçe).
     function epUpdate(r,p,n) {
       let t = get(et(r,p.id,p.activeAssigneeUid)).data;
       return epBase(n,p.id) && poFirstFinance(r,p,n) && epCommand(r,n) && p.state == 'active'
@@ -1626,11 +1699,11 @@ service cloud.firestore {
             ? n.state == 'active' && n.currentStep == p.currentStep+1 && n.activeAssigneeUid == p.routeSnapshot[n.currentStep].assigneeUid && epActivation(r,n)
             : n.state == (n.lastResult == 'approved' ? 'completed' : n.lastResult) && n.currentStep == p.currentStep && n.activeAssigneeUid == '')
         || n.lastCommand == 'withdraw' && n.lastResult == 'withdrawn' && p.ownerUid == request.auth.uid && n.state == 'withdrawn' && n.currentStep == p.currentStep && n.activeAssigneeUid == '' && n.lastReason.trim().size()>0
-        || n.lastCommand == 'delegate' && n.lastResult == 'delegated' && n.lastReason.trim().size()>0 && isAdmin(r) && n.state == 'active' && n.currentStep == p.currentStep && n.activeAssigneeUid != p.activeAssigneeUid && n.activeAssigneeUid != p.ownerUid && epActivation(r,n));
+        || (n.lastCommand == 'delegate' ? n.lastResult == 'delegated' && n.lastReason.trim().size()>0 && n.state == 'active' && n.currentStep == p.currentStep && n.activeAssigneeUid != p.activeAssigneeUid && n.activeAssigneeUid != p.ownerUid && isAdmin(r) && epActivation(r,n) : false));
     }
     match /{r}/ebysProcesses/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ep(r,id)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid || resource.data.activeAssigneeUid == request.auth.uid || epAccess(r,id));
-      allow list: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.ownerUid == request.auth.uid);
+      allow get: if validRoot(r) && member(r) && (!exists(ep(r,id)) || resource.data.ownerUid == request.auth.uid || resource.data.activeAssigneeUid == request.auth.uid || isAdmin(r) || epAccess(r,id));
+      allow list: if validRoot(r) && member(r) && (resource.data.ownerUid == request.auth.uid || isAdmin(r));
       allow create: if validRoot(r) && member(r) && epBase(request.resource.data,id) && epRoute(request.resource.data.routeSnapshot)
         && request.resource.data.ownerUid == request.auth.uid && epTemplate(r,request.resource.data) && request.resource.data.currentStep == 0 && request.resource.data.state == 'active'
         && request.resource.data.activeAssigneeUid == request.resource.data.routeSnapshot[0].assigneeUid && request.resource.data.revision == 1
@@ -1679,7 +1752,7 @@ service cloud.firestore {
             && d.state == (p.lastCommand == 'withdraw' ? 'cancelled' : p.lastCommand == 'delegate' ? 'delegated' : 'closed'));
     }
     match /{r}/ebysTasks/items/{id} {
-      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysTasks',id)) || isAdmin(r) || resource.data.ownerUid == request.auth.uid || resource.data.assigneeUid == request.auth.uid || epAccess(r,resource.data.processId));
+      allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysTasks',id)) || resource.data.ownerUid == request.auth.uid || resource.data.assigneeUid == request.auth.uid || isAdmin(r) || epAccess(r,resource.data.processId));
       allow list: if validRoot(r) && member(r) && (resource.data.assigneeUid == request.auth.uid || resource.data.ownerUid == request.auth.uid);
       allow create: if validRoot(r) && member(r) && etWrite(r,id,request.resource.data,{});
       allow update: if validRoot(r) && member(r) && etWrite(r,id,request.resource.data,resource.data);
@@ -1855,17 +1928,22 @@ service cloud.firestore {
         && d.updatedAt == request.time && d.revision == h.revision && ebysCommand(r,h,'saveDraft')
         && poProposalOk(getAfter(ebysPath(r,'ebysDrafts',id)).data.purchaseSnapshot,id);
     }
+    // İP-7 bütçe: rol seçimi ana yönetici için doğrudan yönetici dalı; personelde önce personel dalı — geçerse isAdmin hiç
+    // değerlendirilmez (10 adımlı başlatma 1000 ifade sınırında). Geçmezse ek yönetici (claim / belge yetkisi) yönetici dalına
+    // düşer. Ek yönetici aynı zamanda personeldir; personel dalının izin verdiği yazım ona yönetici olarak da açıktır.
     match /{r}/purchaseOrders/items/{id} {
       allow get: if validRoot(r) && member(r) && !exists(poMarkerPath(r,id));
       allow create: if poIsLinked(request.resource.data) ? validRoot(r) && member(r) && poMarkerWrite(r,id,request.resource.data)
         && !exists(ebysPath(r,'ebysDocuments',id)) && request.resource.data.revision == 1 && request.resource.data.createdAt == request.time
-        : poIsLegacy(request.resource.data) && (isAdmin(r) ? poLegacyAdminCreate(r,id,request.resource.data) : poLegacyStaffCreate(r,id,request.resource.data));
+        : poIsLegacy(request.resource.data) && (isPrimaryAdmin() ? poLegacyAdminCreate(r,id,request.resource.data)
+          : (poLegacyStaffCreate(r,id,request.resource.data) || (isAdmin(r) && poLegacyAdminCreate(r,id,request.resource.data))));
       allow update: if poIsLinked(resource.data) ? validRoot(r) && member(r) && poMarkerWrite(r,id,request.resource.data)
         && request.resource.data.createdByUid == resource.data.createdByUid
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.revision > resource.data.revision
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unitId','birim','revision','updatedAt'])
-        : poIsLegacy(resource.data) && poIsLegacy(request.resource.data) && (isAdmin(r) ? poLegacyAdminUpdate(r,id,resource.data,request.resource.data) : poLegacyStaffUpdate(r,id,resource.data,request.resource.data));
+        : poIsLegacy(resource.data) && poIsLegacy(request.resource.data) && (isPrimaryAdmin() ? poLegacyAdminUpdate(r,id,resource.data,request.resource.data)
+          : (poLegacyStaffUpdate(r,id,resource.data,request.resource.data) || (isAdmin(r) && poLegacyAdminUpdate(r,id,resource.data,request.resource.data))));
     }
     function poLinkedLineNumbers(v) {
       return v is map && v.keys().hasOnly(['id','description','category','quantity','unit','unitPrice','currency','taxRate','totalPrice'])

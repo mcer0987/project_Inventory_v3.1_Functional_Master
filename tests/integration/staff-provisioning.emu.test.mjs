@@ -9,18 +9,22 @@
 // J11: (7) P0 — erişim kilidi yokken göç yönetici tarafından yapılır, giriş yapan personel hiçbir şey okuyamaz; kilit kapanınca
 // açık oturum yeni okumada reddedilir; (8) P1 — Auth taşıması olup Firestore bağı reddedilince ikinci koşu aynı uid'yi bağlar,
 // başka uid'ye / başka personele hiçbir bağ yazılmaz (bağlama firebase-handler ile aynı tek-transaction kodu).
+// İP-7: (9) ana yönetici gerçek grantAdmin / revokeAdmin transaction'ıyla (parola yeniden doğrulaması + denetim kaydı) yetki verir
+// ve geri alır; yetkili personel yönetici yazımı yapar, geri almada bir sonraki istekte düşer; ek yönetici aynı servisle yetki
+// dağıtamaz, kendi eşlemesine bağlayıcıyla dokunamaz (admin-protected).
 // Usage: npm run test:staff:emu   (firebase emulators:exec --only firestore,auth içinde)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { initializeApp, getApps, deleteApp } from 'firebase/app';
 import {
     initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword,
-    signInWithEmailAndPassword, signOut, updateEmail,
+    signInWithEmailAndPassword, signOut, updateEmail, reauthenticateWithCredential, EmailAuthProvider,
 } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteField, terminate, runTransaction, serverTimestamp } from 'firebase/firestore';
 
@@ -363,4 +367,110 @@ test('J11 · P1: bağlayıcı, başka personele eşlenmiş uid\'yi ikinci bir pe
         e => code(e) === 'uid-mismatch');
     assert.equal((await getDoc(ref(primary.db, 'j11_victim'))).data().uid, undefined);
     assert.equal((await getDoc(mapRef(primary.db, p.uid))).data().personelId, 'user_manuel_001');
+});
+
+// ─── İP-7 (Aşama A) · ana yöneticinin verdiği yönetici yetkisi — GERÇEK servis transaction'ı + gerçek Auth yeniden doğrulaması ───
+// admin-grant-service.js tarayıcıda gstatic CDN'den içe aktarır; burada aynı dosya, içe aktarma npm 'firebase/firestore'a
+// yönlendirilerek geçici bir .mjs olarak yüklenir (aynı modül örneği → aynı Firestore nesneleri). Saf çekirdek admin-grants.js.
+async function loadGrantService() {
+    vm.runInThisContext(fs.readFileSync(path.join(ROOT_DIR, 'src/utils/admin-grants.js'), 'utf8'), { filename: 'admin-grants.js' });
+    const src = fs.readFileSync(path.join(ROOT_DIR, 'src/services/admin-grant-service.js'), 'utf8')
+        .replace(/'https:\/\/www\.gstatic\.com\/firebasejs\/[^']+\/firebase-firestore\.js'/, JSON.stringify(import.meta.resolve('firebase/firestore')));
+    assert.ok(!src.includes('gstatic.com'), 'CDN içe aktarması yönlendirildi');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'admin-grant-')), 'admin-grant-service.mjs');
+    fs.writeFileSync(file, src);
+    return import(pathToFileURL(file).href);
+}
+// buildAuditRecord (firebase-handler) ile aynı alan kümesi; firebase-handler tarayıcı modülü olduğu için burada eşdeğeri kurulur.
+const auditFor = sess => (entry, { id }) => ({ id, data: {
+    id, type: entry.type, refCol: entry.refCol, refId: entry.refId, item: entry.item, qty: null, actorName: entry.actorName,
+    actorPersonelId: entry.actorPersonelId ?? null, uid: sess.auth.currentUser.uid, authKind: 'admin', result: entry.result,
+    reason: entry.reason, page: 'admin', ts: serverTimestamp(), fromValue: entry.fromValue, toValue: entry.toValue,
+} });
+function grantServiceFor(mod, sess, { canManage = true, password = ADMIN.password, calls = [] } = {}) {
+    return mod.createAdminGrantService({
+        db: () => sess.db, root: () => ROOT, grants: () => globalThis.window.AppModules.AdminGrants,
+        session: () => ({ isDbAdmin: () => true, canManageAdmins: () => canManage }),
+        actorUid: () => sess.auth.currentUser.uid, actor: () => ({ name: 'Test Yöneticisi' }), auditRecord: auditFor(sess),
+        reauth: async () => {   // SecurityConfig.promptAdminReauth yerine: gerçek Auth emülatöründe yeniden doğrulama
+            calls.push('reauth');
+            await reauthenticateWithCredential(sess.auth.currentUser, EmailAuthProvider.credential(sess.auth.currentUser.email, password));
+            return 'verified';
+        },
+        isLocked: () => false, inMaintenance: () => false, accountEmail: SP.accountEmailOf, readGate: async () => ({ state: 'open' }),
+        refreshToken: () => sess.auth.currentUser.getIdToken(),
+    });
+}
+
+test('İP-7: ana yönetici gerçek transaction\'la yetki verir; yetkili personel yönetici yazımı yapar; geri almada bir sonraki istekte düşer', async () => {
+    const mod = await loadGrantService();
+    const calls = [];
+    const owner = grantServiceFor(mod, primary, { calls });
+    const p = (await readPersonel(primary.db)).find(x => x.id === 'user_manuel_001');
+    const staff = session('ip7-grantee');
+    await signInWithEmailAndPassword(staff.auth, SP.staffEmail(p.pri), SP.staffPassword(p.code));
+    const probe = () => setDoc(doc(staff.db, ROOT, 'system_config', 'items', 'ip7-probe'), { ok: true });
+    await assert.rejects(probe(), denied, 'yetki verilmeden önce personel yönetici yazımı yapamaz');
+
+    const list0 = await owner.listAdminGrants();
+    assert.equal(list0.canManage, true);
+    assert.equal(list0.candidates.find(c => c.person.id === p.id).eligibility.code, 'ok');
+
+    const authBefore = Date.parse((await primary.auth.currentUser.getIdTokenResult()).authTime);
+    const res = await owner.grantAdmin(p.id, 'İP-7 emülatör kabul testi');
+    const authAfter = Date.parse((await primary.auth.currentUser.getIdTokenResult()).authTime);
+    console.log(`[İP-7 gözlem] Auth emülatörü auth_time: giriş ${new Date(authBefore).toISOString()} → yeniden doğrulama ${new Date(authAfter).toISOString()}`);
+    assert.ok(authAfter > authBefore, 'reauthenticateWithCredential jetondaki auth_time değerini tazeler (kural: ≤ 10 dk)');
+    assert.deepEqual([res.ok, res.uid], [true, p.uid]);
+    assert.deepEqual(calls, ['reauth'], 'parola yeniden doğrulaması transaction\'dan önce');
+    const m = (await getDoc(mapRef(primary.db, p.uid))).data();
+    assert.deepEqual([m.adminGranted, m.adminChangedBy, m.adminReason, m.adminAuditId, m.personelId],
+        [true, primary.auth.currentUser.uid, 'İP-7 emülatör kabul testi', res.auditId, p.id]);
+    const audit = (await getDoc(doc(primary.db, ROOT, 'auditLogs', 'items', res.auditId))).data();
+    assert.deepEqual([audit.type, audit.refCol, audit.refId, audit.fromValue, audit.toValue, audit.result],
+        ['yonetici-yetkisi-verildi', 'staffAccounts', p.uid, 'yok', 'yonetici', 'approved']);
+
+    assert.equal((await getDoc(mapRef(staff.db, p.uid))).data().adminGranted, true, 'kişi kendi eşlemesini okur (istemci yetkisini böyle öğrenir)');
+    await probe();
+    const list1 = await owner.listAdminGrants();
+    assert.deepEqual(list1.rows.map(r => [r.uid, r.state.state]), [[p.uid, 'active']]);
+    await assert.rejects(owner.grantAdmin(p.id, 'ikinci kez'), e => e.code === 'already-admin');
+
+    const rv = await owner.revokeAdmin(p.uid, 'İP-7 emülatör geri alma');
+    assert.equal(rv.ok, true);
+    await assert.rejects(probe(), denied, 'geri alma bir sonraki istekte geçerli (token yenilemesi beklenmez)');
+    assert.ok((await getDoc(ref(staff.db, p.id))).exists(), 'personel yetkileri sürer');
+    const types = (await getDocs(collection(primary.db, ROOT, 'auditLogs', 'items'))).docs.map(d => d.data())
+        .filter(a => a.refId === p.uid).map(a => a.type).sort();
+    assert.deepEqual(types, ['yonetici-yetkisi-geri-alindi', 'yonetici-yetkisi-verildi']);
+    await signOut(staff.auth);
+});
+
+test('İP-7: ek yönetici yetki dağıtamaz — istemci kapısı parola sormadan durur; kapı atlatılsa da kural reddeder; kendi eşlemesine dokunamaz', async () => {
+    const mod = await loadGrantService();
+    const owner = grantServiceFor(mod, primary);
+    const people = await readPersonel(primary.db);
+    const p = people.find(x => x.id === 'user_manuel_001');
+    const other = people.find(x => String(x.id) === '1790573516931123');   // kayıttaki id alanı sayı
+    await owner.grantAdmin(p.id, 'İP-7 ek yönetici senaryosu');
+    const extra = session('ip7-extra');
+    await signInWithEmailAndPassword(extra.auth, SP.staffEmail(p.pri), SP.staffPassword(p.code));
+    await setDoc(doc(extra.db, ROOT, 'system_config', 'items', 'ip7-extra'), { ok: true });   // ek yönetici yetkisi çalışıyor
+
+    const calls = [];
+    const gated = grantServiceFor(mod, extra, { canManage: false, password: SP.staffPassword(p.code), calls });
+    await assert.rejects(gated.grantAdmin(other.id, 'başkasına yetki'), e => e.code === 'forbidden');
+    assert.deepEqual(calls, [], 'istemci kapısı parola sormadan durdu');
+    const bypass = grantServiceFor(mod, extra, { canManage: true, password: SP.staffPassword(p.code) });
+    await assert.rejects(bypass.grantAdmin(other.id, 'başkasına yetki'), e => e.code === 'forbidden' && /Kurallar yazımı reddetti/.test(e.message));
+    await assert.rejects(bypass.revokeAdmin(p.uid, 'kendi yetkimi kaldırıyorum'), e => e.code === 'forbidden');
+    assert.notEqual((await getDoc(mapRef(primary.db, other.uid))).data().adminGranted, true);
+    assert.equal((await getDoc(mapRef(primary.db, p.uid))).data().adminGranted, true);
+
+    // Bağlayıcı (PRI / Hesap Göç Aracı yolu): ek yönetici yetkili eşlemedeki kimlik alanını değiştiremez → admin-protected
+    await assert.rejects(linkVia(extra.db)({ id: p.id, pri: p.pri }, { uid: p.uid, authEmail: 'baska.adres@staff.medipol.local', pri: p.pri }),
+        e => SP.errorKind(e) === 'admin-protected');
+    assert.equal((await getDoc(ref(primary.db, p.id))).data().authEmail, SP.staffEmail(p.pri));
+    await signOut(extra.auth);
+    await owner.revokeAdmin(p.uid, 'İP-7 senaryo sonu temizlik');
 });

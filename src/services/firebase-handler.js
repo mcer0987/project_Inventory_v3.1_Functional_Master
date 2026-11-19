@@ -708,6 +708,8 @@ function _bulkLockBlocks(cols) {
     const locked = Array.isArray(L.collections) && L.collections.length ? L.collections : null;
     return !locked || cols.some(c => locked.includes(c));
 }
+// İP-7: yönetici yetkisi servisi (admin-grant-service.js) bağlama transaction'ından önce aynı kilidi sorar.
+export const isBulkWriteLocked = window.isBulkWriteLocked = (cols = []) => _bulkLockBlocks(cols);
 
 window.addEventListener('unhandledrejection', ev => {
     const e = ev.reason;
@@ -1149,18 +1151,64 @@ window.addEventListener('onAppLogout', () => {
     isSyncStarted = false;
 });
 
+// ─── İP-7 · Ana yöneticinin verdiği yönetici yetkisi (kendi eşlemesi) ───────────────────────────────────────────────
+// [WHY]: Kurallar ek yöneticiyi staffAccounts/{uid}.adminGranted alanından tanır; yetki claim'de değil belgede olduğu için geri
+//        alma bir sonraki istekte geçerlidir. Arayüz de aynı kararı vermeli: girişte "Panele Geç" doğru çıksın, yetki düşünce
+//        açık panel kilitlensin (onAdminGrantChanged).
+// [HOW]: Personel oturumunda kendi eşlemesi (kural: kişi yalnız kendi eşlemesini okur) önce SUNUCUDAN okunur — onAuthReady ve
+//        whenAuthReady bu okumadan SONRA çözülür. Ardından eşleme dinlenir; yalnız sunucu anlık görüntüsü değerlendirilir,
+//        yönetici kararı değişince olay yayınlanır ve veri dinleyicileri yeni role göre yeniden kurulur. Okuma düşerse yetki
+//        yok sayılır (fail-closed); dinleyici gelince düzelir.
+const _ownGrantRef = uid => doc(fireDb, COLLECTION_ROOT, 'staffAccounts', 'items', String(uid));
+let _grantUnsub = null;
+let _grantUid = null;
+async function _readOwnAdminGrant(user, session) {
+    if (!user || !session?.isStaffAccountSession(user)) return null;
+    try {
+        const snap = await getDocFromServer(_ownGrantRef(user.uid));
+        return snap.exists() ? snap.data() : null;
+    } catch (error) {
+        console.warn('[Auth] Yönetici yetkisi okunamadı (yetki yok sayıldı):', error.code || error.message);
+        return null;
+    }
+}
+function _watchOwnAdminGrant(user, session) {
+    if (_grantUnsub && (!user || _grantUid !== user.uid)) {
+        try { _grantUnsub(); } catch (_) { /* yoksay */ }
+        _grantUnsub = null; _grantUid = null;
+    }
+    if (!user || _grantUnsub || !session?.isStaffAccountSession(user)) return;
+    _grantUid = user.uid;
+    _grantUnsub = onSnapshot(_ownGrantRef(user.uid), { includeMetadataChanges: false }, snap => {
+        if (snap.metadata && snap.metadata.fromCache) return;
+        if (!window.userAuth || window.userAuth.uid !== user.uid) return;
+        const data = snap.exists() ? snap.data() : null;
+        const wasAdmin = session.isDbAdmin();
+        session.setStaffAdminGrant(user, data);
+        const isAdmin = session.isDbAdmin();
+        if (wasAdmin === isAdmin) return;
+        console.warn(`👑 [Yetki] Yönetici yetkisi ${isAdmin ? 'verildi' : 'düştü'} · uid ${user.uid}`);
+        if (_syncRunning) window.startRealtimeSync();
+        window.dispatchEvent(new CustomEvent('onAdminGrantChanged', { detail: { uid: user.uid, isAdmin, adminGranted: data?.adminGranted === true } }));
+    }, error => console.warn('[Auth] Yönetici yetkisi dinlenemedi:', error.code || error.message));
+}
+
 onAuthStateChanged(auth, async (user) => {
     const session = window.AppModules?.Session;
-    let token;
-    if (COLLECTION_ROOT === LIVE_COLLECTION_ROOT && session?.isStaffAccountSession(user)) {
+    const readClaims = async () => {
+        if (!(COLLECTION_ROOT === LIVE_COLLECTION_ROOT && session?.isStaffAccountSession(user))) return undefined;
         try {
-            token = await user.getIdTokenResult();
+            return await user.getIdTokenResult();
         } catch (error) {
             console.warn('[Auth] Yönetici yetkisi doğrulanamadı:', error.code);
+            return undefined;
         }
-    }
+    };
+    const [token, grant] = await Promise.all([readClaims(), _readOwnAdminGrant(user, session)]);
     if (auth.currentUser !== user) return;
     session?.setFirebaseAuthClaims(user, token);
+    session?.setStaffAdminGrant(user, grant);
+    _watchOwnAdminGrant(user, session);
     if (user) {
         window.userAuth = user;
         console.log("✅ [Auth] Firebase Oturumu Doğrulandı UID:", user.uid);
@@ -2118,6 +2166,8 @@ let _staffLinker = null;
 async function _linkStaffAccount(person, fields) {
     _staffLinker = _staffLinker || window.StaffProvisioning.createFirestoreLinker({
         runTransaction, db: fireDb, personelRef: id => _docRef('personel', id), accountRef: _staffAccountRef,
+        // İP-7: yönetici yetkili eşlemeye yalnız ana yönetici dokunur (kural da reddeder; burada anlaşılır ileti için erken durur)
+        canEditAdminAccount: () => !!(window.AppModules && window.AppModules.Session && window.AppModules.Session.isPrimaryDbAdmin()),
     });
     const written = await _staffLinker(person, fields);
     // Yazılanları yerel kopyaya hemen işle (snapshot beklenmeden; sonraki önizleme / tablo tutarlı olsun)

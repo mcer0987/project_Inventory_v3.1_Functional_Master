@@ -77,6 +77,7 @@
         localStorage.removeItem('launchpadBypassed');
         sessionStorage.removeItem('adminVizesi');
         window.currentUser = null;
+        setStaffAdminGrant(null, null);
     }
 
     function isAppLoggedIn() {
@@ -95,9 +96,34 @@
             && typeof personId === 'string' && personId ? user : null;
     }
 
+    // ─── İP-7 · Ana yöneticinin verdiği yönetici yetkisi (staffAccounts/{uid}.adminGranted) ─────────────────────
+    // [WHY]: Kurallar ek yöneticiyi kendi eşleme belgesindeki adminGranted alanından tanır (firestore.rules isAdmin). Arayüz
+    //        aynı kararı vermezse yetkili kişi "Panele Geç"i göremez ya da yetkisi alınmış kişi paneli açık tutar.
+    // [HOW]: firebase-handler kendi eşlemesini sunucudan okuyup dinler ve setStaffAdminGrant'i çağırır. Yetki yalnız aynı
+    //        personel oturumuna bağlıdır (oturum değişirse ya da çıkışta düşer); eşleme belgesi ortam köküne göre okunduğu için
+    //        ortam başına ayrıdır (K3). Asıl kapı kurallardadır; bu yalnız arayüz kararıdır.
+    let grantSession = null;
+    let grantMapping = null;
+    function setStaffAdminGrant(user, data) {
+        const granted = !!(user && data && data.adminGranted === true && isStaffAccountSession(user));
+        grantSession = granted ? user : null;
+        grantMapping = granted ? {
+            uid: user.uid, adminChangedBy: data.adminChangedBy || null, adminReason: data.adminReason || '', adminAuditId: data.adminAuditId || null,
+        } : null;
+    }
+    function getStaffAdminGrant() {
+        return grantSession !== null && grantSession === window.userAuth && grantMapping ? { ...grantMapping } : null;
+    }
+
     function isDbAdmin() {
         return isPrimaryDbAdmin() || (window.AppEnv?.COLLECTION_ROOT === 'lifeserver_master'
-            && liveAdminSession !== null && liveAdminSession === window.userAuth);
+            && liveAdminSession !== null && liveAdminSession === window.userAuth)
+            || (grantSession !== null && grantSession === window.userAuth);
+    }
+
+    // İP-7 · K1: yönetici yetkisini yalnız ana yönetici hesabı verir ve geri alır; ek yöneticiler panelde salt okunur görür.
+    function canManageAdmins() {
+        return isPrimaryDbAdmin();
     }
 
     // [WHY]: Faz 4 · J1 (M1, M5) — Rules v2 personelin silme ve admin koleksiyonu yazmalarını reddediyor; birçok fonksiyon
@@ -172,6 +198,7 @@
     const Session = {
         ENABLE_BIOMETRIC_LOGIN,
         getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, isPrimaryDbAdmin, setFirebaseAuthClaims, requireDbAdmin,
+        setStaffAdminGrant, getStaffAdminGrant, canManageAdmins,
         maskUserData, unmaskUserData, sanitizeUser, ADMIN_EMAIL,
         STAFF_AUTH_MODES, DEFAULT_STAFF_AUTH_MODE, getStaffAuthMode, isStaffAccountSession,
         getAdminVisaRemaining, hasValidAdminVisa, grantAdminVisa, extendAdminVisa, clearAdminVisa,

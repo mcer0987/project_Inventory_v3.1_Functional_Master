@@ -1530,6 +1530,27 @@
         return { overlay, gate, verification: v, open, shut, close: dispose };
     };
 
+    // ─── İP-7 · Yönetici Yetkileri (ana yöneticinin verdiği yetki) ───
+    // [WHY]: VIP › "👑 Yönetici Yetkileri" düğmesi paneli açar; ek yöneticinin yetkisi geri alınırsa (ya da askıya düşerse) açık
+    //        admin.html sekmesi beklemeden kilitlenmeli — kurallar zaten bir sonraki yazımı reddeder.
+    // [HOW]: Açıcı window.AppModules.AdminGrantPanel'e devreder (salt okunur / sahip kipi panelde). firebase-handler kendi
+    //        eşlemesini dinler ve yönetici kararı değişince 'onAdminGrantChanged' yayınlar; yetki düştüyse panel kapanır ve
+    //        kilit kartı ('not-admin') açılır.
+    window.vipAdminGrants = function (btn) {
+        const P = window.AppModules && window.AppModules.AdminGrantPanel;
+        if (!P) { _dupAlert('Yönetici yetkileri paneli yüklenemedi; sayfayı yenileyin.', 'error'); return null; }
+        return P.open(btn);
+    };
+    window.addEventListener('onAdminGrantChanged', ev => {
+        const d = (ev && ev.detail) || {};
+        _appendLog(d.isAdmin ? 'success' : 'warn', [`👑 Yönetici yetkisi ${d.isAdmin ? 'verildi' : 'düştü'} · uid ${d.uid || '-'}`]);
+        if (d.isAdmin) return;
+        const P = window.AppModules && window.AppModules.AdminGrantPanel;
+        if (P) P.close();
+        if (typeof window.showAdminLock === 'function') window.showAdminLock('not-admin');
+        _dupAlert('Yönetici yetkiniz geri alındı ya da askıya alındı; yönetici paneli kilitlendi.', 'warning');
+    });
+
     // Global Kill Switch
     // [WHY]: Kill Switch (Sistemi Kapatma) komutu localStorage'da tutuluyordu, DevTools ile bypass edilebiliyordu.
     // [HOW]: Artık Firestore üzerindeki 'system_config/admin_settings' dökümanına asenkron yazıyor. Sadece Firebase Auth ile doğrulanmış adminler bu veriyi değiştirebilir.

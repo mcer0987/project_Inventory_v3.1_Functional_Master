@@ -141,10 +141,14 @@ describe('KVKK: oturumsuz okuma yok · personel hesap eşlemesi (staffAccounts)'
         for (const db of [ctx.none(), ctx.s1(), ctx.admin()]) await assertFails(getDoc(item(db, LIVE, 'staffDirectory', 'current')));
         await assertFails(setDoc(item(ctx.admin(), LIVE, 'staffDirectory', 'current'), { entries: [] }));
     });
-    test('eşlemeyi yalnız admin okur ve yazar', async () => {
+    test('eşlemeyi yalnız admin yazar; personel yalnız KENDİ eşlemesini okur (İP-7)', async () => {
         await assertSucceeds(getDoc(item(ctx.admin(), LIVE, 'staffAccounts', 'uid-s1')));
         await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'staffAccounts', 'uid-new'), { personelId: 's4', pri: 'deniz.ak' }));
-        for (const db of [ctx.none(), ctx.anon(), ctx.s1()]) await assertFails(getDoc(item(db, LIVE, 'staffAccounts', 'uid-s1')));
+        for (const db of [ctx.none(), ctx.anon()]) await assertFails(getDoc(item(db, LIVE, 'staffAccounts', 'uid-s1')));
+        // İP-7 (bilinçli genişletme): istemci yönetici yetkisini kendi eşlemesinden öğrenir; başkasının eşlemesi kapalı kalır.
+        await assertSucceeds(getDoc(item(ctx.s1(), LIVE, 'staffAccounts', 'uid-s1')));
+        await assertFails(getDoc(item(ctx.s1(), LIVE, 'staffAccounts', 'uid-s2')));
+        await assertFails(getDocs(collection(ctx.s1(), LIVE, 'staffAccounts', 'items')));
     });
     test('KÖTÜ NİYET: kendine hesap açan kendini bir personele bağlayamaz (eşleme yazamaz)', async () => {
         await assertFails(setDoc(item(ctx.signup(), LIVE, 'staffAccounts', 'uid-signup'), { personelId: 's4', pri: 'nobody.yok' }));

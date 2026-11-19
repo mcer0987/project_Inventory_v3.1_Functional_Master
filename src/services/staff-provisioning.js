@@ -132,7 +132,7 @@
     // [HOW]: Her hata tek bir türe indirgenir; sonuçlar `kind` taşır. Toplu işi durduranlar (kota, ağ, yetki, kapalı özellik)
     //        ProvisioningStop / durma nedeni olur; kişiye özgü olanlar (yanlış kod, çakışma, devre dışı) satır sonucu kalır.
     /** Hata → tür: rate-limited | operation-not-allowed | requires-recent-login | network | permission-denied | wrong-password |
-     *  email-in-use | user-disabled | uid-mismatch | not-found | unknown */
+     *  email-in-use | user-disabled | uid-mismatch | admin-protected | not-found | unknown */
     function errorKind(e) {
         const c = errCode(e);
         if (RATE_LIMIT.includes(c)) return 'rate-limited';
@@ -144,6 +144,7 @@
         if (c === 'email-already-in-use') return 'email-in-use';
         if (c === 'user-disabled') return 'user-disabled';
         if (c === 'uid-mismatch') return 'uid-mismatch';
+        if (c === 'admin-protected') return 'admin-protected';
         if (c === 'not-found') return 'not-found';
         return 'unknown';
     }
@@ -157,6 +158,8 @@
     function linkFailure(e, uid, email) {
         const kind = errorKind(e);
         if (kind === 'uid-mismatch') return { status: 'conflict', kind, uid, email, reason: (e && e.message) || 'bağ başka bir hesabı / personeli gösteriyor' };
+        // İP-7: yetkili kişinin eşlemesi — satır sonucu (toplu iş durmaz; yalnız ana yönetici düzeltebilir).
+        if (kind === 'admin-protected') return { status: 'conflict', kind, uid, email, reason: (e && e.message) || 'yönetici yetkili hesap' };
         return { status: 'link-failed', kind, uid, email, reason: reasonOf(e) };
     }
 
@@ -392,6 +395,9 @@
 
     // ─── Firestore bağı (tek transaction) ──────────────────────────────────────────────────────────────
     const linkError = (code, message) => Object.assign(new Error(message), { code });
+    // İP-7: yönetici yetkisi aynı eşleme belgesinde (adminGranted). Yetkili bir kişinin eşlemesini ve kimlik alanlarını
+    // (pri / authEmail / active) yalnız ana yönetici değiştirebilir (firestore.rules); ek yöneticinin denemesi bu iletiyle durur.
+    const ADMIN_PROTECTED_MESSAGE = 'bu giriş hesabının yönetici yetkisi var; eşlemesini ve kimlik alanlarını yalnız ana yönetici değiştirebilir (bağ değiştirilmedi)';
     /**
      * [WHY]: Faz 4B · J11 (P1) — bağlama iki ayrı yazmaydı (önce staffAccounts eşlemesi, sonra personel kaydı): ikincisi düşerse
      *        yarım bağ kalıyordu; ayrıca eşlemenin başka bir personeli gösterip göstermediği hiç denetlenmeden üzerine yazılıyordu.
@@ -399,30 +405,42 @@
      *        okunur — personel kaydı var; kayıtta BAŞKA bir uid yok; eşleme BAŞKA bir personeli göstermiyor. Tutmazsa
      *        'uid-mismatch' / 'not-found' fırlatılır ve hiçbir şey yazılmaz. Değişmeyen alan yazılmaz (yeniden çalıştırma ucuz,
      *        idempotent). Tarayıcıda firebase-handler, testte emülatör aynı kodu kullanır.
-     * @param {{runTransaction:Function, db:object, personelRef:(id)=>ref, accountRef:(uid)=>ref, now?:Function}} o
+     *        İP-7: eşleme merge ile yazılır (yönetici yetkisi alanları korunur); yetkili eşlemeye canEditAdminAccount() false olan
+     *        oturum dokunmaya kalkarsa 'admin-protected' fırlatılır (kural reddi de aynı koda çevrilir).
+     * @param {{runTransaction:Function, db:object, personelRef:(id)=>ref, accountRef:(uid)=>ref, now?:Function, canEditAdminAccount?:Function}} o
      * @returns {(person, fields) => Promise<object>}  personel kaydına yazılan alanlar ({} → kayıt zaten bağlıydı)
      */
-    function createFirestoreLinker({ runTransaction, db, personelRef, accountRef, now = Date.now }) {
+    function createFirestoreLinker({ runTransaction, db, personelRef, accountRef, now = Date.now, canEditAdminAccount = () => true }) {
         return async function link(person, fields) {
             const uid = blank(fields && fields.uid) ? '' : String(fields.uid);
             const pid = person && !blank(person.id) ? String(person.id) : '';
             if (!uid || !pid) throw linkError('invalid-argument', 'bağlanacak uid / personel yok');
             const pri = fields.pri || person.pri;
-            return runTransaction(db, async t => {
-                const pSnap = await t.get(personelRef(pid));
-                const mSnap = await t.get(accountRef(uid));
-                if (!pSnap.exists()) throw linkError('not-found', 'personel kaydı bulunamadı (silinmiş olabilir)');
-                const live = pSnap.data();
-                if (!blank(live.uid) && String(live.uid) !== uid) throw linkError('uid-mismatch', 'personel kaydı başka bir giriş hesabına bağlı (bağ değiştirilmedi)');
-                const m = mSnap.exists() ? mSnap.data() : null;
-                if (m && String(m.personelId) !== pid) throw linkError('uid-mismatch', 'bu giriş hesabı başka bir personele eşlenmiş (bağ değiştirilmedi)');
-                const changed = {};
-                for (const [k, v] of Object.entries(fields)) if (k !== 'authProvisionedAt' && v !== undefined && live[k] !== v) changed[k] = v;
-                if (Object.keys(changed).length && fields.authProvisionedAt !== undefined) changed.authProvisionedAt = fields.authProvisionedAt;
-                if (!m || m.pri !== pri) t.set(accountRef(uid), { personelId: pid, pri, linkedAt: now() });
-                if (Object.keys(changed).length) t.update(personelRef(pid), changed);
-                return changed;
-            });
+            let touchedAdmin = false;
+            try {
+                return await runTransaction(db, async t => {
+                    const pSnap = await t.get(personelRef(pid));
+                    const mSnap = await t.get(accountRef(uid));
+                    if (!pSnap.exists()) throw linkError('not-found', 'personel kaydı bulunamadı (silinmiş olabilir)');
+                    const live = pSnap.data();
+                    if (!blank(live.uid) && String(live.uid) !== uid) throw linkError('uid-mismatch', 'personel kaydı başka bir giriş hesabına bağlı (bağ değiştirilmedi)');
+                    const m = mSnap.exists() ? mSnap.data() : null;
+                    if (m && String(m.personelId) !== pid) throw linkError('uid-mismatch', 'bu giriş hesabı başka bir personele eşlenmiş (bağ değiştirilmedi)');
+                    const changed = {};
+                    for (const [k, v] of Object.entries(fields)) if (k !== 'authProvisionedAt' && v !== undefined && live[k] !== v) changed[k] = v;
+                    if (Object.keys(changed).length && fields.authProvisionedAt !== undefined) changed.authProvisionedAt = fields.authProvisionedAt;
+                    const writeMap = !m || m.pri !== pri;
+                    touchedAdmin = !!(m && m.adminGranted === true && (writeMap || Object.keys(changed).length));
+                    if (touchedAdmin && !canEditAdminAccount()) throw linkError('admin-protected', ADMIN_PROTECTED_MESSAGE);
+                    // merge: PRI değişiminde eşlemedeki yönetici yetkisi alanları (adminGranted …) silinmesin.
+                    if (writeMap) t.set(accountRef(uid), { personelId: pid, pri, linkedAt: now() }, { merge: true });
+                    if (Object.keys(changed).length) t.update(personelRef(pid), changed);
+                    return changed;
+                });
+            } catch (e) {
+                if (touchedAdmin && errorKind(e) === 'permission-denied') throw linkError('admin-protected', ADMIN_PROTECTED_MESSAGE);
+                throw e;
+            }
         };
     }
 

@@ -463,16 +463,16 @@ function fakeTx(docs, { failCommit = false } = {}) {
     const snap = p => ({ exists: () => docs.has(p), data: () => ({ ...docs.get(p) }) });
     const runTransaction = async (_db, fn) => {
         const writes = [];
-        const t = { get: async p => snap(p), set: (p, d) => writes.push(['set', p, d]), update: (p, d) => writes.push(['update', p, d]) };
+        const t = { get: async p => snap(p), set: (p, d, o) => writes.push([o && o.merge ? 'merge' : 'set', p, d]), update: (p, d) => writes.push(['update', p, d]) };
         const out = await fn(t);
         if (failCommit) throw Object.assign(new Error('commit düştü'), { code: 'unavailable' });
-        for (const [op, p, d] of writes) docs.set(p, op === 'set' ? { ...d } : { ...(docs.get(p) || {}), ...d });
+        for (const [op, p, d] of writes) docs.set(p, op === 'set' ? { ...d } : { ...(docs.get(p) || {}), ...d });   // merge / update: mevcut alanlar korunur
         return out;
     };
     return { runTransaction };
 }
-const linkerFor = (S, docs, opts) => S.createFirestoreLinker({
-    runTransaction: fakeTx(docs, opts).runTransaction, db: {}, personelRef: id => 'personel/' + id, accountRef: uid => 'staffAccounts/' + uid, now: () => 5,
+const linkerFor = (S, docs, opts, extra = {}) => S.createFirestoreLinker({
+    runTransaction: fakeTx(docs, opts).runTransaction, db: {}, personelRef: id => 'personel/' + id, accountRef: uid => 'staffAccounts/' + uid, now: () => 5, ...extra,
 });
 
 test('createFirestoreLinker: eşleme + personel bağı TEK transaction; commit düşerse ikisi de yazılmaz; yeniden çalıştırma idempotent', async () => {
@@ -501,4 +501,45 @@ test('createFirestoreLinker: kayıt başka uid\'ye bağlıysa / eşleme başka p
     await assert.rejects(link({ id: 'yok' }, { uid: 'u2', pri: 'x.y' }), e => S.errorKind(e) === 'not-found');
     await assert.rejects(link({ id: 'b1' }, { uid: '', pri: 'x.y' }), e => e.code === 'invalid-argument');
     assert.equal(JSON.stringify([...docs]), before);
+});
+
+// İP-7 (Aşama A): yönetici yetkisi aynı eşleme belgesinde. PRI değişiminde eşleme merge ile yazılır (yetki alanları silinmez);
+// yetkili bir eşlemeye ek yönetici dokunamaz (kural reddeder) — bağlayıcı bunu anlaşılır 'admin-protected' sonucuyla bildirir.
+const GRANT = { adminGranted: true, adminChangedAt: 1, adminChangedBy: 'admin-uid', adminReason: 'BT sorumlusu', adminAuditId: 'al_1' };
+test('İP-7 createFirestoreLinker: PRI değişiminde eşleme merge ile yazılır — yönetici yetkisi alanları korunur', async () => {
+    const S = load();
+    const docs = new Map([
+        ['personel/a1', { id: 'a1', pri: 'ali.veli', uid: 'u1', authEmail: 'ali.veli' + D }],
+        ['staffAccounts/u1', { personelId: 'a1', pri: 'ali.veli', linkedAt: 1, ...GRANT }],
+    ]);
+    const changed = await linkerFor(S, docs)({ id: 'a1', pri: 'ali.veli' }, { uid: 'u1', authEmail: 'ali.veli2' + D, pri: 'ali.veli2' });
+    assert.deepEqual(plain(changed), { authEmail: 'ali.veli2' + D, pri: 'ali.veli2' });
+    assert.deepEqual(docs.get('staffAccounts/u1'), { personelId: 'a1', pri: 'ali.veli2', linkedAt: 5, ...GRANT });
+});
+
+test('İP-7 createFirestoreLinker: yetkili eşlemeye ana yönetici olmayan oturum dokunamaz → admin-protected (conflict), hiçbir şey yazılmaz', async () => {
+    const S = load();
+    const docs = new Map([
+        ['personel/a1', { id: 'a1', pri: 'ali.veli', uid: 'u1', authEmail: 'ali.veli' + D }],
+        ['staffAccounts/u1', { personelId: 'a1', pri: 'ali.veli', linkedAt: 1, ...GRANT }],
+    ]);
+    const before = JSON.stringify([...docs]);
+    const link = linkerFor(S, docs, {}, { canEditAdminAccount: () => false });
+    await assert.rejects(link({ id: 'a1' }, { uid: 'u1', authEmail: 'ali.veli2' + D, pri: 'ali.veli2' }), e => S.errorKind(e) === 'admin-protected' && /yalnız ana yönetici/.test(e.message));
+    assert.equal(JSON.stringify([...docs]), before);
+    assert.deepEqual(plain(await link({ id: 'a1', pri: 'ali.veli' }, { uid: 'u1', authEmail: 'ali.veli' + D, pri: 'ali.veli' })), {}, 'değişiklik yoksa engel yok (idempotent yeniden çalıştırma)');
+    // Kural reddi (permission-denied) yetkili eşlemede aynı anlaşılır sonuca çevrilir; toplu iş durmaz (satır sonucu 'conflict').
+    const denied = S.createFirestoreLinker({ db: {}, personelRef: id => 'personel/' + id, accountRef: uid => 'staffAccounts/' + uid,
+        runTransaction: async (_db, fn) => { await fn({ get: async p => ({ exists: () => docs.has(p), data: () => ({ ...docs.get(p) }) }), set() {}, update() {} });
+            throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }); } });
+    const err = await denied({ id: 'a1' }, { uid: 'u1', pri: 'ali.veli2' }).catch(e => e);
+    assert.equal(S.errorKind(err), 'admin-protected');
+    // Toplu göç aracında: yetkili satır 'conflict' olarak raporlanır, iş DURMAZ (permission-denied'dan farklı olarak) ve sıradaki satır işlenir.
+    const auth = fakeAuth();
+    const db = fakeDb([{ id: 'p1', name: 'Ali Veli', pri: 'ali.veli', uid: 'u1', authEmail: 'ali.veli' + D }, { id: 'p2', name: 'Can Can', pri: 'can.can', uid: 'u2', authEmail: 'can.can' + D }]);
+    const okLink = db.link;
+    db.link = async (person, fields) => { if (String(person.id) === 'p1') throw err; return okLink(person, fields); };
+    const r = plain(await S.applyAccounts(S.planAccounts(db.personel), db.byId(), auth, db.link, {}));
+    assert.equal(r.stopped, null);
+    assert.deepEqual(r.results.map(x => [x.id, x.status, x.kind || null]), [['p1', 'conflict', 'admin-protected'], ['p2', 'ok', null]]);
 });

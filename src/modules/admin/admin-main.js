@@ -16,6 +16,7 @@ import './admin-router.js';
 import './inventory-no-change.js';     // v3.6: Operasyon Merkezi › Envanter No Değişimi
 import '../../ui/ebys-catalog-ui.js';  // v3.4 EBYS H6b: Tanımlar › Kurum Künyesi, Dosya Planı, Üst Yazı Şablonları
 import '../self-approval-reporter.js';   // J4: Güvenlik Raporu iki sayfada (EBYS-05)
+import '../../services/admin-grant-service.js';   // İP-7: VIP › Yönetici Yetkileri (ana yöneticinin verdiği yetki)
 
 window.AppModules = window.AppModules || {};
 
