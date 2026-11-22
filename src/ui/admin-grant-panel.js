@@ -21,7 +21,6 @@
         ['Erişim Kilidi uyarısı', 'Bir ek yönetici Personel Erişim Kilidi\'ni kapatırsa kendisi dahil bütün ek yöneticiler askıya alınır; kilidi kapanış kanıtıyla yalnız ana yönetici yeniden açabilir.'],
         ['Geri alma', 'Yetkisi geri alınan kişi personel olarak çalışmaya devam eder; yönetici işlemleri ve yönetici paneli kapanır. Geçmiş, Güvenlik Raporu\'nda kalır.'],
         ['Şifre doğrulaması', 'Her değişiklikte ana yönetici parolası yeniden sorulur. Parola doğrulaması 10 dakikadan eskiyse değişiklik reddedilir.'],
-        ['Eski yöntem', 'Daha önce betikle verilmiş yönetici yetkisi bu listede görünmez. Aynı kişiye buradan yetki verin; eski yöntem sonraki adımda kaldırılacak.'],
     ];
     const READONLY_NOTE = 'Yetkileri yalnız ana yönetici değiştirebilir. Bu listeyi yalnız görüntüleyebilirsiniz.';
 

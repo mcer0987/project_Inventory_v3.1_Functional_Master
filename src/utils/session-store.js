@@ -84,16 +84,8 @@
         return !!getActiveUser();
     }
 
-    let liveAdminSession = null;
-
     function isPrimaryDbAdmin(user = window.userAuth) {
         return !!(user && !user.isAnonymous && user.email === ADMIN_EMAIL);
-    }
-
-    function setFirebaseAuthClaims(user, token) {
-        const personId = token?.claims?.inventoryLiveAdmin;
-        liveAdminSession = isStaffAccountSession(user) && token?.signInProvider === 'password'
-            && typeof personId === 'string' && personId ? user : null;
     }
 
     // ─── İP-7 · Ana yöneticinin verdiği yönetici yetkisi (staffAccounts/{uid}.adminGranted) ─────────────────────
@@ -116,9 +108,7 @@
     }
 
     function isDbAdmin() {
-        return isPrimaryDbAdmin() || (window.AppEnv?.COLLECTION_ROOT === 'lifeserver_master'
-            && liveAdminSession !== null && liveAdminSession === window.userAuth)
-            || (grantSession !== null && grantSession === window.userAuth);
+        return isPrimaryDbAdmin() || (grantSession !== null && grantSession === window.userAuth);
     }
 
     // İP-7 · K1: yönetici yetkisini yalnız ana yönetici hesabı verir ve geri alır; ek yöneticiler panelde salt okunur görür.
@@ -197,7 +187,7 @@
 
     const Session = {
         ENABLE_BIOMETRIC_LOGIN,
-        getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, isPrimaryDbAdmin, setFirebaseAuthClaims, requireDbAdmin,
+        getActiveUser, setActiveUser, clearSession, isAppLoggedIn, isDbAdmin, isPrimaryDbAdmin, requireDbAdmin,
         setStaffAdminGrant, getStaffAdminGrant, canManageAdmins,
         maskUserData, unmaskUserData, sanitizeUser, ADMIN_EMAIL,
         STAFF_AUTH_MODES, DEFAULT_STAFF_AUTH_MODE, getStaffAuthMode, isStaffAccountSession,

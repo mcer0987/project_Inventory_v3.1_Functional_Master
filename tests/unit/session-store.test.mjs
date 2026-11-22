@@ -59,22 +59,14 @@ test('isStaffAccountSession: yalnız @staff.medipol.local e-posta/parola oturumu
 });
 
 
-test('canlı yönetici arayüzü belirteçteki role, aynı oturuma ve canlı köke bağlıdır', () => {
+// KURAL 5 · Bilinçli sıkılaştırma (İP-7 Aşama B): eski inventoryLiveAdmin claim ve setFirebaseAuthClaims kaldırıldı.
+test('İP-7 Aşama B: sahte yönetici rolü ve kaldırılan claim yolu artık isDbAdmin() sonucunu true yapmaz', () => {
     const user = { uid: 'u1', email: 'p1@staff.medipol.local', isAnonymous: false };
-    const { S, window } = load({ userAuth: user, AppEnv: { COLLECTION_ROOT: 'lifeserver_master' } });
+    const { S } = load({ userAuth: user, AppEnv: { COLLECTION_ROOT: 'lifeserver_master' } });
     S.setActiveUser({ name: 'Muhammed Cer', role: 'admin' });
     assert.equal(S.isDbAdmin(), false);
-    S.setFirebaseAuthClaims(user, { signInProvider: 'password', claims: { inventoryLiveAdmin: 'p1' } });
-    assert.equal(S.isDbAdmin(), true);
     assert.equal(S.isStaffAccountSession(), true);
-    window.AppEnv.COLLECTION_ROOT = 'inventory_demo';
-    assert.equal(S.isDbAdmin(), false);
-    window.AppEnv.COLLECTION_ROOT = 'lifeserver_master';
-    window.userAuth = { ...user, uid: 'u2' };
-    assert.equal(S.isDbAdmin(), false);
-    window.userAuth = user;
-    S.setFirebaseAuthClaims(user, { signInProvider: 'anonymous', claims: { inventoryLiveAdmin: 'p1' } });
-    assert.equal(S.isDbAdmin(), false);
+    assert.equal('setFirebaseAuthClaims' in S, false, 'eski setFirebaseAuthClaims köprüsü kaldırıldı');
 });
 
 // İP-7 (Aşama A) — ana yöneticinin verdiği yönetici yetkisi (staffAccounts/{uid}.adminGranted): arayüz kararı yalnız aynı personel
@@ -103,14 +95,13 @@ test('İP-7 setStaffAdminGrant: yalnız personel oturumunda ve aynı oturum içi
     assert.equal(S.isDbAdmin(), false, 'personel oturumu olmayan hesaba belge yetkisi uygulanmaz');
 });
 
-test('İP-7 canManageAdmins: yalnız ana yönetici; ek yönetici (belge ya da claim) yönetici olsa da yetki dağıtamaz', () => {
+test('İP-7 canManageAdmins: yalnız ana yönetici; ek yönetici (belge) yönetici olsa da yetki dağıtamaz', () => {
     const user = { uid: 'u1', email: 'p1@staff.medipol.local', isAnonymous: false };
     const { S, window } = load({ userAuth: user, AppEnv: { COLLECTION_ROOT: 'lifeserver_master' } });
     S.setStaffAdminGrant(user, { adminGranted: true });
     assert.deepEqual([S.isDbAdmin(), S.canManageAdmins()], [true, false]);
     S.setStaffAdminGrant(user, null);
-    S.setFirebaseAuthClaims(user, { signInProvider: 'password', claims: { inventoryLiveAdmin: 'p1' } });
-    assert.deepEqual([S.isDbAdmin(), S.canManageAdmins()], [true, false], 'geçiş: claim yolu korunur ama yetki dağıtamaz');
+    assert.deepEqual([S.isDbAdmin(), S.canManageAdmins()], [false, false]);
     window.userAuth = { uid: 'a1', email: 'admin@medipol.local', isAnonymous: false };
     assert.deepEqual([S.isDbAdmin(), S.canManageAdmins()], [true, true]);
     window.userAuth = { uid: 'a1', email: 'admin@medipol.local', isAnonymous: true };

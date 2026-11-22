@@ -1195,18 +1195,8 @@ function _watchOwnAdminGrant(user, session) {
 
 onAuthStateChanged(auth, async (user) => {
     const session = window.AppModules?.Session;
-    const readClaims = async () => {
-        if (!(COLLECTION_ROOT === LIVE_COLLECTION_ROOT && session?.isStaffAccountSession(user))) return undefined;
-        try {
-            return await user.getIdTokenResult();
-        } catch (error) {
-            console.warn('[Auth] Yönetici yetkisi doğrulanamadı:', error.code);
-            return undefined;
-        }
-    };
-    const [token, grant] = await Promise.all([readClaims(), _readOwnAdminGrant(user, session)]);
+    const grant = await _readOwnAdminGrant(user, session);
     if (auth.currentUser !== user) return;
-    session?.setFirebaseAuthClaims(user, token);
     session?.setStaffAdminGrant(user, grant);
     _watchOwnAdminGrant(user, session);
     if (user) {

@@ -303,3 +303,43 @@ git ls-files --eol -m
 ```
 
 Tarayıcıda elle (emülatör, `http://127.0.0.1:5500/index.html?emu=1`): adımlar [v3.6 Kontrol Listesi](./v3.6%20Kontrol%20Listesi.md) › "İP-7 · Yönetici Yetkileri" bölümünde.
+
+---
+
+## 12. Aşama B — Eski `inventoryLiveAdmin` Yolunun Kaldırılması (`7e`)
+
+> **Durum:** Uygulandı (commit CTO denetimi için bekliyor). `firebase deploy` ve `git push` yapılmadı.
+> **Önkoşul:** Aşama A (`aa29e74`) canlıda yayınlandı ve `muhammed.cer` panel üzerinden `adminGranted: true` yetkisiyle doğrulandı.
+
+### 12.1 Değişen dosyalar ve kaldırılan eski yollar
+
+| Dosya | Değişiklik |
+|---|---|
+| [firestore.rules](../../firestore.rules) | `isAdmin(root)` içindeki `inventoryLiveAdmin` claim dalı ve `regularStaff(root)` içindeki claim kısa yolu kaldırıldı. Yönetici yetkisi yalnızca `isPrimaryAdmin()` veya `(get(staffAccount(root)).data.get('adminGranted', false) == true && isStaff(root))` ile tanınır. |
+| [src/utils/session-store.js](../../src/utils/session-store.js) | `liveAdminSession` durum değişkeni, `setFirebaseAuthClaims` fonksiyonu ve `Session.setFirebaseAuthClaims` dışa aktarımı kaldırıldı. `isDbAdmin()` yalnız `isPrimaryDbAdmin()` veya `grantSession === window.userAuth` kararını verir. |
+| [src/services/firebase-handler.js](../../src/services/firebase-handler.js) | `onAuthStateChanged` içindeki `readClaims()` / `user.getIdTokenResult()` çağrısı ve `session?.setFirebaseAuthClaims(user, token)` bağlantısı kaldırıldı; yalnızca `_readOwnAdminGrant` okunur ve `_watchOwnAdminGrant` dinlenir. |
+| [src/ui/admin-grant-panel.js](../../src/ui/admin-grant-panel.js) | `HELP` yardım dizisindeki geçiş dönemi "Eski yöntem (betikle verilmiş yetki...)" maddesi temizlendi. |
+| [tests/rules/rules.test.mjs](../../tests/rules/rules.test.mjs) | `inventoryLiveAdmin` testi (`~1556`) artık ret (`assertFails`) bekleyecek şekilde güncellendi. |
+| [tests/unit/session-store.test.mjs](../../tests/unit/session-store.test.mjs) | `setFirebaseAuthClaims` / `liveAdminSession` beklentileri (`~62`, `~98`) kaldırılıp sıkılaştırıldı. |
+
+### 12.2 KURAL 5 · Bilinçli sıkılaştırma gerekçesi
+
+- **[tests/rules/rules.test.mjs](../../tests/rules/rules.test.mjs) (`~1556`):** Eski `'canlı yönetici rolü bağlı personel UID’si ve canlı kökle sınırlıdır'` testi, `inventoryLiveAdmin` claim'i taşıyan token ile `lifeserver_master` kökünde `system_config` yazımının geçmesini (`assertSucceeds`) bekliyordu. Aşama B'de betik/claim yolu bilinçli olarak kapatıldığı için test `'eski inventoryLiveAdmin claim\'i artık yönetici yetkisi vermez (İP-7 Aşama B)'` olarak güncellendi: eski claim'i taşıyan token'ın `system_config` yazımları hem canlıda hem demoda **ret (`assertFails`)** verirken, `regularStaff` normal personel okuma ve talep oluşturma haklarının zarar görmeden sürdüğü (`assertSucceeds`) doğrulanır.
+- **[tests/unit/session-store.test.mjs](../../tests/unit/session-store.test.mjs) (`~62`, `~98`):** `setFirebaseAuthClaims` kaldırıldığı için `isDbAdmin()` kararının yalnızca `isPrimaryDbAdmin()` ve `setStaffAdminGrant` (`adminGranted: true`) üzerinden `true` döndüğü, sahte yerel rol (`role: 'admin'`) ve kaldırılmış claim köprüsünün yetki vermediği (`'setFirebaseAuthClaims' in S === false`) doğrulanır.
+
+### 12.3 Aşama B kalite kapıları — gerçek çıktılar
+
+| Kapı | Komut | Sonuç |
+|---|---|---|
+| Yayın dosyası sayısı | `node scratch/hosting-files.js` | `Yayınlanacak dosya: 132 (kök: 23, src/: 98, pdf-fonts/: 3) · beklenen: 132` → `✔ Yalnız uygulama dosyaları yayınlanacak.` |
+| XSS lint | `npm run lint:xss` | `107 dosya · 209 sink · 298 HTML şablonu · 1031 dinamik ifade` → `güvenli 1012 · izinli (xss-ok) 19 · İZİNSİZ 0` |
+| Birim testleri | `npm run test:unit` | `tests 411 · suites 0 · pass 411 · fail 0` |
+| Kural testleri | `npm run test:rules` | `tests 438 · suites 47 · pass 438 · fail 0` |
+| Personel / Auth emülatörü | `npm run test:staff:emu` | `tests 17 · suites 0 · pass 17 · fail 0` |
+| Satır sonu | `git ls-files --eol -m` | Değişen 6 dosyanın tamamı `i/lf w/lf` (LF korundu). |
+
+### 12.4 Canlı yayın sırası (Aşama B)
+
+> Plan §10 / `7e` ile birebir:
+> 1. **Önce hosting yayınlanır:** İstemciden `getIdTokenResult` / `setFirebaseAuthClaims` / `liveAdminSession` kaldırılmış arayüz devreye alınır.
+> 2. **Sonra kurallar (`firestore.rules`) yayınlanır:** `isAdmin` ve `regularStaff` içindeki eski `inventoryLiveAdmin` claim dalları canlıda kapatılır. Token'daki eski claim zararsız kalır; kurallar ve istemci artık hiç okumaz.

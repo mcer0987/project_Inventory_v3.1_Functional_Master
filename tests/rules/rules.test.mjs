@@ -1553,20 +1553,24 @@ describe('v3.6 · Raf sayım kilidi (lockReason / lockedAt / lockedBy)', () => {
 function assert(v) { if (!v) throw new Error('assert'); }
 
 
-test('canlı yönetici rolü bağlı personel UID’si ve canlı kökle sınırlıdır', async () => {
-    const signedIn = claim => env.authenticatedContext('uid-s2', {
+// KURAL 5 · Bilinçli sıkılaştırma (İP-7 Aşama B): eski inventoryLiveAdmin claim yolu kaldırıldı; yetki yalnız
+// staffAccounts.adminGranted: true belgesiyle verilir. Eski claim'i taşıyan token artık yönetici yazımı yapamaz,
+// ancak normal personel işlemleri (regularStaff) zarar görmeden sürer.
+test('eski inventoryLiveAdmin claim\'i artık yönetici yetkisi vermez (İP-7 Aşama B)', async () => {
+    const legacyClaim = claim => env.authenticatedContext('uid-s2', {
         email: 'bora.kaya@staff.medipol.local',
         firebase: { sign_in_provider: 'password' },
         inventoryLiveAdmin: claim,
     }).firestore();
-    const authorized = signedIn('s2');
-    await assertSucceeds(setDoc(item(authorized, LIVE, 'system_config', 'role-test'), { ok: true }));
-    await assertFails(setDoc(item(authorized, DEMO, 'system_config', 'role-test'), { ok: true }));
-    await assertFails(getDoc(doc(authorized, 'inventory_v2', 'b1', 'items', 'old1')));
-    await assertFails(setDoc(item(signedIn('s3'), LIVE, 'system_config', 'role-test'), { ok: true }));
-    await setMaintenance(false);
-    await put('accessGate', 'staff', { staffAccessEnabled: false });
-    await assertFails(setDoc(item(authorized, LIVE, 'system_config', 'role-test'), { ok: true }));
+    const tokenWithClaim = legacyClaim('s2');
+    await assertFails(setDoc(item(tokenWithClaim, LIVE, 'system_config', 'role-test'), { ok: true }));
+    await assertFails(setDoc(item(tokenWithClaim, DEMO, 'system_config', 'role-test'), { ok: true }));
+    await assertFails(getDoc(doc(tokenWithClaim, 'inventory_v2', 'b1', 'items', 'old1')));
+    await assertFails(setDoc(item(legacyClaim('s3'), LIVE, 'system_config', 'role-test'), { ok: true }));
+    await assertSucceeds(getDoc(item(tokenWithClaim, LIVE, 'b1', 'p1')));
+    await assertSucceeds(setDoc(item(tokenWithClaim, LIVE, 'requests', 'r-claim'), {
+        id: 'r-claim', ürün: 'Mouse', adet: 1, durum: 'Beklemede', personel: 'Bora Kaya', personelId: 's2', personelUid: 'uid-s2',
+    }));
     await assertSucceeds(setDoc(item(ctx.admin(), LIVE, 'system_config', 'role-test'), { ok: true }));
 });
 

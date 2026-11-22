@@ -25,21 +25,17 @@ service cloud.firestore {
         && request.auth.token.firebase.sign_in_provider == 'password';
     }
 
-    // İP-7 (Aşama A): yönetici = ana yönetici || (geçiş) inventoryLiveAdmin claim'i || ana yöneticinin verdiği belge yetkisi.
+    // İP-7 (Aşama B): yönetici = ana yönetici || ana yöneticinin verdiği belge yetkisi (adminGranted).
     // [WHY]: Ek yönetici yetkisi betikle yazılan claim'deydi: panelden verilemiyor, geri alınamıyor, iz bırakmıyordu.
+    //        Eski inventoryLiveAdmin claim yolu Aşama B'de kaldırıldı; yetki yalnız staffAccounts/{uid}.adminGranted üzerinden çalışır.
     // [HOW]: Yetki, isStaff'ın ZATEN okuduğu staffAccounts/{uid} belgesinde (adminGranted). Aynı yolun ikinci get()'i ek belge
     //        erişimi sayılmaz. Yetki isStaff zinciriyle birlikte geçerlidir: erişim kilidi kapanır, personel pasifleşir ya da
-    //        uid / PRI bağı koparsa yetki kendiliğinden askıya alınır. Kök başına ayrıdır (K3). Claim dalı Aşama B'de kalkar.
+    //        uid / PRI bağı koparsa yetki kendiliğinden askıya alınır. Kök başına ayrıdır (K3).
     //        isStaff → staffIdentity → staffPersonOk zinciri isAdmin'i çağırmaz (döngü yok).
-    //        Bütçe (emülatör ölçümü, personel oturumu, çağrı başına): eski biçim ≈ 45 ifade, bu biçim ≈ 59. Ana yönetici kontrolü
-    //        önce, claim dalı jetonla erken düşer, eşleme get()'i tek kez; sağlayıcı / e-posta deseni isStaff içinde denetlenir.
     //        Sıcak personel yollarında isAdmin ucuz koşullardan SONRA çağrılır (bkz. purchaseOrders, purchaseHistory/Access).
     function isAdmin(root) {
       return isPrimaryAdmin()
-        || ((request.auth.token.get('inventoryLiveAdmin','') != '' && root == 'lifeserver_master'
-              && request.auth.token.inventoryLiveAdmin == get(staffAccount(root)).data.get('personelId',''))
-            || get(staffAccount(root)).data.get('adminGranted', false) == true)
-          && isStaff(root);
+        || (get(staffAccount(root)).data.get('adminGranted', false) == true && isStaff(root));
     }
 
 
@@ -83,11 +79,10 @@ service cloud.firestore {
       return get(staffGate(root)).data.get('staffAccessEnabled', false) == true;
     }
     function isStaff(root) { return staffAccessOpen(root) && staffIdentity(root); }
-    // isStaff zaten ana yönetici e-postasını dışlar. Yetki iddiası yoksa yönetici kontrolü tekrarlanmaz.
-    // İP-7: belge yetkili personel (adminGranted) yönetici yolundan yazar; aynı eşleme belgesi, ek belge erişimi yok.
+    // isStaff zaten ana yönetici e-postasını dışlar.
+    // İP-7 (Aşama B): belge yetkili personel (adminGranted) yönetici yolundan yazar; aynı eşleme belgesi, ek belge erişimi yok.
     function regularStaff(root) {
-      return isStaff(root) && get(staffAccount(root)).data.get('adminGranted', false) != true
-        && (!request.auth.token.keys().hasAny(['inventoryLiveAdmin']) || !isAdmin(root));
+      return isStaff(root) && get(staffAccount(root)).data.get('adminGranted', false) != true;
     }
     // isAdmin'in ana yönetici dışındaki iki dalı (claim, İP-7 belge yetkisi) isStaff'ı zaten gerektirir; bu yüzden
     // isAdmin || isStaff ≡ isPrimaryAdmin || isStaff. Personel isteklerinde yetki dalının get()'i hiç değerlendirilmez
