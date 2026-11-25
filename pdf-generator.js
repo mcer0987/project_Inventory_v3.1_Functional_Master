@@ -356,10 +356,167 @@
         }
     };
 
+    // [WHY]: v3.7 İP-10 · Depo / çoklu raf sayımı için resmi, Türkçe Unicode (Roboto) fontlu fark tutanağı üretir.
+    // [HOW]: ShelfCount.buildCountReportData sözleşmesindeki belge, özet ve kalemler dizisini A4 tutanak olarak basar.
+    function renderShelfCountReportPDF(reportData) {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+        doc.setFont('Roboto', 'normal');
+
+        const b = reportData.belge || {};
+        const oz = reportData.ozet || {};
+        const kalemler = Array.isArray(reportData.kalemler) ? reportData.kalemler : [];
+
+        drawHeader(doc, 'DEPO SAYIM VE FARK TUTANAĞI');
+
+        const startY = 32;
+        const colW = (PAGE.w - PAGE.margin * 2 - 6) / 2;
+        const leftX = PAGE.margin, rightX = PAGE.margin + colW + 6;
+        const boxH = 31;
+        doc.setDrawColor(...BRAND.line);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(leftX, startY, colW, boxH, 1.5, 1.5);
+        doc.roundedRect(rightX, startY, colW, boxH, 1.5, 1.5);
+
+        const field = (x, y, label, value) => {
+            doc.setFont('Roboto', 'bold'); doc.setFontSize(7.2); doc.setTextColor(...BRAND.gray);
+            doc.text(label, x, y);
+            doc.setFont('Roboto', 'normal'); doc.setFontSize(9); doc.setTextColor(...BRAND.navy);
+            doc.text(dash(value), x, y + 4.2, { maxWidth: colW - 8 });
+        };
+
+        const padX = 4.5, padY = 6.5, gap = 9.5;
+        field(leftX + padX, startY + padY, 'TUTANAK NO', b.raporNo);
+        field(leftX + padX, startY + padY + gap, 'SAYIM TARİHİ', b.tarih);
+        field(leftX + padX, startY + padY + gap * 2, 'DÜZENLEYEN', b.duzenleyen);
+
+        const rafText = Array.isArray(b.raflar) && b.raflar.length
+            ? (b.raflar.length > 8 ? `${b.raflar.slice(0, 8).join(', ')} (+${b.raflar.length - 8} raf)` : b.raflar.join(', '))
+            : 'Tüm depo';
+        field(rightX + padX, startY + padY, 'DEPO', b.depoAdi || String(b.depo || '').toUpperCase());
+        field(rightX + padX, startY + padY + gap, 'SAYIM GEREKÇESİ', b.gerekce);
+        field(rightX + padX, startY + padY + gap * 2, 'SAYILAN RAFLAR', rafText);
+
+        let y = startY + boxH + 5;
+        // Özet şeridi
+        doc.setFillColor(247, 249, 251);
+        doc.setDrawColor(...BRAND.line);
+        doc.roundedRect(PAGE.margin, y, PAGE.w - PAGE.margin * 2, 10, 1.5, 1.5, 'FD');
+        doc.setFont('Roboto', 'bold'); doc.setFontSize(8); doc.setTextColor(...BRAND.navy);
+        const netStr = (oz.netDiff > 0 ? `+${oz.netDiff}` : String(oz.netDiff ?? 0));
+        const summaryLine = [
+            `Toplam Kalem: ${oz.total ?? kalemler.length}`,
+            `Sayılan: ${oz.counted ?? 0}`,
+            `Eksik: ${oz.missing ?? 0} (-${oz.missingQty ?? 0})`,
+            `Fazla: ${oz.excess ?? 0} (+${oz.excessQty ?? 0})`,
+            `Tam: ${oz.match ?? 0}`,
+            `Net Fark: ${netStr}`,
+        ].join('   ·   ');
+        doc.text(summaryLine, PAGE.w / 2, y + 6.2, { align: 'center' });
+        y += 14;
+
+        const body = kalemler.map(k => [
+            String(k.sira),
+            dash(k.raf),
+            k.envanterNo && k.envanterNo !== '-' ? `${k.urun}\n[${k.envanterNo}]` : dash(k.urun),
+            dash(k.tur),
+            String(k.sistemAdet),
+            dash(k.sayilanLabel),
+            dash(k.farkLabel),
+            dash(k.durumLabel),
+            k.not || '-',
+        ]);
+
+        doc.autoTable({
+            startY: y,
+            margin: { left: PAGE.margin, right: PAGE.margin, bottom: 52 },
+            head: [['#', 'Raf', 'Ürün / Envanter No', 'Tür', 'Sistem', 'Sayılan', 'Fark', 'Durum', 'Not']],
+            body,
+            theme: 'grid',
+            styles: { font: 'Roboto', fontStyle: 'normal', fontSize: 7.8, cellPadding: 2.1, textColor: BRAND.navy, lineColor: BRAND.line, lineWidth: 0.2, valign: 'middle' },
+            headStyles: { font: 'Roboto', fontStyle: 'bold', fillColor: BRAND.blue, textColor: [255, 255, 255], fontSize: 8, halign: 'center' },
+            alternateRowStyles: { fillColor: [249, 250, 252] },
+            columnStyles: {
+                0: { halign: 'center', cellWidth: 9 },
+                1: { cellWidth: 20 },
+                2: { cellWidth: 42 },
+                3: { cellWidth: 22 },
+                4: { halign: 'center', cellWidth: 14 },
+                5: { halign: 'center', cellWidth: 15 },
+                6: { halign: 'center', cellWidth: 14, fontStyle: 'bold' },
+                7: { halign: 'center', cellWidth: 18, fontStyle: 'bold' },
+                8: { cellWidth: 28 },
+            },
+            didParseCell(data) {
+                if (data.section !== 'body') return;
+                const row = kalemler[data.row.index];
+                if (!row) return;
+                if (data.column.index === 6 || data.column.index === 7) {
+                    if (row.durum === 'missing') {
+                        data.cell.styles.textColor = [185, 28, 28];
+                        data.cell.styles.fillColor = [254, 242, 242];
+                    } else if (row.durum === 'excess') {
+                        data.cell.styles.textColor = [180, 83, 9];
+                        data.cell.styles.fillColor = [255, 251, 235];
+                    } else if (row.durum === 'match') {
+                        data.cell.styles.textColor = [21, 128, 61];
+                        data.cell.styles.fillColor = [240, 253, 244];
+                    }
+                }
+            },
+        });
+
+        let sigY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : y) + 10;
+        if (sigY + 48 > PAGE.h - 16) { doc.addPage(); sigY = 22; }
+
+        doc.setFont('Roboto', 'normal'); doc.setFontSize(8.2); doc.setTextColor(...BRAND.navy);
+        const beyan = 'İşbu tutanak ile yukarıda belirtilen depo ve raflarda gerçekleştirilen fiziki sayım neticelerinin, sistem kayıtlarıyla karşılaştırılarak doğruluğunun tespit edildiğini beyan ve imza ederiz.';
+        const beyanLines = doc.splitTextToSize(beyan, PAGE.w - PAGE.margin * 2);
+        doc.text(beyanLines, PAGE.margin, sigY);
+        sigY += beyanLines.length * 4 + 10;
+
+        const sigW = (PAGE.w - PAGE.margin * 2 - 12) / 2;
+        const sLeft = PAGE.margin, sRight = PAGE.margin + sigW + 12;
+        const lineY = sigY + 18;
+        doc.setFont('Roboto', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...BRAND.gray);
+        doc.text('SAYIM SORUMLUSU', sLeft, sigY);
+        doc.text('ONAYLAYAN (Yetkili)', sRight, sigY);
+        doc.setDrawColor(...BRAND.navy); doc.setLineWidth(0.3);
+        doc.line(sLeft, lineY, sLeft + sigW, lineY);
+        doc.line(sRight, lineY, sRight + sigW, lineY);
+        doc.setFont('Roboto', 'normal'); doc.setFontSize(9); doc.setTextColor(...BRAND.navy);
+        doc.text(dash(b.duzenleyen), sLeft, lineY + 5);
+        doc.text('Adı Soyadı / Unvan', sRight, lineY + 5);
+        doc.setFontSize(7.5); doc.setTextColor(...BRAND.gray);
+        doc.text('İmza / Tarih', sLeft, lineY + 9.5);
+        doc.text('İmza / Tarih', sRight, lineY + 9.5);
+
+        stampPageNumbers(doc, 'Medipol Sağlık Grubu · Depo Sayım ve Fark Tutanağı');
+        return doc;
+    }
+
+    // [WHY]: v3.7 İP-10 · WMS Sayım Fark Masası'ndan tek tıkla resmi Türkçe PDF sayım tutanağı indirir.
+    // [HOW]: Roboto TTF fontlarını tembel yükler, renderShelfCountReportPDF ile üretir ve dosya olarak kaydeder.
+    window.generateShelfCountReportPDF = async function (reportData) {
+        try {
+            if (!reportData || !Array.isArray(reportData.kalemler) || !reportData.kalemler.length) {
+                alertWarn('Tutanak oluşturmak için en az bir sayım kalemi bulunmalıdır.');
+                return;
+            }
+            await ensureZimmetFonts();
+            const doc = renderShelfCountReportPDF(reportData);
+            const b = reportData.belge || {};
+            doc.save(`Sayim_Fark_Tutanagi_${safeFileName(String(b.depo || 'depo').toUpperCase())}_${safeFileName(b.raporNo || 'rapor')}.pdf`);
+        } catch (err) {
+            console.error('Sayım fark tutanağı PDF hatası:', err);
+            alertErr('Sayım tutanağı oluşturulamadı. ' + (err && err.message || ''));
+        }
+    };
+
     // Test/iç erişim: flow-tests.js jsPDF'in doc.save() tetiklediği dosya indirmesini tarayıcıda taklit etmeden,
     // sayfalama/font/sözleşme eşlemesini doğrudan doğrular.
     window.AppModules = window.AppModules || {};
-    window.AppModules.ZimmetPdf = { renderZimmetTutanagi, renderIadeTutanagi, ensureZimmetFonts };
+    window.AppModules.ZimmetPdf = { renderZimmetTutanagi, renderIadeTutanagi, renderShelfCountReportPDF, ensureZimmetFonts };
 })();
 
 window.exportPDF=function (depo) {

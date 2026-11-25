@@ -797,6 +797,103 @@
         };
     }
 
+    // [WHY]: v3.7 İP-10 · Tek raf, çoklu seçili raflar veya tüm depo için toplu sayım kilidi koyma / kaldırma.
+    //        Her raf mevcut atomik setShelfCountLock sözleşmesini kullanır; kısmi hata diğer rafları bozmaz.
+    // [HOW]: Kilit açılırken gerekçe en başta doğrulanır (0 yazma ile erken ret), ardından her raf sırayla
+    //        kilitlenir/açılır ve başarılı/başarısız özetleri ile yerel yamalar toplanır.
+    async function setBatchShelfCountLock(deps, input) {
+        requireAudit(deps);
+        const S = schema();
+        const i = input || {};
+        if (!S.SHELF_DEPOTS.includes(i.depot)) throw new LedgerError('invalid-argument', `Geçersiz depo: ${i.depot}`);
+        const locked = i.locked === true;
+        if (locked) {
+            const reason = cleanLockReason(i.reason);
+            if (!reason) throw new LedgerError('invalid-argument', 'Sayım gerekçesini yazın (ör. "Yıl sonu sayımı").');
+            if (reason.length > S.SHELF_LOCK_REASON_MAX) {
+                throw new LedgerError('invalid-argument', `Sayım gerekçesi en fazla ${S.SHELF_LOCK_REASON_MAX} karakter olabilir.`);
+            }
+        }
+        const uniqueCodes = [...new Set((Array.isArray(i.codes) ? i.codes : []).map(c => S.normShelfCode(c)).filter(c => S.isValidShelfCode(c)))];
+        if (!uniqueCodes.length) throw new LedgerError('invalid-argument', 'Sayıma alınacak en az bir geçerli raf seçin.');
+
+        const succeeded = [], failed = [], localShelves = [], localRows = [];
+        let totalRowsChanged = 0;
+        let done = 0;
+        const onProgress = typeof i.onProgress === 'function' ? i.onProgress : null;
+        const CONCURRENCY = 4;
+        for (let idx = 0; idx < uniqueCodes.length; idx += CONCURRENCY) {
+            const batch = uniqueCodes.slice(idx, idx + CONCURRENCY);
+            await Promise.all(batch.map(async code => {
+                try {
+                    const res = await setShelfCountLock(deps, { depot: i.depot, code, locked, reason: i.reason });
+                    succeeded.push({ id: res.id, code: res.code, depot: res.depot, locked: res.locked, changed: res.changed, rowsChanged: res.rowsChanged });
+                    totalRowsChanged += res.rowsChanged;
+                    if (res.localShelf) localShelves.push({ id: res.id, data: res.localShelf });
+                    if (Array.isArray(res.localRows) && res.localRows.length) localRows.push(...res.localRows);
+                } catch (err) {
+                    failed.push({ code, message: (err && err.message) || 'Bilinmeyen hata', errorCode: (err && err.code) || 'unknown' });
+                } finally {
+                    done += 1;
+                    if (onProgress) {
+                        try { onProgress(done, uniqueCodes.length, code); } catch (_) { /* ilerleme bildirimi işlemi bozmaz */ }
+                    }
+                }
+            }));
+        }
+        return { depot: i.depot, locked, succeeded, failed, totalRowsChanged, localShelves, localRows };
+    }
+
+    // [WHY]: v3.7 İP-10 · Sayım Fark Masası'nda onaylanan eksik/fazla farkları stoğa atomik olarak işler ve
+    //        sayim-duzeltme denetim kaydı bırakır; kilitli rafta rafPasif:true korunur.
+    // [HOW]: Her kalem için taze stok okunur, computePatch ile durum/adet yaması hazırlanır ve mevcut
+    //        runProductSave transaction'ından geçirilir. Farkı olmayan satırlar atlanır.
+    async function applyCountFixes(deps, input) {
+        requireAudit(deps);
+        const S = schema();
+        const i = input || {};
+        if (!STOCK_COLS.includes(i.depot)) throw new LedgerError('invalid-argument', `Geçersiz koleksiyon: ${i.depot}`);
+        if (!Array.isArray(i.fixes) || !i.fixes.length) throw new LedgerError('invalid-argument', 'Stoğa işlenecek fark satırı yok.');
+        if (typeof i.computePatch !== 'function') throw new LedgerError('invalid-argument', 'Stok durum hesaplayıcı (computePatch) gerekli.');
+
+        const ref = makeRef(deps);
+        const applied = [], skipped = [], failed = [], localWrites = [];
+        for (const fix of i.fixes) {
+            const id = fix && fix.id != null ? String(fix.id).trim() : '';
+            const after = Number(fix && fix.countedQty);
+            if (!id || !Number.isInteger(after) || after < 0) {
+                failed.push({ id, message: 'Geçersiz ürün kimliği veya sayım adedi.' });
+                continue;
+            }
+            try {
+                const snap = await deps.fns.getDoc(ref(i.depot, id));
+                if (!snap.exists()) {
+                    failed.push({ id, message: 'Ürün kaydı bulunamadı (silinmiş olabilir).' });
+                    continue;
+                }
+                const existing = snap.data();
+                const before = Math.trunc(qtyOf(existing));
+                if (after === before) {
+                    skipped.push({ id, before, after });
+                    continue;
+                }
+                const { patch } = i.computePatch(i.depot, existing, after - before);
+                const fields = { adet: after, lastUpdate: Date.now() };
+                ['durumu', 'status', 'stokOncekiDurum'].forEach(k => { if (patch && patch[k] !== undefined) fields[k] = patch[k]; });
+                const reason = String(fix.note ?? '').trim().slice(0, 200) || 'Sayım fark düzeltmesi';
+                const res = await runProductSave(deps, {
+                    col: i.depot, id, isNew: false, fields,
+                    audit: { type: 'sayim-duzeltme', reason },
+                });
+                applied.push({ id, before: res.qtyBefore, after: res.qtyAfter, auditId: res.auditId });
+                if (Array.isArray(res.localWrites)) localWrites.push(...res.localWrites);
+            } catch (err) {
+                failed.push({ id, message: (err && err.message) || 'Sayım düzeltmesi kaydedilemedi.' });
+            }
+        }
+        return { depot: i.depot, applied, skipped, failed, localWrites };
+    }
+
     /** Boş rafı kaldır: adet 0 kayıtlar Havuz'a alınır, raf belgesi silinir, denetim kaydı — kayıtlar, silme ve kanıt tek commit. */
     async function deleteShelf(deps, input) {
         requireAudit(deps);
@@ -952,6 +1049,6 @@
         newOperationId, checkTransferInput, transferShelfIds, shelfIdOf, planShelfCounterWrites,
         planTransfer, planShelfSave, planProductSave, planShelfSync, runTransfer, saveShelf, runProductSave, runShelfSync,
         assertNotCountLocked, planShelfLock, planShelfDelete, planShelfRename, planShelfLockSync,
-        createShelf, setShelfCountLock, deleteShelf, renameShelf,
+        createShelf, setShelfCountLock, setBatchShelfCountLock, applyCountFixes, deleteShelf, renameShelf,
     });
 })();

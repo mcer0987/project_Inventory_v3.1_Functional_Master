@@ -365,7 +365,13 @@
             return `<span class="shelf-drawer-action-note">Bu raf katalogda yok; sayım ve raf yönetimi için önce kapasitesini tanımlayın.</span>
                 ${button('capacity', '⚙️ Kataloğa ekle')}`;
         }
-        if (shelf.locked) return [button('unlock', '✅ Sayımı bitir', 'primary'), button('capacity', '⚙️ Kapasite')].join('');
+        if (shelf.locked) {
+            return [
+                button('count-desk', '📋 Fark Masası', 'primary'),
+                button('unlock', '✅ Sayımı bitir'),
+                button('capacity', '⚙️ Kapasite'),
+            ].join('');
+        }
         return [
             button('lock', '🔒 Sayıma al', 'primary'),
             button('capacity', '⚙️ Kapasite'),
@@ -380,6 +386,7 @@
         if (action === 'capacity') setCapacity(depot, shelf.code);
         else if (action === 'lock') lockShelfDialog(depot, shelf);
         else if (action === 'unlock') unlockShelf(depot, shelf);
+        else if (action === 'count-desk') openCountDeskModal(depot, [shelf.code]);
         else if (action === 'rename') renameShelfDialog(depot, shelf);
         else if (action === 'remove') removeShelf(depot, shelf);
     }
@@ -446,6 +453,7 @@
         if (!grid || !metrics) return;
         try {
             const allShelves = activeDepot === 'havuz' ? collectPoolShelves() : collectShelves(activeDepot);
+            updateCountToolbar(activeDepot, allShelves);
             metrics.innerHTML = makeMetricsHtml(allShelves);
             const visible = sortShelves(allShelves.filter(shelf => matchesFilter(shelf) && matchesQuery(shelf)));
             const emptyText = shelfFilter === 'empty' ? 'Bu depoda boş raf yok.'
@@ -684,18 +692,32 @@
         dialog.error.hidden = false;
         if (focusEl) focusEl.focus();
     }
-    function guardedSubmit(dialog, handler) {
+    function guardedSubmit(dialog, handler, opts = {}) {
         let busy = false;
         const submit = dialog.form.querySelector('.shelf-dialog-submit');
+        const cancel = dialog.form.querySelector('.shelf-dialog-cancel');
+        const closeBtn = dialog.dialog?.querySelector('.shelf-dialog-close');
+        const baseLabel = submit ? submit.textContent : '';
+        const setBusy = flag => {
+            busy = flag;
+            if (submit) {
+                submit.disabled = flag;
+                submit.classList.toggle('is-busy', flag);
+                if (flag && opts.busyText) submit.textContent = opts.busyText;
+                else if (!flag) submit.textContent = baseLabel;
+            }
+            if (cancel) cancel.disabled = flag;
+            if (closeBtn) closeBtn.disabled = flag;
+        };
+        dialog.setProgress = text => { if (submit && busy && text) submit.textContent = text; };
         dialog.form.addEventListener('submit', async event => {
             event.preventDefault();
             if (busy) return;
-            busy = true;
-            submit.disabled = true;
+            setBusy(true);
             dialog.error.hidden = true;
             try { await handler(); }
             catch (error) { showDialogError(dialog, error && error.message ? error.message : 'İşlem tamamlanamadı.'); }
-            finally { busy = false; submit.disabled = false; }
+            finally { setBusy(false); }
         });
     }
     function serviceOr(dialog, name) {
@@ -883,6 +905,745 @@
         });
     }
 
+    // ─── v3.7 · İP-10: Toplu Depo / Çoklu Raf Sayımı & Canlı Eksik/Fazla Fark Masası ─────────────────────────────────
+    // [WHY]: Yönetici tek tek raf çekmecesi açmadan birden fazla rafı veya tüm B1/B2 deposunu sayıma alabilmeli,
+    //        eksik/fazla farkları tek masada görüp onaylayarak stoğa işleyebilmeli ve resmi PDF/Excel tutanağı alabilmelidir.
+    // [HOW]: Hesaplama ve rapor projeksiyonu saf ShelfCount modülünden (src/utils/shelf-count-session.js), yazmalar ise
+    //        window.setBatchShelfCountLock ve window.applyCountFixes servislerinden akar; DOM saf createElement ile kurulur.
+    const countDrafts = { b1: new Map(), b2: new Map() };
+    let activeCountDeskRefresh = null;
+
+    function shelfCountApi() {
+        const mod = window.AppModules && window.AppModules.ShelfCount;
+        if (!mod || typeof mod.buildCountRows !== 'function') {
+            throw new Error('Sayım fark motoru (shelf-count-session.js) yüklenmemiş.');
+        }
+        return mod;
+    }
+
+    function updateCountToolbar(depot, allShelves) {
+        const batchBtn = document.getElementById('shelfBatchCountBtn');
+        const deskBtn = document.getElementById('shelfCountDeskBtn');
+        const badge = document.getElementById('shelfCountDeskBadge');
+        if (!batchBtn || !deskBtn) return;
+        const isRealDepot = depot === 'b1' || depot === 'b2';
+        batchBtn.hidden = !isRealDepot;
+        if (!isRealDepot) {
+            deskBtn.hidden = true;
+            return;
+        }
+        const lockedCount = (allShelves || []).filter(s => !s.isUnassigned && s.locked).length;
+        deskBtn.hidden = lockedCount === 0;
+        if (badge) badge.textContent = String(lockedCount);
+    }
+
+    // [WHY]: Tek raf, seçili raflar veya tüm B1/B2 deposunu tek akışta sayım kilidine alır.
+    // [HOW]: Katalogdaki kilitsiz rafları listeler; gerekçe ile window.setBatchShelfCountLock çağırır ve Fark Masası'na geçiş sunar.
+    function openBatchCountDialog(depotInput) {
+        if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Toplu raf sayımı')) return;
+        const depot = depotInput === 'b2' ? 'b2' : 'b1';
+        const depotName = depot === 'b2' ? 'B2 Demirbaş Deposu' : 'B1 Sarf Deposu';
+        const physical = collectShelves(depot).filter(s => !s.isUnassigned && s.registered);
+        const unlocked = physical.filter(s => !s.locked);
+        const alreadyLocked = physical.filter(s => s.locked);
+
+        if (!physical.length) {
+            notify(`${depotName} için katalogda tanımlı raf bulunmuyor. Önce "Raf Ekle" ile raf tanımlayın.`, 'warning');
+            return;
+        }
+        if (!unlocked.length) {
+            notify(`${depotName} kataloğundaki tüm raflar (${alreadyLocked.length}) zaten sayımda. Sayım Fark Masası açılıyor.`, 'info');
+            openCountDeskModal(depot);
+            return;
+        }
+
+        const dialog = createDialog(
+            'TOPLU SAYIM KİLİDİ',
+            `${depotName} — Sayıma Al`,
+            'Seçtiğiniz raflar (veya tüm depo) sayım kilidine alınır. Kilitli raflardaki ürünler depo listelerinden gizlenir; çıkış, zimmet, talep ve transfer yapılamaz.',
+            'Sayıma Al'
+        );
+
+        const scopeWrap = document.createElement('div');
+        scopeWrap.className = 'shelf-batch-scope';
+
+        const modeRow = document.createElement('div');
+        modeRow.className = 'shelf-batch-modes';
+        const makeMode = (val, labelText, checked) => {
+            const lbl = document.createElement('label');
+            lbl.className = 'shelf-batch-mode';
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'shelfBatchMode';
+            radio.value = val;
+            radio.checked = checked;
+            const span = document.createElement('span');
+            span.textContent = labelText;
+            lbl.append(radio, span);
+            return { lbl, radio };
+        };
+        const modeAll = makeMode('all', `Tüm Depo (${unlocked.length} kilitsiz raf)`, true);
+        const modeSel = makeMode('selected', 'Seçili Raflar', false);
+        modeRow.append(modeAll.lbl, modeSel.lbl);
+
+        const pickerWrap = document.createElement('div');
+        pickerWrap.className = 'shelf-batch-picker';
+        pickerWrap.hidden = true;
+
+        const pickerHead = document.createElement('div');
+        pickerHead.className = 'shelf-batch-picker-head';
+        const pickerCount = document.createElement('small');
+        pickerCount.className = 'shelf-dialog-hint';
+        const btnAll = document.createElement('button');
+        btnAll.type = 'button'; btnAll.className = 'shelf-batch-mini-btn'; btnAll.textContent = 'Tümünü seç';
+        const btnNone = document.createElement('button');
+        btnNone.type = 'button'; btnNone.className = 'shelf-batch-mini-btn'; btnNone.textContent = 'Temizle';
+        pickerHead.append(pickerCount, btnAll, btnNone);
+
+        const grid = document.createElement('div');
+        grid.className = 'shelf-batch-grid';
+        const checkboxes = [];
+        unlocked.sort((a, b) => a.code.localeCompare(b.code, 'tr', { numeric: true, sensitivity: 'base' })).forEach(s => {
+            const chip = document.createElement('label');
+            chip.className = 'shelf-batch-chip';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = s.code;
+            cb.checked = true;
+            const txt = document.createElement('span');
+            txt.textContent = `${s.code} (${s.boundRows.length})`;
+            chip.append(cb, txt);
+            grid.append(chip);
+            checkboxes.push(cb);
+        });
+
+        const refreshSelCount = () => {
+            const n = checkboxes.filter(c => c.checked).length;
+            pickerCount.textContent = `${n} / ${checkboxes.length} raf seçildi`;
+        };
+        refreshSelCount();
+        grid.addEventListener('change', refreshSelCount);
+        btnAll.addEventListener('click', () => { checkboxes.forEach(c => { c.checked = true; }); refreshSelCount(); });
+        btnNone.addEventListener('click', () => { checkboxes.forEach(c => { c.checked = false; }); refreshSelCount(); });
+
+        pickerWrap.append(pickerHead, grid);
+        const syncMode = () => { pickerWrap.hidden = !modeSel.radio.checked; };
+        modeAll.radio.addEventListener('change', syncMode);
+        modeSel.radio.addEventListener('change', syncMode);
+
+        scopeWrap.append(modeRow, pickerWrap);
+        if (alreadyLocked.length) {
+            const note = document.createElement('small');
+            note.className = 'shelf-dialog-hint';
+            note.textContent = `Not: Bu depoda ${alreadyLocked.length} raf zaten sayımda; listede yalnız kilitsiz raflar gösterilir.`;
+            scopeWrap.append(note);
+        }
+        dialog.fields.append(scopeWrap);
+
+        const reason = document.createElement('textarea');
+        reason.rows = 2;
+        reason.maxLength = schema().SHELF_LOCK_REASON_MAX;
+        reason.required = true;
+        reason.placeholder = 'ör. 2026 Yıl Sonu Depo Sayımı';
+        addField(dialog, { id: 'shelfBatchLockReason', label: 'Sayım gerekçesi (zorunlu)', element: reason });
+        reason.focus();
+
+        guardedSubmit(dialog, async () => {
+            const cleanReason = reason.value.trim();
+            if (!cleanReason) { showDialogError(dialog, 'Sayım gerekçesini yazın.', reason); return; }
+            const codes = modeAll.radio.checked ? unlocked.map(s => s.code) : checkboxes.filter(c => c.checked).map(c => c.value);
+            if (!codes.length) { showDialogError(dialog, 'En az bir raf seçin.'); return; }
+            if (!serviceOr(dialog, 'setBatchShelfCountLock')) return;
+
+            dialog.setProgress(`Sayıma alınıyor (0 / ${codes.length})…`);
+            const result = await window.setBatchShelfCountLock(depot, codes, {
+                locked: true,
+                reason: cleanReason,
+                onProgress: (done, total) => dialog.setProgress(`Sayıma alınıyor (${done} / ${total})…`),
+            });
+            dialog.finish(result);
+            const okCount = result.succeeded.length;
+            const failCount = result.failed.length;
+            notify(
+                failCount
+                    ? `${okCount} raf sayıma alındı (${result.totalRowsChanged} kayıt gizlendi), ${failCount} raf kilitlenemedi.`
+                    : `${okCount} raf sayıma alındı; ${result.totalRowsChanged} kayıt depo listelerinden gizlendi.`,
+                failCount ? 'warning' : 'success'
+            );
+            render();
+            refreshDrawerIfOpen();
+            if (okCount > 0) openCountDeskModal(depot, result.succeeded.map(s => s.code));
+        });
+    }
+
+    // [WHY]: Sayımdaki rafların Sistem vs Sayılan adetlerini tek ekranda karşılaştırır, eksik/fazla farkları
+    //        filtreleyip stoğa işler ve resmi Türkçe PDF / Excel tutanağı üretir (AGENTS.md uyumlu).
+    // [HOW]: Saf DOM düğümleri ve ShelfCount motoruyla çizilir; DialogStack ile erişilebilir odak hapsi sağlar.
+    function openCountDeskModal(depotInput, initialShelfCodes = null) {
+        if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Sayım Fark Masası')) return;
+        const depot = depotInput === 'b2' ? 'b2' : 'b1';
+        const depotName = depot === 'b2' ? 'B2 Demirbaş Deposu' : 'B1 Sarf Deposu';
+        let SC;
+        try { SC = shelfCountApi(); }
+        catch (err) { notify(err.message, 'error'); return; }
+
+        const lockedList = () => collectShelves(depot).filter(s => !s.isUnassigned && s.locked)
+            .sort((a, b) => a.code.localeCompare(b.code, 'tr', { numeric: true, sensitivity: 'base' }));
+        const initialLocked = lockedList();
+        if (!initialLocked.length) {
+            notify(`${depotName} içinde sayımda olan raf bulunmuyor. Önce rafları sayıma alın.`, 'info');
+            return;
+        }
+
+        const drafts = countDrafts[depot];
+        let scopeShelf = (Array.isArray(initialShelfCodes) && initialShelfCodes.length === 1) ? schema().normShelfCode(initialShelfCodes[0]) : 'ALL';
+        let stateFilter = 'all';
+        let searchText = '';
+        let busy = false;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'shelf-dialog-overlay';
+        const modal = document.createElement('section');
+        modal.className = 'shelf-dialog shelf-count-desk-dialog';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'scdTitle');
+
+        const header = document.createElement('header');
+        header.className = 'scd-header';
+        const headText = document.createElement('div');
+        const eyebrow = document.createElement('small');
+        eyebrow.className = 'shelf-dialog-eyebrow';
+        eyebrow.textContent = `CANLI SAYIM VE FARK MASASI · ${depotName.toUpperCase()}`;
+        const title = document.createElement('h2');
+        title.id = 'scdTitle';
+        title.textContent = `${depotName} — Sayım Fark Masası`;
+        // AGENTS.md: kısa görünür açıklama + erişilebilir yardım düğmesi
+        const desc = document.createElement('p');
+        desc.className = 'scd-desc';
+        desc.textContent = 'Sayımdaki rafların fiziksel adetlerini girin; eksik ve fazla farkları anında filtreleyip onayınızla stoğa işleyin veya resmi tutanak indirin.';
+        headText.append(eyebrow, title, desc);
+
+        const headActions = document.createElement('div');
+        headActions.className = 'scd-head-actions';
+        const helpPanel = document.createElement('div');
+        helpPanel.id = 'shelfCountDeskHelp';
+        helpPanel.className = 'scd-help';
+        helpPanel.hidden = true;
+        [
+            '1. Her ürün satırına rafta fiziken saydığınız adedi yazın; Eksik (🔴), Fazla (🟡) ve Tam (🟢) farkı anında hesaplanır.',
+            '2. Filtre çipleriyle yalnızca eksik veya fazla çıkan kalemlere odaklanabilir, her satıra kısa sayım notu ekleyebilirsiniz.',
+            '3. "Seçili Farkları Stoğa İşle" ile onayladığınız yeni adetler stok defterine yazılır ve denetim kaydı (sayim-duzeltme) oluşur; raf kilidi sayım bitene kadar korunur.',
+            '4. Sayım sırasında veya sonunda "PDF Tutanak" ya da "Excel Rapor" indirip, işiniz bittiğinde "Sayımı Bitir" ile kilitleri kaldırabilirsiniz.',
+        ].forEach(line => {
+            const p = document.createElement('p');
+            p.textContent = line;
+            helpPanel.append(p);
+        });
+
+        const helpBtn = document.createElement('button');
+        helpBtn.type = 'button';
+        helpBtn.className = 'scd-help-btn';
+        helpBtn.textContent = 'ⓘ Nasıl çalışır?';
+        helpBtn.setAttribute('aria-expanded', 'false');
+        helpBtn.setAttribute('aria-controls', helpPanel.id);
+        helpBtn.addEventListener('click', () => {
+            const open = helpPanel.hidden;
+            helpPanel.hidden = !open;
+            helpBtn.setAttribute('aria-expanded', String(open));
+        });
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'shelf-dialog-close';
+        closeBtn.setAttribute('aria-label', 'Sayım Fark Masasını kapat');
+        closeBtn.textContent = '×';
+        headActions.append(helpBtn, closeBtn);
+        header.append(headText, headActions);
+
+        const kpiBar = document.createElement('div');
+        kpiBar.className = 'scd-kpis';
+        kpiBar.setAttribute('aria-live', 'polite');
+
+        const controls = document.createElement('div');
+        controls.className = 'scd-controls';
+
+        const scopeSelect = document.createElement('select');
+        scopeSelect.className = 'scd-select';
+        scopeSelect.setAttribute('aria-label', 'Sayım raf kapsamı');
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'search';
+        searchInput.className = 'scd-search';
+        searchInput.placeholder = 'Ürün, raf, tür, envanter no veya seri no ara…';
+        searchInput.autocomplete = 'off';
+
+        const chipGroup = document.createElement('div');
+        chipGroup.className = 'scd-chips';
+        chipGroup.setAttribute('role', 'group');
+        chipGroup.setAttribute('aria-label', 'Fark durumu filtresi');
+        const chipDefs = [
+            ['all', 'Tümü'],
+            ['missing', '🔴 Eksik'],
+            ['excess', '🟡 Fazla'],
+            ['match', '🟢 Tam'],
+            ['pending', '⏳ Bekleyen'],
+        ];
+        const chipButtons = new Map();
+        chipDefs.forEach(([key, labelText]) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `scd-chip scd-chip-${key}`;
+            btn.dataset.filter = key;
+            btn.setAttribute('aria-pressed', String(key === stateFilter));
+            btn.textContent = labelText;
+            btn.addEventListener('click', () => {
+                stateFilter = key;
+                chipButtons.forEach((b, k) => b.setAttribute('aria-pressed', String(k === stateFilter)));
+                renderTable();
+            });
+            chipButtons.set(key, btn);
+            chipGroup.append(btn);
+        });
+
+        controls.append(scopeSelect, searchInput, chipGroup);
+
+        const statusNote = document.createElement('p');
+        statusNote.className = 'shelf-dialog-error';
+        statusNote.setAttribute('role', 'status');
+        statusNote.hidden = true;
+
+        const tableWrap = document.createElement('div');
+        tableWrap.className = 'scd-table-wrap';
+        const table = document.createElement('table');
+        table.className = 'scd-table';
+        const thead = document.createElement('thead');
+        const headTr = document.createElement('tr');
+        const masterCb = document.createElement('input');
+        masterCb.type = 'checkbox';
+        masterCb.setAttribute('aria-label', 'Farkı olan tüm satırları seç');
+        const thSelect = document.createElement('th');
+        thSelect.className = 'scd-col-check';
+        thSelect.append(masterCb);
+        headTr.append(thSelect);
+        ['Raf', 'Ürün & Detay', 'Sistem', 'Sayılan Adet', 'Fark', 'Sayım Notu', 'İşlem'].forEach(colLabel => {
+            const th = document.createElement('th');
+            th.textContent = colLabel;
+            headTr.append(th);
+        });
+        thead.append(headTr);
+        const tbody = document.createElement('tbody');
+        table.append(thead, tbody);
+        tableWrap.append(table);
+
+        const footer = document.createElement('footer');
+        footer.className = 'scd-footer';
+        const leftFooter = document.createElement('div');
+        leftFooter.className = 'scd-footer-group';
+        const applySelectedBtn = document.createElement('button');
+        applySelectedBtn.type = 'button';
+        applySelectedBtn.className = 'scd-btn scd-btn-primary';
+        applySelectedBtn.textContent = '✅ Seçili Farkları Stoğa İşle (0)';
+        applySelectedBtn.disabled = true;
+        leftFooter.append(applySelectedBtn);
+
+        const rightFooter = document.createElement('div');
+        rightFooter.className = 'scd-footer-group';
+        const pdfBtn = document.createElement('button');
+        pdfBtn.type = 'button';
+        pdfBtn.className = 'scd-btn';
+        pdfBtn.textContent = '📄 Sayım Fark Tutanağı (PDF)';
+        const excelBtn = document.createElement('button');
+        excelBtn.type = 'button';
+        excelBtn.className = 'scd-btn';
+        excelBtn.textContent = '📊 Excel Rapor';
+        const unlockBtn = document.createElement('button');
+        unlockBtn.type = 'button';
+        unlockBtn.className = 'scd-btn scd-btn-danger';
+        unlockBtn.textContent = '🔓 Sayımı Bitir';
+        rightFooter.append(pdfBtn, excelBtn, unlockBtn);
+        footer.append(leftFooter, rightFooter);
+
+        modal.append(header, helpPanel, kpiBar, controls, statusNote, tableWrap, footer);
+        overlay.append(modal);
+        document.body.append(overlay);
+        document.body.classList.add('shelf-dialog-open');
+
+        const closeModal = () => {
+            activeCountDeskRefresh = null;
+            if (window.DialogStack) window.DialogStack.close(modal);
+            overlay.remove();
+            document.body.classList.remove('shelf-dialog-open');
+        };
+        closeBtn.addEventListener('click', closeModal);
+        overlay.addEventListener('click', event => { if (event.target === overlay) closeModal(); });
+        if (window.DialogStack) window.DialogStack.open(modal, { onEscape: closeModal, initialFocus: closeBtn });
+        else closeBtn.focus();
+
+        const getActiveShelfCodes = () => {
+            const locked = lockedList();
+            if (scopeShelf !== 'ALL' && locked.some(s => s.code === scopeShelf)) return [scopeShelf];
+            scopeShelf = 'ALL';
+            return locked.map(s => s.code);
+        };
+
+        const getScopeRows = () => {
+            const codes = getActiveShelfCodes();
+            const depotRows = valuesOf(window.data && window.data[depot]);
+            return SC.buildCountRows(depotRows, codes, { countedMap: drafts });
+        };
+
+        const syncScopeOptions = () => {
+            const locked = lockedList();
+            scopeSelect.replaceChildren();
+            const optAll = document.createElement('option');
+            optAll.value = 'ALL';
+            optAll.textContent = `Tüm Sayımdaki Raflar (${locked.length})`;
+            scopeSelect.append(optAll);
+            locked.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.code;
+                opt.textContent = `🔒 ${s.code} (${s.boundRows.length} kalem)`;
+                scopeSelect.append(opt);
+            });
+            if (scopeShelf !== 'ALL' && !locked.some(s => s.code === scopeShelf)) scopeShelf = 'ALL';
+            scopeSelect.value = scopeShelf;
+        };
+
+        const getSelectedFixes = rows => rows.filter(r => {
+            const d = drafts.get(r.id);
+            return d && d.selected === true && (r.state === 'missing' || r.state === 'excess');
+        }).map(r => ({ id: r.id, countedQty: r.countedQty, note: r.note, name: r.name, before: r.systemQty }));
+
+        const updateSummaryUI = allRows => {
+            const sum = SC.summarizeVariances(allRows);
+            kpiBar.replaceChildren();
+            const cards = [
+                ['Toplam Kalem', String(sum.total), ''],
+                ['Sayılan', `${sum.counted}/${sum.total}`, ''],
+                ['🔴 Eksik', `${sum.missing}${sum.missingQty ? ` (-${sum.missingQty})` : ''}`, 'is-missing'],
+                ['🟡 Fazla', `${sum.excess}${sum.excessQty ? ` (+${sum.excessQty})` : ''}`, 'is-excess'],
+                ['🟢 Tam', String(sum.match), 'is-match'],
+                ['Net Fark', sum.netDiff > 0 ? `+${sum.netDiff}` : String(sum.netDiff), sum.netDiff < 0 ? 'is-missing' : sum.netDiff > 0 ? 'is-excess' : ''],
+            ];
+            cards.forEach(([labelText, valText, cls]) => {
+                const card = document.createElement('div');
+                card.className = `scd-kpi${cls ? ` ${cls}` : ''}`;
+                const lbl = document.createElement('small');
+                lbl.textContent = labelText;
+                const val = document.createElement('strong');
+                val.textContent = valText;
+                card.append(lbl, val);
+                kpiBar.append(card);
+            });
+
+            chipButtons.get('all').textContent = `Tümü (${sum.total})`;
+            chipButtons.get('missing').textContent = `🔴 Eksik (${sum.missing})`;
+            chipButtons.get('excess').textContent = `🟡 Fazla (${sum.excess})`;
+            chipButtons.get('match').textContent = `🟢 Tam (${sum.match})`;
+            chipButtons.get('pending').textContent = `⏳ Bekleyen (${sum.pending})`;
+
+            const selectedFixes = getSelectedFixes(allRows);
+            applySelectedBtn.textContent = `✅ Seçili Farkları Stoğa İşle (${selectedFixes.length})`;
+            applySelectedBtn.disabled = busy || selectedFixes.length === 0;
+        };
+
+        const formatDiffBadge = (el, state, diff) => {
+            el.className = `scd-diff-badge scd-state-${state}`;
+            if (state === 'missing') el.textContent = `🔴 ${diff}`;
+            else if (state === 'excess') el.textContent = `🟡 +${diff}`;
+            else if (state === 'match') el.textContent = '🟢 0';
+            else el.textContent = '—';
+        };
+
+        const applyFixesList = async fixes => {
+            if (busy || !fixes.length) return;
+            if (typeof window.applyCountFixes !== 'function') {
+                notify('Sayım düzeltme servisi (applyCountFixes) yüklenmemiş.', 'error');
+                return;
+            }
+            const ok = await confirmInDrawer(
+                'SAYIM DÜZELTMESİ',
+                `${fixes.length} fark kalemi stoğa işlensin mi?`,
+                'Onaylanan kalemlerin stok adetleri güncellenecek ve her biri için "sayim-duzeltme" denetim kaydı yazılacak. Raf sayım kilidi siz "Sayımı Bitir" diyene kadar korunur.',
+                'Stoğa İşle'
+            );
+            if (!ok) return;
+            busy = true;
+            statusNote.hidden = true;
+            updateSummaryUI(getScopeRows());
+            try {
+                const res = await window.applyCountFixes(depot, fixes);
+                res.applied.forEach(item => { drafts.delete(item.id); });
+                res.skipped.forEach(item => { drafts.delete(item.id); });
+                const msg = `${res.applied.length} fark stoğa işlendi${res.skipped.length ? `, ${res.skipped.length} kalem değişmedi` : ''}${res.failed.length ? `, ${res.failed.length} hata` : ''}.`;
+                notify(msg, res.failed.length ? 'warning' : 'success');
+                if (res.failed.length) {
+                    statusNote.textContent = res.failed.map(f => `${f.id}: ${f.message}`).join(' · ');
+                    statusNote.hidden = false;
+                }
+            } catch (err) {
+                statusNote.textContent = (err && err.message) || 'Farklar stoğa işlenemedi.';
+                statusNote.hidden = false;
+            } finally {
+                busy = false;
+                render();
+                refreshDrawerIfOpen();
+                renderTable();
+            }
+        };
+
+        const renderTable = () => {
+            syncScopeOptions();
+            const allRows = getScopeRows();
+            updateSummaryUI(allRows);
+            const q = searchText.toLocaleLowerCase('tr-TR');
+            const filtered = allRows.filter(r => {
+                if (stateFilter !== 'all' && r.state !== stateFilter) return false;
+                if (!q) return true;
+                return [r.shelfCode, r.name, r.type, r.brand, r.envanterNo, r.serialNo, r.barcode].join(' ').toLocaleLowerCase('tr-TR').includes(q);
+            });
+
+            tbody.replaceChildren();
+            if (!filtered.length) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 8;
+                td.className = 'scd-empty';
+                td.textContent = allRows.length
+                    ? 'Seçili filtre veya arama kriteriyle eşleşen kalem yok.'
+                    : 'Seçili sayımdaki raflarda kayıtlı ürün bulunmuyor.';
+                tr.append(td);
+                tbody.append(tr);
+                masterCb.checked = false;
+                masterCb.disabled = true;
+                return;
+            }
+
+            const varianceVisible = filtered.filter(r => r.state === 'missing' || r.state === 'excess');
+            masterCb.disabled = varianceVisible.length === 0;
+            masterCb.checked = varianceVisible.length > 0 && varianceVisible.every(r => drafts.get(r.id)?.selected === true);
+
+            filtered.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.className = `scd-row scd-row-${row.state}`;
+
+                const tdCheck = document.createElement('td');
+                tdCheck.className = 'scd-col-check';
+                const rowCb = document.createElement('input');
+                rowCb.type = 'checkbox';
+                const isVar = row.state === 'missing' || row.state === 'excess';
+                rowCb.disabled = !isVar;
+                rowCb.checked = isVar && drafts.get(row.id)?.selected === true;
+                rowCb.setAttribute('aria-label', `${row.name} farkını seç`);
+                tdCheck.append(rowCb);
+
+                const tdShelf = document.createElement('td');
+                const shelfBadge = document.createElement('span');
+                shelfBadge.className = 'scd-shelf-pill';
+                shelfBadge.textContent = row.shelfCode;
+                tdShelf.append(shelfBadge);
+
+                const tdInfo = document.createElement('td');
+                const nameEl = document.createElement('strong');
+                nameEl.className = 'scd-item-name';
+                nameEl.textContent = row.name;
+                const metaEl = document.createElement('small');
+                metaEl.className = 'scd-item-meta';
+                metaEl.textContent = [row.type, row.envanterNo && `Env: ${row.envanterNo}`, row.serialNo && `SN: ${row.serialNo}`, row.systemQty === 0 ? 'Stok 0' : ''].filter(Boolean).join(' · ');
+                tdInfo.append(nameEl, metaEl);
+
+                const tdSys = document.createElement('td');
+                tdSys.className = 'scd-num';
+                tdSys.textContent = String(row.systemQty);
+
+                const tdCount = document.createElement('td');
+                const qtyInput = document.createElement('input');
+                qtyInput.type = 'number';
+                qtyInput.min = '0';
+                qtyInput.step = '1';
+                qtyInput.inputMode = 'numeric';
+                qtyInput.className = 'scd-qty-input';
+                qtyInput.placeholder = 'Sayım…';
+                qtyInput.setAttribute('aria-label', `${row.name} sayılan adet`);
+                if (row.countedQty !== null) qtyInput.value = String(row.countedQty);
+                tdCount.append(qtyInput);
+
+                const tdDiff = document.createElement('td');
+                const diffBadge = document.createElement('span');
+                formatDiffBadge(diffBadge, row.state, row.diff);
+                tdDiff.append(diffBadge);
+
+                const tdNote = document.createElement('td');
+                const noteInput = document.createElement('input');
+                noteInput.type = 'text';
+                noteInput.maxLength = 200;
+                noteInput.className = 'scd-note-input';
+                noteInput.placeholder = 'İsteğe bağlı not';
+                noteInput.setAttribute('aria-label', `${row.name} sayım notu`);
+                noteInput.value = row.note || '';
+                tdNote.append(noteInput);
+
+                const tdAct = document.createElement('td');
+                const fixBtn = document.createElement('button');
+                fixBtn.type = 'button';
+                fixBtn.className = 'scd-row-fix-btn';
+                fixBtn.textContent = 'Stoğa İşle';
+                fixBtn.disabled = !isVar || busy;
+                tdAct.append(fixBtn);
+
+                rowCb.addEventListener('change', () => {
+                    const prev = drafts.get(row.id) || { countedQty: row.countedQty, note: row.note, selected: false };
+                    drafts.set(row.id, { ...prev, selected: rowCb.checked });
+                    updateSummaryUI(getScopeRows());
+                });
+
+                qtyInput.addEventListener('input', () => {
+                    const raw = qtyInput.value.trim();
+                    const prev = drafts.get(row.id) || { countedQty: null, note: noteInput.value, selected: false };
+                    if (raw === '') {
+                        drafts.delete(row.id);
+                        tr.className = 'scd-row scd-row-pending';
+                        formatDiffBadge(diffBadge, 'pending', null);
+                        rowCb.checked = false;
+                        rowCb.disabled = true;
+                        fixBtn.disabled = true;
+                        updateSummaryUI(getScopeRows());
+                        return;
+                    }
+                    const parsed = Number(raw);
+                    if (!Number.isInteger(parsed) || parsed < 0) return;
+                    const v = SC.computeVariance(row.systemQty, parsed);
+                    const hasDiff = v.state === 'missing' || v.state === 'excess';
+                    drafts.set(row.id, { countedQty: parsed, note: noteInput.value, selected: hasDiff });
+                    tr.className = `scd-row scd-row-${v.state}`;
+                    formatDiffBadge(diffBadge, v.state, v.diff);
+                    rowCb.disabled = !hasDiff;
+                    rowCb.checked = hasDiff;
+                    fixBtn.disabled = !hasDiff || busy;
+                    updateSummaryUI(getScopeRows());
+                });
+
+                noteInput.addEventListener('input', () => {
+                    const prev = drafts.get(row.id);
+                    if (prev) drafts.set(row.id, { ...prev, note: noteInput.value });
+                });
+
+                fixBtn.addEventListener('click', () => {
+                    const d = drafts.get(row.id);
+                    if (!d || d.countedQty === null || d.countedQty === row.systemQty) return;
+                    applyFixesList([{ id: row.id, countedQty: d.countedQty, note: d.note || noteInput.value }]);
+                });
+
+                tr.append(tdCheck, tdShelf, tdInfo, tdSys, tdCount, tdDiff, tdNote, tdAct);
+                tbody.append(tr);
+            });
+        };
+
+        scopeSelect.addEventListener('change', () => { scopeShelf = scopeSelect.value; renderTable(); });
+        searchInput.addEventListener('input', () => { searchText = searchInput.value.trim(); renderTable(); });
+        masterCb.addEventListener('change', () => {
+            const allRows = getScopeRows();
+            allRows.filter(r => r.state === 'missing' || r.state === 'excess').forEach(r => {
+                const prev = drafts.get(r.id) || { countedQty: r.countedQty, note: r.note, selected: false };
+                drafts.set(r.id, { ...prev, selected: masterCb.checked });
+            });
+            renderTable();
+        });
+
+        applySelectedBtn.addEventListener('click', () => {
+            const fixes = getSelectedFixes(getScopeRows());
+            if (fixes.length) applyFixesList(fixes);
+        });
+
+        const buildCurrentReport = () => {
+            const codes = getActiveShelfCodes();
+            const lockedMap = new Map(lockedList().map(s => [s.code, s]));
+            const reasons = [...new Set(codes.map(c => lockedMap.get(c)?.doc?.lockReason).filter(Boolean))];
+            const activeUser = typeof window.getActiveUser === 'function' ? window.getActiveUser() : window.currentUser;
+            return SC.buildCountReportData({
+                depot,
+                depotName,
+                shelves: codes,
+                reason: reasons.join(' · ') || 'Depo stok sayımı',
+                createdBy: (activeUser && (activeUser.name || activeUser.adSoyad)) || 'Sistem Yöneticisi',
+            }, getScopeRows());
+        };
+
+        pdfBtn.addEventListener('click', async () => {
+            if (typeof window.generateShelfCountReportPDF !== 'function') {
+                notify('PDF üretici (generateShelfCountReportPDF) yüklenmemiş.', 'error');
+                return;
+            }
+            pdfBtn.disabled = true;
+            try { await window.generateShelfCountReportPDF(buildCurrentReport()); }
+            finally { pdfBtn.disabled = false; }
+        });
+
+        excelBtn.addEventListener('click', () => {
+            if (typeof window.XLSX === 'undefined' || !window.XLSX.utils) {
+                notify('Excel kütüphanesi (XLSX) yüklenemedi.', 'error');
+                return;
+            }
+            const report = buildCurrentReport();
+            if (!report.excelRows.length) {
+                notify('Dışa aktarılacak sayım kalemi bulunmuyor.', 'warning');
+                return;
+            }
+            const ws = window.XLSX.utils.json_to_sheet(report.excelRows);
+            const wb = window.XLSX.utils.book_new();
+            window.XLSX.utils.book_append_sheet(wb, ws, 'Sayim Farklari');
+            window.XLSX.writeFile(wb, `Sayim_Fark_Raporu_${depot.toUpperCase()}_${report.belge.raporNo}.xlsx`);
+        });
+
+        unlockBtn.addEventListener('click', async () => {
+            if (busy) return;
+            const codes = getActiveShelfCodes();
+            if (!codes.length) return;
+            const ok = await confirmInDrawer(
+                'SAYIMI BİTİR',
+                `${codes.length} rafın sayım kilidi kaldırılsın mı?`,
+                'Seçili raflardaki tüm ürünler yeniden B1/B2 depo listelerinde görünecek ve normal stok hareketlerine açılacak.',
+                'Sayımı Bitir'
+            );
+            if (!ok) return;
+            if (typeof window.setBatchShelfCountLock !== 'function') {
+                notify('Toplu raf servisi yüklenmemiş.', 'error');
+                return;
+            }
+            busy = true;
+            unlockBtn.disabled = true;
+            try {
+                const res = await window.setBatchShelfCountLock(depot, codes, { locked: false });
+                const unlockedSet = new Set(res.succeeded.map(s => s.code));
+                getScopeRows().forEach(r => { if (unlockedSet.has(r.shelfCode)) drafts.delete(r.id); });
+                notify(
+                    res.failed.length
+                        ? `${res.succeeded.length} rafın sayımı bitti, ${res.failed.length} rafta hata oluştu.`
+                        : `${res.succeeded.length} rafın sayımı tamamlandı; ${res.totalRowsChanged} kayıt depo listelerine döndü.`,
+                    res.failed.length ? 'warning' : 'success'
+                );
+                render();
+                refreshDrawerIfOpen();
+                if (!lockedList().length) closeModal();
+                else renderTable();
+            } catch (err) {
+                statusNote.textContent = (err && err.message) || 'Sayım kilidi kaldırılamadı.';
+                statusNote.hidden = false;
+            } finally {
+                busy = false;
+                unlockBtn.disabled = false;
+            }
+        });
+
+        activeCountDeskRefresh = () => {
+            if (!overlay.isConnected) { activeCountDeskRefresh = null; return; }
+            if (!lockedList().length) { closeModal(); return; }
+            renderTable();
+        };
+        renderTable();
+    }
+
     // ─── v3.3 Aşama 6 (Veri Geçişi) — "Sistem Raf Sayaçlarını Eşitle (Sync)" ────────────────────────────────────────
     // [WHY]: P1-02 (Aşama 2/4) yalnız kendinden SONRAKİ yazmalarda usedSlots'u doğru tutar; bu, ondan ÖNCEKİ kaymayı
     //        (ve kataloğa sonradan eklenen eski rafları) kapatan TEK SEFERLİK, geçici bir göç aracıdır.
@@ -950,6 +1711,8 @@
         app.addEventListener('click', event => {
             if (event.target.closest('#shelfMatrixSyncBtn')) { syncShelfCountersAction(); return; }
             if (event.target.closest('#shelfAddBtn')) { addShelfDialog(); return; }
+            if (event.target.closest('#shelfBatchCountBtn')) { openBatchCountDialog(activeDepot); return; }
+            if (event.target.closest('#shelfCountDeskBtn')) { openCountDeskModal(activeDepot); return; }
             const filterButton = event.target.closest('[data-shelf-filter]');
             if (filterButton) {
                 shelfFilter = ['all', 'empty', 'locked'].includes(filterButton.dataset.shelfFilter) ? filterButton.dataset.shelfFilter : 'all';
@@ -993,7 +1756,10 @@
             const matrixVisible = document.getElementById('shelfMatrixTab').style.display !== 'none';
             if ((inventoryChanged || catalogChanged) && matrixVisible) render();
             // P2-07: çekmece kapanmaz/yeniden açılmaz — içeriği sessizce tazelenir (odak ve kaydırma konumu korunur).
-            if (inventoryChanged || catalogChanged) refreshDrawerIfOpen();
+            if (inventoryChanged || catalogChanged) {
+                refreshDrawerIfOpen();
+                if (typeof activeCountDeskRefresh === 'function') activeCountDeskRefresh();
+            }
         });
     }
 
@@ -1001,7 +1767,7 @@
         bindUI();
     }
 
-    window.ShelfMatrix = { render, openDrawer, closeDrawer };
+    window.ShelfMatrix = { render, openDrawer, closeDrawer, openBatchCountDialog, openCountDeskModal };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
     else init();
 })();

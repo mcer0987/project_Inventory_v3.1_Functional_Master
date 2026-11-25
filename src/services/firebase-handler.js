@@ -1711,6 +1711,65 @@ export const setShelfCountLock = window.setShelfCountLock = async function (depo
     return out;
 };
 
+// [WHY]: v3.7 İP-10 · Tek raf, seçili raflar veya tüm depo (b1/b2) için toplu sayım kilidi yönetimi.
+// [HOW]: codes === 'ALL' ise deponun katalog raflarını çözümler, StockLedger.setBatchShelfCountLock ile
+//        her rafı güvenle kilitleyip/açar ve yerel önbelleği tek seferde senkronize eder.
+export const setBatchShelfCountLock = window.setBatchShelfCountLock = async function (depot, codes, { locked, reason, onProgress } = {}) {
+    _ledgerPreflight([depot].filter(Boolean), 'Toplu raf sayımı yalnızca sistem yöneticisi tarafından başlatılıp bitirilebilir.');
+    let targetCodes = codes;
+    if (codes === 'ALL') {
+        const S = window.Schema;
+        let catalog = (window.data && Array.isArray(window.data.shelves) ? window.data.shelves : [])
+            .filter(s => s && s.depot === depot && S.isValidShelfCode(s.code));
+        if (!catalog.length) {
+            const snap = await getDocsFromServer(collection(fireDb, COLLECTION_ROOT, 'shelves', 'items'));
+            catalog = snap.docs.map(d => d.data()).filter(s => s && s.depot === depot && S.isValidShelfCode(s.code));
+        }
+        targetCodes = catalog
+            .filter(s => (locked === true ? !S.isShelfCountLocked(s) : S.isShelfCountLocked(s)))
+            .map(s => s.code);
+        if (!targetCodes.length) {
+            targetCodes = catalog.map(s => s.code);
+        }
+    }
+    let res;
+    try {
+        res = await window.StockLedger.setBatchShelfCountLock(_shelfDeps(), {
+            depot, codes: targetCodes, locked: locked === true, reason, onProgress,
+        });
+    } catch (e) { throw _ledgerError(e, 'setBatchShelfCountLock'); }
+    const { localShelves, localRows, ...out } = res;
+    (localShelves || []).forEach(s => _shelfLocal(s.id, s.data));
+    _applyLocalRows(localRows);
+    console.log(`☁️ toplu sayım (${out.depot}): ${out.succeeded.length} raf ${out.locked ? 'kilitlendi' : 'açıldı'}, ${out.totalRowsChanged} kayıt işaretlendi${out.failed.length ? `, ${out.failed.length} hata` : ''}`);
+    return out;
+};
+
+// [WHY]: v3.7 İP-10 · Sayım Fark Masası'ndan onaylanan eksik/fazla farkları stoğa işler (sayim-duzeltme audit ile).
+// [HOW]: StockLedger.applyCountFixes her kalemi runProductSave üzerinden işler; yerel b1/b2/shelves önbelleği güncellenir.
+export const applyCountFixes = window.applyCountFixes = async function (depot, fixes = []) {
+    _ledgerPreflight([depot].filter(Boolean), 'Sayım farkı işleme yalnızca sistem yöneticisi tarafından yapılabilir.');
+    let res;
+    try {
+        res = await window.StockLedger.applyCountFixes(_ledgerDeps(), {
+            depot, fixes, computePatch: computeStockPatch,
+        });
+    } catch (e) { throw _ledgerError(e, 'applyCountFixes'); }
+    const { localWrites, ...out } = res;
+    (localWrites || []).forEach(w => {
+        if (w.col === window.StockLedger.SHELF_COL) _shelfLocal(w.id, w.data);
+        else _applyLocal(w.col, { op: w.kind, id: w.id, data: w.data });
+    });
+    if ((localWrites || []).length) {
+        window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: depot, isPatch: false, changes: [] } }));
+    }
+    console.log(`☁️ sayım düzeltme (${out.depot}): ${out.applied.length} uygulandı, ${out.skipped.length} değişmedi${out.failed.length ? `, ${out.failed.length} hata` : ''}`);
+    return out;
+};
+
+window.AppModules = window.AppModules || {};
+window.AppModules.ShelfCountService = { setBatchShelfCountLock, applyCountFixes };
+
 /** Boş rafı kaldır (adet 0 kayıtlar Havuz'a). Dönüş: { id, code, depot, movedToPool }. */
 export const deleteShelf = window.deleteShelf = async function (depot, code) {
     _ledgerPreflight([depot].filter(Boolean), 'Raf kaldırma yalnızca sistem yöneticisi tarafından yapılabilir.');
