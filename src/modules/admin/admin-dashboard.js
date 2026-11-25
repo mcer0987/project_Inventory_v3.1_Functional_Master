@@ -799,6 +799,340 @@ window.checkExitIsDemirbas = function (exit) {
     return true; // Varsayılan olarak demirbaş
 };
 
+// ── UX-1 · ORTAK GRAFİK YARDIMCILARI ─────────────────────────────────────────
+// [WHY]: Dört analitik grafik (stok barı + 3 doughnut) aynı görsel dili ve tema duyarlılığını paylaşır.
+// [HOW]: Renkler çizim anında (scriptable/plugin) okunur; tema değişince yalnız update() yeterlidir.
+//        Tüm DOM düğümleri createElement + textContent ile kurulur (innerHTML yok).
+function chartTheme() {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const cs = getComputedStyle(document.documentElement);
+    const v = (name, fallback) => (cs.getPropertyValue(name) || '').trim() || fallback;
+    return {
+        dark,
+        text: v('--color-text', dark ? '#e2e8f0' : '#1e293b'),
+        muted: v('--color-text-muted', dark ? '#94a3b8' : '#64748b'),
+        surface: v('--color-surface', dark ? '#1e293b' : '#ffffff'),
+        grid: dark ? 'rgba(148, 163, 184, 0.16)' : 'rgba(100, 116, 139, 0.16)',
+        barFrom: dark ? 'rgba(96, 165, 250, 0.30)' : 'rgba(52, 152, 219, 0.35)',
+        barTo: dark ? '#60a5fa' : '#2d7dd2',
+    };
+}
+
+const CHART_PALETTES = {
+    stock: ['#2ecc71', '#e67e22', '#3498db', '#e74c3c', '#9b59b6', '#1abc9c', '#f1c40f', '#34495e'],
+    exitDemirbas: ['#e74c3c', '#c0392b', '#d35400', '#f39c12', '#e67e22'],
+    exitSarf: ['#2ecc71', '#27ae60', '#3498db', '#2980b9', '#1abc9c'],
+};
+
+function paletteColors(base, count) {
+    const colors = base.slice(0, count);
+    for (let i = base.length; i < count; i++) colors.push(`hsl(${(i * 47) % 360}, 62%, 52%)`);
+    return colors;
+}
+
+const fmtPct = value => `%${value.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}`;
+const domEl = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = String(text);
+    return node;
+};
+
+// Lejanttan gizlenen dilimler tuval kimliğine göre saklanır; grafik yeniden kurulsa da seçim korunur.
+const hiddenSlices = {};
+
+// Doughnut ortasına görünür dilimlerin toplam adedini ve alt etiketi çizer (DOM'a dokunmaz).
+const donutCenterPlugin = {
+    id: 'donutCenter',
+    afterDraw(chart) {
+        const opts = chart.$donut; // renderDonut her çizimde güncel merkez verisini buraya yazar
+        const arc = chart.getDatasetMeta(0)?.data?.[0];
+        const area = chart.chartArea;
+        if (!arc || !area || !opts) return;
+        const inner = arc.innerRadius || 0;
+        if (inner < 24) return;
+        const t = chartTheme();
+        const total = opts.empty ? 0 : opts.values.reduce((s, val, i) => s + (chart.getDataVisibility(i) ? val : 0), 0);
+        const big = Math.max(16, Math.min(34, inner * 0.55));
+        const small = Math.max(10, Math.min(13, big * 0.42));
+        const cx = (area.left + area.right) / 2, cy = (area.top + area.bottom) / 2;
+        const { ctx } = chart;
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = t.text;
+        ctx.font = `700 ${big}px ${Chart.defaults.font.family}`;
+        ctx.fillText(total.toLocaleString('tr-TR'), cx, cy - small * 0.7);
+        ctx.fillStyle = t.muted;
+        ctx.font = `600 ${small}px ${Chart.defaults.font.family}`;
+        ctx.fillText(opts.empty ? 'Veri yok' : opts.caption, cx, cy + big * 0.6);
+        ctx.restore();
+    }
+};
+
+// Canvas'ı [grafik | lejant] yerleşimine bir kez taşır; lejant kabını döndürür.
+function mountDonutLayout(canvas) {
+    let wrap = canvas.closest('.dash-donut');
+    if (!wrap) {
+        const parent = canvas.parentElement;
+        wrap = domEl('div', 'dash-donut');
+        const box = domEl('div', 'dash-donut-canvas');
+        const legend = domEl('div', 'dash-donut-legend');
+        legend.setAttribute('role', 'group');
+        legend.setAttribute('aria-label', 'Grafik göstergesi');
+        parent.insertBefore(wrap, canvas);
+        box.append(canvas);
+        wrap.append(box, legend);
+        parent.classList.add('dash-donut-host');
+    }
+    return wrap.querySelector('.dash-donut-legend');
+}
+
+// Renk göstergeli, adet + % oranlı, tıklayınca dilimi gizleyen/gösteren ve vurgulayan özel lejant.
+function paintDonutLegend(chart, legend, labels, values, colors, hidden, empty, focusIndex) {
+    legend.replaceChildren();
+    if (empty) {
+        legend.append(domEl('p', 'dash-legend-empty', 'Henüz kayıt yok'));
+        return;
+    }
+    const visibleTotal = values.reduce((s, val, i) => s + (hidden.has(labels[i]) ? 0 : val), 0);
+    const highlight = index => {
+        if (!chart.getDataVisibility(index)) return;
+        const active = [{ datasetIndex: 0, index }];
+        chart.setActiveElements(active);
+        chart.tooltip?.setActiveElements(active, { x: 0, y: 0 });
+        chart.update('none');
+    };
+    const clearHighlight = () => {
+        chart.setActiveElements([]);
+        chart.tooltip?.setActiveElements([], { x: 0, y: 0 });
+        chart.update('none');
+    };
+    labels.forEach((label, i) => {
+        const isHidden = hidden.has(label);
+        const pct = !isHidden && visibleTotal > 0 ? (values[i] / visibleTotal) * 100 : null;
+        const item = domEl('button', 'dash-legend-item' + (isHidden ? ' is-hidden' : ''));
+        item.type = 'button';
+        item.setAttribute('aria-pressed', String(!isHidden));
+        item.setAttribute('aria-label', `${label}: ${values[i]} adet${pct != null ? `, ${fmtPct(pct)}` : ', gizli'}. Dilimi gizlemek veya göstermek için basın.`);
+        item.title = `${label}: ${values[i]} adet`;
+        const dot = domEl('span', 'dash-legend-dot');
+        dot.style.backgroundColor = colors[i];
+        item.append(dot, domEl('span', 'dash-legend-name', label), domEl('span', 'dash-legend-val', values[i]),
+            domEl('span', 'dash-legend-pct', pct != null ? fmtPct(pct) : '—'));
+        item.addEventListener('click', () => {
+            if (hidden.has(label)) hidden.delete(label); else hidden.add(label);
+            chart.toggleDataVisibility(i);
+            chart.update();
+            paintDonutLegend(chart, legend, labels, values, colors, hidden, empty, i);
+        });
+        item.addEventListener('mouseenter', () => highlight(i));
+        item.addEventListener('focus', () => highlight(i));
+        item.addEventListener('mouseleave', clearHighlight);
+        item.addEventListener('blur', clearHighlight);
+        legend.append(item);
+    });
+    if (focusIndex != null) legend.children[focusIndex]?.focus();
+}
+
+// Üç doughnut grafiğinin ortak çizimi. Grafik varsa yerinde güncellenir (flicker yok), yoksa kurulur.
+function renderDonut({ canvasId, labels, values, palette, offsets, caption = 'Adet' }) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof Chart === 'undefined') return null;
+    const empty = !labels.length;
+    const L = empty ? ['Veri yok'] : labels;
+    const V = empty ? [1] : values;
+    const colors = empty ? ['rgba(148, 163, 184, 0.35)'] : paletteColors(palette, L.length);
+    const legend = mountDonutLayout(canvas);
+    const t = chartTheme();
+    const hidden = hiddenSlices[canvasId] || (hiddenSlices[canvasId] = new Set());
+    for (const name of [...hidden]) if (!L.includes(name)) hidden.delete(name);
+
+    const dataset = {
+        data: V, backgroundColor: colors, borderColor: t.surface, borderWidth: 2, hoverOffset: 6,
+        offset: offsets || L.map(() => 0),
+    };
+    const center = { values: empty ? [] : values, caption, empty };
+    const tooltipLabel = ctx => {
+        if (empty) return '';
+        const total = ctx.dataset.data.reduce((s, val, i) => s + (ctx.chart.getDataVisibility(i) ? val : 0), 0);
+        const pct = total > 0 ? ` (${fmtPct((ctx.raw / total) * 100)})` : '';
+        return ` ${ctx.label}: ${ctx.raw} Adet${pct}`;
+    };
+
+    let chart = Chart.getChart(canvas);
+    if (chart && chart.config.type !== 'doughnut') { chart.destroy(); chart = null; }
+    if (chart) {
+        chart.data.labels = L;
+        Object.assign(chart.data.datasets[0], dataset);
+        chart.options.plugins.tooltip.enabled = !empty;
+    } else {
+        chart = new Chart(canvas.getContext('2d'), {
+            type: 'doughnut',
+            data: { labels: L, datasets: [dataset] },
+            plugins: [donutCenterPlugin],
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '68%',
+                layout: { padding: 18 }, // offset (dışarı çıkan dilim) ve hoverOffset kırpılmasın
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { enabled: !empty, callbacks: { label: tooltipLabel } },
+                },
+            },
+        });
+    }
+    chart.$donut = center;
+    L.forEach((name, i) => {
+        const wantVisible = empty || !hidden.has(name);
+        if (chart.getDataVisibility(i) !== wantVisible) chart.toggleDataVisibility(i);
+    });
+    chart.update('none');
+    paintDonutLegend(chart, legend, L, V, colors, hidden, empty, null);
+    return chart;
+}
+
+// Kayıtları (adet toplamı ile) tür veya model adına göre gruplar; çoktan aza sıralar.
+function groupStockBy(items, mode) {
+    const map = new Map();
+    items.forEach(item => {
+        const raw = mode === 'model' ? item.ürün : (item.tür || item.type);
+        const label = window.getCleanProductName(String(raw || '').trim()) || (mode === 'model' ? 'İsimsiz' : 'Türsüz');
+        const key = label.toLocaleUpperCase('tr-TR');
+        const row = map.get(key) || { label, value: 0 };
+        row.value += parseInt(item.adet) || 0;
+        map.set(key, row);
+    });
+    return [...map.values()].sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, 'tr'));
+}
+
+// Çubuk ucuna adet yazar.
+const barValuePlugin = {
+    id: 'barValueLabels',
+    afterDatasetsDraw(chart) {
+        const t = chartTheme();
+        const { ctx } = chart;
+        ctx.save();
+        ctx.fillStyle = t.text;
+        ctx.font = `700 11px ${Chart.defaults.font.family}`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        chart.getDatasetMeta(0).data.forEach((bar, i) => {
+            const value = chart.data.datasets[0].data[i];
+            if (value == null || chart.data.labels[i] === 'Veri Yok') return;
+            ctx.fillText(String(value), bar.x + 6, bar.y);
+        });
+        ctx.restore();
+    }
+};
+
+// Canvas'ı kaydırılabilir kapsayıcı içindeki yüksekliği ayarlanabilir sarmalayıcıya bir kez taşır.
+function mountHBarLayout(canvas) {
+    let inner = canvas.closest('.dash-hbar-inner');
+    if (!inner) {
+        const host = canvas.parentElement;
+        inner = domEl('div', 'dash-hbar-inner');
+        host.insertBefore(inner, canvas);
+        inner.append(canvas);
+        host.classList.add('dash-hbar-host');
+    }
+    return inner;
+}
+
+function renderStockBar(rows) {
+    const canvas = document.getElementById('dashDemirbasChart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const inner = mountHBarLayout(canvas);
+    const labels = rows.length ? rows.map(r => r.label) : ['Veri Yok'];
+    const values = rows.length ? rows.map(r => r.value) : [0];
+    // Etiketler üst üste binmesin: her kalem için sabit satır yüksekliği, kapsayıcı dikey kayar.
+    inner.style.height = `${Math.max(240, labels.length * 32 + 48)}px`;
+
+    let chart = Chart.getChart(canvas);
+    if (chart && chart.options.indexAxis !== 'y') { chart.destroy(); chart = null; }
+    if (chart) {
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = values;
+        chart.update('none');
+        chart.resize();
+    } else {
+        chart = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Demirbaş',
+                    data: values,
+                    borderRadius: 6,
+                    borderSkipped: false,
+                    maxBarThickness: 22,
+                    backgroundColor: ctx => {
+                        const bar = ctx.element;
+                        const t = chartTheme();
+                        if (!bar || Math.abs(bar.x - bar.base) < 1) return t.barTo;
+                        const g = ctx.chart.ctx.createLinearGradient(bar.base, 0, bar.x, 0);
+                        g.addColorStop(0, t.barFrom);
+                        g.addColorStop(1, t.barTo);
+                        return g;
+                    },
+                }]
+            },
+            plugins: [barValuePlugin],
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: { padding: { right: 40 } },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: ctx => ` ${ctx.raw} Adet` } },
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        grid: { color: () => chartTheme().grid },
+                        border: { display: false },
+                        ticks: { precision: 0, color: () => chartTheme().muted },
+                    },
+                    y: {
+                        grid: { display: false },
+                        border: { display: false },
+                        ticks: {
+                            autoSkip: false,
+                            color: () => chartTheme().text,
+                            font: { size: 11 },
+                            callback(value) {
+                                const label = this.getLabelForValue(value);
+                                return label.length > 26 ? `${label.slice(0, 25)}…` : label;
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+    window._dashCharts = window._dashCharts || {};
+    window._dashCharts.bar = chart;
+}
+
+// Tema (data-theme) değişince dört grafiği yeni renklerle yeniden çizer (dark-mode-toggle.js'e dokunmadan).
+if (!window._chartThemeObserver && typeof MutationObserver !== 'undefined') {
+    let themeTimer = null;
+    window._chartThemeObserver = new MutationObserver(() => {
+        clearTimeout(themeTimer);
+        themeTimer = setTimeout(() => {
+            try {
+                if (typeof window.renderDashboardStats === 'function' && window.data) window.renderDashboardStats();
+                if (typeof window.renderExitCharts === 'function' && window.data) window.renderExitCharts();
+            } catch (err) {
+                console.warn('Grafik tema yenilemesi atlandı:', err);
+            }
+        }, 60);
+    });
+    window._chartThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+}
+
 // --- GRAFİK ÇİZİMİ (CHART.JS) ---
 
 let demirbasExitChart = null;
@@ -811,12 +1145,7 @@ window.renderExitCharts = function () {
     const demirbasCounts = {};
     const sarfCounts = {};
 
-    // 1. MEVCUT GRAFİKLERİ BUL VE YOK ET (Çakışmayı önlemek için)
-    const existingDemirbas = Chart.getChart("exitDemirbasChart");
-    if (existingDemirbas) existingDemirbas.destroy();
-
-    const existingSarf = Chart.getChart("exitSarfChart");
-    if (existingSarf) existingSarf.destroy();
+    // 1. UX-1: Mevcut doughnut grafikler yok edilmez; renderDonut yerinde günceller (lejant seçimi korunur, flicker olmaz).
 
     // 2. VERİ KAYNAĞINI AL
     const exits = window.data.b3 || window.data.exits || [];
@@ -862,41 +1191,23 @@ window.renderExitCharts = function () {
         }
     }
 
-    // Artık kullanılmayan referansları da temizle
-    if (demirbasExitChart) demirbasExitChart.destroy();
-    if (sarfExitChart) sarfExitChart.destroy();
+    // Sayıca çoktan aza sıralanmış [ad, adet] çiftleri (lejant ve dilimler aynı sırayı kullanır).
+    const sortedEntries = counts => Object.entries(counts).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
 
-    const commonOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { position: 'right' } }
-    };
-
-    // 4. DEMİRBAŞ GRAFİĞİNİ ÇİZ
-    const ctxDemirbas = document.getElementById('exitDemirbasChart');
-    if (ctxDemirbas) {
-        const hasDemirbasData = Object.keys(demirbasCounts).length > 0;
-
-        demirbasExitChart = new Chart(ctxDemirbas.getContext('2d'), {
-            type: 'pie',
-            data: {
-                labels: hasDemirbasData ? Object.keys(demirbasCounts) : ['Çıkış Yok'],
-                datasets: [{
-                    data: hasDemirbasData ? Object.values(demirbasCounts) : [1],
-                    backgroundColor: ['#e74c3c', '#c0392b', '#d35400', '#f39c12', '#e67e22'],
-                    borderWidth: 2
-                }]
-            },
-            options: commonOptions
-        });
-    }
+    // 4. DEMİRBAŞ GRAFİĞİNİ ÇİZ (doughnut + merkez toplam + özel lejant)
+    const demirbasEntries = sortedEntries(demirbasCounts);
+    demirbasExitChart = renderDonut({
+        canvasId: 'exitDemirbasChart',
+        labels: demirbasEntries.map(([name]) => name),
+        values: demirbasEntries.map(([, n]) => n),
+        palette: CHART_PALETTES.exitDemirbas,
+    }) || demirbasExitChart;
 
     // 5. SARF GRAFİĞİNİ ÇİZ
     const ctxSarf = document.getElementById('exitSarfChart');
     if (ctxSarf) {
-        const hasSarfData = Object.keys(sarfCounts).length > 0;
-        const labels = hasSarfData ? Object.keys(sarfCounts) : ['Çıkış Yok'];
-        const values = hasSarfData ? Object.values(sarfCounts) : [1];
+        const sarfEntries = sortedEntries(sarfCounts);
+        const labels = sarfEntries.map(([name]) => name);
 
         // Son çıkışı yapılan sarf kategorisini öne çıkartmak için offset ekleme
         const offsets = labels.map(() => 0);
@@ -907,19 +1218,13 @@ window.renderExitCharts = function () {
             }
         }
 
-        sarfExitChart = new Chart(ctxSarf.getContext('2d'), {
-            type: 'pie',
-            data: {
-                labels: labels,
-                datasets: [{
-                    data: values,
-                    backgroundColor: ['#2ecc71', '#27ae60', '#3498db', '#2980b9', '#1abc9c'],
-                    borderWidth: 2,
-                    offset: offsets
-                }]
-            },
-            options: commonOptions
-        });
+        sarfExitChart = renderDonut({
+            canvasId: 'exitSarfChart',
+            labels,
+            values: sarfEntries.map(([, n]) => n),
+            palette: CHART_PALETTES.exitSarf,
+            offsets,
+        }) || sarfExitChart;
 
         // Çıkış yapıldıysa kartın etrafında hafifçe yeşil/turkuaz pulse glow efekti oluştur
         const cardElement = ctxSarf.closest('.card');
@@ -1131,19 +1436,31 @@ window.renderCriticalStockTable = function () {
             statusClass = "status-badge status-warning";
         }
 
+        // UX-2: ürün adı 2 satıra kadar açılır (CSS line-clamp), modeller mikro çip olur, mevcut/limit bir doluluk barıyla vurgulanır.
+        const modelChips = data.models.length
+            ? data.models.slice(0, 2).map(model =>
+                `<span class="bento-chip" title="${escapeHtml(model)}">${escapeHtml(model)}</span>`).join('')
+            : '<span class="bento-chip is-muted">Model yok</span>';
+        const moreChip = data.models.length > 2
+            ? `<span class="bento-chip is-muted" title="${escapeHtml(data.models.slice(2).join(', '))}">+${data.models.length - 2} model</span>`
+            : '';
+        const pct = Math.max(0, Math.min(100, Math.round((data.mevcut / Math.max(1, data.limit)) * 100)));
+        const meterTone = data.mevcut === 0 ? 'is-danger' : data.mevcut <= 1 ? 'is-critical' : 'is-warning';
+
         return `
             <tr class="align-middle">
                 <td>
-                    <div class="fw-bold text-truncate" title="${escapeHtml(data.name)}">${escapeHtml(data.name)}</div>
-                    <small class="text-muted d-block" title="${escapeHtml(data.models.join(', '))}">
-                        Model: ${escapeHtml(data.models.slice(0, 2).join(', ') || '-')}
-                        ${data.models.length > 2 ? `+${data.models.length - 2} model` : ''}
-                    </small>
-                    <small class="text-muted d-block">${escapeHtml(data.location)}</small>
+                    <div class="bento-title" title="${escapeHtml(data.name)}">${escapeHtml(data.name)}</div>
+                    <div class="bento-chips" title="${escapeHtml(data.models.join(', '))}">
+                        ${modelChips}${moreChip}
+                        <span class="bento-chip is-location" title="Konum"><i class="fas fa-location-dot" aria-hidden="true"></i>${escapeHtml(data.location)}</span>
+                    </div>
                 </td>
                 <td class="text-center">
-                    <span class="fw-bold ${data.mevcut <= 1 ? 'text-danger' : 'text-dark'}">${escapeHtml(data.mevcut)}</span>
-                    <span class="text-muted small">/ ${escapeHtml(data.limit)}</span>
+                    <div class="bento-stock">
+                        <span class="bento-stock-line"><b class="bento-stock-now ${data.mevcut <= 1 ? 'is-low' : ''}">${escapeHtml(data.mevcut)}</b><span class="text-muted small"> / ${escapeHtml(data.limit)}</span></span>
+                        <span class="stock-meter ${meterTone /* xss-ok: üç sabit sınıf */}" role="progressbar" aria-label="Limite göre stok doluluğu" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${escapeHtml(pct)}"><i style="width: ${escapeHtml(pct)}%"></i></span>
+                    </div>
                 </td>
                 <td class="text-center align-middle">
                     <span class="${statusClass /* xss-ok: üç sabit sınıf */} status-badge-compact">${statusText /* xss-ok: üç sabit metin */}</span>
@@ -1371,6 +1688,7 @@ window.showAdminTab = function (tabId) {
 // ── 🚀 DASHBOARD FILTER LOGIC ────────────────────────────────
 window._dashBarFilter = 'all'; // Bar chart depo filtresi (b1, b2, all)
 window._dashPieFilter = 'all'; // Pie chart görünüm filtresi (b1, b2, all, sarf)
+window._dashBarGroup = 'type'; // UX-1: Bar chart gruplama modu ('type' = Tür Bazlı, 'model' = Model Bazlı)
 
 /**
  * Bar grafiği (Demirbaş Stok Durumu) filtrelerini yönetir.
@@ -1383,6 +1701,25 @@ window.setBarChartFilter = function (filter, btn) {
     if (toggleGroup) {
         toggleGroup.querySelectorAll('.chart-toggle-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
+    }
+
+    window.renderDashboardStats();
+};
+
+/**
+ * UX-1: Bar grafiğinin gruplama modunu (Tür Bazlı | Model Bazlı) değiştirir.
+ */
+window.setBarGroupMode = function (mode, btn) {
+    window._dashBarGroup = mode === 'model' ? 'model' : 'type';
+
+    const toggleGroup = btn.closest('.chart-toggles');
+    if (toggleGroup) {
+        toggleGroup.querySelectorAll('.chart-toggle-btn').forEach(b => {
+            b.classList.remove('active');
+            b.setAttribute('aria-pressed', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
     }
 
     window.renderDashboardStats();
@@ -1433,18 +1770,11 @@ window.renderDashboardStats = function () {
     let barSource = (window._dashBarFilter === 'b1') ? b1 :
         (window._dashBarFilter === 'b2') ? b2 : allItems;
 
-    const productNames = [];
-    const productValues = [];
-
-    barSource.forEach(item => {
+    // UX-1: Tekil (adet=1) satırlar tek tek çubuk olmaz; seçili moda göre (Tür / Model) gruplanıp adetleri toplanır.
+    const barItems = barSource.filter(item =>
         // Pasifleri grafiklerden hariç tut
-        if (item.durumu === 'Pasif' || item.status === 'Pasif') return;
-
-        if (window._isDemirbasStrict(item)) {
-            productNames.push(item.ürün || "İsimsiz");
-            productValues.push(parseInt(item.adet) || 0);
-        }
-    });
+        !(item.durumu === 'Pasif' || item.status === 'Pasif') && window._isDemirbasStrict(item));
+    const barRows = groupStockBy(barItems, window._dashBarGroup);
 
     // 2. PIE CHART: Moduna göre Demirbaş veya Sarf dağılımını gösterir.
     const pieMode = window._dashPieFilter;
@@ -1480,110 +1810,39 @@ window.renderDashboardStats = function () {
 
 
 
-    // ── 1. BAR GRAFİK: Demirbaş Stok Durumu ──────────────────────────────────
-    const ctxBar = document.getElementById('dashDemirbasChart');
-    if (ctxBar) {
-        const labels = productNames.length ? productNames : ['Veri Yok'];
-        const values = productValues.length ? productValues : [0];
+    // ── 1. BAR GRAFİK: Demirbaş Stok Durumu (yatay, gruplu, kaydırılabilir) ──
+    renderStockBar(barRows);
 
-        if (window._dashCharts.bar) {
-            window._dashCharts.bar.data.labels = labels;
-            window._dashCharts.bar.data.datasets[0].data = values;
-            window._dashCharts.bar.data.datasets[0].label = 'Demirbaş';
-            window._dashCharts.bar.update('none');
-        } else {
-            window._dashCharts.bar = new Chart(ctxBar.getContext('2d'), {
-                type: 'bar',
-                data: {
-                    labels,
-                    datasets: [{
-                        label: 'Demirbaş',
-                        data: values,
-                        backgroundColor: '#3498db',
-                        borderRadius: 4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: { beginAtZero: true, grid: { display: false } },
-                        x: { grid: { display: false } }
-                    }
-                }
-            });
-        }
-    }
-
-    // ── 2. PIE GRAFİK: Envanter Dağılımı ─────────────────────────────────────
+    // ── 2. DOUGHNUT: Envanter Dağılımı (merkez toplam + özel lejant) ─────────
     if (typeof renderCustomWatchDashboard === 'function') {
         renderCustomWatchDashboard();
     }
 
-    const ctxPie = document.getElementById('dashSarfChart');
-    if (ctxPie) {
-        const labels = Object.keys(typeCounts).length ? Object.keys(typeCounts) : ['Veri Yok'];
-        const values = Object.values(typeCounts).length ? Object.values(typeCounts) : [0];
+    window._dashCharts = window._dashCharts || {};
+    const pieEntries = Object.entries(typeCounts).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+    window._dashCharts.pie = renderDonut({
+        canvasId: 'dashSarfChart',
+        labels: pieEntries.map(([name]) => name),
+        values: pieEntries.map(([, n]) => n),
+        palette: CHART_PALETTES.stock,
+    }) || window._dashCharts.pie;
 
-        if (window._dashCharts.pie) {
-            window._dashCharts.pie.data.labels = labels;
-            window._dashCharts.pie.data.datasets[0].data = values;
-            window._dashCharts.pie.update('none');
-        } else {
-            window._dashCharts.pie = new Chart(ctxPie.getContext('2d'), {
-                type: 'pie',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: values,
-                        backgroundColor: [
-                            '#2ecc71', '#e67e22', '#3498db', '#e74c3c',
-                            '#9b59b6', '#1abc9c', '#f1c40f', '#34495e'
-                        ],
-                        borderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                boxWidth: 12,
-                                padding: 15,
-                                font: { size: 11 }
-                            }
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function (context) {
-                                    const label = context.label || '';
-                                    const value = context.raw || 0;
-                                    return ` ${label}: ${value} Adet`;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    }
-
-    // ── 3. BAŞLIKLARI GÜNCELLE ───────────────────────────────────────────────
+    // ── 3. BAŞLIKLARI VE ALT BAŞLIKLARI GÜNCELLE ─────────────────────────────
     const barCard = document.getElementById('dashDemirbasChart')?.closest('.card');
     const pieCard = document.getElementById('dashSarfChart')?.closest('.card');
+    const scopeLabel = { b1: 'B1 deposu', b2: 'B2 deposu', all: 'tüm depolar' };
 
     if (barCard) {
         const h3 = barCard.querySelector('h3');
         if (h3) h3.innerText = '🛡️ Demirbaş Stok Durumu'; // Bar her zaman demirbaş
+        const sub = document.getElementById('dashBarSub');
+        if (sub) sub.textContent = `${window._dashBarGroup === 'model' ? 'Model' : 'Tür'} bazlı toplam adet · ${scopeLabel[window._dashBarFilter] || scopeLabel.all}`;
     }
     if (pieCard) {
         const h3 = pieCard.querySelector('h3');
         if (h3) h3.innerText = isSarfView ? '📦 Sarf Malzeme Dağılımı' : '🛡️ Demirbaş Dağılımı';
+        const sub = document.getElementById('dashPieSub');
+        if (sub) sub.textContent = `Tür bazlı toplam adet · ${isSarfView ? 'sarf malzemeler' : (scopeLabel[pieMode] || scopeLabel.all)}`;
     }
 };
 
@@ -1814,6 +2073,92 @@ document.addEventListener("DOMContentLoaded", () => {
     if (user && typeof updateNavbarUI === 'function') updateNavbarUI(user);
     startAdminStatusTimer();
 });
+
+// ── UX-2 · ADMIN BENTO TABLOLARI ─────────────────────────────────────────────
+// [WHY]: ~17 admin tablosu dar ekranda yatay taşıyor veya okunmuyordu; satırları basan modüller beş farklı dosyada.
+// [HOW]: Tek bir geliştirici hedef tablolara `admin-bento-table` sınıfını ekler, `thead th` metinlerinden her `td`'ye
+//        `data-label` ve rol (`data-bento`) yazar. CSS (admin-add-style.css) ≤768px'te her `tr`'yi bento karta çevirir.
+//        Renderer'lar tbody.innerHTML ile satırları yenileyince MutationObserver etiketleri tazeler.
+//        Observer yalnız { childList, subtree } izler; geliştirici yalnız öznitelik/sınıf yazar → sonsuz döngü olmaz.
+//        Satır içeriğine, data-action delegasyonlarına ve escapeHtml çıktılarına dokunulmaz (innerHTML yazılmaz).
+const BENTO_TABLE_SELECTORS = [
+    '#customWatchTable', '#criticalStockTable', '#tablePersonel', '#purchaseRequestTable',
+    '#quickExitDeskBody', '#ebysDocumentRows', '[data-execution-rows]',
+    '#adminPendingRequestsBody', '#adminReturnRequestsBody', '#serviceTableBody',
+    '#templateTableBody', '#locationTableBody', '#adminDefProductTypeTableBody',
+    '#adminDefUnitTableBody', '#adminDefTemplateTableBody', '#ebysDocumentTypesBody',
+];
+// Kart başlığı olacak sütun (ilk eşleşen); eşleşme yoksa ilk uygun hücre başlık olur.
+const BENTO_TITLE_LABEL = /^(ürün|cihaz|evrak|kayıt|belge|şablon|tür adı|birim|ad soyad|mahal)/i;
+
+function bentoHeaderLabels(table) {
+    const headRow = table.tHead?.rows[table.tHead.rows.length - 1];
+    const labels = [];
+    if (!headRow) return labels;
+    [...headRow.cells].forEach(th => {
+        const text = th.textContent.replace(/\s+/g, ' ').trim();
+        for (let i = 0; i < (th.colSpan || 1); i++) labels.push(text);
+    });
+    return labels;
+}
+
+function enhanceBentoTable(table) {
+    const labels = bentoHeaderLabels(table);
+    table.classList.add('admin-bento-table');
+    if (!table.hasAttribute('role')) table.setAttribute('role', 'table');
+    if (table.tHead && !table.tHead.hasAttribute('role')) table.tHead.setAttribute('role', 'rowgroup');
+    [...(table.tHead?.rows[0]?.cells || [])].forEach(th => { if (!th.hasAttribute('role')) th.setAttribute('role', 'columnheader'); });
+
+    [...table.tBodies].forEach(tbody => {
+        if (!tbody.hasAttribute('role')) tbody.setAttribute('role', 'rowgroup');
+        [...tbody.rows].forEach(row => {
+            if (!row.hasAttribute('role')) row.setAttribute('role', 'row');
+            const cells = [...row.cells];
+            let col = 0;
+            const info = cells.map(td => {
+                const label = td.colSpan > 1 ? '' : (labels[col] || '');
+                const norm = label.toLocaleLowerCase('tr-TR');
+                col += td.colSpan || 1;
+                let role = 'meta';
+                if (td.colSpan > 1) role = 'empty';
+                else if (td.querySelector('input[type="checkbox"]') && !td.textContent.trim()) role = 'select';
+                else if (norm.includes('işlem') || td.querySelector('.action-buttons')) role = 'actions';
+                else if (norm.includes('durum') || (td.children.length === 1 && td.firstElementChild.matches('.badge, .status-badge, [class*="badge"]') && td.textContent.trim() === td.firstElementChild.textContent.trim())) role = 'status';
+                return { td, label, norm, role };
+            });
+            // Başlık hücresi: ürün/kayıt adı sütunu, yoksa ilk "meta" hücre.
+            const titleCell = info.find(c => c.role === 'meta' && BENTO_TITLE_LABEL.test(c.norm)) || info.find(c => c.role === 'meta');
+            if (titleCell) titleCell.role = 'title';
+            info.forEach(({ td, label, role }) => {
+                if (!td.hasAttribute('role')) td.setAttribute('role', 'cell');
+                if (td.dataset.bento !== role) td.dataset.bento = role;
+                if (label && td.getAttribute('data-label') !== label) td.setAttribute('data-label', label);
+            });
+            row.classList.toggle('bento-empty-row', info.length === 1 && info[0].role === 'empty');
+        });
+    });
+}
+
+function initAdminBentoTables() {
+    const tables = new Set();
+    BENTO_TABLE_SELECTORS.forEach(selector => document.querySelectorAll(selector).forEach(node => {
+        const table = node.closest('table');
+        if (table) tables.add(table);
+    }));
+    tables.forEach(table => {
+        let queued = false;
+        const run = () => { queued = false; enhanceBentoTable(table); };
+        new MutationObserver(() => {
+            if (queued) return;
+            queued = true;
+            requestAnimationFrame(run);
+        }).observe(table, { childList: true, subtree: true });
+        enhanceBentoTable(table);
+    });
+}
+window.enhanceAdminBentoTables = initAdminBentoTables;
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAdminBentoTables, { once: true });
+else initAdminBentoTables();
 
 // 🕒 ADMIN STATUS TIMER
 window.lastSyncTimestamp = Date.now();

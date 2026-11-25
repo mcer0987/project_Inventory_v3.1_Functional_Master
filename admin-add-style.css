@@ -1209,6 +1209,191 @@ input:checked+.slider::before {
 }
 
 
+/* ── UX-1 · ANALİTİK GRAFİKLER ───────────────────────────────
+   WHY: Demirbaş stok barı yüzlerce ince çubukla okunmuyordu; pie grafikler kaba lejant kullanıyordu.
+   HOW: Yatay bar kaydırılabilir kapsayıcıda dinamik yükseklikle çizilir; doughnut'lar [grafik | özel lejant]
+        yerleşimindedir. Tüm renkler --color-* token'larından gelir, bu yüzden koyu temada da okunur. */
+.chart-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chart-sub {
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: var(--color-text-muted, #64748b);
+}
+
+.chart-toggle-set {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Yatay bar: kalem sayısı çoksa kapsayıcı dikey kayar, etiketler üst üste binmez */
+.chart-container.dash-hbar-host {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.dash-hbar-inner {
+  position: relative;
+  width: 100%;
+}
+
+.dash-hbar-inner #dashDemirbasChart {
+  height: 100% !important;
+  max-height: none !important;
+  min-width: 0;
+}
+
+/* Doughnut + özel HTML lejant */
+.dash-donut {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  height: 250px;
+  min-width: 0;
+}
+
+.chart-container .dash-donut {
+  height: 100%;
+}
+
+.dash-donut-canvas {
+  position: relative;
+  flex: 1 1 55%;
+  min-width: 0;
+  height: 100%;
+}
+
+.dash-donut-canvas #dashSarfChart,
+.dash-donut-canvas #exitDemirbasChart,
+.dash-donut-canvas #exitSarfChart {
+  height: 100% !important;
+  max-height: none !important;
+  min-width: 0;
+}
+
+.dash-donut-legend {
+  flex: 1 1 45%;
+  min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scrollbar-width: thin;
+}
+
+.dash-legend-item {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.dash-legend-item:hover,
+.dash-legend-item:focus-visible {
+  background: var(--color-surface-alt, #f1f5f9);
+}
+
+.dash-legend-item:focus-visible {
+  outline: 2px solid var(--accent, #3498db);
+  outline-offset: 1px;
+}
+
+.dash-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.dash-legend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.dash-legend-val {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-legend-pct {
+  min-width: 44px;
+  text-align: right;
+  color: var(--color-text-muted, #64748b);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-legend-item.is-hidden {
+  opacity: 0.5;
+}
+
+.dash-legend-item.is-hidden .dash-legend-name {
+  text-decoration: line-through;
+}
+
+.dash-legend-empty {
+  margin: 0;
+  font-size: 0.8rem;
+  text-align: left;
+  color: var(--color-text-muted, #64748b);
+}
+
+@media (max-width: 576px) {
+  .chart-toggle-set {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .dash-donut {
+    flex-direction: column;
+    align-items: stretch;
+    height: auto;
+    gap: 8px;
+  }
+
+  .chart-container .dash-donut {
+    height: auto;
+  }
+
+  .dash-donut-canvas {
+    flex: none;
+    width: 100%;
+    height: 210px;
+  }
+
+  .dash-donut-legend {
+    flex: none;
+    max-height: 190px;
+  }
+
+  /* Lejant grafiğin altına indiği için kapsayıcı yüksekliği içeriğe uyar */
+  .chart-container.dash-donut-host {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
 /* ── 15. WATCH / TAKİP KARTLARI ───────────────────────────── */
 .watch-grid {
   display: grid;
@@ -2409,4 +2594,371 @@ input:checked+.slider::before {
 
 #criticalStockTable td {
   vertical-align: middle;
+}
+
+/* ── UX-2 · ADMIN BENTO TABLOLARI ─────────────────────────────
+   WHY: Admin tabloları dar ekranda yatay taşıyor, uzun ürün adları tek satıra eziliyordu.
+   HOW: admin-dashboard.js (enhanceBentoTable) hedef tablolara `.admin-bento-table`, hücrelere `data-label` ve
+        `data-bento` (title | status | meta | actions | select | empty) yazar. Masaüstünde premium tablo,
+        ≤768px'te her <tr> bağımsız kart. Renkler --color-* token'larından gelir (açık/koyu otomatik).
+        Not: bu dosya style.css ve dark-theme.css'ten ÖNCE yüklenir; bu yüzden seçiciler `table.admin-bento-table`
+        ile güçlendirilmiş, koyu tema kuralları ayrıca yazılmıştır. */
+table.admin-bento-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+table.admin-bento-table thead th {
+  padding: 11px 14px;
+  background: var(--color-surface-alt, #f8fafc);
+  color: var(--color-text-muted, #64748b);
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+table.admin-bento-table thead th:first-child {
+  border-top-left-radius: 10px;
+}
+
+table.admin-bento-table thead th:last-child {
+  border-top-right-radius: 10px;
+}
+
+table.admin-bento-table tbody td {
+  padding: 12px 14px;
+  vertical-align: middle;
+  color: var(--color-text);
+  background: transparent;
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  overflow-wrap: anywhere;
+}
+
+table.admin-bento-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+table.admin-bento-table tbody tr:hover td {
+  background: var(--color-surface-alt, #f8fafc);
+}
+
+/* Koyu tema: dark-theme.css'teki .modern-table / .premium-table kurallarını (daha geç yüklenir) geçersiz kılar */
+[data-theme="dark"] table.admin-bento-table thead th {
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  border-color: var(--color-border-light);
+}
+
+[data-theme="dark"] table.admin-bento-table tbody tr,
+[data-theme="dark"] table.admin-bento-table tbody tr:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-theme="dark"] table.admin-bento-table tbody td {
+  background: transparent;
+  color: var(--color-text);
+  border-color: var(--color-border-light);
+}
+
+[data-theme="dark"] table.admin-bento-table tbody tr:hover td {
+  background: var(--color-surface-alt);
+}
+
+/* Kritik Stok Takibi: ad (2 satır), model mikro çipleri, mevcut / limit doluluk barı */
+.bento-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.bento-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 6px;
+}
+
+.bento-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 999px;
+  background: var(--color-surface-alt, #f1f5f9);
+  color: var(--color-text-muted, #64748b);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bento-chip.is-muted {
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.bento-chip.is-location {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.22);
+  color: var(--color-primary, #2563eb);
+}
+
+[data-theme="dark"] .bento-chip.is-location {
+  color: #93c5fd;
+}
+
+.bento-stock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 84px;
+}
+
+.bento-stock-line {
+  font-variant-numeric: tabular-nums;
+}
+
+.bento-stock-now {
+  font-size: 1.05rem;
+  color: var(--color-text);
+}
+
+.bento-stock-now.is-low {
+  color: #dc2626;
+}
+
+[data-theme="dark"] .bento-stock-now.is-low {
+  color: #f87171;
+}
+
+.stock-meter {
+  display: block;
+  width: 100%;
+  max-width: 96px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-border-light, #e2e8f0);
+  overflow: hidden;
+}
+
+.stock-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #f59e0b;
+  transition: width 0.3s ease;
+}
+
+.stock-meter.is-critical > i {
+  background: #f97316;
+}
+
+.stock-meter.is-danger {
+  background: rgba(239, 68, 68, 0.28);
+}
+
+.stock-meter.is-danger > i {
+  background: #ef4444;
+}
+
+#criticalStockTable th:nth-child(2) {
+  width: 130px !important;
+}
+
+#criticalStockTable th:nth-child(3) {
+  width: 140px !important;
+}
+
+/* ── Mobil (≤768px): her <tr> bağımsız bento kart ─────────────── */
+@media (max-width: 768px) {
+
+  table.admin-bento-table,
+  table.admin-bento-table tbody {
+    display: block;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100%;
+  }
+
+  /* Başlıklar görsel olarak gizlenir; etiketler hücrelerin data-label değerinden gelir */
+  table.admin-bento-table thead {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  table.admin-bento-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  table.admin-bento-table tbody tr {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--color-border-light, #e2e8f0);
+    border-radius: 14px;
+    background: var(--color-surface, #fff);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  }
+
+  [data-theme="dark"] table.admin-bento-table tbody tr,
+  [data-theme="dark"] table.admin-bento-table tbody tr:hover {
+    background: var(--color-surface);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  table.admin-bento-table tbody td {
+    display: block;
+    box-sizing: border-box;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100%;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    text-align: left !important;
+  }
+
+  table.admin-bento-table tbody tr:hover td,
+  [data-theme="dark"] table.admin-bento-table tbody tr:hover td {
+    background: transparent !important;
+  }
+
+  /* Üst satır: başlık + sağda durum rozeti */
+  table.admin-bento-table tbody td[data-bento="title"] {
+    order: 1;
+    flex: 1 1 calc(100% - 110px);
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+
+  table.admin-bento-table tbody td[data-bento="status"] {
+    order: 2;
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  /* Seçim kutusu kartın sağ üst köşesine oturur; başlık altına girmez */
+  table.admin-bento-table tbody td[data-bento="select"] {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+  }
+
+  table.admin-bento-table tbody tr:has(td[data-bento="select"]) td[data-bento="title"] {
+    padding-right: 32px !important;
+  }
+
+  /* Orta: konum / model / adet / tarih çipleri (2 sütun) */
+  table.admin-bento-table tbody td[data-bento="meta"] {
+    order: 3;
+    flex: 1 1 calc(50% - 5px);
+    padding: 8px 10px !important;
+    border-radius: 10px;
+    background: var(--color-surface-alt, #f1f5f9) !important;
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+  }
+
+  table.admin-bento-table tbody td[data-bento="meta"]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--color-text-muted, #64748b);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  /* Alt: parmak dostu aksiyon şeridi (tam genişlik, ≥38px) */
+  table.admin-bento-table tbody td[data-bento="actions"] {
+    order: 4;
+    display: flex;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 10px !important;
+    border-top: 1px dashed var(--color-border-light, #e2e8f0) !important;
+  }
+
+  table.admin-bento-table tbody td[data-bento="actions"] > .action-buttons {
+    display: flex !important;
+    flex: 1 1 100%;
+    flex-wrap: wrap !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    width: 100%;
+    white-space: normal !important;
+  }
+
+  table.admin-bento-table tbody td[data-bento="actions"] .btn-action,
+  table.admin-bento-table tbody td[data-bento="actions"] .p-btn-icon {
+    flex: 0 0 auto !important;
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 38px;
+    min-height: 38px;
+    font-size: 14px;
+  }
+
+  table.admin-bento-table tbody td[data-bento="actions"] > .btn,
+  table.admin-bento-table tbody td[data-bento="actions"] > button {
+    flex: 1 1 auto;
+    min-width: 38px;
+    min-height: 38px;
+  }
+
+  /* Tek hücreli boş liste satırı ("Henüz kayıt yok"): kartın tamamını kaplar */
+  table.admin-bento-table tbody td[data-bento="empty"] {
+    order: 0;
+    flex: 1 1 100%;
+    grid-column: 1 / -1;
+    padding: 10px 0 !important;
+    text-align: center !important;
+  }
+
+  table.admin-bento-table tbody tr.bento-empty-row {
+    justify-content: center;
+    border-style: dashed;
+    box-shadow: none;
+  }
+
+  .bento-stock {
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  .stock-meter {
+    max-width: 100%;
+  }
 }

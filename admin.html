@@ -508,12 +508,24 @@
 
                 <div class="card" style="flex:1; min-width:300px;">
                     <div class="card-header">
-                        <h3>🛡️ Demirbaş Stok Durumu</h3>
-                        <div class="chart-toggles">
-                            <button onclick="setBarChartFilter('b1', this)" class="chart-toggle-btn">B1</button>
-                            <button onclick="setBarChartFilter('b2', this)" class="chart-toggle-btn">B2</button>
-                            <button onclick="setBarChartFilter('all', this)"
-                                class="chart-toggle-btn active">Toplu</button>
+                        <div class="chart-head-text">
+                            <h3>🛡️ Demirbaş Stok Durumu</h3>
+                            <small class="chart-sub" id="dashBarSub">Tür bazlı toplam adet</small>
+                        </div>
+                        <div class="chart-toggle-set">
+                            <!-- UX-1: gruplama çipi (Tür Bazlı | Model Bazlı) -->
+                            <div class="chart-toggles" role="group" aria-label="Gruplama">
+                                <button type="button" onclick="setBarGroupMode('type', this)"
+                                    class="chart-toggle-btn active" aria-pressed="true">Tür Bazlı</button>
+                                <button type="button" onclick="setBarGroupMode('model', this)"
+                                    class="chart-toggle-btn" aria-pressed="false">Model Bazlı</button>
+                            </div>
+                            <div class="chart-toggles">
+                                <button onclick="setBarChartFilter('b1', this)" class="chart-toggle-btn">B1</button>
+                                <button onclick="setBarChartFilter('b2', this)" class="chart-toggle-btn">B2</button>
+                                <button onclick="setBarChartFilter('all', this)"
+                                    class="chart-toggle-btn active">Toplu</button>
+                            </div>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -523,7 +535,10 @@
 
                 <div class="card" style="flex:1; min-width:300px;">
                     <div class="card-header">
-                        <h3>📦 Envanter Dağılımı (Sarf / Demirbaş)</h3>
+                        <div class="chart-head-text">
+                            <h3>📦 Envanter Dağılımı (Sarf / Demirbaş)</h3>
+                            <small class="chart-sub" id="dashPieSub">Tür bazlı toplam adet</small>
+                        </div>
                         <div class="chart-toggles">
                             <button onclick="setPieChartFilter('b1', this)" class="chart-toggle-btn">B1</button>
                             <button onclick="setPieChartFilter('b2', this)" class="chart-toggle-btn">B2</button>
@@ -844,8 +859,11 @@
                                     style="width: 34px; height: 34px; border-radius: 8px; background: rgba(59, 130, 246, 0.1); color: var(--color-primary, #3b82f6); display: flex; align-items: center; justify-content: center; font-size: 14px;">
                                     <i class="fas fa-shield-alt"></i>
                                 </div>
-                                <h3 class="m-0 fw-bold" style="font-size: 0.95rem; color: var(--color-text);">🛡️
-                                    Demirbaş Çıkış Analizi</h3>
+                                <div class="chart-head-text">
+                                    <h3 class="m-0 fw-bold" style="font-size: 0.95rem; color: var(--color-text);">🛡️
+                                        Demirbaş Çıkış Analizi</h3>
+                                    <small class="chart-sub">Çıkış yapılan demirbaşların türe göre adedi</small>
+                                </div>
                             </div>
                         </div>
                         <div class="p-4 text-center"
@@ -863,8 +881,11 @@
                                     style="width: 34px; height: 34px; border-radius: 8px; background: rgba(16, 185, 129, 0.1); color: #10b981; display: flex; align-items: center; justify-content: center; font-size: 14px;">
                                     <i class="fas fa-boxes-stacked"></i>
                                 </div>
-                                <h3 class="m-0 fw-bold" style="font-size: 0.95rem; color: var(--color-text);">📦 Sarf
-                                    Çevre Çıkış Analizi</h3>
+                                <div class="chart-head-text">
+                                    <h3 class="m-0 fw-bold" style="font-size: 0.95rem; color: var(--color-text);">📦 Sarf
+                                        Çevre Çıkış Analizi</h3>
+                                    <small class="chart-sub">Çıkış yapılan sarf malzemelerin türe göre adedi</small>
+                                </div>
                             </div>
                         </div>
                         <div class="p-4 text-center"
