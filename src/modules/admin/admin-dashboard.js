@@ -148,9 +148,9 @@ window.LoadingCoordinator = {
         // 4. GRAFİKLERİ VE TABLOLARI TEKRAR TETİKLE (Tam görünürlükte)
         setTimeout(() => {
             window.dispatchEvent(new Event('resize'));
-            if (typeof window.renderDashboardStats === 'function') window.renderDashboardStats();
-            if (typeof window.renderCriticalStockTable === 'function') window.renderCriticalStockTable();
-            if (typeof window.renderAdminRequestTable === 'function') window.renderAdminRequestTable();
+            try { if (typeof window.renderDashboardStats === 'function') window.renderDashboardStats(); } catch (e) { console.error('[reveal] renderDashboardStats:', e); }
+            try { if (typeof window.renderCriticalStockTable === 'function') window.renderCriticalStockTable(); } catch (e) { console.error('[reveal] renderCriticalStockTable:', e); }
+            try { if (typeof window.renderAdminRequestTable === 'function') window.renderAdminRequestTable(); } catch (e) { console.error('[reveal] renderAdminRequestTable:', e); }
         }, 800); // Reveal başladıktan 800ms sonra (Animasyon ortasında)
     }
 };
@@ -1070,7 +1070,7 @@ function renderStockBar(rows) {
                     backgroundColor: ctx => {
                         const bar = ctx.element;
                         const t = chartTheme();
-                        if (!bar || Math.abs(bar.x - bar.base) < 1) return t.barTo;
+                        if (!bar || !Number.isFinite(bar.x) || !Number.isFinite(bar.base) || Math.abs(bar.x - bar.base) < 1) return t.barTo;
                         const g = ctx.chart.ctx.createLinearGradient(bar.base, 0, bar.x, 0);
                         g.addColorStop(0, t.barFrom);
                         g.addColorStop(1, t.barTo);
@@ -1641,15 +1641,15 @@ window.showAdminTab = function (tabId) {
     if (tabId === 'dashboard-content') {
         requestAnimationFrame(() => {
             setTimeout(() => {
-                if (typeof window.renderDashboardStats === 'function') window.renderDashboardStats();
-                if (typeof window.renderCriticalStockTable === 'function') window.renderCriticalStockTable();
+                try { if (typeof window.renderDashboardStats === 'function') window.renderDashboardStats(); } catch (e) { console.error('[showAdminTab] renderDashboardStats:', e); }
+                try { if (typeof window.renderCriticalStockTable === 'function') window.renderCriticalStockTable(); } catch (e) { console.error('[showAdminTab] renderCriticalStockTable:', e); }
             }, 0);
         });
     } else if (tabId === 'productTypeSettings') {
         requestAnimationFrame(() => {
             setTimeout(() => {
-                if (typeof window.renderExitCharts === 'function') window.renderExitCharts();
-                if (typeof window.renderQuickExitDesk === 'function') window.renderQuickExitDesk();
+                try { if (typeof window.renderExitCharts === 'function') window.renderExitCharts(); } catch (e) { console.error('[showAdminTab] renderExitCharts:', e); }
+                try { if (typeof window.renderQuickExitDesk === 'function') window.renderQuickExitDesk(); } catch (e) { console.error('[showAdminTab] renderQuickExitDesk:', e); }
             }, 0);
         });
     } else if (tabId === 'definitionsTab') {
@@ -1696,8 +1696,8 @@ window._dashBarGroup = 'type'; // UX-1: Bar chart gruplama modu ('type' = Tür B
 window.setBarChartFilter = function (filter, btn) {
     window._dashBarFilter = filter;
 
-    // UI Güncelleme: Sadece Bar chart kartındaki butonları güncelle
-    const toggleGroup = btn.closest('.chart-toggles');
+    // UI Güncelleme: Yalnız depo grubu butonlarını güncelle
+    const toggleGroup = btn.closest('[data-toggle-group]') || btn.closest('.chart-toggles');
     if (toggleGroup) {
         toggleGroup.querySelectorAll('.chart-toggle-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
@@ -1712,7 +1712,7 @@ window.setBarChartFilter = function (filter, btn) {
 window.setBarGroupMode = function (mode, btn) {
     window._dashBarGroup = mode === 'model' ? 'model' : 'type';
 
-    const toggleGroup = btn.closest('.chart-toggles');
+    const toggleGroup = btn.closest('[data-toggle-group]') || btn.closest('.chart-toggles');
     if (toggleGroup) {
         toggleGroup.querySelectorAll('.chart-toggle-btn').forEach(b => {
             b.classList.remove('active');

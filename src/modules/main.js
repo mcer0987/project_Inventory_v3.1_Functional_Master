@@ -15,6 +15,7 @@ import { TableEngine } from '../ui/table-engine.js';
 import { InventoryLogic } from './inventory-logic.js';
 import { UIComponents } from '../ui/ui-components.js';      // Phase 5 — STRICTLY after InventoryLogic
 import { SelfApproval } from './self-approval-reporter.js';
+import '../services/brand-settings-service.js';             // v3.8 UX-5: marka ayarı senkronu (oturum açılınca başlar)
 
 // Assign namespaces
 window.AppModules.Utils        = Utils;

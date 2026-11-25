@@ -635,8 +635,23 @@ service cloud.firestore {
         && d.get('jobTitle', '').size() <= 160 && noTag(d.get('jobTitle', ''))
         && (d.get('unitId', '') == '' || existsAfter(unitPath(r, d.unitId)));
     }
+    // v3.8 UX-5: Marka ayarı (system_config/items/brand_settings). Okuma genel kuralla member(root); yazma yalnız yönetici.
+    //        Kapalı alan listesi (özel logo URL'si / SVG yok), amblem ve efekt beyaz listesi, kısa ve etiketsiz metin.
+    //        updatedAt sunucu zamanı, updatedBy yazanın uid'i olmak zorunda (başkası adına yazılamaz).
+    function brandSettingsOk(d) {
+      return d.keys().hasOnly(['emblemId', 'title', 'subtitle', 'effect', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['emblemId', 'title', 'subtitle', 'effect', 'updatedAt', 'updatedBy'])
+        && d.emblemId in ['cube', 'shield', 'crest', 'pulse-node']
+        && d.effect in ['shimmer', 'glow', 'pulse', 'none']
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 32 && noTag(d.title)
+        && d.subtitle is string && d.subtitle.size() <= 40 && noTag(d.subtitle)
+        && d.updatedAt == request.time
+        && d.updatedBy is string && d.updatedBy == request.auth.uid;
+    }
     function definitionOk(r, c, id, d) {
-      return c == 'units' ? unitDefinitionOk(r, id, d) : (c == 'personel' ? personDefinitionOk(r, id, d) : true);
+      return c == 'units' ? unitDefinitionOk(r, id, d)
+        : (c == 'personel' ? personDefinitionOk(r, id, d)
+          : (c == 'system_config' && id == 'brand_settings' ? brandSettingsOk(d) : true));
     }
     function definitionLinkOk(r, c, d, old) {
       return c == 'units' ? (d.get('parentUnitId', '') == ''

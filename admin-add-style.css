@@ -1233,6 +1233,36 @@ input:checked+.slider::before {
   gap: 8px;
 }
 
+.chart-toggles-unified {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px;
+}
+
+.chart-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.chart-toggles-unified .chart-toggle-btn {
+  padding: 5px 10px;
+  font-size: 0.7rem;
+}
+
+.chart-toggle-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: rgba(100, 116, 139, 0.28);
+}
+
+[data-theme="dark"] .chart-toggle-sep {
+  background: rgba(148, 163, 184, 0.25);
+}
+
 /* Yatay bar: kalem sayısı çoksa kapsayıcı dikey kayar, etiketler üst üste binmez */
 .chart-container.dash-hbar-host {
   overflow-x: hidden;
@@ -1285,6 +1315,7 @@ input:checked+.slider::before {
   min-width: 0;
   max-height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1297,6 +1328,8 @@ input:checked+.slider::before {
   align-items: center;
   gap: 8px;
   width: 100%;
+  margin: 0;
+  box-sizing: border-box;
   padding: 6px 8px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -2961,4 +2994,24 @@ table.admin-bento-table tbody tr:hover td {
   .stock-meter {
     max-width: 100%;
   }
+}
+
+/* ── Global button padding sıfırlama · Modal kapatma butonları ────────────────── */
+/* WHY: style.css:739 global button { padding: 6px 12px; margin: 0 4px } kuralı
+        kare kapatma butonlarında "×" / ikonu sağ alta kaydırıyordu. */
+.shelf-dialog-close,
+.app-modal-close,
+.modal-close-btn,
+.uap-close-btn,
+.close-btn-circle,
+.admin-modal .btn-close,
+.modern-modal .btn-close,
+.modal-header .btn-close {
+  padding: 0 !important;
+  margin: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+  flex-shrink: 0;
 }

@@ -71,7 +71,10 @@ const expected = f => /^(index|admin|404|verify)\.html$/.test(f) || /^[^/]+\.(cs
 //        İP-6 içe/dışa aktarma (1).
 // v3.7 · EBYS H7 yazışma takibi: yazışma şeması, servisi ve arayüzü (3).
 // İP-7 · Yönetici yetkisi (Aşama A): saf çekirdek admin-grants.js, servis admin-grant-service.js, panel admin-grant-panel.js (3).
-const EXPECTED_COUNT = 132;
+// v3.7 · İP-10: Depo/çoklu raf sayım ve fark motoru src/utils/shelf-count-session.js (1).
+// v3.8 · UX-5: kurumsal logo stüdyosu — saf çekirdek + arayüz src/ui/brand-logo.js ve Firestore servisi
+//        src/services/brand-settings-service.js (2).
+const EXPECTED_COUNT = 135;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

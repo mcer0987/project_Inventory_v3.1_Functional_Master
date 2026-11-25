@@ -96,23 +96,40 @@
         touch-action: manipulation;
     }
 
+    /* v3.8 UX-5 · Unified Glass Pill Dock mobilde logonun altında tam genişlikli kapsül olur */
     .inventory-screen > .header #userDisplay {
         width: 100%;
         min-width: 0;
         max-width: 100%;
         margin: 0 !important;
-        padding: 0 !important;
-        gap: 6px !important;
+        padding: 4px !important;
+        gap: 4px !important;
         order: 3;
+        justify-content: space-between;
         box-sizing: border-box;
+    }
+
+    .inventory-screen > .header .nav-dock-user {
+        min-width: 0;
+        flex: 1 1 auto;
     }
 
     .inventory-screen > .header .user-display-name {
         min-width: 0;
+        max-width: none;
         flex: 1 1 auto;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .inventory-screen > .header .nav-dock-actions {
+        flex: 0 0 auto;
+    }
+
+    .inventory-screen > .header .nav-dock .nav-dock-sep {
+        flex: 0 0 1px;
+        margin-inline: 2px;
     }
 
     .inventory-screen > .header .user-tasks-button {
@@ -139,7 +156,7 @@
         flex: 0 0 44px;
         justify-content: center;
         gap: 0;
-        border-radius: 12px !important;
+        border-radius: 999px !important; /* UX-5: cam kapsül dock ile uyumlu */
         touch-action: manipulation;
     }
 
@@ -369,13 +386,18 @@
     }
 }
 
-@media (max-width: 460px) {
+/* UX-5: dock'ta etiketler yalnız ≥601px'te görünür; daha dar ekranda ikon-only 44px daireler (taşma yok) */
+@media (max-width: 600px) {
     .inventory-screen > .header .user-action-button > span {
         display: none;
     }
+
+    .inventory-screen > .header .nav-dock .user-action-button {
+        border-radius: 999px !important;
+    }
 }
 
-@media (min-width: 461px) and (max-width: 768px) {
+@media (min-width: 601px) and (max-width: 768px) {
     .inventory-screen > .header .user-action-button {
         width: auto !important;
         min-width: 44px;

@@ -160,18 +160,14 @@ export const updateNavbarUI = function (user) {
     let userDisplay = document.getElementById('userDisplay');
     if (userDisplay) userDisplay.remove();
 
+    // v3.8 UX-5 · Unified Glass Pill Dock: tüm kullanıcı alanı tek cam kapsül (stil: style.css › .nav-dock).
+    //        Tüm mevcut ID/sınıf/onclick kancaları (#userDisplay, #nav-todo-badge, #nav-todo-count, .user-display-name,
+    //        .btn-admin-panel, .user-logout-button) ve onNavbarRendered olayı korunur.
     userDisplay = document.createElement('div');
     userDisplay.id = 'userDisplay';
+    userDisplay.className = 'nav-dock';
     userDisplay.setAttribute('role', 'group');
     userDisplay.setAttribute('aria-label', 'Kullanıcı işlemleri');
-    userDisplay.style.cssText = `
-        margin-left: auto; 
-        display: flex; 
-        align-items: center; 
-        gap: 10px; 
-        padding-right: 15px;
-        z-index: 999;
-    `;
 
     header.appendChild(userDisplay);
 
@@ -179,24 +175,32 @@ export const updateNavbarUI = function (user) {
     const adminButtonHTML = isAdmin ? `
         <button type="button" class="btn-admin-panel user-action-button user-admin-button"
                 aria-label="Yönetici paneline geç" title="Yönetici paneline geç"
-                onclick="window.location.href='admin.html'" 
-                style="padding: 6px 12px; width: auto; margin-top: 0; font-size: 12px; background: #3498db;">
+                onclick="window.location.href='admin.html'">
                 <i class="fas fa-chart-column" aria-hidden="true"></i><span>Panele Geç</span>
         </button>
     ` : '';
 
+    // Avatar çipi: ad ve soyadın baş harfleri (tek sözcükse tek harf); metin escapeHtml'den geçer.
+    const initialsOf = String(user.name || '').trim().split(/\s+/).filter(Boolean);
+    const initials = (initialsOf.length > 1
+        ? Array.from(initialsOf[0])[0] + Array.from(initialsOf[initialsOf.length - 1])[0]
+        : Array.from(initialsOf[0] || '?')[0]).toLocaleUpperCase('tr-TR');
+
     userDisplay.innerHTML = `
         <button type="button" class="todo-nav-badge-container user-tasks-button" id="nav-todo-badge"
              aria-label="Görevlerim: bekleyen görevleri göster" title="Bekleyen Görevleriniz"
-             onclick="if(typeof switchTab === 'function') switchTab('myTasksTab')" 
-             style="margin-right: 10px;">
+             onclick="if(typeof switchTab === 'function') switchTab('myTasksTab')">
             <i class="fas fa-bell todo-nav-icon" aria-hidden="true"></i>
             <span class="todo-nav-badge badge-hidden" id="nav-todo-count">0</span>
         </button>
-        <span class="user-display-name" title="${escapeHtml(user.name)}">👤 ${escapeHtml(user.name)}</span>
-        ${adminButtonHTML}
-        <button type="button" class="user-action-button user-logout-button" aria-label="Oturumu kapat" title="Oturumu kapat" onclick="handleLogout()"
-                style="background: #e74c3c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+        <span class="nav-dock-sep" aria-hidden="true"></span>
+        <span class="nav-dock-user">
+            <span class="nav-dock-avatar" aria-hidden="true">${escapeHtml(initials)}</span>
+            <span class="user-display-name" title="${escapeHtml(user.name)}">${escapeHtml(user.name)}</span>
+        </span>
+        <span class="nav-dock-actions">${adminButtonHTML}</span>
+        <span class="nav-dock-sep" aria-hidden="true"></span>
+        <button type="button" class="user-action-button user-logout-button" aria-label="Oturumu kapat" title="Oturumu kapat" onclick="handleLogout()">
                 <i class="fas fa-right-from-bracket" aria-hidden="true"></i><span>Çıkış Yap</span>
         </button>
     `;

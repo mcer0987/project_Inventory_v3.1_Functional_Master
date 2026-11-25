@@ -17,6 +17,7 @@ import './inventory-no-change.js';     // v3.6: Operasyon Merkezi › Envanter N
 import '../../ui/ebys-catalog-ui.js';  // v3.4 EBYS H6b: Tanımlar › Kurum Künyesi, Dosya Planı, Üst Yazı Şablonları
 import '../self-approval-reporter.js';   // J4: Güvenlik Raporu iki sayfada (EBYS-05)
 import '../../services/admin-grant-service.js';   // İP-7: VIP › Yönetici Yetkileri (ana yöneticinin verdiği yetki)
+import '../../services/brand-settings-service.js'; // v3.8 UX-5: Marka & Logo Ayarları (system_config/items/brand_settings)
 
 window.AppModules = window.AppModules || {};
 

@@ -1677,3 +1677,109 @@ body *::after {
         color: #7dd3fc;
     }
 }
+
+/* =============================================================================
+   v3.8 · UX-4 — B3 BUTON AİLESİ & SATIRA TIKLA-SEÇ (SPACE TITANIUM DARK)
+   ============================================================================= */
+[data-theme="dark"] .b3-action-btn.btn-action-outline {
+    background: var(--color-surface-elevated, #1b2434);
+    color: #e2e8f0 !important;
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="dark"] .b3-action-btn.btn-action-outline:hover {
+    background: #243146;
+    border-color: rgba(96, 165, 250, 0.4);
+    color: #93c5fd !important;
+}
+
+[data-theme="dark"] .selection-context-pill {
+    background: rgba(59, 130, 246, 0.16);
+    border-color: rgba(96, 165, 250, 0.35);
+    color: #93c5fd;
+}
+
+[data-theme="dark"] .sel-pill-btn {
+    background: rgba(15, 23, 42, 0.65);
+    border-color: rgba(96, 165, 250, 0.3);
+    color: #e2e8f0;
+}
+
+[data-theme="dark"] .sel-pill-btn:hover {
+    background: rgba(59, 130, 246, 0.28);
+}
+
+[data-theme="dark"] tr.selectable-row:hover > td {
+    background-color: rgba(96, 165, 250, 0.08);
+}
+
+[data-theme="dark"] tr.selected-row > td {
+    background: rgba(59, 130, 246, 0.16) !important;
+}
+
+[data-theme="dark"] tr.selected-row > td:first-child {
+    box-shadow: inset 3px 0 0 #60a5fa;
+}
+
+[data-theme="dark"] tr.selectable-row.selected-row > td:first-child::before {
+    background: #3b82f6;
+    color: #ffffff;
+    box-shadow: 0 1px 4px rgba(59, 130, 246, 0.5);
+}
+
+[data-theme="dark"] .b3-card-item.selectable-row.selected-row {
+    border-color: #60a5fa;
+    background: rgba(59, 130, 246, 0.14);
+    box-shadow: inset 3px 0 0 #60a5fa, 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+
+/* =============================================================================
+   v3.8 · UX-5 — Logo Stüdyosu ve Glass Pill Dock · Space Titanium ince ayarları
+   (renkler çoğunlukla --color-* token'larından gelir; burada yalnız tema farkı olan yerler)
+   ============================================================================= */
+[data-theme="dark"] .header .nav-dock {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .nav-dock .nav-dock-sep {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .brand-studio {
+    border-color: var(--color-border);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .brand-studio-overlay {
+    background: rgba(2, 6, 23, 0.72);
+}
+
+[data-theme="dark"] .brand-studio-preview,
+[data-theme="dark"] .brand-close,
+[data-theme="dark"] .brand-btn {
+    background: var(--color-surface-alt);
+}
+
+[data-theme="dark"] .brand-btn.primary {
+    background: var(--color-primary);
+}
+
+[data-theme="dark"] .brand-btn.ghost {
+    background: transparent;
+}
+
+[data-theme="dark"] .brand-choice:has(input:checked) {
+    background: rgba(96, 165, 250, 0.16);
+}
+
+[data-theme="dark"] .brand-studio-status.is-error {
+    color: #f87171;
+}
+
+[data-theme="dark"] .brand-fx-glow .brand-emblem {
+    box-shadow: 0 0 16px 3px rgba(96, 165, 250, 0.45);
+}

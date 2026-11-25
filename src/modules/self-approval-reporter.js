@@ -319,10 +319,13 @@ window.addEventListener('onNavbarRendered', () => {
     reportBtn.setAttribute('aria-label', 'Güvenlik raporunu aç');
     reportBtn.title = 'Güvenlik Raporu';
     reportBtn.innerHTML = '<i class="fas fa-shield-alt" aria-hidden="true"></i><span>Güvenlik Raporu</span>';
-    reportBtn.style.cssText = 'padding: 6px 12px; width: auto; margin-top: 0; font-size: 12px; background: #e67e22; border: none; border-radius: 4px; color: white; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;';
+    // v3.8 UX-5: görünüm .nav-dock .user-security-button sınıfından gelir (satır içi stil yok).
     reportBtn.onclick = () => showReportModal();
+    // Unified Glass Pill Dock: yönetici eylemleri alanına (Panele Geç yanına) girer; eski yerleşim için geri dönüş korunur.
+    const dockActions = userDisplay.querySelector('.nav-dock-actions');
     const logoutBtn = userDisplay.querySelector('button[onclick="handleLogout()"]');
-    if (logoutBtn) userDisplay.insertBefore(reportBtn, logoutBtn);
+    if (dockActions) dockActions.appendChild(reportBtn);
+    else if (logoutBtn) userDisplay.insertBefore(reportBtn, logoutBtn);
     else userDisplay.appendChild(reportBtn);
 });
 

@@ -43,6 +43,7 @@
     <script src="src/utils/html.js"></script>
     <script src="src/utils/shelf-capacity.js"></script>
     <script src="src/utils/schema.js"></script>
+    <script src="src/utils/shelf-count-session.js"></script>
     <script src="src/utils/ebys-definitions-schema.js"></script>
     <script src="src/ui/ebys-definitions-ui.js"></script>
     <script src="src/utils/stock-import.js"></script>
@@ -319,6 +320,12 @@
             <i class="fas fa-project-diagram"></i>
             <span>Sistem Kılavuzu</span>
         </div>
+        <!-- v3.8 UX-5: Marka & Logo Ayarları — en altta minimal ayar düğmesi (src/ui/brand-logo.js) -->
+        <button type="button" class="nav-item brand-studio-nav" id="brandStudioOpen" aria-haspopup="dialog"
+            title="Logo, marka metni ve efekti seçin; değişiklik tüm kullanıcılarda görünür">
+            <i class="fas fa-sliders" aria-hidden="true"></i>
+            <span>Marka &amp; Logo Ayarları</span>
+        </button>
     </div>
 
     <div class="main-content admin-content-hidden">
@@ -512,15 +519,16 @@
                             <h3>🛡️ Demirbaş Stok Durumu</h3>
                             <small class="chart-sub" id="dashBarSub">Tür bazlı toplam adet</small>
                         </div>
-                        <div class="chart-toggle-set">
-                            <!-- UX-1: gruplama çipi (Tür Bazlı | Model Bazlı) -->
-                            <div class="chart-toggles" role="group" aria-label="Gruplama">
+                        <!-- UX-1: tek satır birleşik minimalist kontrol çubuğu -->
+                        <div class="chart-toggles chart-toggles-unified">
+                            <div class="chart-toggle-group" data-toggle-group="mode" role="group" aria-label="Gruplama">
                                 <button type="button" onclick="setBarGroupMode('type', this)"
-                                    class="chart-toggle-btn active" aria-pressed="true">Tür Bazlı</button>
+                                    class="chart-toggle-btn active" aria-pressed="true">Tür</button>
                                 <button type="button" onclick="setBarGroupMode('model', this)"
-                                    class="chart-toggle-btn" aria-pressed="false">Model Bazlı</button>
+                                    class="chart-toggle-btn" aria-pressed="false">Model</button>
                             </div>
-                            <div class="chart-toggles">
+                            <span class="chart-toggle-sep" aria-hidden="true"></span>
+                            <div class="chart-toggle-group" data-toggle-group="depot" role="group" aria-label="Depo">
                                 <button onclick="setBarChartFilter('b1', this)" class="chart-toggle-btn">B1</button>
                                 <button onclick="setBarChartFilter('b2', this)" class="chart-toggle-btn">B2</button>
                                 <button onclick="setBarChartFilter('all', this)"
@@ -1893,9 +1901,9 @@
                         </ul>
                         <h3>Sayım</h3>
                         <ul>
-                            <li><strong>Sayıma al:</strong> gerekçe yazarak rafı kilitleyin. Raftaki ürünler B1/B2 listelerinde, aramalarda ve raporlarda gizlenir; personel bu ürünleri görmez.</li>
+                            <li><strong>Sayıma al:</strong> tek rafı veya araç çubuğundaki "Depoyu / Rafları Sayıma Al" ile seçili rafları ya da tüm depoyu gerekçe yazarak kilitleyin. Kilitli raftaki ürünler B1/B2 listelerinde, aramalarda ve raporlarda gizlenir; personel bu ürünleri görmez.</li>
                             <li>Sayım sürerken bu ürünlerden çıkış, zimmet, talep, transfer, servis ve iade ile stok ekleme yapılamaz; rafa yeni ürün yerleştirilemez.</li>
-                            <li><strong>Sayım düzelt:</strong> paneldeki her ürün için saydığınız adedi girin. Eski ve yeni adet denetim kaydına yazılır.</li>
+                            <li><strong>Sayım Fark Masası:</strong> aktif sayım varken "Sayım Fark Masası" ile tüm kilitli kalemlerin sayılan adetlerini tek ekranda girin; Eksik / Fazla / Tam filtreleriyle farkları onaylayıp stoğa işleyin ve resmi PDF / Excel tutanağı indirin.</li>
                             <li><strong>Sayımı bitir:</strong> ürünler listelere döner ve yeniden hareket edebilir. Sayımdaki raf kaldırılamaz ve adı değiştirilemez.</li>
                         </ul>
                     </div>
@@ -1966,6 +1974,14 @@
             </div>
             <div class="shelf-matrix-manage" role="group" aria-label="Raf yönetimi">
                 <button type="button" id="shelfAddBtn" class="shelf-add-btn"><i class="fas fa-plus" aria-hidden="true"></i> Raf Ekle</button>
+                <button type="button" id="shelfBatchCountBtn" class="shelf-count-lock-btn"
+                    title="Seçili rafları veya aktif deponun tamamını sayım kilidine alır">
+                    🔒 Depoyu / Rafları Sayıma Al
+                </button>
+                <button type="button" id="shelfCountDeskBtn" class="shelf-count-desk-btn" hidden
+                    title="Sayımdaki rafların eksik/fazla farklarını inceleyin, stoğa işleyin ve resmi tutanak alın">
+                    📋 Sayım Fark Masası <span id="shelfCountDeskBadge" class="shelf-count-desk-badge">0</span>
+                </button>
                 <div class="shelf-filter-chips" role="group" aria-label="Raf filtresi">
                     <button type="button" class="shelf-filter-chip" data-shelf-filter="all" aria-pressed="true">Tüm raflar</button>
                     <button type="button" class="shelf-filter-chip" data-shelf-filter="empty" aria-pressed="false">Boş raflar</button>
@@ -3181,6 +3197,7 @@
     <script src="src/utils/purchase-money.js"></script>
     <script src="src/ui/purchase-items-ui.js"></script>
     <script src="src/modules/admin/admin-system-control.js"></script>
+    <script src="src/ui/brand-logo.js"></script>
     <script src="src/ui/admin-grant-panel.js"></script>
     <script src="src/utils/return-request-schema.js"></script>
     <script src="src/modules/return-requests.js"></script>
