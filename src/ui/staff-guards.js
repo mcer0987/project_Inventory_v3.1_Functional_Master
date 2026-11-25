@@ -16,7 +16,7 @@
         if (!document.body) return;
         const readonly = loggedIn() && !isAdmin();
         document.body.classList.toggle('staff-readonly', readonly);
-        document.querySelectorAll('.uab-bar .uab-btn, .uab-bar .uab-checkbox-wrap, .uab-bar input').forEach(el => {
+        document.querySelectorAll('.uab-bar .uab-btn, .uab-bar .b3-action-btn, .uab-bar .uab-checkbox-wrap, .uab-bar input').forEach(el => {
             if (readonly) el.setAttribute('aria-disabled', 'true'); else el.removeAttribute('aria-disabled');
         });
     }
@@ -41,6 +41,11 @@
     }, true));
 
     // ─── Sağ tık ve geliştirici araçları kısayolları ──────────────────────────────────────────────────────
+    // [WHY]: Canlı ortamda sağ tık / F12 kısayolları kapalı kalırken yerelde (localhost / 127.0.0.1) mobil ve DOM
+    //        doğrulaması yapılabilmesi için geliştirici araçları kısayolları engellenmez.
+    // [HOW]: location.hostname 'localhost' veya '127.0.0.1' ise erken çıkılır; aksi halde kısayollar durdurulur.
+    const isLocalDev = () => typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
     function isInspectShortcut(e) {
         const key = String(e.key || '').toLowerCase();
         if (key === 'f12') return true;
@@ -50,9 +55,12 @@
         if (mod && !e.shiftKey && !e.altKey && key === 'u') return true;                   // kaynağı görüntüle
         return false;
     }
-    document.addEventListener('contextmenu', e => { e.preventDefault(); }, true);
+    document.addEventListener('contextmenu', e => {
+        if (isLocalDev()) return;
+        e.preventDefault();
+    }, true);
     document.addEventListener('keydown', e => {
-        if (!isInspectShortcut(e)) return;
+        if (isLocalDev() || !isInspectShortcut(e)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
     }, true);

@@ -37,21 +37,39 @@
         initFilterListener();
     }
 
-    // [WHY] (Faz 5 · K2 · INV-07): Tam eşleşme ("durum === 'pasif'") "Tükendi / Pasif" gibi bileşik durum metinlerini
-    //       yakalamıyordu (computeStockPatch bu metni STOCK_AUTO_EMPTY olarak yazar); o ürünler "Sadece Aktifler"
-    //       filtresinde görünmeye devam ediyordu.
-    // [HOW]: Alt dize eşleşmesi ("pasif" geçen her durum metni pasif sayılır). table-engine.js da aynı fonksiyonu
-    //        (satır/kart stil işaretlemesi ve patchDOMForCollection'ın filtre-uyumlu gizleme kararı için) kullanır —
-    //        tek kaynak, iki yerde ayrı ayrı tanım kalmasın.
-    window.isPassiveStatus = function (status) {
-        return String(status || "").trim().toLocaleLowerCase("tr-TR").includes("pasif");
+    // [WHY] (Faz 5 · K2 · INV-07 + v3.8 UX-Fix): Tam eşleşme ("durum === 'pasif'") ve yalnız "pasif" araması,
+    //       stok 0'a düştüğünde computeStockPatch'in yazdığı "Tükendi" kayıtlarını yakalamıyordu; B1'de
+    //       "Sadece Pasifler" filtresi boş kalıyor, B2'de 0 adetli cihazlar aktif listede bekliyordu.
+    // [HOW]: Durum metninde "pasif", "tükendi"/"tukendi", "stok dışı"/"stok disi" geçiyorsa VEYA nesnenin adedi ≤ 0 ise
+    //        pasif / tükenmiş kabul edilir. B1 üç modlu filtreyi (`active`/`passive`/`all`), B2 aktif stok filtresini uygular.
+    window.isPassiveStatus = function (status, item) {
+        const norm = String(status || "").trim().toLocaleLowerCase("tr-TR");
+        if (norm.includes("pasif") || norm.includes("tükendi") || norm.includes("tukendi")
+            || norm.includes("stok dışı") || norm.includes("stok disi")) {
+            return true;
+        }
+        if (item && typeof item === "object") {
+            const rawQty = item.adet !== undefined ? item.adet : (item.qty !== undefined ? item.qty : item.quantity);
+            if (rawQty !== undefined && rawQty !== null && rawQty !== "") {
+                const n = Number(rawQty);
+                if (Number.isFinite(n) && n <= 0) return true;
+            }
+        }
+        return false;
     };
 
-    // [WHY]: window.data.b1 verisini değiştirmeden (mutation yapmadan) sadece görünüm ve arama için pasifleri elemeyi sağlar.
-    // [HOW]: getProcessedData tarafından çağrılır. Filtre Sadece Aktifler ise 'pasif' durumlu olanları eler. Ürünlerin __index koruması aynen kalır.
+    // [WHY]: window.data.b1/b2 verilerini değiştirmeden (mutation yapmadan) görünüm ve aramada aktif/pasif süzme sağlar.
+    // [HOW]: getProcessedData tarafından çağrılır. B1'de #b1StatusFilter ('active'|'passive'|'all') uygulanır;
+    //        B2'de stok adedi 0 ('Tükendi') veya 'Pasif' cihazlar ana aktif listeden çıkarılır. __index korunur.
     window.getFilteredB1Data = function (depo, dataArray) {
-        if (depo !== "b1" || !dataArray || !Array.isArray(dataArray)) {
-            return dataArray || [];
+        if (!dataArray || !Array.isArray(dataArray)) {
+            return [];
+        }
+        if (depo === "b2") {
+            return dataArray.filter(item => !window.isPassiveStatus(item.durumu || item.status, item));
+        }
+        if (depo !== "b1") {
+            return dataArray;
         }
 
         const filterEl = document.getElementById("b1StatusFilter");
@@ -62,12 +80,10 @@
         }
 
         return dataArray.filter(item => {
-            const passive = window.isPassiveStatus(item.durumu || item.status);
+            const passive = window.isPassiveStatus(item.durumu || item.status, item);
             if (filterVal === "active") {
-                // Sadece Aktifler: Durumu 'pasif' olmayan her şey
                 return !passive;
             } else if (filterVal === "passive") {
-                // Sadece Pasifler: Sadece durumu 'pasif' olanlar
                 return passive;
             }
             return true;

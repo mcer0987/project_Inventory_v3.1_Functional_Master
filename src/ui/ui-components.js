@@ -70,6 +70,8 @@ function _bindProductActions(container, mobile = false) {
         deleteItem: run('deleteItem', d => window.deleteItem(d.depo, d.id)),
         bulkDelete: el => window._bulkDeleteSelected(el.dataset.depo, JSON.parse(el.dataset.ids)),
         bulkTransfer: () => window.showAppAlert('Toplu Sevk özelliği yakında!', 'info'),
+        selectAllRows: el => { if (el.dataset.depo && typeof window.toggleSelectAll === 'function') window.toggleSelectAll(el.dataset.depo, true); },
+        clearSelection: () => window.clearRowSelection(),
     });
 }
 
@@ -912,16 +914,39 @@ export const UIComponents = {
         tbody._fabListenerAttached = true;
 
         tbody.addEventListener('click', function (e) {
-            // [WHY]/[HOW]: Tooltip aynı tbody üzerinde delege edilir; bu tıklama satır seçimini değiştirmez.
-            if (e.target.closest('[data-action="mobileTooltip"]')) return;
-            // Checkbox tıklaması kendi mantığını yönetir
-            if (e.target.type === 'checkbox') return;
+            // [WHY]/[HOW]: Tooltip ve satır içi etkileşimli düğme/bağlantı tıklamaları satır seçimini değiştirmez.
+            if (e.target.closest('button, a, input, select, textarea, label, [data-action="mobileTooltip"]')) return;
 
             const tr = e.target.closest('tr.selectable-row');
             if (!tr) return;
 
             const { depo, id, name } = tr.dataset;
             const key = `${depo}|${id}`; // DATA-06: seçim anahtarı ürün id'si (indeks snapshot'ta kayar)
+
+            // v3.8 UX-4: Shift + Tık ile aralık seçimi
+            const rows = Array.from(tbody.querySelectorAll('tr.selectable-row'));
+            if (e.shiftKey && tbody._lastClickedRow && rows.includes(tbody._lastClickedRow)) {
+                const a = rows.indexOf(tbody._lastClickedRow);
+                const b = rows.indexOf(tr);
+                if (a >= 0 && b >= 0) {
+                    const [start, end] = a < b ? [a, b] : [b, a];
+                    const shouldSelect = !tr.classList.contains('selected-row');
+                    for (let idx = start; idx <= end; idx++) {
+                        const row = rows[idx];
+                        const rKey = `${row.dataset.depo}|${row.dataset.id}`;
+                        row.classList.toggle('selected-row', shouldSelect);
+                        if (shouldSelect) {
+                            window._selectedRows.add(rKey);
+                            row._fabData = { depo: row.dataset.depo, id: row.dataset.id, name: row.dataset.name };
+                        } else {
+                            window._selectedRows.delete(rKey);
+                        }
+                    }
+                    tbody._lastClickedRow = tr;
+                    UIComponents.updateFloatingBar();
+                    return;
+                }
+            }
 
             if (tr.classList.contains('selected-row')) {
                 // Toggle off
@@ -933,6 +958,7 @@ export const UIComponents = {
                 window._selectedRows.add(key);
                 tr._fabData = { depo, id, name };
             }
+            tbody._lastClickedRow = tr;
 
             UIComponents.updateFloatingBar();
 
@@ -948,16 +974,29 @@ export const UIComponents = {
     // [WHY]: Kaç satır seçildiğine göre farklı buton setleri gösterilir.
     //        >1 seçimde tekil işlemler (Düzenle) gizlenir, toplu işlemler açılır.
     // [HOW]: window._selectedRows.size okunur. UAB bar'a uab-bulk-visible
-    //        class'ı eklenerek/kaldırılarak CSS transition ile akıcı geçiş sağlanır.
+    //        class'ı ve üst seçim sayacı senkronize edilir.
     // =========================================================================
     updateFloatingBar() {
         const count = window._selectedRows.size;
 
-        // UAB Contextual Intelligence Sync
+        // UAB Contextual Intelligence Sync + üst seçim sayacı / Tümünü Seç senkronu
         const activeTabContent = document.querySelector('.tab-content.active');
         const activeUab        = activeTabContent ? activeTabContent.querySelector('.uab-bar') : null;
+        const activeDepo       = activeTabContent && (activeTabContent.id === 'b1' || activeTabContent.id === 'b2') ? activeTabContent.id : null;
         if (activeUab) {
             activeUab.classList.toggle('uab-bulk-visible', count > 0);
+        }
+        if (activeDepo) {
+            const upper = activeDepo.toUpperCase();
+            const countPill = document.getElementById(`selectionCount${upper}`);
+            if (countPill) countPill.textContent = `${count} kayıt seçildi`;
+            const selectAllCb = document.getElementById(`selectAll${upper}`);
+            if (selectAllCb) {
+                const isCards = !!(window._cardViewActive && window._cardViewActive[activeDepo]);
+                const scopeSel = isCards ? `#cardView${upper} .selectable-row[data-id]` : `#table${upper} tbody tr.selectable-row[data-id]`;
+                const visibleRows = document.querySelectorAll(scopeSel);
+                selectAllCb.checked = visibleRows.length > 0 && count >= visibleRows.length;
+            }
         }
 
         const fab = _dom.fab();
@@ -973,7 +1012,7 @@ export const UIComponents = {
         if (fabCount) fabCount.textContent = `${count} kayıt seçili`;
 
         // Seçili satır verilerini topla
-        const selectedEls = document.querySelectorAll('.selectable-row.selected-row');
+        const selectedEls = document.querySelectorAll('.selectable-row.selected-row[data-depo="b1"], .selectable-row.selected-row[data-depo="b2"]');
         const items = Array.from(selectedEls).map(el => ({
             depo:  el.dataset.depo,
             id:    el.dataset.id,
@@ -1006,7 +1045,7 @@ export const UIComponents = {
         }
 
         if (count === 1) {
-            // TEKİL MOD: Tüm işlemler
+            // TEKİL MOD: Tüm işlemler + Tümünü Seç kısayolu
             const item      = (window.data[first.depo] || []).find(x => x && String(x.id) === String(first.id)) || {};
             const isWatched = item.isWatched;
             const d = escapeHtml(first.depo), i = escapeHtml(first.id);
@@ -1031,14 +1070,24 @@ export const UIComponents = {
                 </button>
                 <button class="fab-btn fab-btn-del" data-action="deleteItem" data-depo="${d}" data-id="${i}">
                     <i class="fas fa-trash-alt"></i> Sil
+                </button>
+                <button class="fab-btn fab-btn-select-all" data-action="selectAllRows" data-depo="${d}" title="Görünür satırların tümünü seç">
+                    <i class="fas fa-check-double"></i> Tümünü Seç
                 </button>`;
         } else {
-            // ÇOKLU MOD: Sadece toplu işlemler — Contextual Intelligence
+            // ÇOKLU MOD: Tümünü Seç · Temizle · Seçilenleri Sil · Toplu Sevk
             const depo = first.depo;
+            const d    = escapeHtml(depo);
             const ids  = items.map(x => x.id);
             buttonsHtml = `
-                <button class="fab-btn fab-btn-bulk-del" data-action="bulkDelete" data-depo="${escapeHtml(depo)}" data-ids="${escapeHtml(JSON.stringify(ids))}">
-                    <i class="fas fa-trash-alt"></i> Toplu Sil (${count})
+                <button class="fab-btn fab-btn-select-all" data-action="selectAllRows" data-depo="${d}">
+                    <i class="fas fa-check-double"></i> Tümünü Seç
+                </button>
+                <button class="fab-btn fab-btn-clear" data-action="clearSelection">
+                    <i class="fas fa-eraser"></i> Temizle
+                </button>
+                <button class="fab-btn fab-btn-bulk-del" data-action="bulkDelete" data-depo="${d}" data-ids="${escapeHtml(JSON.stringify(ids))}">
+                    <i class="fas fa-trash-alt"></i> Seçilenleri Sil (${count})
                 </button>
                 <button class="fab-btn fab-btn-bulk-transfer" data-action="bulkTransfer">
                     <i class="fas fa-shipping-fast"></i> Toplu Sevk (${count})
@@ -1128,6 +1177,14 @@ export const UIComponents = {
         if (fab) fab.classList.remove('fab-visible');
         document.querySelectorAll('.uab-bar.uab-bulk-visible')
             .forEach(bar => bar.classList.remove('uab-bulk-visible'));
+        ['selectAllB1', 'selectAllB2', 'selectAllB3Cards'].forEach(id => {
+            const cb = document.getElementById(id);
+            if (cb) cb.checked = false;
+        });
+        ['b3SelectionPill', 'personelSelectionPill'].forEach(id => {
+            const pill = document.getElementById(id);
+            if (pill) pill.hidden = true;
+        });
     },
 
     // =========================================================================

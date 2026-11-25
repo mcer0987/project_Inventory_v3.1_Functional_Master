@@ -24,9 +24,15 @@ window.renderPersonelTable = function () {
         if (unit) return `${escapeHtml(unit.name || '-')}${unit.active === false ? ' <small class="text-muted">(Pasif birim)</small>' : ''}<br><small class="text-muted">${escapeHtml(item.jobTitle || '')}</small>`;
         return `<span class="text-muted">Birim ataması yok</span><br><small class="text-muted">${item.birim ? 'Eski kayıt: ' + escapeHtml(item.birim) + ' · ' : ''}${escapeHtml(item.jobTitle || '')}</small>`;
     };
-    tbody.innerHTML = (window.data.personel || []).map(item => `
-        <tr>
-            <td><input type="checkbox" class="row-select" data-id="${escapeHtml(item.id ?? '')}"></td>
+    // v3.8 UX-4: index.html #tablePersonel "Seç" sütunu kaldırılıp satıra tıkla-seç'e geçti; admin.html 5 sütunu korur.
+    const firstTh = document.querySelector('#tablePersonel thead th');
+    const hasSelectCol = !!(firstTh && /^seç$/i.test((firstTh.textContent || '').trim()));
+
+    tbody.innerHTML = (window.data.personel || []).map((item, idx) => {
+        const selectTd = hasSelectCol ? `<td><input type="checkbox" class="row-select" data-id="${escapeHtml(item.id ?? '')}"></td>` : '';
+        return `
+        <tr class="${hasSelectCol ? '' : 'selectable-row personel-selectable-row'}" data-depo="personel" data-id="${escapeHtml(item.id ?? '')}" data-index="${escapeHtml(idx)}" data-name="${escapeHtml(item.name || '-')}">
+            ${selectTd /* xss-ok: yalnız sabit checkbox hücresi + escapeHtml(item.id) */}
             <td>${escapeHtml(item.name || '-')}<br><small>ID: ${escapeHtml(item.id)} · UID: ${escapeHtml(item.uid || 'yok')} · ${item.active === false ? 'Pasif' : 'Aktif'}</small></td>
             <td>${unitCell(item) /* xss-ok: unitCell() escapeHtml kullanır (linter ayrıca denetler) */}</td>
             <td>${account(item) /* xss-ok: account() kendi şablonlarında escapeHtml / jsArg kullanır (linter ayrıca denetler) */}</td>
@@ -34,8 +40,61 @@ window.renderPersonelTable = function () {
                 <button class="edit-btn" onclick="if(validateAdminAction()) openPersonelModal('edit', ${jsArg(item.id)})">Düzenle</button>
                 <button class="delete-btn" onclick="if(validateAdminAction()) deletePersonel(${jsArg(item.id)})">Pasifleştir</button>
             </td>
-        </tr>`).join('');
+        </tr>`;
+    }).join('');
+
+    if (!hasSelectCol) {
+        _bindPersonelRowSelection(tbody);
+        _syncPersonelSelectionUI();
+    }
 };
+
+// [WHY]: v3.8 UX-4 · index.html Personel tablosunda "Seç" sütunu olmadan satıra tıkla-seç + Shift aralık seçimi sağlar.
+// [HOW]: Satır içi buton/bağlantı tıklamalarını yoksayar; seçili satır sayısını #personelSelectionPill içinde gösterir.
+let _personelLastClicked = null;
+function _syncPersonelSelectionUI() {
+    const all = Array.from(document.querySelectorAll('#tablePersonel tr.personel-selectable-row'));
+    const selected = all.filter(tr => tr.classList.contains('selected-row'));
+    const pill = document.getElementById('personelSelectionPill');
+    const countEl = document.getElementById('personelSelectionCount');
+    const selAllBtn = document.getElementById('personelSelectAllBtn');
+    if (pill) pill.hidden = selected.length === 0;
+    if (countEl) countEl.textContent = `${selected.length} kayıt seçildi`;
+    if (selAllBtn) selAllBtn.textContent = (all.length > 0 && selected.length === all.length) ? 'Seçimi Kaldır' : 'Tümünü Seç';
+}
+function _bindPersonelRowSelection(tbody) {
+    if (!tbody || tbody._personelSelectBound) return;
+    tbody._personelSelectBound = true;
+    tbody.addEventListener('click', e => {
+        if (e.target.closest('button, a, input, select, textarea, label')) return;
+        const tr = e.target.closest('tr.personel-selectable-row');
+        if (!tr) return;
+        const rows = Array.from(tbody.querySelectorAll('tr.personel-selectable-row'));
+        if (e.shiftKey && _personelLastClicked && rows.includes(_personelLastClicked)) {
+            const a = rows.indexOf(_personelLastClicked);
+            const b = rows.indexOf(tr);
+            const [start, end] = a < b ? [a, b] : [b, a];
+            const nextState = !tr.classList.contains('selected-row');
+            for (let i = start; i <= end; i++) rows[i].classList.toggle('selected-row', nextState);
+        } else {
+            tr.classList.toggle('selected-row');
+        }
+        _personelLastClicked = tr;
+        _syncPersonelSelectionUI();
+    });
+}
+document.addEventListener('click', e => {
+    if (e.target && e.target.id === 'personelSelectAllBtn') {
+        const rows = Array.from(document.querySelectorAll('#tablePersonel tr.personel-selectable-row'));
+        const selectAll = rows.some(tr => !tr.classList.contains('selected-row'));
+        rows.forEach(tr => tr.classList.toggle('selected-row', selectAll));
+        _syncPersonelSelectionUI();
+    } else if (e.target && e.target.id === 'personelClearSelBtn') {
+        document.querySelectorAll('#tablePersonel tr.personel-selectable-row.selected-row').forEach(tr => tr.classList.remove('selected-row'));
+        _personelLastClicked = null;
+        _syncPersonelSelectionUI();
+    }
+});
 
 window.deletePersonel = async function (id) {
     if (!window.requireDbAdmin('Personel pasifleştirme')) return;

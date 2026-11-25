@@ -482,6 +482,8 @@
             </button>
             <!-- [DECOMMISSIONED] Launchpad Button Removed -->
         </div>
+        <!-- v3.8 UX-5: kayıtlı marka ayarı (logo, başlık, efekt) önbellekten, başlık çizilir çizilmez ve boyamadan önce uygulanır -->
+        <script src="src/ui/brand-logo.js"></script>
 
         <div id="sessionWarning"
             style="display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #ff9800; color: white; padding: 15px 30px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 9999; font-weight: bold;">
@@ -521,55 +523,60 @@
                 </button>
             </div>
             <!-- =================================================================
-                 UNIVERSAL ACTION BAR — B1
-                 [WHY]: Tum butonlar tek hiyerarside, ayni yukseklik ve radius ile.
-                        Toplu islem butonlari (.uab-bulk) JS kontrolunde belirir.
+                 UNIVERSAL ACTION BAR — B1 (v3.8 UX-4 · B3 Buton Ailesi Standardı)
+                 [WHY]: Tüm ana sekme butonları tek .b3-action-btn tasarım ailesinde.
+                        Toplu işlem butonları (.uab-bulk) seçim yapılınca belirir.
                  ================================================================= -->
             <div class="uab-bar" id="uabB1">
                 <!-- Birincil İşlem -->
-                <button class="uab-btn uab-btn-primary" onclick="if(validateAdminAction()) openProductModal('add')">
+                <button class="b3-action-btn btn-action-primary uab-btn-primary" onclick="if(validateAdminAction()) openProductModal('add')">
                     <i class="fas fa-plus"></i> Ürün Ekle
                 </button>
 
                 <div class="uab-separator"></div>
 
-                <!-- Toplu Seçim Checkbox -->
+                <!-- Toplu Seçim Tetikleyici (satıra tıkla-seç ile senkron) -->
                 <label class="uab-checkbox-wrap">
                     <input type="checkbox" id="selectAllB1" onclick="if(validateAdminAction()) toggleSelectAll('b1')">
-                    Toplu Seç
+                    Tümünü Seç
                 </label>
 
+                <span class="selection-context-pill uab-bulk" id="selectionPillB1">
+                    <span class="sel-pill-count" id="selectionCountB1">0 kayıt seçildi</span>
+                    <button type="button" class="sel-pill-btn" onclick="window.clearRowSelection()">Temizle</button>
+                </span>
+
                 <!-- Toplu İşlem Butonları: Sadece seçim yapılınca görünür (.uab-bulk-visible JS'de eklenir) -->
-                <button class="uab-btn uab-btn-danger uab-bulk" onclick="if(validateAdminAction()) bulkDelete('b1')">
-                    <i class="fas fa-trash-alt"></i> Toplu Sil
+                <button class="b3-action-btn btn-action-danger uab-bulk" onclick="if(validateAdminAction()) bulkDelete('b1')">
+                    <i class="fas fa-trash-alt"></i> Seçilenleri Sil
                 </button>
 
                 <div class="uab-separator"></div>
 
                 <!-- İkincil İşlemler -->
-                <button class="uab-btn uab-btn-outline" onclick="if(validateAdminAction()) exportPDF('b1')">
+                <button class="b3-action-btn btn-action-outline" onclick="if(validateAdminAction()) exportPDF('b1')">
                     <i class="fas fa-file-pdf"></i> PDF
                 </button>
 
-                <label for="fileInput" class="uab-btn uab-btn-purple"
+                <label for="fileInput" class="b3-action-btn btn-action-purple"
                     onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b1')">
                     <i class="fas fa-file-excel"></i> Import
                 </label>
-                <button type="button" class="uab-btn uab-btn-icon import-help-trigger" title="Excel sütun formatı" aria-label="Excel sütun formatı"
+                <button type="button" class="b3-action-btn btn-action-outline uab-btn uab-btn-icon import-help-trigger" title="Excel sütun formatı" aria-label="Excel sütun formatı"
                     onclick="showImportFormatHelp('b1')"><svg class="import-help-symbol" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.5 4.8 6.4 4.2 3 5v14c3.4-.8 6.5-.2 9 1.5C14.5 18.8 17.6 18.2 21 19V5c-3.4-.8-6.5-.2-9 1.5Z"/><path d="M12 6.5v14M6.5 9l2 .4M6.5 12l2 .4M15.5 9.4l2-.4M15.5 12.4l2-.4"/></svg>
                 </button>
 
-                <button class="uab-btn uab-btn-success" onclick="exportToExcel('b1')">
+                <button class="b3-action-btn btn-action-success" onclick="exportToExcel('b1')">
                     <i class="fas fa-chart-bar"></i> Excel Rapor
                 </button>
 
                 <div class="uab-separator"></div>
 
-                <button class="uab-btn uab-btn-teal" onclick="if(validateAdminAction()) exportFirebaseBackup()">
+                <button class="b3-action-btn btn-action-teal" onclick="if(validateAdminAction()) exportFirebaseBackup()">
                     <i class="fas fa-save"></i> Yedek Al
                 </button>
 
-                <label for="firebaseBackupImport" class="uab-btn uab-btn-warning"
+                <label for="firebaseBackupImport" class="b3-action-btn btn-action-warning"
                     onclick="if(!validateAdminAction()) return false;">
                     <i class="fas fa-undo"></i> Yedekten Yükle
                 </label>
@@ -583,7 +590,6 @@
                 <table id="tableB1">
                     <thead>
                         <tr>
-                            <th>Seç</th>
                             <th onclick="sortTable('sütun', 'b1')" style="cursor:pointer">Sütun </th>
                             <th onclick="sortTable('raf', 'b1')" style="cursor:pointer">Raf/Shelves </th>
                             <th onclick="sortTable('ürün', 'b1')" style="cursor:pointer">Ürün </th>
@@ -612,10 +618,10 @@
                 </button>
             </div>
             <!-- =================================================================
-                 UNIVERSAL ACTION BAR — B2
+                 UNIVERSAL ACTION BAR — B2 (v3.8 UX-4 · B3 Buton Ailesi Standardı)
                  ================================================================= -->
             <div class="uab-bar" id="uabB2">
-                <button class="uab-btn uab-btn-primary" onclick="if(validateAdminAction()) openProductModal('add')">
+                <button class="b3-action-btn btn-action-primary uab-btn-primary" onclick="if(validateAdminAction()) openProductModal('add')">
                     <i class="fas fa-plus"></i> Ürün Ekle
                 </button>
 
@@ -623,29 +629,34 @@
 
                 <label class="uab-checkbox-wrap">
                     <input type="checkbox" id="selectAllB2" onclick="toggleSelectAll('b2')">
-                    Toplu Seç
+                    Tümünü Seç
                 </label>
 
-                <button class="uab-btn uab-btn-danger uab-bulk" onclick="bulkDelete('b2')">
-                    <i class="fas fa-trash-alt"></i> Toplu Sil
+                <span class="selection-context-pill uab-bulk" id="selectionPillB2">
+                    <span class="sel-pill-count" id="selectionCountB2">0 kayıt seçildi</span>
+                    <button type="button" class="sel-pill-btn" onclick="window.clearRowSelection()">Temizle</button>
+                </span>
+
+                <button class="b3-action-btn btn-action-danger uab-bulk" onclick="bulkDelete('b2')">
+                    <i class="fas fa-trash-alt"></i> Seçilenleri Sil
                 </button>
 
                 <div class="uab-separator"></div>
 
-                <button class="uab-btn uab-btn-outline" onclick="exportPDF('b2')">
+                <button class="b3-action-btn btn-action-outline" onclick="exportPDF('b2')">
                     <i class="fas fa-file-pdf"></i> PDF
                 </button>
 
-                <label for="fileInput" class="uab-btn uab-btn-purple"
+                <label for="fileInput" class="b3-action-btn btn-action-purple"
                     onclick="if(!requireDbAdmin('Excel içe aktarma')){event.preventDefault();return;} document.getElementById('fileInput').setAttribute('data-depo', 'b2')">
                     <i class="fas fa-file-excel"></i> Import
                 </label>
-                <button type="button" class="uab-btn uab-btn-icon import-help-trigger" title="Excel sütun formatı" aria-label="Excel sütun formatı"
+                <button type="button" class="b3-action-btn btn-action-outline uab-btn uab-btn-icon import-help-trigger" title="Excel sütun formatı" aria-label="Excel sütun formatı"
                     onclick="showImportFormatHelp('b2')"><svg class="import-help-symbol" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.5 4.8 6.4 4.2 3 5v14c3.4-.8 6.5-.2 9 1.5C14.5 18.8 17.6 18.2 21 19V5c-3.4-.8-6.5-.2-9 1.5Z"/><path d="M12 6.5v14M6.5 9l2 .4M6.5 12l2 .4M15.5 9.4l2-.4M15.5 12.4l2-.4"/></svg>
                 </button>
 
                 <!-- B1/B2 Excel raporlarında Envanter No ortak alan olarak dışa aktarılır. -->
-                <button class="uab-btn uab-btn-success" onclick="exportToExcel('b2')">
+                <button class="b3-action-btn btn-action-success" onclick="exportToExcel('b2')">
                     <i class="fas fa-chart-bar"></i> Excel Rapor
                 </button>
             </div>
@@ -653,7 +664,6 @@
                 <table id="tableB2">
                     <thead>
                         <tr>
-                            <th>Seç</th>
                             <th onclick="sortTable('sütun', 'b2')">Sütun</th>
                             <th onclick="sortTable('raf', 'b2')">Raf/Shelves</th>
                             <th onclick="sortTable('ürün', 'b2')">Ürün</th>
@@ -729,6 +739,11 @@
                 <button class="b3-action-btn btn-action-danger" onclick="bulkDeleteB3()" title="Seçili çıkış kayıtlarını sil">
                     <i class="fas fa-trash-alt"></i> Seçilenleri Sil
                 </button>
+                <span class="selection-context-pill" id="b3SelectionPill" hidden>
+                    <span class="sel-pill-count" id="b3SelectionCount">0 kayıt seçildi</span>
+                    <button type="button" class="sel-pill-btn" id="b3SelectAllBtn">Tümünü Seç</button>
+                    <button type="button" class="sel-pill-btn" id="b3ClearSelBtn">Temizle</button>
+                </span>
                 <button class="b3-action-btn btn-action-success" onclick="exportToExcel('b3')">
                     <i class="fas fa-file-excel"></i> 📊 Excel Rapor
                 </button>
@@ -737,7 +752,6 @@
                 <table id="tableB3">
                     <thead>
                         <tr>
-                            <th style="width:36px; text-align:center;"><input type="checkbox" id="selectAllB3" title="Tümünü Seç"></th>
                             <th>Raf No</th>
                             <th>Ürün Türü</th>
                             <th>Ürün Açıklama</th>
@@ -802,14 +816,22 @@
                 </button>
             </div>
             <div class="actions">
-                <button class="add-btn" onclick="openPersonelModal('add')">Personel Ekle</button>
-                <button class="add-btn" onclick="exportPDF('personel')">PDF Export</button>
+                <button class="b3-action-btn btn-action-primary" onclick="openPersonelModal('add')">
+                    <i class="fas fa-user-plus"></i> Personel Ekle
+                </button>
+                <button class="b3-action-btn btn-action-outline" onclick="exportPDF('personel')">
+                    <i class="fas fa-file-pdf"></i> PDF Export
+                </button>
+                <span class="selection-context-pill" id="personelSelectionPill" hidden>
+                    <span class="sel-pill-count" id="personelSelectionCount">0 kayıt seçildi</span>
+                    <button type="button" class="sel-pill-btn" id="personelSelectAllBtn">Tümünü Seç</button>
+                    <button type="button" class="sel-pill-btn" id="personelClearSelBtn">Temizle</button>
+                </span>
             </div>
             <div class="table-responsive-wrapper">
                 <table id="tablePersonel">
                     <thead>
                         <tr>
-                            <th>Seç</th>
                             <th>Ad Soyad</th>
                             <th>Birim</th>
                             <th>Kurumsal Kimlik / Hesap</th>
@@ -825,15 +847,13 @@
 
         <div id="requests" class="tab-content">
             <h3>Gelen Envanter Talepleri</h3>
-            <div class="action-buttons">
-                <button onclick="exportTableToExcel('tableRequests', 'Gelen_Talepler')" class="btn-export"
-                    style="background-color: #27ae60; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer;">
-                    📊 Excel'e Aktar
+            <div class="actions action-buttons">
+                <button onclick="exportTableToExcel('tableRequests', 'Gelen_Talepler')" class="b3-action-btn btn-action-success btn-export">
+                    <i class="fas fa-file-excel"></i> Excel'e Aktar
                 </button>
 
-                <button onclick="deleteSelectedRequests()" class="btn-bulk-delete"
-                    style="background-color: #c0392b; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px;">
-                    🗑️ Seçilenleri Sil
+                <button onclick="deleteSelectedRequests()" class="b3-action-btn btn-action-danger btn-bulk-delete">
+                    <i class="fas fa-trash-alt"></i> Seçilenleri Sil
                 </button>
             </div>
             <p class="req-panel-desc">Personelin "Envanter Talep Et" ile gönderdiği talepler. Onayladığınızda stok düşer ve ürün kişiye zimmetlenir; reddederken yazdığınız gerekçe personelin "Taleplerim" ekranında görünür.</p>
@@ -919,7 +939,7 @@
                 <button class="b3-action-btn btn-action-luxury" type="button" onclick="switchTab('myRequests')">
                     <i class="fas fa-clock-rotate-left"></i> Taleplerim
                 </button>
-                <button class="b3-action-btn btn-action-primary" type="button" onclick="window.generatePersonnelZimmetPDF(window.getActiveUser() && window.getActiveUser().id)">
+                <button class="b3-action-btn btn-action-outline" type="button" onclick="window.generatePersonnelZimmetPDF(window.getActiveUser() && window.getActiveUser().id)">
                     <i class="fas fa-file-pdf"></i> Zimmet Tutanağımı İndir (PDF)
                 </button>
             </div>
@@ -1026,7 +1046,9 @@
                 </button>
             </div>
             <div class="actions">
-                <button class="add-btn" onclick="window.openUnitModal()">+ Yeni Birim Ekle</button>
+                <button class="b3-action-btn btn-action-primary" onclick="window.openUnitModal()">
+                    <i class="fas fa-plus"></i> Yeni Birim Ekle
+                </button>
             </div>
 
             <table id="tableUnits" class="main-table">
@@ -1080,15 +1102,11 @@
                         </button>
                     </div>
                     <div class="d-flex gap-2">
-                        <button class="add-btn"
-                            style="background-color: var(--color-primary); border-radius: var(--radius-md); border:none; color:white; font-weight:600;"
-                            onclick="window.openNewPurchaseModal()">
-                            <i class="fas fa-plus me-2"></i>Yeni Talep
+                        <button class="b3-action-btn btn-action-primary" onclick="window.openNewPurchaseModal()">
+                            <i class="fas fa-plus"></i> Yeni Talep
                         </button>
-                        <button class="add-btn"
-                            style="background-color: var(--color-success-dark); border-radius: var(--radius-md); border:none; color:white; font-weight:600;"
-                            onclick="exportTableToExcel('tablePurchaseRecords', 'Satin_Alma_Talepleri')">
-                            <i class="fas fa-file-excel me-2"></i>Excel
+                        <button class="b3-action-btn btn-action-success" onclick="exportTableToExcel('tablePurchaseRecords', 'Satin_Alma_Talepleri')">
+                            <i class="fas fa-file-excel"></i> Excel
                         </button>
                     </div>
                 </div>

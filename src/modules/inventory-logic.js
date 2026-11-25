@@ -150,31 +150,38 @@ export const deleteItem = async function (depo, id) {
     if (typeof window.showAppAlert === 'function') window.showAppAlert('Kayıt silindi.');
 };
 
+// [WHY]: v3.8 UX-4 · "Seç" sütunu kaldırıldığı için seçili ürünler .selectable-row.selected-row üzerinden okunur.
+// [HOW]: Önce aktif tablo/karttaki .selected-row öğelerinden data-id toplanır; eski .row-select:checked yedek olarak desteklenir.
 export const bulkDelete = async function (depo) {
     if (typeof window.validateAdminAction === 'function' && !window.validateAdminAction()) return;
 
-    const tableId = `table${depo.toUpperCase()}`;
-    const tableContainer = document.getElementById(tableId);
-    if (!tableContainer) return;
+    const upper = depo.toUpperCase();
+    const selectedRows = Array.from(document.querySelectorAll(
+        `#table${upper} tr.selectable-row.selected-row, #cardView${upper} .selectable-row.selected-row`
+    ));
+    const legacyChecked = selectedRows.length
+        ? []
+        : Array.from(document.querySelectorAll(`#table${upper} .row-select:checked, #cardView${upper} .row-select:checked`));
+    const picked = selectedRows.length ? selectedRows : legacyChecked;
 
-    const checkboxes = tableContainer.querySelectorAll('.row-select:checked');
-    if (checkboxes.length === 0) {
+    if (picked.length === 0) {
         if (typeof window.showAppAlert === 'function') window.showAppAlert('Lütfen pasife alınacak ürünleri seçiniz.', 'warning');
         return;
     }
 
+    const uniqueIds = [...new Set(picked.map(el => el.getAttribute('data-id')).filter(Boolean))];
     const onay = (typeof window.showCustomConfirm === 'function')
         ? await window.showCustomConfirm(
             'Toplu Pasife Alma',
-            `${checkboxes.length} adet ürünü pasife almak istediğinize emin misiniz? (Adetleri korunacaktır)`
+            `${uniqueIds.length} adet ürünü pasife almak istediğinize emin misiniz? (Adetleri korunacaktır)`
           )
-        : confirm(`${checkboxes.length} ürünü pasife almak istiyor musunuz?`);
+        : confirm(`${uniqueIds.length} ürünü pasife almak istiyor musunuz?`);
 
     if (!onay) return;
 
     // Id ile çözülür; yalnız durum alanları güncellenir (diğer alanlara ve eşzamanlı düzenlemelere dokunulmaz).
-    const targets = [...checkboxes].map(cb => _find(depo, cb.getAttribute('data-id'))).filter(Boolean);
-    if (targets.length < checkboxes.length) { _missing(); return; }
+    const targets = uniqueIds.map(id => _find(depo, id)).filter(Boolean);
+    if (targets.length < uniqueIds.length) { _missing(); return; }
     const changed = targets.length > 0;
 
     if (changed) {
@@ -185,10 +192,11 @@ export const bulkDelete = async function (depo) {
             _alert('Pasife alma kaydedilemedi.', 'error');
             return;
         }
+        if (typeof window.clearRowSelection === 'function') window.clearRowSelection();
         if (typeof window.renderTable === 'function') window.renderTable(depo);
-        if (typeof window.showAppAlert === 'function') window.showAppAlert(`${checkboxes.length} ürün başarıyla pasife alındı.`, 'success');
+        if (typeof window.showAppAlert === 'function') window.showAppAlert(`${targets.length} ürün başarıyla pasife alındı.`, 'success');
 
-        const selectAll = document.getElementById(`selectAll${depo.toUpperCase()}`);
+        const selectAll = document.getElementById(`selectAll${upper}`);
         if (selectAll) selectAll.checked = false;
     }
 };
@@ -451,12 +459,36 @@ export const _bulkDeleteSelected = async function (depo, ids) {
     _alert(`${targets.length} kayıt başarıyla silindi.`, 'success');
 };
 
-export const toggleSelectAll = function (depo) {
-    const selectAll = document.getElementById(`selectAll${depo.toUpperCase()}`);
-    if (!selectAll) return;
+// [WHY]: v3.8 UX-4 · "Tümünü Seç" artık checkbox sütunu yerine .selectable-row.selected-row ve window._selectedRows yönetir.
+// [HOW]: Görünür tablo veya kart satırlarının tümünü seçer/kaldırır ve floating bar ile üst çubuğu günceller.
+export const toggleSelectAll = function (depo, forceSelect = null) {
+    const upper = String(depo || '').toUpperCase();
+    const selectAll = document.getElementById(`selectAll${upper}`);
+    const isCards = !!(window._cardViewActive && window._cardViewActive[depo]);
+    const scopeSel = isCards
+        ? `#cardView${upper} .selectable-row[data-id]`
+        : `#table${upper} tbody tr.selectable-row[data-id]`;
+    const rows = Array.from(document.querySelectorAll(scopeSel));
 
-    const checkboxes = document.querySelectorAll(`#table${depo.toUpperCase()} .row-select`);
-    checkboxes.forEach(cb => cb.checked = selectAll.checked);
+    const shouldSelect = typeof forceSelect === 'boolean'
+        ? forceSelect
+        : (selectAll ? !!selectAll.checked : rows.some(el => !el.classList.contains('selected-row')));
+
+    if (selectAll) selectAll.checked = shouldSelect;
+    window._selectedRows = window._selectedRows || new Set();
+    rows.forEach(el => {
+        const d = el.dataset.depo || depo;
+        const id = el.dataset.id || '';
+        const key = `${d}|${id}`;
+        el.classList.toggle('selected-row', shouldSelect);
+        if (shouldSelect) {
+            window._selectedRows.add(key);
+            el._fabData = { depo: d, id, name: el.dataset.name };
+        } else {
+            window._selectedRows.delete(key);
+        }
+    });
+    if (typeof window.updateFloatingBar === 'function') window.updateFloatingBar();
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

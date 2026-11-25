@@ -408,6 +408,7 @@ window.switchTab = function (tabName) {
     if (protectedTabs.includes(tabName)) {
         if (!validateAdminAction()) return;
     }
+    if (typeof window.clearRowSelection === 'function') window.clearRowSelection();
     document.querySelectorAll('.tab-content, .admin-tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab-button, .tab-btn').forEach(el => el.classList.remove('active'));
 

@@ -98,21 +98,71 @@
         }
         const selectAll = document.getElementById('selectAllB3');
         if (selectAll) selectAll.checked = false;
+        _syncB3SelectionUI();
+    }
+
+    // [WHY]: v3.8 UX-4 · B3 tablo/kart satırlarında "Seç" sütunu yerine satıra tıkla-seç + Shift aralık seçimi.
+    // [HOW]: Seçili .b3-selectable-row.selected-row öğelerini sayar; #b3SelectionPill göstergesini günceller.
+    let _b3LastClicked = null;
+    function _getB3SelectableEls() {
+        const scope = window._cardViewActive.b3 ? '#cardViewB3' : '#tableB3';
+        return Array.from(document.querySelectorAll(`${scope} .b3-selectable-row`));
+    }
+    function _syncB3SelectionUI() {
+        const all = _getB3SelectableEls();
+        const selected = all.filter(el => el.classList.contains('selected-row'));
+        const pill = document.getElementById('b3SelectionPill');
+        const countEl = document.getElementById('b3SelectionCount');
+        const selAllBtn = document.getElementById('b3SelectAllBtn');
+        if (pill) pill.hidden = selected.length === 0;
+        if (countEl) countEl.textContent = `${selected.length} kayıt seçildi`;
+        if (selAllBtn) selAllBtn.textContent = (all.length > 0 && selected.length === all.length) ? 'Seçimi Kaldır' : 'Tümünü Seç';
+        const cardsCb = document.getElementById('selectAllB3Cards');
+        if (cardsCb) cardsCb.checked = all.length > 0 && selected.length === all.length;
+    }
+    function _toggleB3RowSelection(targetEl, shiftKey) {
+        const rows = _getB3SelectableEls();
+        if (shiftKey && _b3LastClicked && rows.includes(_b3LastClicked)) {
+            const a = rows.indexOf(_b3LastClicked);
+            const b = rows.indexOf(targetEl);
+            if (a >= 0 && b >= 0) {
+                const [start, end] = a < b ? [a, b] : [b, a];
+                const nextState = !targetEl.classList.contains('selected-row');
+                for (let i = start; i <= end; i++) rows[i].classList.toggle('selected-row', nextState);
+                _b3LastClicked = targetEl;
+                _syncB3SelectionUI();
+                return;
+            }
+        }
+        targetEl.classList.toggle('selected-row');
+        _b3LastClicked = targetEl;
+        _syncB3SelectionUI();
+    }
+    function _bindB3Selection(container) {
+        if (!container || container._b3ClickSelectBound) return;
+        container._b3ClickSelectBound = true;
+        container.addEventListener('click', e => {
+            if (e.target.closest('button, a, input, label, select, textarea, summary, details, .table-row-actions, .b3-card-actions')) return;
+            const rowEl = e.target.closest('.b3-selectable-row');
+            if (!rowEl) return;
+            _toggleB3RowSelection(rowEl, e.shiftKey);
+        });
     }
 
     function _renderB3Table(rows) {
         const tbody = document.querySelector('#tableB3 tbody');
         if (!tbody) return;
+        _b3LastClicked = null;
         if (rows.length === 0) {
             const msg = (window.data.b3 || []).length ? 'Aramanızla eşleşen çıkış kaydı yok.' : 'Çıkış kaydı bulunamadı.';
-            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${msg}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">${msg}</td></tr>`;
+            _syncB3SelectionUI();
             return;
         }
         tbody.innerHTML = rows.map(({ item, row }) => {
             const isPassive = (item.durumu === 'Pasif' || item.status === 'Pasif');
             const envNo = row.envanterNo !== '-' ? `<div class="b3-env-sub">Env. No: ${escapeHtml(row.envanterNo)}</div>` : '';
-            return `<tr class="${isPassive ? 'passive-row' : ''}">
-            <td style="text-align:center;"><input type="checkbox" class="row-select b3-row-select" data-id="${escapeHtml(item.id)}" aria-label="Kaydı seç"></td>
+            return `<tr class="${isPassive ? 'passive-row ' : ''}selectable-row b3-selectable-row" data-depo="b3" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(row.urunAciklama)}">
             <td${row.stokDisi ? ' style="color:var(--color-text-muted); font-style:italic;"' : ''}>${escapeHtml(row.rafNo)}</td>
             <td>${escapeHtml(row.urunTuru)}</td>
             <td>${escapeHtml(row.urunAciklama)}</td>
@@ -126,6 +176,8 @@
             </td>
         </tr>`;
         }).join('');
+        _bindB3Selection(tbody);
+        _syncB3SelectionUI();
     }
 
     // Tarih "03.11.2026 14:22:11" biçimindedir; gün ve saat ayrılır. Tarih yoksa kaydın zaman damgası kullanılır.
@@ -174,11 +226,8 @@
                 row.adet > 0 ? `<span class="b3-chip b3-chip-qty"><i class="fas fa-box" aria-hidden="true"></i> ${escapeHtml(row.adet)} Adet</span>` : ''
             ].join('');
             const detail = (label, value, cls = '') => `<div class="b3-drawer-row"><dt>${escapeHtml(label)}</dt><dd class="${escapeHtml(cls)}">${escapeHtml(value)}</dd></div>`;
-            return `<article class="b3-card-item b3-tip-${escapeHtml(tip)}${isPassive ? ' card-item-passive' : ''}">
+            return `<article class="b3-card-item selectable-row b3-selectable-row b3-tip-${escapeHtml(tip)}${isPassive ? ' card-item-passive' : ''}" data-depo="b3" data-id="${escapeHtml(item.id)}">
                 <header class="b3-card-header">
-                    <label class="b3-card-select">
-                        <input type="checkbox" class="row-select b3-row-select" data-id="${escapeHtml(item.id)}" aria-label="Kaydı seç">
-                    </label>
                     <div class="b3-card-title">
                         <span class="b3-card-name">${escapeHtml(row.urunAciklama)}</span>
                         <span class="b3-card-sub">${escapeHtml(row.urunTuru)}${row.marka ? ` · ${escapeHtml(row.marka)}` : ''}</span>
@@ -215,6 +264,8 @@
                 </h3>
                 <div class="b3-day-body">${g.items.map(cardHtml).join('')}</div>
             </section>`).join('')}`;
+        _bindB3Selection(container);
+        _syncB3SelectionUI();
     }
 
     function renderExitTable() {
@@ -290,16 +341,19 @@
         if (typeof showAppAlert === 'function') showAppAlert(`${label} çıkışı geri alındı.`, 'success');
     };
 
-    // [WHY]: B3 çıkış kayıtlarının aylık raporlama sonrasında toplu temizlenmesi
-    // [HOW]: Seçili satır ID'lerini toplar, yönetici onayından sonra atomic window.bulkRemove('b3', ids) ile siler
+    // [WHY]: B3 çıkış kayıtlarının aylık raporlama sonrasında toplu temizlenmesi (v3.8 UX-4 tıkla-seç uyumlu)
+    // [HOW]: Seçili satır ID'lerini .b3-selectable-row.selected-row (ve geriye uyumlu .b3-row-select:checked) üzerinden
+    //        toplar, yönetici onayından sonra atomic window.bulkRemove('b3', ids) ile siler.
     window.bulkDeleteB3 = async function () {
         if (typeof validateAdminAction === 'function' && !validateAdminAction()) return;
-        const checked = Array.from(document.querySelectorAll('.b3-row-select:checked'));
-        if (checked.length === 0) {
+        const selectedRows = Array.from(document.querySelectorAll('#tableB3 .b3-selectable-row.selected-row, #cardViewB3 .b3-selectable-row.selected-row'));
+        const legacyChecked = selectedRows.length ? [] : Array.from(document.querySelectorAll('.b3-row-select:checked'));
+        const picked = selectedRows.length ? selectedRows : legacyChecked;
+        if (picked.length === 0) {
             if (typeof showAppAlert === 'function') showAppAlert('Lütfen silinecek çıkış kayıtlarını seçin.', 'warning');
             return;
         }
-        const ids = [...new Set(checked.map(cb => cb.dataset.id).filter(Boolean))];
+        const ids = [...new Set(picked.map(el => el.dataset.id).filter(Boolean))];
         const confirmed = typeof window.showCustomConfirm === 'function'
             ? await window.showCustomConfirm('Toplu Çıkış Kaydı Silme', `${ids.length} adet çıkış kaydı kalıcı olarak silinecek. (Stok değişmez). Onaylıyor musunuz?`)
             : confirm(`${ids.length} adet çıkış kaydı silinsin mi?`);
@@ -314,6 +368,7 @@
                 }
             }
             if (typeof renderExitTable === 'function') renderExitTable();
+            _syncB3SelectionUI();
             if (typeof showAppAlert === 'function') showAppAlert(`${ids.length} adet çıkış kaydı başarıyla silindi.`, 'success');
         } catch (err) {
             console.error('[bulkDeleteB3] Toplu silme hatası:', err);
@@ -321,15 +376,28 @@
         }
     };
 
-    // [WHY]: B3 çıkış tablosu "Tümünü Seç" kutusu dinleyicisi
-    // [HOW]: Delegated change dinleyicisi; tablo (selectAllB3) ve kart (selectAllB3Cards) kutuları yalnız kendi
-    //        görünümündeki .b3-row-select elemanlarını işaretler (yalnız etkin görünüm çizilir).
+    // [WHY]: B3 çıkış tablosu & kart görünümü "Tümünü Seç" / "Temizle" dinleyicileri (v3.8 UX-4)
+    // [HOW]: Delegated change ve click dinleyicileriyle satır/kart .selected-row sınıfları yönetilir.
     document.addEventListener('change', (e) => {
         const scopes = { selectAllB3: '#tableB3', selectAllB3Cards: '#cardViewB3' };
         const scope = e.target && scopes[e.target.id];
         if (scope) {
             const isChecked = e.target.checked;
+            document.querySelectorAll(`${scope} .b3-selectable-row`).forEach(el => { el.classList.toggle('selected-row', isChecked); });
             document.querySelectorAll(`${scope} .b3-row-select`).forEach(cb => { cb.checked = isChecked; });
+            _syncB3SelectionUI();
+        }
+    });
+    document.addEventListener('click', (e) => {
+        if (e.target && e.target.id === 'b3SelectAllBtn') {
+            const rows = _getB3SelectableEls();
+            const selectAll = rows.some(el => !el.classList.contains('selected-row'));
+            rows.forEach(el => el.classList.toggle('selected-row', selectAll));
+            _syncB3SelectionUI();
+        } else if (e.target && e.target.id === 'b3ClearSelBtn') {
+            _getB3SelectableEls().forEach(el => el.classList.remove('selected-row'));
+            _b3LastClicked = null;
+            _syncB3SelectionUI();
         }
     });
 

@@ -54,7 +54,6 @@ function _buildRowInnerHtml(depo, item, realIndex, qtyHtml) {
     if (depo === 'b1' || depo === 'b2') {
         const itemType = item.tür || item.type || item.prodType || '-';
         return `
-            <td><input type="checkbox" class="row-select" data-index="${escapeHtml(realIndex)}" data-id="${escapeHtml(item.id ?? '')}"></td>
             <td>${escapeHtml(item.sütun || '-')}</td>
             <td>${escapeHtml(item.raf || '-')}</td>
             <td>${escapeHtml(item.ürün || '-')}${item.isWatched ? ' <i class="fas fa-eye" title="Takipte" style="color:var(--color-info);margin-left:4px;"></i>' : ''}</td>
@@ -65,7 +64,6 @@ function _buildRowInnerHtml(depo, item, realIndex, qtyHtml) {
             <td>${escapeHtml(item.envanterNo || '-')}</td>`;
     }
     return `
-        <td><input type="checkbox" class="row-select"></td>
         <td>${escapeHtml(item.ürün || item.name || '-')}</td>
         <td>${escapeHtml(item.tür || item.type || '-')}</td>
         <td>${escapeHtml(item.raf || item.shelf || '-')}</td>
@@ -80,7 +78,7 @@ function _buildRowHtml(depo, item, realIndex) {
     const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
     const qtyHtml = _buildQtyDisplay(itemQty, updateDate);
     const innerHtml = _buildRowInnerHtml(depo, item, realIndex, qtyHtml);
-    const isPassive = window.isPassiveStatus ? window.isPassiveStatus(item.durumu || item.status) : (item.durumu === 'Pasif' || item.status === 'Pasif');
+    const isPassive = window.isPassiveStatus ? window.isPassiveStatus(item.durumu || item.status, item) : (item.durumu === 'Pasif' || item.status === 'Pasif');
     const rowClass = isPassive ? 'passive-row' : '';
     const safeName = escapeHtml(item.ürün || item.name || '-');
 
@@ -392,7 +390,7 @@ export const renderCardSearchResults = function (depo, results) {
         if (realIndex === -1) return '';
 
         const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
-        const isPassive = window.isPassiveStatus ? window.isPassiveStatus(item.durumu || item.status) : (item.durumu === 'Pasif' || item.status === 'Pasif');
+        const isPassive = window.isPassiveStatus ? window.isPassiveStatus(item.durumu || item.status, item) : (item.durumu === 'Pasif' || item.status === 'Pasif');
         const isWatched = item.isWatched;
         const qtyClass = itemQty === 0 ? 'qty-zero' : (itemQty <= 3 ? 'qty-low' : 'qty-ok');
         const safeName = escapeHtml(item.ürün || item.name || '-');
@@ -486,7 +484,7 @@ export const renderMobileCards = function (depo) {
 
         const itemsHtml = items.map(item => {
             const itemQty = item.adet !== undefined ? item.adet : (item.qty || 0);
-            const isPassive = window.isPassiveStatus ? window.isPassiveStatus(item.durumu || item.status) : (item.durumu === 'Pasif' || item.status === 'Pasif');
+            const isPassive = window.isPassiveStatus ? window.isPassiveStatus(item.durumu || item.status, item) : (item.durumu === 'Pasif' || item.status === 'Pasif');
             const isWatched = item.isWatched;
             const qtyClass = itemQty === 0 ? 'qty-zero' : (itemQty <= 3 ? 'qty-low' : 'qty-ok');
             const safeDepo = escapeHtml(depo);
@@ -620,6 +618,7 @@ _detectAndApplyCardView();
 //        hesaplanır; filtre dışına düşüyorsa DOM'dan kaldırılır (tam renderTable ile tutarlı); düşmüyorsa eskisi gibi
 //        hücreler/stil güncellenir. Diğer depolar (b2) ve filtre 'all' iken hiçbir satır kaldırılmaz.
 function _passiveFilterExcludes(colName, isPassive) {
+    if (colName === 'b2') return isPassive;
     if (colName !== 'b1') return false;
     const filterEl = document.getElementById('b1StatusFilter');
     const filterVal = filterEl ? filterEl.value : 'active';
@@ -636,7 +635,7 @@ export const patchDOMForCollection = function (colName, changes) {
         const data = change.data;
         const itemQty = data.adet !== undefined ? data.adet : (data.qty || 0);
         const itemStatus = data.durumu || data.status || '-';
-        const isPassive = window.isPassiveStatus ? window.isPassiveStatus(itemStatus) : (itemStatus === 'Pasif');
+        const isPassive = window.isPassiveStatus ? window.isPassiveStatus(itemStatus, data) : (itemStatus === 'Pasif');
         const hideNow = data.rafPasif === true || _passiveFilterExcludes(colName, isPassive);
 
         const rowEl = document.querySelector(`tr[data-depo="${colName}"][data-id="${id}"]`);
