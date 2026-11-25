@@ -141,13 +141,16 @@ body *::after {
    ============================================================================= */
 [data-theme="dark"] {
 
-    /* ── style.css token'ları ──────────────────────────────────────────────── */
-    --color-bg: #0f172a;
-    --color-surface: #1e293b;
-    --color-surface-alt: #1a2535;
+    /* ── style.css token'ları — v3.8 UX-3 Space Titanium ──────────────────── */
+    --bg-canvas: #0b0f17;
+    --color-bg: #0b0f17;
+    --color-surface: #131a26;
+    --color-surface-alt: #172030;
+    --color-surface-elevated: #1b2434;
 
-    --color-border: #334155;
-    --color-border-light: #2d3f55;
+    --color-border: #253045;
+    --color-border-light: rgba(255, 255, 255, 0.08);
+    --color-border-hairline: rgba(255, 255, 255, 0.08);
 
     --color-text: #e2e8f0;
     --color-text-muted: #94a3b8;
@@ -193,6 +196,8 @@ body *::after {
     --shadow-md: 0 4px 15px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
     --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.6);
+    --shadow-platinum-sm: 0 1px 2px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --shadow-platinum-md: 0 14px 32px -10px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 
     /* ── admin-add-style.css token'ları ────────────────────────────────────── */
     --primary: #60a5fa;
@@ -201,11 +206,11 @@ body *::after {
     --danger: #f87171;
     --success: #34d399;
     --warning: #fbbf24;
-    --bg: #0f172a;
-    --card-bg: #1e293b;
+    --bg: #0b0f17;
+    --card-bg: #131a26;
     --text: #e2e8f0;
     --text-muted: #94a3b8;
-    --border: #334155;
+    --border: #253045;
 }
 
 /* =============================================================================
@@ -972,6 +977,25 @@ body *::after {
     background: transparent;
 }
 
+/* UX-1 · Analitik grafikler: özel lejant, alt başlık ve kaydırma çubuğu (Chart.js renkleri çizim anında okunur) */
+[data-theme="dark"] .chart-sub {
+    color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .dash-legend-item:hover,
+[data-theme="dark"] .dash-legend-item:focus-visible {
+    background: rgba(148, 163, 184, 0.12);
+}
+
+[data-theme="dark"] .dash-legend-dot {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+[data-theme="dark"] .dash-hbar-host,
+[data-theme="dark"] .dash-donut-legend {
+    scrollbar-color: #475569 transparent;
+}
+
 /* Loading overlay */
 [data-theme="dark"] #admin-premium-loader {
     background: #0f172a;
@@ -1512,4 +1536,144 @@ body *::after {
 
 [data-theme="dark"] .card-details {
     background: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* =============================================================================
+   v3.8 · UX-3 — SPACE TITANIUM DARK MODE & BENTO DEPO KARTLARI
+   ============================================================================= */
+[data-theme="dark"] .index-transition-loader {
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(96, 165, 250, 0.12), transparent 55%),
+        rgba(11, 15, 23, 0.90);
+}
+
+[data-theme="dark"] .itl-card {
+    background: rgba(19, 26, 38, 0.92);
+    border-color: rgba(255, 255, 255, 0.09);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .itl-spinner {
+    border-color: rgba(96, 165, 250, 0.20);
+    border-top-color: #60a5fa;
+}
+
+[data-theme="dark"] .inventory-screen {
+    background:
+        radial-gradient(ellipse 90% 42% at 50% -10%, rgba(96, 165, 250, 0.08), transparent 65%),
+        var(--bg-canvas, #0b0f17);
+}
+
+[data-theme="dark"] .inventory-screen .header {
+    background: rgba(19, 26, 38, 0.92);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="dark"] .inventory-screen .tabs {
+    background: rgba(19, 26, 38, 0.86);
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: var(--shadow-platinum-sm);
+}
+
+[data-theme="dark"] .inventory-screen .tab-button {
+    color: #94a3b8;
+    background: transparent;
+}
+
+[data-theme="dark"] .inventory-screen .tab-button:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #f1f5f9;
+}
+
+[data-theme="dark"] .inventory-screen .tab-button.active {
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+    color: #ffffff;
+    box-shadow: 0 4px 12px -2px rgba(59, 130, 246, 0.45);
+}
+
+[data-theme="dark"] .inventory-screen .tab-content {
+    background: var(--color-surface, #131a26);
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: var(--shadow-platinum-md);
+}
+
+[data-theme="dark"] .inventory-screen .search-bar {
+    background: var(--color-surface-elevated, #1b2434);
+    border-color: rgba(255, 255, 255, 0.09);
+}
+
+[data-theme="dark"] .inventory-screen .search-bar:focus-within {
+    background: #1f2a3d;
+    border-color: rgba(96, 165, 250, 0.45);
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.16);
+}
+
+[data-theme="dark"] .inventory-screen .table-responsive-wrapper {
+    background: var(--color-surface, #131a26);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+@media (min-width: 769px) {
+    [data-theme="dark"] #cardViewB1 .type-group-card,
+    [data-theme="dark"] #cardViewB2 .type-group-card {
+        background: var(--color-surface, #131a26);
+        border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    [data-theme="dark"] #cardViewB1 .type-group-header:hover,
+    [data-theme="dark"] #cardViewB2 .type-group-header:hover {
+        background: rgba(255, 255, 255, 0.03);
+    }
+
+    [data-theme="dark"] #cardViewB1 .type-group-body.expanded,
+    [data-theme="dark"] #cardViewB2 .type-group-body.expanded {
+        background: var(--bg-canvas, #0b0f17);
+        border-top-color: rgba(255, 255, 255, 0.08);
+    }
+
+    [data-theme="dark"] #cardViewB1 .product-card-item,
+    [data-theme="dark"] #cardViewB2 .product-card-item {
+        background: var(--color-surface-elevated, #1b2434);
+        border-color: rgba(255, 255, 255, 0.08);
+        box-shadow: var(--shadow-platinum-sm);
+    }
+
+    [data-theme="dark"] #cardViewB1 .product-card-item:last-child,
+    [data-theme="dark"] #cardViewB2 .product-card-item:last-child {
+        border-bottom-color: rgba(255, 255, 255, 0.08);
+    }
+
+    [data-theme="dark"] #cardViewB1 .product-card-item:hover,
+    [data-theme="dark"] #cardViewB2 .product-card-item:hover {
+        background: #202b3e;
+        border-color: rgba(96, 165, 250, 0.42);
+        box-shadow: var(--shadow-platinum-md);
+    }
+
+    [data-theme="dark"] #cardViewB1 .product-card-item.selected-row,
+    [data-theme="dark"] #cardViewB2 .product-card-item.selected-row {
+        background: rgba(59, 130, 246, 0.14) !important;
+        border-color: rgba(96, 165, 250, 0.55);
+        box-shadow: inset 3px 0 0 #60a5fa, var(--shadow-platinum-sm);
+    }
+
+    [data-theme="dark"] #cardViewB1 .pci-meta,
+    [data-theme="dark"] #cardViewB2 .pci-meta {
+        border-top-color: rgba(255, 255, 255, 0.07);
+    }
+
+    [data-theme="dark"] #cardViewB1 .pci-meta-tag,
+    [data-theme="dark"] #cardViewB2 .pci-meta-tag {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.08);
+        color: #cbd5e1;
+    }
+
+    [data-theme="dark"] #cardViewB1 .pci-meta-shelf,
+    [data-theme="dark"] #cardViewB2 .pci-meta-shelf {
+        background: rgba(56, 189, 248, 0.12);
+        border-color: rgba(56, 189, 248, 0.24);
+        color: #7dd3fc;
+    }
 }

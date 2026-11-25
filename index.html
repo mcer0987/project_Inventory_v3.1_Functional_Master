@@ -194,6 +194,48 @@
         }
     </style>
 
+    <!-- v3.8 UX-3 · Sıfır-Flicker Soft Geçiş Ön-Kontrolü (senkron, ilk boyamadan önce) -->
+    <script>
+        // [WHY]: Admin → Index geçişinde veya oturumlu yenilemede Firebase Auth çözülene kadar
+        //        #loginModal göz kırpmasını önler; Zero-Trust doğrulaması auth-engine.js'te kalır.
+        // [HOW]: Geçiş/oturum ipucu varsa html.auth-hydrating ekler ve 2.5s emniyet timeout'u kurar.
+        (function () {
+            try {
+                if (localStorage.getItem('system_maintenance_mode') === 'true') return;
+                var hint = sessionStorage.getItem('pendingQuickExit') === '1' || !!sessionStorage.getItem('adminVizesi');
+                if (!hint) {
+                    var rawVisa = localStorage.getItem('admin_auth');
+                    if (rawVisa) {
+                        try {
+                            var parsed = JSON.parse(rawVisa);
+                            if (parsed && Number(parsed.expiry) > Date.now()) hint = true;
+                        } catch (e) { }
+                    }
+                }
+                if (!hint && localStorage.getItem('activeUser')) hint = true;
+                if (!hint) {
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var k = localStorage.key(i);
+                        if (k && k.indexOf('firebase:authUser:') === 0) { hint = true; break; }
+                    }
+                }
+                if (hint) {
+                    var rootEl = document.documentElement;
+                    rootEl.classList.add('auth-hydrating', 'auth-transition-ready');
+                    window.__authHydratingTimer = setTimeout(function () {
+                        window.__authKnownResolved = true;
+                        if (typeof window.releaseAuthHydration === 'function') {
+                            window.releaseAuthHydration();
+                        } else {
+                            rootEl.classList.remove('auth-hydrating', 'auth-transition-ready');
+                        }
+                        if (typeof window.checkAuth === 'function') window.checkAuth();
+                    }, 2500);
+                }
+            } catch (e) { /* depolama kapalıysa klasik akış devam eder */ }
+        })();
+    </script>
+
 </head>
 
 <body>
@@ -225,6 +267,15 @@
             }
         })();
     </script>
+    <!-- v3.8 UX-3 · Sıfır-Flicker Soft Geçiş Perdesi (yalnız oturum ipucu ile açılışta görünür) -->
+    <div id="indexTransitionLoader" class="index-transition-loader" role="status" aria-live="polite">
+        <div class="itl-card">
+            <div class="itl-spinner" aria-hidden="true"></div>
+            <div class="itl-title">Oturum Hazırlanıyor</div>
+            <div class="itl-subtitle">Envanter verileri senkronize ediliyor…</div>
+        </div>
+    </div>
+
     <div id="appAlert" class="app-alert" style="display: none;">
         <div class="app-alert-content">
             <span id="appAlertMessage"></span>
@@ -1549,7 +1600,7 @@
         <!-- Giriş Modal -->
         <div id="loginModal" class="modal login-modal-v3" role="dialog" aria-modal="true"
             aria-labelledby="loginModalTitle" aria-describedby="loginModalDescription"
-            style="display: flex !important; align-items: center !important; justify-content: center !important;">
+            style="display: flex; align-items: center; justify-content: center;">
             <div class="modal-content login-special-style login-card-v3">
                 <div class="login-header-bar"></div>
                 <div class="login-inner-body">

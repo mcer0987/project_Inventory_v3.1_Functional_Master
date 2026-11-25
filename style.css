@@ -37,12 +37,15 @@
     --color-purple: #8e44ad;
     --color-purple-light: #f3e9f9;
 
-    /* Nötr / yüzey renkleri */
-    --color-bg: #ecf0f1;
+    /* Nötr / yüzey renkleri — v3.8 UX-3 macOS Platinum */
+    --bg-canvas: #f3f5f8;
+    --color-bg: #f3f5f8;
     --color-surface: #ffffff;
-    --color-surface-alt: #f8f9fa;
-    --color-border: #bdc3c7;
-    --color-border-light: #e2e8f0;
+    --color-surface-alt: #f8fafc;
+    --color-surface-elevated: #ffffff;
+    --color-border: #cbd5e1;
+    --color-border-light: rgba(15, 23, 42, 0.08);
+    --color-border-hairline: rgba(15, 23, 42, 0.08);
 
     /* Metin renkleri */
     --color-text: #2c3e50;
@@ -93,6 +96,8 @@
     --shadow-md: 0 4px 15px rgba(0, 0, 0, 0.08);
     --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.15);
     --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.20);
+    --shadow-platinum-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
+    --shadow-platinum-md: 0 10px 28px -8px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
 
     /* Geçiş */
     --transition: all 0.3s ease;
@@ -6363,4 +6368,369 @@ tr.zim-row-awaiting td { opacity: 0.85; }
 #quickProductModal.kb-open .quick-product-card {
     max-height: calc(var(--vv-h, 100dvh) - 16px - 58px);
 }
+
+/* =============================================================================
+   v3.8 · UX-3 — SIFIR-FLICKER SOFT GEÇİŞ, MACOS PLATINUM & MASAÜSTÜ BENTO KARTLAR
+   ============================================================================= */
+
+/* ── 1. Sıfır-Flicker Soft Geçiş Perdesi (#indexTransitionLoader) ──────────── */
+html.auth-hydrating #loginModal {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+html.auth-hydrating #inventory-screen {
+    filter: none !important;
+    pointer-events: none !important;
+    user-select: none !important;
+}
+
+.index-transition-loader {
+    position: fixed;
+    inset: 0;
+    z-index: 100050;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(59, 130, 246, 0.08), transparent 55%),
+        rgba(243, 245, 248, 0.90);
+    backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.28s ease;
+}
+
+html.auth-transition-ready .index-transition-loader {
+    display: flex;
+}
+
+html.auth-hydrating .index-transition-loader {
+    display: flex;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: all;
+}
+
+.index-transition-loader.is-hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.itl-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    min-width: 240px;
+    padding: 26px 32px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.88);
+    border: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.08));
+    box-shadow: 0 20px 50px -12px rgba(15, 23, 42, 0.14), 0 2px 8px rgba(15, 23, 42, 0.04);
+    text-align: center;
+}
+
+.itl-spinner {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 2.5px solid rgba(52, 152, 219, 0.18);
+    border-top-color: var(--color-primary, #3498db);
+    animation: itlSpin 0.78s linear infinite;
+}
+
+@keyframes itlSpin {
+    to { transform: rotate(360deg); }
+}
+
+.itl-title {
+    font-size: 14.5px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--color-text, #1e293b);
+}
+
+.itl-subtitle {
+    font-size: 12.5px;
+    color: var(--color-text-muted, #64748b);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .index-transition-loader { transition: none; }
+    .itl-spinner { animation-duration: 1.6s; }
+}
+
+/* ── 2. macOS Platinum Yüzey Tonajı (index.html · .inventory-screen kapsamı) ─ */
+.inventory-screen {
+    min-height: 100vh;
+    background:
+        radial-gradient(ellipse 90% 40% at 50% -10%, rgba(52, 152, 219, 0.06), transparent 65%),
+        var(--bg-canvas, #f3f5f8);
+    -webkit-font-smoothing: antialiased;
+}
+
+.inventory-screen .tabs {
+    margin: 18px 20px 12px;
+    padding: 5px;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.78);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.08));
+    border-radius: 14px;
+    box-shadow: var(--shadow-platinum-sm);
+}
+
+.inventory-screen .tab-button {
+    border-right: none;
+    border-radius: 10px;
+    padding: 9px 16px;
+    background: transparent;
+    color: var(--color-text-muted, #64748b);
+    font-weight: 600;
+    font-size: 13.5px;
+    letter-spacing: -0.01em;
+    transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.inventory-screen .tab-button:hover {
+    background: rgba(15, 23, 42, 0.05);
+    color: var(--color-text, #1e293b);
+}
+
+.inventory-screen .tab-button.active {
+    background: var(--color-primary, #3498db);
+    color: #ffffff;
+    box-shadow: 0 2px 8px -2px rgba(52, 152, 219, 0.45);
+}
+
+.inventory-screen .tab-button.active:hover {
+    background: var(--color-primary-dark, #2980b9);
+    color: #ffffff;
+}
+
+.inventory-screen .tab-content {
+    margin: 0 20px 24px;
+    background: var(--color-surface-elevated, #ffffff);
+    border: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.08));
+    border-radius: 16px;
+    padding: 20px 22px;
+    box-shadow: var(--shadow-platinum-md);
+}
+
+.inventory-screen .search-bar {
+    background: var(--color-surface-alt, #f8fafc);
+    border: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.08));
+    border-radius: 12px;
+    padding: 6px 8px 6px 14px;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.inventory-screen .search-bar:focus-within {
+    background: var(--color-surface-elevated, #ffffff);
+    border-color: rgba(52, 152, 219, 0.45);
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.12);
+}
+
+.inventory-screen .search-bar input[type="text"] {
+    border: none;
+    box-shadow: none;
+    outline: none;
+}
+
+.inventory-screen .table-responsive-wrapper {
+    border: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.08));
+    border-radius: 12px;
+    background: var(--color-surface-elevated, #ffffff);
+    box-shadow: var(--shadow-platinum-sm);
+}
+
+@media (max-width: 768px) {
+    .inventory-screen .tabs {
+        margin: 12px 10px 8px;
+        padding: 4px;
+        border-radius: 12px;
+    }
+
+    .inventory-screen .tab-content {
+        margin: 0 10px 14px;
+        padding: 14px;
+        border-radius: 14px;
+    }
+}
+
+/* ── 3. Masaüstü Bento Depo Kartları (> 768px · #cardViewB1 / #cardViewB2) ── */
+@media (min-width: 769px) {
+    #cardViewB1,
+    #cardViewB2 {
+        gap: 14px;
+        padding: 14px 0 8px;
+    }
+
+    #cardViewB1 .type-group-card,
+    #cardViewB2 .type-group-card {
+        border: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.08));
+        border-radius: 16px;
+        background: var(--color-surface-elevated, #ffffff);
+        box-shadow: var(--shadow-platinum-sm);
+    }
+
+    #cardViewB1 .type-group-header,
+    #cardViewB2 .type-group-header {
+        padding: 14px 20px;
+        transition: background-color 0.16s ease;
+    }
+
+    #cardViewB1 .type-group-header:hover,
+    #cardViewB2 .type-group-header:hover {
+        background: var(--color-surface-alt, #f8fafc);
+    }
+
+    #cardViewB1 .type-group-body.expanded,
+    #cardViewB2 .type-group-body.expanded {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 14px;
+        padding: 16px 18px 18px;
+        background: var(--bg-canvas, #f3f5f8);
+        border-top: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.08));
+    }
+
+    #cardViewB1 .product-card-item,
+    #cardViewB2 .product-card-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 10px 12px;
+        padding: 15px 16px;
+        min-height: 112px;
+        border: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.08));
+        border-radius: 14px;
+        background: var(--color-surface-elevated, #ffffff);
+        box-shadow: var(--shadow-platinum-sm);
+        transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+                    box-shadow 0.18s ease,
+                    border-color 0.18s ease,
+                    background-color 0.18s ease;
+    }
+
+    #cardViewB1 .product-card-item:last-child,
+    #cardViewB2 .product-card-item:last-child {
+        border-bottom: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.08));
+    }
+
+    #cardViewB1 .product-card-item:hover,
+    #cardViewB2 .product-card-item:hover {
+        transform: translateY(-2px);
+        border-color: rgba(52, 152, 219, 0.34);
+        box-shadow: var(--shadow-platinum-md);
+    }
+
+    #cardViewB1 .product-card-item.selected-row,
+    #cardViewB2 .product-card-item.selected-row {
+        background: rgba(52, 152, 219, 0.06) !important;
+        border-color: rgba(52, 152, 219, 0.55);
+        box-shadow: inset 3px 0 0 var(--color-primary, #3498db), var(--shadow-platinum-sm);
+    }
+
+    #cardViewB1 .pci-left,
+    #cardViewB2 .pci-left {
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    #cardViewB1 .card-checkbox,
+    #cardViewB2 .card-checkbox {
+        width: 17px;
+        height: 17px;
+        margin-top: 2px;
+    }
+
+    #cardViewB1 .pci-info,
+    #cardViewB2 .pci-info {
+        gap: 10px;
+        width: 100%;
+    }
+
+    #cardViewB1 .pci-name,
+    #cardViewB2 .pci-name {
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: -0.015em;
+        line-height: 1.35;
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    #cardViewB1 .pci-meta,
+    #cardViewB2 .pci-meta {
+        gap: 6px;
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.06));
+    }
+
+    #cardViewB1 .pci-meta-tag,
+    #cardViewB2 .pci-meta-tag {
+        padding: 3px 8px;
+        border-radius: 7px;
+        background: var(--color-surface-alt, #f8fafc);
+        border: 1px solid var(--color-border-hairline, rgba(15, 23, 42, 0.07));
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--color-text-muted, #475569);
+    }
+
+    #cardViewB1 .pci-meta-shelf,
+    #cardViewB2 .pci-meta-shelf {
+        background: rgba(52, 152, 219, 0.08);
+        border-color: rgba(52, 152, 219, 0.18);
+        color: var(--color-primary-dark, #2980b9);
+        font-weight: 600;
+    }
+
+    #cardViewB1 .pci-meta-code,
+    #cardViewB2 .pci-meta-code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 10.5px;
+    }
+
+    #cardViewB1 .pci-right,
+    #cardViewB2 .pci-right {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+        margin-left: 0;
+    }
+
+    #cardViewB1 .pci-qty-badge,
+    #cardViewB2 .pci-qty-badge {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 3px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+    }
+
+    #cardViewB1 .pci-qty-badge::after,
+    #cardViewB2 .pci-qty-badge::after {
+        content: "adet";
+        font-size: 10px;
+        font-weight: 600;
+        opacity: 0.78;
+    }
+}
+
 

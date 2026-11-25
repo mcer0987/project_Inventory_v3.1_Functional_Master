@@ -236,6 +236,49 @@ window.addEventListener('onAdminGrantChanged', ev => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// releaseAuthHydration (v3.8 · UX-3 Sıfır-Flicker Soft Geçiş)
+// ─────────────────────────────────────────────────────────────────────────────
+// [WHY]: Admin → Index geçişinde veya yenilemede Firebase Auth çözülene kadar #loginModal
+//        göz kırpmasını önleyen geçiş perdesini güvenli ve yumuşak biçimde kaldırır.
+// [HOW]: Emniyet zamanlayıcısını temizler, html.auth-hydrating sınıfını siler ve
+//        #indexTransitionLoader'ı opacity:0 ile kapatır; Zero-Trust bariyerini değiştirmez.
+export const releaseAuthHydration = function () {
+    if (window.__authHydratingTimer) {
+        clearTimeout(window.__authHydratingTimer);
+        window.__authHydratingTimer = null;
+    }
+    document.documentElement.classList.remove('auth-hydrating');
+    const loader = document.getElementById('indexTransitionLoader');
+    if (loader && !loader.classList.contains('is-hidden')) {
+        loader.classList.add('is-hidden');
+        loader.setAttribute('aria-hidden', 'true');
+        setTimeout(() => {
+            if (!document.documentElement.classList.contains('auth-hydrating')) {
+                document.documentElement.classList.remove('auth-transition-ready');
+            }
+        }, 320);
+    } else if (!document.documentElement.classList.contains('auth-hydrating')) {
+        document.documentElement.classList.remove('auth-transition-ready');
+    }
+};
+window.releaseAuthHydration = releaseAuthHydration;
+
+// [WHY]: v3.8 UX-3 · Admin Operasyon Merkezi'ndeki "Hızlı Envanter Çıkış Masası" ile gelindiğinde,
+//        oturum doğrulandığı anda çıkış modalını göz kırpmasız ve pürüzsüz açar.
+// [HOW]: sessionStorage.pendingQuickExit === '1' varsa ve openExitModal hazırsa bayrağı tüketip
+//        sonraki çizim karesinde açar; henüz hazır değilse script.js yedeğine bırakır.
+function _flushPendingQuickExit() {
+    try {
+        if (sessionStorage.getItem('pendingQuickExit') !== '1') return;
+        if (typeof window.openExitModal !== 'function') return;
+        sessionStorage.removeItem('pendingQuickExit');
+        requestAnimationFrame(() => {
+            try { window.openExitModal(); } catch (e) { console.error('[auth-engine] pendingQuickExit açılamadı:', e); }
+        });
+    } catch (e) { /* depolama kapalıysa sorun değil */ }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // checkAuth
 // ─────────────────────────────────────────────────────────────────────────────
 /**
@@ -270,6 +313,7 @@ export const checkAuth = function () {
             isAuthValid = true;
         } else {
             console.warn('🔒 [auth-engine] Bayat yönetici oturumu (vize/kimlik yok) — kapatılıyor.');
+            releaseAuthHydration();
             if (S) {
                 S.endAdminSession('stale').then(() => {
                     if (typeof window.showAppAlert === 'function') window.showAppAlert('Yönetici oturumunun süresi dolmuş. Lütfen yeniden giriş yapın.', 'warning');
@@ -293,6 +337,7 @@ export const checkAuth = function () {
         const person = list.find(p => p && p.uid && String(p.uid) === String(uid));
         if (!person) {
             console.warn('🔒 [auth-engine] Personel hesabı oturumu geçersiz (personele bağlı değil) — kapatılıyor.');
+            releaseAuthHydration();
             if (S) S.endAdminSession('stale');
             return;
         }
@@ -303,6 +348,7 @@ export const checkAuth = function () {
     }
 
     if (isAuthValid) {
+        const wasHydrating = document.documentElement.classList.contains('auth-hydrating');
         updateNavbarUI(activeUser);
 
         // Şablon motoru varsa yükle
@@ -325,10 +371,17 @@ export const checkAuth = function () {
 
         if (loginModal) {
             loginModal.classList.add('hidden-modal');
-            setTimeout(() => {
+            if (wasHydrating) {
                 loginModal.style.setProperty('display', 'none', 'important');
-            }, 400);
+            } else {
+                setTimeout(() => {
+                    loginModal.style.setProperty('display', 'none', 'important');
+                }, 400);
+            }
         }
+
+        releaseAuthHydration();
+        _flushPendingQuickExit();
 
         // [WHY]: İlk yüklemede sekme render'ını yalnızca bir kez tetikliyoruz.
         //        onSnapshot her veri gelişinde bu kodu çalıştırmasın; modal kapanmasın.
@@ -342,6 +395,18 @@ export const checkAuth = function () {
             }, 100);
         }
     } else {
+        // [WHY]: v3.8 UX-3 · Geçiş/yenileme sırasında Firebase Auth ilk yanıtını henüz vermediyse
+        //        #loginModal'ı erken açıp göz kırptırma; ekran perde arkasında kilitli bekler (Zero-Trust korunur).
+        if (document.documentElement.classList.contains('auth-hydrating') && !window.__authKnownResolved) {
+            if (inventoryScreen) {
+                inventoryScreen.style.setProperty('display', 'block', 'important');
+                inventoryScreen.style.setProperty('pointer-events', 'none', 'important');
+                inventoryScreen.style.setProperty('user-select', 'none', 'important');
+            }
+            return;
+        }
+        releaseAuthHydration();
+
         // ❗ AUTH YOKSA — ekranı kilitle, login modal göster
         window.isFirebaseLoaded = false;
         window._initialRenderDone = false;
@@ -691,14 +756,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // 2. GERÇEK AUTH KONTROLÜ
     checkAuth();
 
-    // 3. J10 PRI: oturum olmadığı kesinleşince (Firebase durumu bildirdi, kullanıcı yok) kurumsal kimlik kutusuna odak
-    if (document.getElementById('login-pri')) {
-        const focusWhenSignedOut = () => {
-            if (typeof window.whenAuthKnown !== 'function') { setTimeout(focusWhenSignedOut, 100); return; }
-            window.whenAuthKnown().then(u => { if (!u) _autoFocusLogin(); });
-        };
-        focusWhenSignedOut();
-    }
+    // 3. v3.8 UX-3 + J10 PRI: Firebase Auth ilk yanıtını verdiğinde geçiş perdesini kesin sonuca bağla;
+    //    oturum yoksa login modalı aç ve kurumsal kimlik kutusuna odakla.
+    const resolveWhenAuthKnown = () => {
+        if (typeof window.whenAuthKnown !== 'function') { setTimeout(resolveWhenAuthKnown, 50); return; }
+        window.whenAuthKnown().then(u => {
+            window.__authKnownResolved = true;
+            if (!u || document.documentElement.classList.contains('auth-hydrating')) {
+                checkAuth();
+            }
+            if (!u && document.getElementById('login-pri')) _autoFocusLogin();
+        });
+    };
+    resolveWhenAuthKnown();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -756,6 +826,7 @@ export const handleLogout = async function (reason = 'manual') {
     window.isFirebaseLoaded = false;
     window._launchpadTriggered = false;
     document.body.classList.remove('logged-in');
+    releaseAuthHydration();
 
     // 2. TEK SONLANDIRMA YOLU (Faz 4 · J3): zamanlayıcılar → clearSession() → await signOut (yerel kalıcılığa dönerek) →
     //    'onAppLogout'. main.js gözlemcisi bu olayla sayfa yenilemeden (Soft Reset) giriş ekranını açar.

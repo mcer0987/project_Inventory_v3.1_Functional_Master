@@ -413,10 +413,10 @@ export const renderCardSearchResults = function (depo, results) {
                     <div class="pci-info">
                         <span class="pci-name">${safeName}</span>
                         <span class="pci-meta">
-                            <span class="pci-meta-tag"><i class="fas fa-layer-group"></i> ${escapeHtml(turAdi)}</span>
-                            <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(item.raf || '-')}</span>
-                            ${item.envanterNo ? `<span class="pci-meta-tag"><i class="fas fa-barcode"></i> ${escapeHtml(item.envanterNo)}</span>` : ''}
-                            ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${escapeHtml(item.marka)}</span>` : ''}
+                            <span class="pci-meta-tag pci-meta-type"><i class="fas fa-layer-group" aria-hidden="true"></i> ${escapeHtml(turAdi)}</span>
+                            <span class="pci-meta-tag pci-meta-shelf"><i class="fas fa-map-marker-alt" aria-hidden="true"></i> ${escapeHtml(item.raf || '-')}</span>
+                            ${item.envanterNo ? `<span class="pci-meta-tag pci-meta-code"><i class="fas fa-barcode" aria-hidden="true"></i> ${escapeHtml(item.envanterNo)}</span>` : ''}
+                            ${item.marka ? `<span class="pci-meta-tag pci-meta-brand"><i class="fas fa-tag" aria-hidden="true"></i> ${escapeHtml(item.marka)}</span>` : ''}
                         </span>
                     </div>
                 </div>
@@ -507,10 +507,10 @@ export const renderMobileCards = function (depo) {
                         <div class="pci-info">
                             <span class="pci-name">${safeName}</span>
                             <span class="pci-meta">
-                                <span class="pci-meta-tag"><i class="fas fa-map-marker-alt"></i> ${escapeHtml(item.raf || '-')}</span>
-                                ${item.envanterNo ? `<span class="pci-meta-tag"><i class="fas fa-barcode"></i> ${escapeHtml(item.envanterNo)}</span>` : ''}
-                                ${item.marka ? `<span class="pci-meta-tag"><i class="fas fa-tag"></i> ${escapeHtml(item.marka)}</span>` : ''}
-                                ${item.sütun ? `<span class="pci-meta-tag"><i class="fas fa-columns"></i> ${escapeHtml(item.sütun)}</span>` : ''}
+                                <span class="pci-meta-tag pci-meta-shelf"><i class="fas fa-map-marker-alt" aria-hidden="true"></i> ${escapeHtml(item.raf || '-')}</span>
+                                ${item.envanterNo ? `<span class="pci-meta-tag pci-meta-code"><i class="fas fa-barcode" aria-hidden="true"></i> ${escapeHtml(item.envanterNo)}</span>` : ''}
+                                ${item.marka ? `<span class="pci-meta-tag pci-meta-brand"><i class="fas fa-tag" aria-hidden="true"></i> ${escapeHtml(item.marka)}</span>` : ''}
+                                ${item.sütun ? `<span class="pci-meta-tag pci-meta-col"><i class="fas fa-columns" aria-hidden="true"></i> ${escapeHtml(item.sütun)}</span>` : ''}
                             </span>
                         </div>
                     </div>
@@ -526,7 +526,7 @@ export const renderMobileCards = function (depo) {
         const gid = `${depo /* xss-ok: b1|b2 doğrulanmış sabit */}_${groupIdx}`;
         return `
             <div class="type-group-card" id="typeGroup_${gid /* xss-ok: depo sabiti + sıra */}">
-                <div class="type-group-header"
+                <div class="type-group-header" role="button" tabindex="0" aria-expanded="false"
                      data-action="toggleCardGroup" data-body="typeGroupBody_${escapeHtml(gid)}" data-icon="typeGroupIcon_${escapeHtml(gid)}">
                     <div class="tgh-left">
                         <i class="fas fa-layer-group tgh-icon"></i>
@@ -727,6 +727,10 @@ export const toggleCardGroup = function (bodyId, iconId) {
     const body = document.getElementById(bodyId);
     if (!body) return;
     const isOpen = body.classList.toggle('expanded');
+    const header = body.previousElementSibling;
+    if (header && header.classList.contains('type-group-header')) {
+        header.setAttribute('aria-expanded', String(isOpen));
+    }
     const icon = document.getElementById(iconId);
     if (icon) icon.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
 };
