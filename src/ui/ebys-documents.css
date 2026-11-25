@@ -96,3 +96,25 @@ dialog.ebys-document-dialog{position:fixed;inset:0;margin:auto!important;width:m
 .ebys-preview-institution { text-align: center; margin-bottom: 12px; }
 .ebys-preview-institution strong { display: block; font-size: 15px; }
 .ebys-preview-institution small { display: block; color: var(--color-text-muted, #64748b); }
+
+/* v3.7 İP-11 · Kişisel Üst Yazı Şablonları (kurumsal + kişisel seçici, kaydetme ve silme) */
+.ebys-template-bar { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--color-border, #cbd5e1); border-radius: 10px; background: var(--color-surface-alt, #f8fafc); }
+.ebys-template-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ebys-template-desc { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--color-text-muted, #475569); }
+.ebys-template-help-btn { flex-shrink: 0; white-space: nowrap; }
+.ebys-template-help { padding: 8px 10px; border-left: 3px solid var(--color-primary, #3b82f6); border-radius: 6px; background: var(--color-surface, #fff); font-size: 12.5px; line-height: 1.5; }
+.ebys-template-help p { margin: 0 0 4px; }
+.ebys-template-help p:last-child { margin-bottom: 0; }
+.ebys-template-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.ebys-template-select-wrap { flex: 1 1 260px; }
+.ebys-personal-save-trigger { min-height: 38px; white-space: nowrap; }
+.ebys-personal-save-box:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--color-border, #cbd5e1); }
+.ebys-personal-save-box input { flex: 1 1 220px; min-width: 0; }
+.ebys-personal-manage { font-size: 13px; }
+.ebys-personal-manage summary { cursor: pointer; font-weight: 600; color: var(--color-text, #1e293b); }
+.ebys-personal-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.ebys-personal-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--color-border, #e2e8f0); border-radius: 8px; background: var(--color-surface, #fff); }
+.ebys-personal-item-info { min-width: 0; flex: 1 1 180px; }
+.ebys-personal-item-info strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.ebys-personal-item-info small { display: block; font-size: 12px; color: var(--color-text-muted, #64748b); overflow-wrap: anywhere; }
+.ebys-personal-item-actions { display: flex; gap: 6px; flex-shrink: 0; }

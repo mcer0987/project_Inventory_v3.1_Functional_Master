@@ -1,4 +1,4 @@
-import { doc, collection, query, where, getDocFromServer, getDocsFromServer, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+import { doc, collection, query, where, getDocFromServer, getDocsFromServer, runTransaction, deleteDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import { fireDb } from './firebase-handler.js';
 import '../utils/ebys-catalog-schema.js';
 
@@ -64,8 +64,10 @@ async function saveFilePlan(input, { expectedRevision, create = false } = {}) {
         if (!create && !snap.exists()) throw new Error('Dosya planı bulunamadı.');
         const old = snap.exists() ? snap.data() : null;
         stale(old, expectedRevision, 'Dosya planı');
-        const next = { id: data.code, code: data.code, title: data.title, active: data.active, revision: (old?.revision || 0) + 1,
-            createdAt: old?.createdAt || serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: actor };
+        const next = {
+            id: data.code, code: data.code, title: data.title, active: data.active, revision: (old?.revision || 0) + 1,
+            createdAt: old?.createdAt || serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: actor
+        };
         tx.set(ref('ebysFilePlans', data.code), next);
         return { ...next, createdAt: null, updatedAt: null };
     });
@@ -88,10 +90,14 @@ async function saveTemplate(input, { expectedRevision } = {}) {
         const old = snap.exists() ? snap.data() : null;
         stale(old, expectedRevision, 'Şablon');
         const currentRevision = (old?.currentRevision || 0) + 1;
-        tx.set(ref('ebysLetterTemplateRevisions', C().revisionId(id, currentRevision)), { id: C().revisionId(id, currentRevision), templateId: id,
-            revision: currentRevision, ...data, createdAt: serverTimestamp(), createdBy: actor });
-        const next = { id, name: data.name, active: old ? old.active !== false : true, currentRevision, revision: (old?.revision || 0) + 1,
-            createdAt: old?.createdAt || serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: actor };
+        tx.set(ref('ebysLetterTemplateRevisions', C().revisionId(id, currentRevision)), {
+            id: C().revisionId(id, currentRevision), templateId: id,
+            revision: currentRevision, ...data, createdAt: serverTimestamp(), createdBy: actor
+        });
+        const next = {
+            id, name: data.name, active: old ? old.active !== false : true, currentRevision, revision: (old?.revision || 0) + 1,
+            createdAt: old?.createdAt || serverTimestamp(), updatedAt: serverTimestamp(), updatedBy: actor
+        };
         tx.set(ref('ebysLetterTemplates', id), next);
         return { ...next, createdAt: null, updatedAt: null };
     });
@@ -110,7 +116,52 @@ async function setTemplateActive(id, enabled, { expectedRevision } = {}) {
     });
 }
 
+// [WHY]: v3.7 İP-11 · Kullanıcının yalnızca kendi kişisel üst yazı şablonlarını sunucudan listeler.
+// [HOW]: ownerUid == actor sorgusu firestore.rules personalTemplateAccessOk list kuralıyla tam uyumludur; ad sırasıyla döner.
+async function listMyPersonalTemplates() {
+    const actor = uid();
+    const snap = await getDocsFromServer(query(collection(fireDb, root(), 'ebysPersonalTemplates', 'items'), where('ownerUid', '==', actor)));
+    return rows(snap).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'tr'));
+}
+
+// [WHY]: v3.7 İP-11 · Personelin sık kullandığı üst yazı taslağını kendi kişisel şablonu olarak kaydetmesi veya güncellemesi.
+// [HOW]: normalizePersonalTemplate ile doğrular; tek transaction içinde ownerUid ve createdAt değerlerini koruyarak yazar.
+async function savePersonalTemplate(input) {
+    const actor = uid(), data = C().normalizePersonalTemplate(input);
+    const id = input && input.id ? String(input.id).trim() : crypto.randomUUID();
+    if (!id) throw new Error('Kişisel şablon kimliği geçersiz.');
+    return runTransaction(fireDb, async tx => {
+        const target = ref('ebysPersonalTemplates', id);
+        const snap = await tx.get(target);
+        if (input && input.id && !snap.exists()) throw new Error('Kişisel şablon bulunamadı.');
+        const old = snap.exists() ? snap.data() : null;
+        if (old && old.ownerUid !== actor) throw new Error('Bu kişisel şablon size ait değil.');
+        const next = {
+            id, ownerUid: old ? old.ownerUid : actor, ...data,
+            createdAt: old?.createdAt || serverTimestamp(), updatedAt: serverTimestamp(),
+        };
+        tx.set(target, next);
+        return { ...next, createdAt: null, updatedAt: null };
+    });
+}
+
+// [WHY]: v3.7 İP-11 · Kullanıcının kendi kişisel üst yazı şablonunu kalıcı olarak silmesi.
+// [HOW]: Oturum ve kimlik doğrulamasından sonra belgeyi siler; sahiplik sunucu tarafında personalTemplateAccessOk ile zorlanır.
+async function deletePersonalTemplate(id) {
+    uid();
+    const targetId = String(id ?? '').trim();
+    if (!targetId) throw new Error('Silinecek kişisel şablon kimliği gerekli.');
+    await deleteDoc(ref('ebysPersonalTemplates', targetId));
+    return { id: targetId, deleted: true };
+}
+
 window.AppModules = window.AppModules || {};
-window.AppModules.EBYSCatalog = { loadCatalog, getTemplateRevision, listTemplateRevisions, listProfileRevisions,
-    saveProfile, saveFilePlan, setFilePlanActive, saveTemplate, setTemplateActive };
-export { loadCatalog, getTemplateRevision, listTemplateRevisions, listProfileRevisions, saveProfile, saveFilePlan, setFilePlanActive, saveTemplate, setTemplateActive };
+window.AppModules.EBYSCatalog = {
+    loadCatalog, getTemplateRevision, listTemplateRevisions, listProfileRevisions,
+    saveProfile, saveFilePlan, setFilePlanActive, saveTemplate, setTemplateActive,
+    listMyPersonalTemplates, savePersonalTemplate, deletePersonalTemplate
+};
+export {
+    loadCatalog, getTemplateRevision, listTemplateRevisions, listProfileRevisions, saveProfile, saveFilePlan, setFilePlanActive, saveTemplate, setTemplateActive,
+    listMyPersonalTemplates, savePersonalTemplate, deletePersonalTemplate
+};

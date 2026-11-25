@@ -61,6 +61,16 @@
             content: text(input.content, LIMITS.content, 'Şablon metni'),
         };
     }
+    // [WHY]: v3.7 İP-11 · Personelin kendi sık kullandığı üst yazıları kişisel şablon olarak saklaması için saf doğrulama.
+    // [HOW]: Kurumsal şablon sınırlarını (name ≤120, subject ≤240 opsiyonel, content ≤40000) ve etiketsiz metin kuralını uygular.
+    function normalizePersonalTemplate(input) {
+        if (!input || typeof input !== 'object') throw new Error('Kişisel şablon bilgisi geçersiz.');
+        return {
+            name: text(input.name, LIMITS.templateName, 'Kişisel şablon adı'),
+            subject: text(input.subject, LIMITS.subject, 'Konu', false),
+            content: text(input.content, LIMITS.content, 'Şablon metni'),
+        };
+    }
     const revisionId = (templateId, revision) => `${templateId}_${revision}`;
     // Şablon metnini forma uygular; konu boşsa mevcut konu korunur.
     function applyTemplate(revision, current = {}) {
@@ -69,10 +79,19 @@
             letterTemplate: { templateId: revision.templateId, revision: revision.revision, name: revision.name },
         };
     }
+    // [WHY]: v3.7 İP-11 · Kişisel şablon evraka yalnız metin kopyalar; dondurulmuş sürüme kişisel meta taşımaz (0 ek AST yükü).
+    // [HOW]: Konu boşsa mevcut taslak konusunu korur; letterTemplate alanını her zaman null döndürür.
+    function applyPersonalTemplate(template, current = {}) {
+        return {
+            subject: (template && template.subject) || current.subject || '',
+            content: (template && template.content) || '',
+            letterTemplate: null,
+        };
+    }
 
     window.AppModules = window.AppModules || {};
     window.AppModules.EBYSCatalogSchema = Object.freeze({
         PROFILE_ID, PROFILE_FIELDS, LIMITS, active, normalizeProfile, planCode, normalizeFilePlan, planLabel, filePlanOptions,
-        normalizeTemplate, revisionId, applyTemplate,
+        normalizeTemplate, normalizePersonalTemplate, revisionId, applyTemplate, applyPersonalTemplate,
     });
 })();

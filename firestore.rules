@@ -1621,6 +1621,29 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // İleride yönetici vekâleten kullanıcı erişimi buradan tanımlanacaktır.
+    function personalTemplateAccessOk(root, ownerUid) {
+      return request.auth != null && request.auth.uid == ownerUid;
+    }
+    function ecPersonalTemplateOk(id, d, old) {
+      return d.keys().hasOnly(['id','ownerUid','name','subject','content','createdAt','updatedAt'])
+        && d.keys().hasAll(['id','ownerUid','name','subject','content','createdAt','updatedAt'])
+        && d.id == id && ebysId(id)
+        && d.ownerUid is string && d.ownerUid == old.get('ownerUid', request.auth.uid)
+        && ebysText(d.name, 120, true)
+        && ebysText(d.subject, 240, false)
+        && ebysText(d.content, 40000, true)
+        && d.createdAt == old.get('createdAt', request.time)
+        && d.updatedAt == request.time;
+    }
+    match /{r}/ebysPersonalTemplates/items/{id} {
+      allow get: if validRoot(r) && member(r) && (resource == null || personalTemplateAccessOk(r, resource.data.ownerUid));
+      allow list: if validRoot(r) && member(r) && personalTemplateAccessOk(r, resource.data.ownerUid);
+      allow create: if validRoot(r) && member(r) && personalTemplateAccessOk(r, request.resource.data.ownerUid) && ecPersonalTemplateOk(id, request.resource.data, {});
+      allow update: if validRoot(r) && member(r) && personalTemplateAccessOk(r, resource.data.ownerUid) && ecPersonalTemplateOk(id, request.resource.data, resource.data);
+      allow delete: if validRoot(r) && member(r) && personalTemplateAccessOk(r, resource.data.ownerUid);
+    }
+
     // Taslağın katalog kopyaları. Satın almaya bağlı evrak bu pakette kopya taşımaz (sözleşmesi ayrı: poVersionShape).
     // Bütçe: personelin taslak güncellemesi 1000 ifade sınırına yakın; değişmeyen kopya tek karşılaştırmayla geçer, katalog
     // okuması yalnız yeni seçimde yapılır. Plan adı ve şablon adı katalog kaydına eşit olmak zorunda olduğundan ayrıca metin

@@ -9,30 +9,30 @@ import './ebys-correspondence-ui.js';
 const api = () => window.AppModules.EBYSDocuments;
 const schema = () => window.AppModules.EBYSDocumentSchema;
 const labels = { incoming: 'Gelen Evrak Defteri', outgoing: 'Giden Evrak Defteri', internal: 'İç Yazışmalar' };
-const states = { draft: 'Taslak', registered: 'Kayıtlı', in_review: 'Donduruldu · Süreç durumuna bakın', internally_approved: 'Kurum içi onay tamamlandı', closed: 'Kapandı', returned:'İade edildi',rejected:'Reddedildi',withdrawn:'Geri çekildi',pending_execution: 'İcra bekliyor (eski kayıt)', archived: 'Arşivde' };
+const states = { draft: 'Taslak', registered: 'Kayıtlı', in_review: 'Donduruldu · Süreç durumuna bakın', internally_approved: 'Kurum içi onay tamamlandı', closed: 'Kapandı', returned: 'İade edildi', rejected: 'Reddedildi', withdrawn: 'Geri çekildi', pending_execution: 'İcra bekliyor (eski kayıt)', archived: 'Arşivde' };
 const node = (tag, text, css) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (css) n.className = css; return n; };
 const button = (text, action, css = 'btn btn-sm btn-outline-primary') => { const b = node('button', text, css); b.type = 'button'; b.onclick = action; return b; };
 let kind = 'incoming', rows = [], cursor = null, unsubscribe = null, dialog = null, syncAllowed = false, countsRevision = 0, listRevision = 0, editorEpoch = 0, countsLoaded = false, countsBusy = false;
-const documentDialogs=new Map();let sessionActor=null;
-function clearDocumentDialogs(documentId=null){for(const [d,r] of documentDialogs)if(!documentId||r.documentId===documentId){d.remove();documentDialogs.delete(d);}if(!documentId)dialog=null;}
-function pauseEditors(){for(const [d,r] of documentDialogs){r.ready=false;r.generation++;if(!r.saved)r.saved=[...d.querySelectorAll('button')].filter(b=>b.textContent!=='Kapat'&&!b.classList.contains('ebys-dialog-close')&&b!==r.retry).map(b=>[b,b.disabled]);r.saved.forEach(([b])=>b.disabled=true);}}
-async function resumeEditors(){
-    for(const [d,r] of documentDialogs){
-        if(!d.isConnected){documentDialogs.delete(d);continue;}
-        const generation=++r.generation;
-        try{
-            if(r.actor!==window.userAuth?.uid){d.remove();documentDialogs.delete(d);continue;}
-            if(r.validate&&!await r.validate()){
-                if(generation===r.generation&&d.isConnected){r.status.textContent='Evrak değişti. Metniniz korunuyor. İşlem yapmak için güncel evrakı yeniden açın.';r.retry.hidden=true;}continue;
+const documentDialogs = new Map(); let sessionActor = null;
+function clearDocumentDialogs(documentId = null) { for (const [d, r] of documentDialogs) if (!documentId || r.documentId === documentId) { d.remove(); documentDialogs.delete(d); } if (!documentId) dialog = null; }
+function pauseEditors() { for (const [d, r] of documentDialogs) { r.ready = false; r.generation++; if (!r.saved) r.saved = [...d.querySelectorAll('button')].filter(b => b.textContent !== 'Kapat' && !b.classList.contains('ebys-dialog-close') && b !== r.retry).map(b => [b, b.disabled]); r.saved.forEach(([b]) => b.disabled = true); } }
+async function resumeEditors() {
+    for (const [d, r] of documentDialogs) {
+        if (!d.isConnected) { documentDialogs.delete(d); continue; }
+        const generation = ++r.generation;
+        try {
+            if (r.actor !== window.userAuth?.uid) { d.remove(); documentDialogs.delete(d); continue; }
+            if (r.validate && !await r.validate()) {
+                if (generation === r.generation && d.isConnected) { r.status.textContent = 'Evrak değişti. Metniniz korunuyor. İşlem yapmak için güncel evrakı yeniden açın.'; r.retry.hidden = true; } continue;
             }
-            if(!d.isConnected||generation!==r.generation||document.hidden)continue;
-            if(r.actor!==window.userAuth?.uid){d.remove();documentDialogs.delete(d);continue;}
-            r.saved?.forEach(([b,disabled])=>b.disabled=disabled);r.saved=null;r.ready=true;r.retry.hidden=true;r.status.textContent='';
-        }catch(error){
-            if(!d.isConnected||generation!==r.generation)continue;
-            if(r.actor!==window.userAuth?.uid){d.remove();documentDialogs.delete(d);}
-            else if(error.code==='permission-denied'){clearDocumentDialogs(r.documentId);}
-            else{r.status.textContent='Evrak durumu kontrol edilemedi. Metniniz korunuyor; yeniden kontrol edin.';r.retry.hidden=false;}
+            if (!d.isConnected || generation !== r.generation || document.hidden) continue;
+            if (r.actor !== window.userAuth?.uid) { d.remove(); documentDialogs.delete(d); continue; }
+            r.saved?.forEach(([b, disabled]) => b.disabled = disabled); r.saved = null; r.ready = true; r.retry.hidden = true; r.status.textContent = '';
+        } catch (error) {
+            if (!d.isConnected || generation !== r.generation) continue;
+            if (r.actor !== window.userAuth?.uid) { d.remove(); documentDialogs.delete(d); }
+            else if (error.code === 'permission-denied') { clearDocumentDialogs(r.documentId); }
+            else { r.status.textContent = 'Evrak durumu kontrol edilemedi. Metniniz korunuyor; yeniden kontrol edin.'; r.retry.hidden = false; }
         }
     }
 }
@@ -45,9 +45,9 @@ const registryVisible = () => Boolean(host) && !document.hidden && (!panel || ge
 const countScope = document.getElementById('ebysCountScope');
 const countStatus = document.getElementById('ebysCountStatus');
 const countRefresh = document.getElementById('ebysCountRefresh');
-const message = text => { const status=document.getElementById('ebysDocumentStatus'); if(status)status.textContent=text;else window.showAppAlert?.(text); };
-function clear() { editorEpoch++;rows = []; document.getElementById('ebysDocumentRows')?.replaceChildren(); clearDocumentDialogs(); }
-function stop(resetCounts=true) {
+const message = text => { const status = document.getElementById('ebysDocumentStatus'); if (status) status.textContent = text; else window.showAppAlert?.(text); };
+function clear() { editorEpoch++; rows = []; document.getElementById('ebysDocumentRows')?.replaceChildren(); clearDocumentDialogs(); }
+function stop(resetCounts = true) {
     unsubscribe?.();
     unsubscribe = null;
     countsRevision++;
@@ -63,15 +63,15 @@ function stop(resetCounts=true) {
     countsBusy = false;
 }
 async function refreshCounts() {
-    if(!syncAllowed||countsBusy||!registryVisible())return;
-    countsBusy=true;countsLoaded=true;const actor=window.userAuth?.uid;
+    if (!syncAllowed || countsBusy || !registryVisible()) return;
+    countsBusy = true; countsLoaded = true; const actor = window.userAuth?.uid;
     if (countRefresh) countRefresh.disabled = true;
     if (countStatus) countStatus.textContent = 'Toplamlar kontrol ediliyor…';
     const revision = ++countsRevision;
     try {
         const counts = await api().countDocuments();
-        if (revision !== countsRevision || !syncAllowed || !registryVisible() || actor!==window.userAuth?.uid) return;
-        countsLoaded=true;
+        if (revision !== countsRevision || !syncAllowed || !registryVisible() || actor !== window.userAuth?.uid) return;
+        countsLoaded = true;
         for (const key of ['total', 'draft', 'registered', 'in_review']) document.getElementById(`ebysCount-${key}`).textContent = String(counts[key]);
         if (countStatus) countStatus.textContent = 'Toplamlar güncel. Son kontrol: ' + new Date().toLocaleTimeString('tr-TR');
     } catch {
@@ -86,10 +86,10 @@ async function refreshCounts() {
     }
 }
 function dismissable(modal) {
-    const r={actor:window.userAuth?.uid,generation:0,ready:!document.hidden};documentDialogs.set(modal,r);
-    r.status=node('p','');r.status.setAttribute('role','status');r.retry=button('Durumu yeniden kontrol et',()=>resumeEditors());r.retry.hidden=true;modal.append(r.status,r.retry);
+    const r = { actor: window.userAuth?.uid, generation: 0, ready: !document.hidden }; documentDialogs.set(modal, r);
+    r.status = node('p', ''); r.status.setAttribute('role', 'status'); r.retry = button('Durumu yeniden kontrol et', () => resumeEditors()); r.retry.hidden = true; modal.append(r.status, r.retry);
     r.retry.classList.add('ebys-recheck');
-    modal.addEventListener('close',()=>{if(modal.dataset.confirming!=='true')documentDialogs.delete(modal);});
+    modal.addEventListener('close', () => { if (modal.dataset.confirming !== 'true') documentDialogs.delete(modal); });
     const close = button('✕', () => modal.close(), 'ebys-dialog-close'); close.setAttribute('aria-label', 'Pencereyi kapat'); modal.append(close);
     const outside = e => { const r = modal.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
     let downOutside = false;
@@ -98,16 +98,18 @@ function dismissable(modal) {
     modal.addEventListener('close', () => { if (!modal.open && modal.dataset.confirming !== 'true') modal.remove(); });
 }
 function subscribe() {
-    unsubscribe?.();unsubscribe=null;const revision=++listRevision, actor=window.userAuth?.uid;
+    unsubscribe?.(); unsubscribe = null; const revision = ++listRevision, actor = window.userAuth?.uid;
     const repair = document.getElementById("ebysLegacyAccessRepair");
     if (repair) repair.hidden = !window.isDbAdmin?.();
-    if (!syncAllowed || !window.userAuth || !registryVisible()) return () => {};
+    if (!syncAllowed || !window.userAuth || !registryVisible()) return () => { };
     message('Evraklar yükleniyor…');
-    if(!countsLoaded)refreshCounts();
+    if (!countsLoaded) refreshCounts();
     // H7 D5: durum, birim ve tam kayıt numarası sunucuda süzülür; kısmi metin açık sayfada süzülür (render()).
-    const filters = { state: document.getElementById('ebysStateFilter')?.value || '', unitId: document.getElementById('ebysUnitFilter')?.value || '',
-        registrationNo: document.getElementById('ebysDocumentSearch')?.value?.trim() || '' };
-    const own = api().listDocuments(data => { if(revision!==listRevision||!syncAllowed||!registryVisible()||actor!==window.userAuth?.uid)return; rows=data;render();message(data.length+' kayıt · Sayfa başına en fazla 50 evrak · Arama ve durum filtresi yalnız bu sayfada'); },error=>{if(revision!==listRevision||actor!==window.userAuth?.uid)return;stop();clear();message('Evraklar yüklenemedi: '+error.message);},cursor,kind,filters);
+    const filters = {
+        state: document.getElementById('ebysStateFilter')?.value || '', unitId: document.getElementById('ebysUnitFilter')?.value || '',
+        registrationNo: document.getElementById('ebysDocumentSearch')?.value?.trim() || ''
+    };
+    const own = api().listDocuments(data => { if (revision !== listRevision || !syncAllowed || !registryVisible() || actor !== window.userAuth?.uid) return; rows = data; render(); message(data.length + ' kayıt · Sayfa başına en fazla 50 evrak · Arama ve durum filtresi yalnız bu sayfada'); }, error => { if (revision !== listRevision || actor !== window.userAuth?.uid) return; stop(); clear(); message('Evraklar yüklenemedi: ' + error.message); }, cursor, kind, filters);
     unsubscribe = own;
     return () => { own(); if (unsubscribe === own) { unsubscribe = null; clear(); } };
 }
@@ -122,7 +124,7 @@ function render() {
         const unit = (window.data?.units || []).find(u => String(u.id) === head.unitId);
         const date = head.updatedAt?.toDate?.().toLocaleString('tr-TR') || '—';
         for (const text of [head.registrationNo || `Taslak · ${head.id.slice(0, 8)}`, unit?.name || head.unitId, states[head.state] || head.state, date]) row.append(node('td', text));
-        const action = node('td'), actions = node('div',null,'ebys-registry-actions');
+        const action = node('td'), actions = node('div', null, 'ebys-registry-actions');
         // A-3: satın almaya bağlı, henüz dondurulmamış veya revizyon bekleyen evrak genel metin formunda açılamaz
         // (servis bu kaydı reddeder); satın alma formunun EBYS düzenleme kipine yönlendirilir.
         const purchaseRevision = Object.hasOwn(head, 'purchaseOrderId') && (!head.currentVersionId || ['returned', 'rejected', 'withdrawn'].includes(head.state));
@@ -132,7 +134,7 @@ function render() {
             Promise.resolve(target).catch(error => message(error.message));
         }));
         else actions.append(node('span', 'Yazarına özel içerik', 'small text-muted'));
-        if(head.currentVersionId)actions.append(button('Süreç durumu',()=>window.AppModules.EBYSProcessUI.open(head.currentVersionId,head.id,head.ownerUid===window.userAuth?.uid)));
+        if (head.currentVersionId) actions.append(button('Süreç durumu', () => window.AppModules.EBYSProcessUI.open(head.currentVersionId, head.id, head.ownerUid === window.userAuth?.uid)));
         action.append(actions);
         row.append(action); body.append(row);
     }
@@ -151,24 +153,34 @@ function field(form, label, name, value = '', options = null, multiline = false)
 }
 async function open(id = null, replyContext = null) {
     try {
-        const actor = window.userAuth?.uid, epoch=editorEpoch;
+        const actor = window.userAuth?.uid, epoch = editorEpoch;
         const loaded = id ? await api().readDocument(id) : null;
-        if (!actor || actor !== window.userAuth?.uid || epoch!==editorEpoch) return;
+        if (!actor || actor !== window.userAuth?.uid || epoch !== editorEpoch) return;
         // H7 D2: cevap taslağı daima giden evrak olarak ve hedef gelen evrakın birimiyle açılır.
-        let head = loaded?.head || { id: schema().uuid(), kind: replyContext ? 'outgoing' : kind, revision: 0,
-            unitId: replyContext?.unitId || '', organizationCode: 'MED', registrationNo: '', state: 'draft' };
+        let head = loaded?.head || {
+            id: schema().uuid(), kind: replyContext ? 'outgoing' : kind, revision: 0,
+            unitId: replyContext?.unitId || '', organizationCode: 'MED', registrationNo: '', state: 'draft'
+        };
         const data = loaded?.body || {};
-        const metadata = { ...(data.metadataSnapshot || data.metadata || {}),
-            ...(!loaded && replyContext ? { correspondent: replyContext.summary.correspondent, subject: ('Cevap: ' + replyContext.summary.subject).slice(0, 240) } : {}) };
+        const metadata = {
+            ...(data.metadataSnapshot || data.metadata || {}),
+            ...(!loaded && replyContext ? { correspondent: replyContext.summary.correspondent, subject: ('Cevap: ' + replyContext.summary.subject).slice(0, 240) } : {})
+        };
         const replyLink = !loaded && replyContext ? { replyToDocumentId: replyContext.replyToDocumentId, linked: false } : null;
         const frozen = !!head.currentVersionId;
-        // H6b: kurum künyesi, dosya planı ve şablon kataloğu (dondurulmuş evrak kendi kopyalarını gösterir; katalog okunmaz).
-        // Katalog yüklenemezse (modül yok / ağ hatası) form eski davranışla açılır: kod ve plan elle yazılır.
-        const cat = frozen ? null : await Promise.resolve(window.AppModules.EBYSCatalog?.loadCatalog()).catch(() => null) ?? null;
+        // H6b + v3.7 İP-11: kurum kataloğu ve kişisel şablonlar paralel yüklenir (dondurulmuş evrak kendi kopyalarını gösterir).
+        // Katalog veya kişisel şablon yüklenemezse form eski davranışla açılır: kod ve plan elle yazılır.
+        const [cat, loadedPersonal] = frozen
+            ? [null, []]
+            : await Promise.all([
+                Promise.resolve(window.AppModules.EBYSCatalog?.loadCatalog()).catch(() => null),
+                Promise.resolve(window.AppModules.EBYSCatalog?.listMyPersonalTemplates?.()).catch(() => []),
+            ]);
+        let personalTemplates = Array.isArray(loadedPersonal) ? [...loadedPersonal] : [];
         if (actor !== window.userAuth?.uid || epoch !== editorEpoch) return;
         if (!loaded && cat?.profile) head = { ...head, organizationCode: cat.profile.code };
         dialog?.remove(); dialog = node('dialog', null, 'ebys-document-dialog');
-        const editor = dialog; dismissable(editor);documentDialogs.get(editor).documentId=head.id;documentDialogs.get(editor).validate=async()=>{if(!loaded)return true;const current=await api().readDocument(head.id);return current.head.revision===head.revision;};
+        const editor = dialog; dismissable(editor); documentDialogs.get(editor).documentId = head.id; documentDialogs.get(editor).validate = async () => { if (!loaded) return true; const current = await api().readDocument(head.id); return current.head.revision === head.revision; };
         const form = node('form', null, 'ebys-document-form'); form.method = 'dialog';
         const title = node('h3', `${labels[head.kind]} · ${head.registrationNo || 'Yeni taslak'}`, 'ebys-wide'); form.append(title);
         const unitOptions = [['', 'Birim seçin'], ...(window.data?.units || []).filter(u => u.active !== false || String(u.id) === head.unitId).map(u => [String(u.id), u.name || u.birimAdi || String(u.id)])];
@@ -179,37 +191,192 @@ async function open(id = null, replyContext = null) {
             ? `Evrakın kurum künyesi: ${inst.name} · revizyon ${inst.revision}. Bu kopya sabittir; künye sonradan değişse de evrak etkilenmez.`
             : `Kurum künyesi: ${inst.name} (${inst.code}). Kaydettiğinizde evraka kopyalanır.`, 'ebys-institution-note'));
         else if (loaded && cat?.profile) form.append(node('p', 'Bu evrak kurum künyesi tanımlanmadan önce açıldı; künye kopyası taşımaz.', 'ebys-institution-note'));
-        // Şablon: seçilen sürümün konu ve metni forma kopyalanır; evrak hangi şablon sürümüyle hazırlandığını kaydeder.
-        let letterTemplate = data.letterTemplate || null, undo = null;
+        // Şablon: kurumsal şablon seçildiğinde sürüm bağı kaydedilir; kişisel şablon uygulandığında yalnız konu/metin kopyalanır (letterTemplate: null).
+        let letterTemplate = data.letterTemplate || null, undo = null, personalAppliedName = '';
         const templateNote = node('p', '', 'ebys-institution-note');
         const renderTemplateNote = () => {
             templateNote.replaceChildren();
-            templateNote.hidden = !letterTemplate && !undo;
+            templateNote.hidden = !letterTemplate && !undo && !personalAppliedName;
             if (letterTemplate) templateNote.append(`Şablon: ${letterTemplate.name} · sürüm ${letterTemplate.revision}${frozen ? '' : ' (metin evraka kopyalandı; düzenleyebilirsiniz)'}. `);
+            else if (personalAppliedName) templateNote.append(`Kişisel şablon uygulandı: ${personalAppliedName} (yalnızca konu ve metin taslağa kopyalandı). `);
             if (!frozen && undo) templateNote.append(button('Önceki metne dön', () => {
-                form.elements.subject.value = undo.subject; form.elements.content.value = undo.content; letterTemplate = undo.letterTemplate; undo = null; renderTemplateNote();
+                form.elements.subject.value = undo.subject; form.elements.content.value = undo.content; letterTemplate = undo.letterTemplate; personalAppliedName = ''; undo = null; renderTemplateNote();
             }, 'btn btn-sm btn-link p-0 me-2'));
             if (!frozen && letterTemplate) templateNote.append(button('Şablon bağını kaldır', () => { letterTemplate = null; undo = null; renderTemplateNote(); }, 'btn btn-sm btn-link p-0'));
         };
         const usableTemplates = frozen ? [] : (cat?.templates || []).filter(t => t.active !== false).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
-        if (usableTemplates.length) {
-            const chooser = field(form, 'Şablondan doldur (isteğe bağlı)', 'templateChoice', '',
-                [['', '— Şablon seçin —'], ...usableTemplates.map(t => [t.id, `${t.name} · sürüm ${t.currentRevision}`])]);
-            chooser.required = false;
+        if (!frozen && window.AppModules.EBYSCatalog) {
+            // [WHY]: v3.7 İP-11 · Kurumsal ve kişisel üst yazı şablonlarını tek erişilebilir alanda sunar; AGENTS.md uyumlu açıklama ve yardım içerir.
+            // [HOW]: Saf DOM düğümleriyle <optgroup> ayrımı, taslağı kişisel şablon olarak kaydetme ve onaylı silme işlemlerini yürütür.
+            const tplBar = node('section', null, 'ebys-template-bar ebys-wide');
+            const tplHead = node('div', null, 'ebys-template-head');
+            tplHead.append(node('p', 'Üst yazı şablonları: Kurumsal şablonları veya yalnızca size özel kişisel şablonlarınızı taslağa uygulayabilirsiniz. Kişisel şablonlarınızı başkaları göremez.', 'ebys-template-desc'));
+            const helpPanel = node('div', null, 'ebys-template-help');
+            helpPanel.id = 'ebysPersonalTplHelp';
+            helpPanel.hidden = true;
+            helpPanel.append(
+                node('p', '1. Şablondan Doldur menüsünden bir kurumsal ya da kişisel şablon seçtiğinizde konu ve metin taslağa kopyalanır.'),
+                node('p', '2. Mevcut taslağınızı sık kullanıyorsanız "Taslağı Kişisel Şablonum Yap" ile kendinize özel kaydedebilir, dilediğinizde silebilirsiniz.'),
+                node('p', '3. Kişisel şablonlarınız yalnızca sizin hesabınıza özeldir; evrak dondurulduğunda yalnızca kopyalanan metin saklanır.')
+            );
+            const helpBtn = button('? Yardım', () => {
+                const nextOpen = helpPanel.hidden;
+                helpPanel.hidden = !nextOpen;
+                helpBtn.setAttribute('aria-expanded', String(nextOpen));
+            }, 'btn btn-sm btn-outline-secondary ebys-template-help-btn');
+            helpBtn.setAttribute('aria-expanded', 'false');
+            helpBtn.setAttribute('aria-controls', helpPanel.id);
+            tplHead.append(helpBtn);
+            tplBar.append(tplHead, helpPanel);
+
+            const controls = node('div', null, 'ebys-template-controls');
+            const chooserWrap = node('label', '📄 Şablondan doldur (isteğe bağlı)', 'ebys-field ebys-template-select-wrap');
+            const chooser = node('select', null, 'form-control');
+            chooser.name = 'templateChoice';
+            chooserWrap.append(chooser);
+            controls.append(chooserWrap);
+
+            const applyPersonalChoice = p => {
+                undo = { subject: form.elements.subject.value, content: form.elements.content.value, letterTemplate };
+                const applied = window.AppModules.EBYSCatalogSchema.applyPersonalTemplate(p, { subject: form.elements.subject.value });
+                form.elements.subject.value = applied.subject;
+                form.elements.content.value = applied.content;
+                letterTemplate = null;
+                personalAppliedName = p.name;
+                if (!undo.content.trim() && !undo.subject.trim()) undo = null;
+                renderTemplateNote();
+            };
+
+            const personalListWrap = node('details', null, 'ebys-personal-manage');
+            const personalSummary = node('summary', 'Kişisel Şablonlarım (0)');
+            const personalList = node('ul', null, 'ebys-personal-list');
+            personalListWrap.append(personalSummary, personalList);
+
+            const rebuildTemplateUI = () => {
+                chooser.replaceChildren();
+                const emptyOpt = node('option', usableTemplates.length || personalTemplates.length ? '— Şablon seçin —' : '— Kayıtlı şablon yok —');
+                emptyOpt.value = '';
+                chooser.append(emptyOpt);
+                if (usableTemplates.length) {
+                    const corpGroup = node('optgroup'); corpGroup.label = 'Kurumsal Şablonlar';
+                    for (const t of usableTemplates) {
+                        const opt = node('option', `${t.name} · sürüm ${t.currentRevision}`);
+                        opt.value = `corp:${t.id}`;
+                        corpGroup.append(opt);
+                    }
+                    chooser.append(corpGroup);
+                }
+                if (personalTemplates.length) {
+                    const persGroup = node('optgroup'); persGroup.label = 'Kişisel Şablonlarım';
+                    for (const p of personalTemplates) {
+                        const opt = node('option', p.name);
+                        opt.value = `pers:${p.id}`;
+                        persGroup.append(opt);
+                    }
+                    chooser.append(persGroup);
+                }
+                chooser.disabled = !usableTemplates.length && !personalTemplates.length;
+                personalListWrap.hidden = !personalTemplates.length;
+                personalSummary.textContent = `Kişisel Şablonlarım (${personalTemplates.length})`;
+                personalList.replaceChildren();
+                for (const p of personalTemplates) {
+                    const li = node('li', null, 'ebys-personal-item');
+                    const info = node('div', null, 'ebys-personal-item-info');
+                    info.append(node('strong', p.name));
+                    if (p.subject) info.append(node('small', p.subject));
+                    const rowBtns = node('div', null, 'ebys-personal-item-actions');
+                    rowBtns.append(
+                        button('Uygula', () => applyPersonalChoice(p), 'btn btn-sm btn-outline-primary'),
+                        button('Sil', async () => {
+                            const msg = `"${p.name}" kişisel şablonu kalıcı olarak silinecek. Onaylıyor musunuz?`;
+                            const ok = typeof window.showCustomConfirm === 'function'
+                                ? await window.showCustomConfirm('Kişisel Şablonu Sil', msg)
+                                : window.confirm(msg);
+                            if (!ok || !editor.isConnected || actor !== window.userAuth?.uid || epoch !== editorEpoch) return;
+                            try {
+                                await window.AppModules.EBYSCatalog.deletePersonalTemplate(p.id);
+                                if (!editor.isConnected || actor !== window.userAuth?.uid || epoch !== editorEpoch) return;
+                                personalTemplates = personalTemplates.filter(item => item.id !== p.id);
+                                if (personalAppliedName === p.name) { personalAppliedName = ''; renderTemplateNote(); }
+                                rebuildTemplateUI();
+                                status.textContent = 'Kişisel şablon silindi.';
+                            } catch (error) { status.textContent = error.message; }
+                        }, 'btn btn-sm btn-outline-danger')
+                    );
+                    li.append(info, rowBtns);
+                    personalList.append(li);
+                }
+            };
+
             chooser.addEventListener('change', async () => {
-                const t = usableTemplates.find(x => x.id === chooser.value);
+                const raw = chooser.value;
+                if (!raw) return;
+                if (raw.startsWith('pers:')) {
+                    const p = personalTemplates.find(x => x.id === raw.slice(5));
+                    chooser.value = '';
+                    if (p) applyPersonalChoice(p);
+                    return;
+                }
+                if (!raw.startsWith('corp:')) return;
+                const t = usableTemplates.find(x => x.id === raw.slice(5));
                 if (!t) return;
                 chooser.disabled = true;
                 try {
                     const rev = await window.AppModules.EBYSCatalog.getTemplateRevision(t.id, t.currentRevision);
+                    if (!editor.isConnected || actor !== window.userAuth?.uid || epoch !== editorEpoch) return;
                     undo = { subject: form.elements.subject.value, content: form.elements.content.value, letterTemplate };
                     const applied = window.AppModules.EBYSCatalogSchema.applyTemplate(rev, { subject: form.elements.subject.value });
-                    form.elements.subject.value = applied.subject; form.elements.content.value = applied.content; letterTemplate = applied.letterTemplate;
+                    form.elements.subject.value = applied.subject; form.elements.content.value = applied.content;
+                    letterTemplate = applied.letterTemplate; personalAppliedName = '';
                     if (!undo.content.trim() && !undo.subject.trim()) undo = null;
                     renderTemplateNote();
                 } catch (error) { status.textContent = error.message; }
-                finally { chooser.value = ''; chooser.disabled = false; }
+                finally { chooser.value = ''; chooser.disabled = !usableTemplates.length && !personalTemplates.length; }
             });
+
+            const saveBox = node('div', null, 'ebys-personal-save-box');
+            saveBox.hidden = true;
+            const saveNameInput = node('input', null, 'form-control');
+            saveNameInput.type = 'text';
+            saveNameInput.maxLength = 120;
+            saveNameInput.placeholder = 'Kişisel şablon adı (örn. Aylık İzin Talebim)';
+            saveNameInput.setAttribute('aria-label', 'Kişisel şablon adı');
+            const confirmSaveBtn = button('Şablonu Kaydet', async () => {
+                confirmSaveBtn.disabled = true;
+                try {
+                    const savedTpl = await window.AppModules.EBYSCatalog.savePersonalTemplate({
+                        name: saveNameInput.value,
+                        subject: form.elements.subject.value,
+                        content: form.elements.content.value,
+                    });
+                    if (!editor.isConnected || actor !== window.userAuth?.uid || epoch !== editorEpoch) return;
+                    personalTemplates = [...personalTemplates.filter(item => item.id !== savedTpl.id), savedTpl]
+                        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'tr'));
+                    saveNameInput.value = '';
+                    saveBox.hidden = true;
+                    rebuildTemplateUI();
+                    status.textContent = `"${savedTpl.name}" kişisel şablon olarak kaydedildi.`;
+                } catch (error) {
+                    status.textContent = error.message;
+                } finally {
+                    confirmSaveBtn.disabled = false;
+                }
+            }, 'btn btn-sm btn-primary');
+            const cancelSaveBtn = button('Vazgeç', () => { saveBox.hidden = true; }, 'btn btn-sm btn-outline-secondary');
+            saveBox.append(saveNameInput, confirmSaveBtn, cancelSaveBtn);
+
+            const openSaveBtn = button('💾 Taslağı Kişisel Şablonum Yap', () => {
+                saveBox.hidden = !saveBox.hidden;
+                if (!saveBox.hidden) {
+                    if (!saveNameInput.value.trim()) saveNameInput.value = String(form.elements.subject.value || '').trim().slice(0, 120);
+                    saveNameInput.focus();
+                }
+            }, 'btn btn-sm btn-outline-primary ebys-personal-save-trigger');
+            controls.append(openSaveBtn);
+
+            tplBar.append(controls, saveBox, personalListWrap);
+            rebuildTemplateUI();
+            form.append(tplBar);
         }
         form.append(templateNote); renderTemplateNote();
         field(form, 'Konu', 'subject', metadata.subject || ''); field(form, 'Muhatap kurum / kişi', 'correspondent', metadata.correspondent || '');
@@ -237,17 +404,19 @@ async function open(id = null, replyContext = null) {
             const values = Object.fromEntries(new FormData(form));
             const plan = values.filePlanChoice !== undefined ? planChoices[Number(values.filePlanChoice)] : null;
             if (plan) Object.assign(values, { filePlanCode: plan.code, filePlanTitle: plan.title });
-            return { id: head.id, expectedRevision: head.revision, kind: head.kind, unitId: values.unitId, organizationCode: values.organizationCode,
+            return {
+                id: head.id, expectedRevision: head.revision, kind: head.kind, unitId: values.unitId, organizationCode: values.organizationCode,
                 content: values.content, ...(letterTemplate ? { letterTemplate } : {}),
-                metadata: Object.fromEntries(['subject','correspondent','date','filePlanCode','confidentiality','distribution','externalRegistrationNo',
-                    ...(values.filePlanTitle ? ['filePlanTitle'] : [])].map(k => [k, values[k]])) };
+                metadata: Object.fromEntries(['subject', 'correspondent', 'date', 'filePlanCode', 'confidentiality', 'distribution', 'externalRegistrationNo',
+                    ...(values.filePlanTitle ? ['filePlanTitle'] : [])].map(k => [k, values[k]]))
+            };
         };
         // H7 D3: mükerrerlik anahtarı güncel form değerleriyle yazılır (dondurulmuşsa sürüm metadataSnapshot'ı kullanılır).
         const regKeyMetadata = () => frozen
             ? { correspondent: metadata.correspondent, externalRegistrationNo: metadata.externalRegistrationNo, date: metadata.date }
             : { correspondent: form.elements.correspondent.value, externalRegistrationNo: form.elements.externalRegistrationNo.value, date: form.elements.date.value };
         async function act(action) {
-            if (busy||document.hidden||actor!==window.userAuth?.uid||!documentDialogs.get(editor)?.ready) return; busy = true; actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
+            if (busy || document.hidden || actor !== window.userAuth?.uid || !documentDialogs.get(editor)?.ready) return; busy = true; actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
             try {
                 if (!frozen) {
                     if (!form.reportValidity()) return;
@@ -273,7 +442,7 @@ async function open(id = null, replyContext = null) {
                     pendingFreeze = null;
                 }
                 if (action === 'issueVerification') await window.AppModules.EBYSVerification.issueVerification(head.id);
-                if(!editor.isConnected||actor!==window.userAuth?.uid||epoch!==editorEpoch)return;
+                if (!editor.isConnected || actor !== window.userAuth?.uid || epoch !== editorEpoch) return;
                 status.textContent = action === 'freeze' ? 'İçerik donduruldu ve incelemeye hazır.' : 'Evrak kaydedildi.';
                 if (action === 'save') {
                     // H7 D2: cevap taslağının hedef gelen evraka bağı ilk kayıttan sonra kurulur; bağ kurulamazsa
@@ -293,7 +462,7 @@ async function open(id = null, replyContext = null) {
                     editor.close(); cursor = null; subscribe(); message('Taslak kaydedildi.');
                 }
                 else if (editor.isConnected) await open(head.id);
-            } catch (error) { if(error.code==='permission-denied'){clearDocumentDialogs();return;}status.textContent = error.message; }
+            } catch (error) { if (error.code === 'permission-denied') { clearDocumentDialogs(); return; } status.textContent = error.message; }
             finally { busy = false; actions.querySelectorAll('button').forEach(b => { b.disabled = false; }); }
         }
         if (!frozen) {
@@ -311,7 +480,7 @@ async function open(id = null, replyContext = null) {
                 } finally { delete editor.dataset.confirming; }
             }, 'btn btn-outline-primary'));
         } else form.querySelectorAll('input,select,textarea').forEach(n => { n.disabled = true; });
-        if (frozen) actions.append(button('Onay rotası / Süreç',()=>window.AppModules.EBYSProcessUI.open(head.currentVersionId,head.id)));
+        if (frozen) actions.append(button('Onay rotası / Süreç', () => window.AppModules.EBYSProcessUI.open(head.currentVersionId, head.id)));
         if (!head.registrationNo && ['draft', 'in_review'].includes(head.state)) actions.append(button('Kesin kayıt numarası al', () => act('register'), 'btn btn-outline-success'));
         if (!head.verificationToken && ['closed', 'archived'].includes(head.state) && head.ownerUid === actor) {
             form.append(node('p', head.registrationNo
@@ -330,8 +499,8 @@ async function open(id = null, replyContext = null) {
 function preview(head, data) {
     const modal = node('dialog', null, 'ebys-document-dialog'); const body = node('article', null, 'ebys-preview');
     dismissable(modal);
-    documentDialogs.get(modal).documentId=head.id;
-    documentDialogs.get(modal).validate=async()=>{if(!head.revision)return true;const current=await api().readDocument(head.id);return current.head.revision===head.revision;};
+    documentDialogs.get(modal).documentId = head.id;
+    documentDialogs.get(modal).validate = async () => { if (!head.revision) return true; const current = await api().readDocument(head.id); return current.head.revision === head.revision; };
     const meta = data.metadataSnapshot || data.metadata || data;
     // H6b: başlık evrakın kendi künye kopyasından çizilir (güncel künyeden değil); eski evrak künyesiz görünür.
     const inst = data.institutionSnapshot;
@@ -382,11 +551,13 @@ function preview(head, data) {
 }
 if (host) {
     {
-        const repair=button('Eski satın alma erişim eşlemeleri',async()=>{
-            try{const preview=await window.previewLegacyPurchaseAccess();const ok=await window.showCustomConfirm('Erişim eşleme önizlemesi',`${preview.orders} satın alma kaydı incelendi. UID eksik adım: ${preview.unresolved.length}. Yalnız doğrulanmış mevcut/karar verilmiş adımlara kuyruk eşlemesi oluşturulsun mu?`);
-                if(ok){const result=await window.prepareLegacyPurchaseAccess();message(`${result.created} eşleme oluşturuldu. Belirsiz kişi: ${result.unresolved.length}.`);}}
-            catch(e){message(e.message);}
-        });repair.id="ebysLegacyAccessRepair";repair.hidden=true;host.append(repair);
+        const repair = button('Eski satın alma erişim eşlemeleri', async () => {
+            try {
+                const preview = await window.previewLegacyPurchaseAccess(); const ok = await window.showCustomConfirm('Erişim eşleme önizlemesi', `${preview.orders} satın alma kaydı incelendi. UID eksik adım: ${preview.unresolved.length}. Yalnız doğrulanmış mevcut/karar verilmiş adımlara kuyruk eşlemesi oluşturulsun mu?`);
+                if (ok) { const result = await window.prepareLegacyPurchaseAccess(); message(`${result.created} eşleme oluşturuldu. Belirsiz kişi: ${result.unresolved.length}.`); }
+            }
+            catch (e) { message(e.message); }
+        }); repair.id = "ebysLegacyAccessRepair"; repair.hidden = true; host.append(repair);
     }
     if (countRefresh) countRefresh.onclick = refreshCounts;
     const tabs = document.getElementById('ebysDocumentKinds');
@@ -452,18 +623,18 @@ if (host) {
     // admin.html'de tetiklenir); panel üzerindeki style/class değişimini izleyip sekmeye göre akışı başlat/durdur.
     if (panel) new MutationObserver(() => { if (registryVisible()) { if (!unsubscribe) subscribe(); } else { stop(); clear(); } })
         .observe(panel, { attributes: true, attributeFilter: ['style', 'class'] });
-    window.AppModules.AdminTabs?.onAny(tab => { if (tab === 'purchaseTab') {if(!unsubscribe)subscribe();} else { stop(); clear(); } });
-    document.addEventListener('visibilitychange',()=>{
-        if(!syncAllowed)return;
-        if(sessionActor!==window.userAuth?.uid){syncAllowed=false;stop();clear();return;}
-        if(document.hidden){pauseEditors();stop(false);rows=[];document.getElementById('ebysDocumentRows')?.replaceChildren();}
-        else if(registryVisible()){if(!unsubscribe)subscribe();resumeEditors();}
+    window.AppModules.AdminTabs?.onAny(tab => { if (tab === 'purchaseTab') { if (!unsubscribe) subscribe(); } else { stop(); clear(); } });
+    document.addEventListener('visibilitychange', () => {
+        if (!syncAllowed) return;
+        if (sessionActor !== window.userAuth?.uid) { syncAllowed = false; stop(); clear(); return; }
+        if (document.hidden) { pauseEditors(); stop(false); rows = []; document.getElementById('ebysDocumentRows')?.replaceChildren(); }
+        else if (registryVisible()) { if (!unsubscribe) subscribe(); resumeEditors(); }
     });
-    window.addEventListener('onAppLogout', () => { syncAllowed=false;stop();clear(); });
+    window.addEventListener('onAppLogout', () => { syncAllowed = false; stop(); clear(); });
     window.addEventListener('onInventoryDataUpdated', e => { if (e.detail?.collection === 'units') { refreshUnitFilterOptions(); render(); } });
 }
 // H7 D2: gelen evraka cevap, hedef evrak bilgisinden önceden doldurulmuş yeni bir giden taslak açar.
 function openReplyDraft({ replyToDocumentId, replyToVersionId, unitId, summary }) {
     return open(null, { replyToDocumentId, replyToVersionId, unitId, summary });
 }
-window.AppModules.EBYSDocumentsUI={open,openReplyDraft};
+window.AppModules.EBYSDocumentsUI = { open, openReplyDraft };

@@ -51,6 +51,8 @@ beforeEach(async () => {
         await sdk.setDoc(ref(db, 'accessGate', 'staff'), { staffAccessEnabled: true });
         await sdk.setDoc(ref(db, 'personel', 'a'), { id: 'a', uid: 'a', name: 'a', unitId: 'unit', pri: 'a.test', active: true });
         await sdk.setDoc(ref(db, 'staffAccounts', 'a'), { personelId: 'a', pri: 'a.test' });
+        await sdk.setDoc(ref(db, 'personel', 'b'), { id: 'b', uid: 'b', name: 'b', unitId: 'unit', pri: 'b.test', active: true });
+        await sdk.setDoc(ref(db, 'staffAccounts', 'b'), { personelId: 'b', pri: 'b.test' });
     });
 });
 
@@ -235,4 +237,56 @@ test('şablon güncellemesi yeni sürümdür; pasife alma ve yeni sürüm başla
         name: 'X', subject: '', content: 'Üzerine yaz', createdAt: sdk.serverTimestamp(), createdBy: 'owner' }));
     await assertFails(sdk.updateDoc(ref(admin.store, 'ebysLetterTemplates', t.id), { currentRevision: 5, revision: 4,
         updatedAt: sdk.serverTimestamp(), updatedBy: 'owner' }));
+});
+
+test('kişisel üst yazı şablonları (v3.7 İP-11): tam gizlilik (yönetici dahil erişemez) ve sahip CRUD', async () => {
+    const staffA = services('a', false);
+    const staffB = services('b', false);
+    const admin = services('owner', true);
+
+    // 1. Personel A kendi kişisel şablonunu oluşturur, listeler ve günceller.
+    const created = await staffA.catalog.savePersonalTemplate({ name: 'Aylık Raporum', subject: 'Aylık Faaliyet', content: 'Aylık raporum ektedir.' });
+    assert.equal(created.ownerUid, 'a');
+    assert.equal(created.name, 'Aylık Raporum');
+
+    const myList = await staffA.catalog.listMyPersonalTemplates();
+    assert.equal(myList.length, 1);
+    assert.equal(myList[0].id, created.id);
+
+    const updated = await staffA.catalog.savePersonalTemplate({ id: created.id, name: 'Aylık Raporum v2', subject: '', content: 'Güncel metin.' });
+    assert.equal(updated.name, 'Aylık Raporum v2');
+    assert.equal((await sdk.getDoc(ref(staffA.store, 'ebysPersonalTemplates', created.id))).data().content, 'Güncel metin.');
+
+    // 2. Başka personel (B) VE yönetici (owner) A'nın kişisel şablonunu okuyamaz, listeleyemez, değiştiremez, silemez.
+    for (const outsider of [staffB, admin]) {
+        await assertFails(sdk.getDoc(ref(outsider.store, 'ebysPersonalTemplates', created.id)));
+        await assertFails(sdk.getDocs(sdk.collection(outsider.store, root, 'ebysPersonalTemplates', 'items')));
+        await assertFails(sdk.getDocs(sdk.query(sdk.collection(outsider.store, root, 'ebysPersonalTemplates', 'items'), sdk.where('ownerUid', '==', 'a'))));
+        await assertFails(sdk.updateDoc(ref(outsider.store, 'ebysPersonalTemplates', created.id), { name: 'Sızma', updatedAt: sdk.serverTimestamp() }));
+        await assertFails(sdk.deleteDoc(ref(outsider.store, 'ebysPersonalTemplates', created.id)));
+        // Başkası adına oluşturma girişimi reddedilir.
+        await assertFails(sdk.setDoc(ref(outsider.store, 'ebysPersonalTemplates', webcrypto.randomUUID()), {
+            id: webcrypto.randomUUID(), ownerUid: 'a', name: 'Sahte', subject: '', content: 'x',
+            createdAt: sdk.serverTimestamp(), updatedAt: sdk.serverTimestamp(),
+        }));
+    }
+
+    // 3. Kendi listesi boş döner (B ve yönetici yalnız kendi şablonlarını listeleyebilir).
+    assert.deepEqual(await staffB.catalog.listMyPersonalTemplates(), []);
+    assert.deepEqual(await admin.catalog.listMyPersonalTemplates(), []);
+
+    // 4. Sahip dahi ownerUid değiştiremez, ekstra alan ekleyemez veya createdAt tahrif edemez.
+    await assertFails(sdk.updateDoc(ref(staffA.store, 'ebysPersonalTemplates', created.id), { ownerUid: 'b', updatedAt: sdk.serverTimestamp() }));
+    await assertFails(sdk.updateDoc(ref(staffA.store, 'ebysPersonalTemplates', created.id), { extra: 'yasak', updatedAt: sdk.serverTimestamp() }));
+    await assertFails(sdk.updateDoc(ref(staffA.store, 'ebysPersonalTemplates', created.id), { createdAt: sdk.serverTimestamp(), updatedAt: sdk.serverTimestamp() }));
+
+    // 5. Kişisel şablon taslağa uygulandığında (letterTemplate olmadan) mevcut evrak akışı sıfır ek kural yüküyle çalışır.
+    const draft = draftInput({ content: updated.content, metadata: { ...draftInput().metadata, subject: 'Kişisel konu' } });
+    const savedDraft = await staffA.docs.saveDraft(draft);
+    assert.equal((await sdk.getDoc(ref(staffA.store, 'ebysDrafts', draft.id))).data().letterTemplate, undefined);
+    await staffA.docs.freezeVersion({ documentId: draft.id, expectedRevision: savedDraft.revision });
+
+    // 6. Sahip kendi kişisel şablonunu silebilir.
+    await staffA.catalog.deletePersonalTemplate(created.id);
+    assert.deepEqual(await staffA.catalog.listMyPersonalTemplates(), []);
 });

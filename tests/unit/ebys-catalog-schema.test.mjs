@@ -67,3 +67,25 @@ test('şablon: normalize, sürüm kimliği, bağ ve forma uygulama', () => {
     const applied = C.applyTemplate({ templateId: id, revision: 3, name: 'İzin', subject: '', content: 'Metin' }, { subject: 'Mevcut konu' });
     assert.deepEqual(plain(applied), { subject: 'Mevcut konu', content: 'Metin', letterTemplate: { templateId: id, revision: 3, name: 'İzin' } });
 });
+
+test('kişisel şablon (v3.7 İP-11): normalize sınır/etiket kontrolü ve letterTemplate:null uygulama', () => {
+    const ok = C.normalizePersonalTemplate({ name: ' İzin Şablonum ', subject: '', content: 'Gereğini arz ederim.\r\nSaygılarımla.' });
+    assert.deepEqual(plain(ok), { name: 'İzin Şablonum', subject: '', content: 'Gereğini arz ederim.\nSaygılarımla.' });
+    for (const bad of [
+        null,
+        { name: '', content: 'x' },
+        { name: 'x'.repeat(121), content: 'x' },
+        { name: 'A', subject: 'x'.repeat(241), content: 'x' },
+        { name: 'A', content: '' },
+        { name: 'A', content: 'x'.repeat(40001) },
+        { name: '<script>x</script>', content: 'ok' },
+        { name: 'A', subject: '<img src=x>', content: 'ok' },
+        { name: 'A', content: '<b>Yasak</b>' },
+    ]) {
+        assert.throws(() => C.normalizePersonalTemplate(bad), undefined, JSON.stringify(bad));
+    }
+    const appliedKeep = C.applyPersonalTemplate({ name: 'Özel', subject: '', content: 'Kişisel metin' }, { subject: 'Taslak konusu' });
+    assert.deepEqual(plain(appliedKeep), { subject: 'Taslak konusu', content: 'Kişisel metin', letterTemplate: null });
+    const appliedOverride = C.applyPersonalTemplate({ name: 'Özel', subject: 'Yeni konu', content: 'Kişisel metin' }, { subject: 'Eski konu' });
+    assert.deepEqual(plain(appliedOverride), { subject: 'Yeni konu', content: 'Kişisel metin', letterTemplate: null });
+});
