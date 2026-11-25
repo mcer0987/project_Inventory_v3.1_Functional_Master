@@ -2130,6 +2130,33 @@
                 </div>
             </div>
 
+            <!-- ═══ WIDGET 4B (İP-12): 3. Parti API & Bağımlılık Envanteri ═══ -->
+            <div class="vip-card" data-id="widget-dependencies">
+                <div class="vip-card-header">
+                    <div class="header-left">
+                        <i class="fas fa-plug" style="color: var(--vip-neon-blue);"></i>
+                        <span>3. Parti API & Bağımlılık Envanteri</span>
+                    </div>
+                    <div class="header-right">
+                        <button class="vip-collapse-btn" title="Küçült"><i class="fas fa-chevron-up"></i></button>
+                        <i class="fas fa-grip-vertical grip-icon"></i>
+                    </div>
+                </div>
+                <div class="vip-card-body">
+                    <p class="vip-deps-intro">Uygulamanın çalıştığı dış servisleri, statik kütüphane kaynaklarını ve pakete gömülü yerel varlıkları tek bakışta gösterir.</p>
+                    <button type="button" class="panel-help-trigger vip-deps-help-btn" data-panel-help aria-expanded="false"
+                        aria-controls="vipDepsHelp"><i class="fas fa-circle-info" aria-hidden="true"></i> Nasıl çalışır?</button>
+                    <div id="vipDepsHelp" class="panel-help vip-deps-help" hidden>
+                        <ul>
+                            <li><strong>Gerçek API Bağımlılıkları:</strong> Veritabanı, kimlik doğrulama ve e-posta gönderimi gibi canlı ağ trafiği olan servislerdir.</li>
+                            <li><strong>Statik CDN Kütüphaneleri:</strong> Yalnızca tarayıcıya kütüphane kodu indirir; kurumsal veri göndermez.</li>
+                            <li><strong>Yerel / Gömülü Varlıklar:</strong> Dış ağa çıkmadan doğrudan uygulama paketinden yüklenen ikon ve PDF yazı tipleridir.</li>
+                        </ul>
+                    </div>
+                    <div class="vip-deps-list" id="vipDependenciesList" aria-live="polite"></div>
+                </div>
+            </div>
+
             <!-- ═══ WIDGET 5: Platform & Donanım Analizi ═══ -->
             <div class="vip-card" data-id="widget-platform">
                 <div class="vip-card-header">

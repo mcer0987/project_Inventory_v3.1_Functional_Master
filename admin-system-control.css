@@ -1609,3 +1609,125 @@
     text-align: center;
     letter-spacing: 0.5px;
 }
+
+/* ─── v3.7 · İP-12: 3. Parti API & Bağımlılık Envanteri Kartı ─────────── */
+#systemControlTab .vip-deps-intro {
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--vip-text-muted) !important;
+    margin: 0 0 8px;
+}
+#systemControlTab .vip-deps-help-btn {
+    margin-bottom: 10px;
+    color: var(--vip-neon-blue) !important;
+    background: rgba(10, 132, 255, 0.1);
+    border: 1px solid rgba(10, 132, 255, 0.28);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+#systemControlTab .vip-deps-help {
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    font-size: 0.75rem;
+}
+#systemControlTab .vip-deps-help ul {
+    margin: 0;
+    padding-left: 16px;
+}
+#systemControlTab .vip-deps-help li {
+    color: var(--vip-text-muted) !important;
+    margin-bottom: 4px;
+}
+#systemControlTab .vip-deps-help strong {
+    color: var(--vip-text) !important;
+}
+.vip-deps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.vip-deps-group {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+.vip-deps-group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+#systemControlTab .vip-deps-group-title {
+    margin: 0;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--vip-text) !important;
+}
+.vip-deps-badge {
+    font-size: 0.66rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+#systemControlTab .vip-deps-badge-api {
+    background: rgba(255, 159, 10, 0.14);
+    color: var(--vip-warning) !important;
+    border: 1px solid rgba(255, 159, 10, 0.35);
+}
+#systemControlTab .vip-deps-badge-cdn {
+    background: rgba(10, 132, 255, 0.14);
+    color: var(--vip-neon-blue) !important;
+    border: 1px solid rgba(10, 132, 255, 0.35);
+}
+#systemControlTab .vip-deps-badge-local {
+    background: rgba(0, 255, 136, 0.12);
+    color: var(--vip-matrix) !important;
+    border: 1px solid rgba(0, 255, 136, 0.32);
+}
+.vip-deps-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.vip-deps-item {
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+}
+.vip-deps-item-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+#systemControlTab .vip-deps-item-name {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--vip-text) !important;
+}
+#systemControlTab .vip-deps-item-host {
+    font-size: 0.7rem;
+    color: var(--vip-neon-blue) !important;
+    background: rgba(10, 132, 255, 0.1);
+    padding: 1px 6px;
+    border-radius: 6px;
+    word-break: break-all;
+}
+#systemControlTab .vip-deps-item-role {
+    font-size: 0.71rem;
+    color: var(--vip-text-muted) !important;
+    margin-top: 2px;
+}

@@ -426,6 +426,93 @@
         `).join('');
     }
 
+    // [WHY]: v3.7 · İP-12 — VIP panelde uygulamanın güvendiği dış API'leri, statik CDN kütüphanelerini ve
+    //        yerel varlıkları görünür kılar (firebase.json CSP ve DOCKER_GUIDE.md ile uyumlu).
+    // [HOW]: innerHTML kullanmadan createElement + textContent + DocumentFragment ile #vipDependenciesList
+    //        içine 3 gruplu liste kurar; XSS sink'i üretmez.
+    function _renderDependenciesPanel() {
+        const container = document.getElementById('vipDependenciesList');
+        if (!container) return;
+
+        const groups = [
+            {
+                title: 'Gerçek API Bağımlılıkları',
+                tone: 'api',
+                badge: 'Canlı API',
+                items: [
+                    { name: 'Firebase Firestore', host: 'firestore.googleapis.com', role: 'Ana veritabanı — envanter, talep, personel ve EBYS verisi' },
+                    { name: 'Firebase Auth (Identity Toolkit)', host: 'identitytoolkit.googleapis.com', role: 'Kullanıcı girişi ve hesap doğrulama' },
+                    { name: 'Firebase Auth (Secure Token)', host: 'securetoken.googleapis.com', role: 'Oturum ve belirteç (token) yenileme' },
+                    { name: 'EmailJS', host: 'api.emailjs.com', role: 'Tarayıcıdan arşiv/bildirim e-postası gönderimi' },
+                ],
+            },
+            {
+                title: 'Statik CDN Kütüphaneleri',
+                tone: 'cdn',
+                badge: 'Statik CDN',
+                items: [
+                    { name: 'Firebase JS SDK 10.7.1', host: 'www.gstatic.com', role: 'Modüler ESM istemci SDK yüklemesi' },
+                    { name: 'Chart.js 4.4.1 · lz-string 1.5.0 · EmailJS 3.12.1 · SortableJS 1.15.7', host: 'cdn.jsdelivr.net', role: 'Grafik, sıkıştırma, e-posta ve sürükle-bırak yardımcıları' },
+                    { name: 'jsPDF 2.5.1 · jspdf-autotable 3.8.2 · xlsx 0.18.5', host: 'cdnjs.cloudflare.com', role: 'PDF belge üretimi ve Excel içe/dışa aktarma' },
+                ],
+            },
+            {
+                title: 'Yerel / Gömülü Varlıklar',
+                tone: 'local',
+                badge: 'Yerel Paket',
+                items: [
+                    { name: 'Font Awesome 6.5.2', host: 'assets/fontawesome/', role: 'Uygulama paketine gömülü ikon seti (CDN dışı)' },
+                    { name: 'Roboto PDF Yazı Tipleri', host: 'pdf-fonts/', role: 'Türkçe karakter uyumlu tembel yüklenen PDF yazı tipleri' },
+                ],
+            },
+        ];
+
+        const frag = document.createDocumentFragment();
+        groups.forEach(group => {
+            const section = document.createElement('section');
+            section.className = 'vip-deps-group';
+
+            const heading = document.createElement('div');
+            heading.className = 'vip-deps-group-head';
+            const titleEl = document.createElement('h4');
+            titleEl.className = 'vip-deps-group-title';
+            titleEl.textContent = group.title;
+            const badgeEl = document.createElement('span');
+            badgeEl.className = `vip-deps-badge vip-deps-badge-${group.tone}`;
+            badgeEl.textContent = group.badge;
+            heading.append(titleEl, badgeEl);
+
+            const list = document.createElement('ul');
+            list.className = 'vip-deps-items';
+            group.items.forEach(item => {
+                const li = document.createElement('li');
+                li.className = 'vip-deps-item';
+
+                const top = document.createElement('div');
+                top.className = 'vip-deps-item-top';
+                const nameEl = document.createElement('span');
+                nameEl.className = 'vip-deps-item-name';
+                nameEl.textContent = item.name;
+                const hostEl = document.createElement('code');
+                hostEl.className = 'vip-deps-item-host';
+                hostEl.textContent = item.host;
+                top.append(nameEl, hostEl);
+
+                const roleEl = document.createElement('div');
+                roleEl.className = 'vip-deps-item-role';
+                roleEl.textContent = item.role;
+
+                li.append(top, roleEl);
+                list.appendChild(li);
+            });
+
+            section.append(heading, list);
+            frag.appendChild(section);
+        });
+
+        container.replaceChildren(frag);
+    }
+
 
     // ═══════════════════════════════════════════════════════════════
     // 6. PLATFORM & DONANIM ANALİZİ
@@ -702,6 +789,7 @@
             _updateSystemHealth();
             _updateSessionInfo();
             _renderDebugPanel();
+            _renderDependenciesPanel();
             _flushTerminalScroll();   // VIP-11: gizliyken biriken loglar için tek kaydırma
             _startHealthLoop();   // VIP-08: sekmeye geri dönüşte döngü yeniden başlar
             return;
@@ -715,6 +803,7 @@
         _updatePlatformInfo();
         _updateOpsReport();
         _renderDebugPanel();
+        _renderDependenciesPanel();
         _updateSystemHealth();
         _updateSessionInfo();
 
