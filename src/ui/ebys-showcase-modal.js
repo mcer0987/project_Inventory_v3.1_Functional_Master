@@ -292,6 +292,48 @@ function renderOrg() {
     return root;
 }
 
+// İP-13 · "3 Adımda Nasıl Yaparım?" pusulası: her aşama için Nereye gir → Hangi butona bas → Ne olur?
+// Metinler gerçek menü/buton adlarını kullanır. { admin, staff } ayrımı yalnız ekranları farklı olan aşamalarda vardır.
+const COMPASS_LABELS = ['Nereye gir', 'Hangi butona bas', 'Ne olur?'];
+const COMPASS = {
+    org: {
+        admin: ['Tanımlar → Birim Yönetimi veya Personel sayfasını açın.', 'Yeni Birim Ekle / Personel Ekle kullanın; kaydı silmek yerine Pasifleştir düğmesine basın.', 'Pasif kayıt yeni seçimlerde çıkmaz; eski evraklar ve imzalar bozulmadan okunur.'],
+        staff: ['Evraklarım (EBYS) bölümünü açın.', 'Yeni evrak formunda bağlı biriminizi seçin.', 'Evrak ve onay rotası, seçtiğiniz kalıcı birim kaydına göre çalışır.'],
+    },
+    purchase: {
+        admin: ['Talep ve Süreçler → Satın Alma Talepleri bölümünü açın.', 'Listeden talebi açıp kalemlerini ve durumunu inceleyin.', 'Kur ilk onayda sabitlenir; sonraki kur değişiklikleri talebin TL toplamını etkilemez.'],
+        staff: ['Satın Alma (EBYS) sekmesini açın.', 'Yeni Talep düğmesine basın; kalemleri ekleyip gönderin.', 'Talep onay zincirine girer; kur ilk onayda sabitlenir.'],
+    },
+    books: {
+        admin: ['Talep ve Süreçler → Evrak Kayıt Defteri bölümünü açın.', 'Yeni evrak düğmesine basın; defteri, konuyu ve metni yazıp kaydedin.', 'Taslak oluşur. Onaya sun / Dondur dediğinizde metin kilitlenir ve evrak resmi kayıt numarası alır.'],
+        staff: ['Evraklarım (EBYS) bölümünü açın.', 'Yeni evrak düğmesine basın; defteri, konuyu ve metni yazıp kaydedin.', 'Taslak oluşur. Onaya sun / Dondur dediğinizde metin kilitlenir ve evrak resmi kayıt numarası alır.'],
+    },
+    sign: {
+        all: ['Bana Gelen Onaylar → Evrak görevlerim bölümünü açın.', 'Görev / Karar düğmesine basın; Onayla, Yazara iade et veya Reddet seçin.', 'Onayla derseniz evrak sıradaki imzacıya geçer; son onayda icra işi açılır.'],
+    },
+    execution: {
+        admin: ['Talep ve Süreçler → İcra Takibi → Havale tanımları bölümünü açın.', 'İcra birimini ve sorumluyu seçip kaydedin.', 'Son onaydan sonra iş sorumluya Kabul bekliyor olarak açılır; iade gelirse Havale Bekleyen İadeler’den yeniden havale edersiniz.'],
+        staff: ['Görevlerim → İcra İşlerim bölümünü açın.', 'Görevi aç düğmesine, ardından Kabul Et ve işi bitirince Tamamla düğmesine basın.', 'İş İcrada olur; Tamamla dediğinizde evrak kapanır ve yazara bildirim gider.'],
+    },
+    verification: {
+        admin: ['Talep ve Süreçler → Evrak Kayıt Defteri bölümünden kapanmış evrakı açın.', 'Doğrulama QR’ı oluştur düğmesine basın.', 'QR, Çıktı önizleme ve yazdırma çıktısında görünür; okutan kişi evrakın güncel durumunu görür.'],
+        staff: ['Görevlerim → Evrak Bildirimlerim bölümünden kapanmış evrakı açın.', 'Doğrulama QR’ı oluştur düğmesine basın.', 'QR, Çıktı önizleme ve yazdırma çıktısında görünür; okutan kişi evrakın güncel durumunu görür.'],
+    },
+};
+const isAdminPage = () => !!document.getElementById('ebysExecutionAdmin');
+function renderCompass(sectionId) {
+    const entry = COMPASS[sectionId];
+    if (!entry) return null;
+    const steps = entry.all || (isAdminPage() ? entry.admin : entry.staff);
+    return el('section', { cls: 'ebys-sc-compass', attrs: { 'aria-label': '3 Adımda Nasıl Yaparım?' } }, [
+        el('strong', { cls: 'ebys-sc-compass-title', text: '🧭 3 Adımda Nasıl Yaparım?' }),
+        el('ol', { cls: 'ebys-sc-compass-steps' }, steps.map((text, i) => el('li', { cls: 'ebys-sc-compass-step' }, [
+            el('span', { cls: 'ebys-sc-compass-num', text: i + 1, attrs: { 'aria-hidden': 'true' } }),
+            el('div', {}, [el('small', { text: COMPASS_LABELS[i] }), el('p', { text })]),
+        ]))),
+    ]);
+}
+
 // İP-9 · 9c: Aşama 5 (renderSign) kalıbıyla aynı yardımcılar ve CSS sınıfları yeniden kullanılır (innerHTML yok).
 // Durum sırası: Kabul bekliyor → İcrada → Tamamlandı; alternatif dal: İade edildi.
 const EXECUTION_STAGES = [
@@ -350,9 +392,111 @@ function renderExecutionSimulation() {
     return panel;
 }
 
+// İP-13 · Yönetici havale simülasyonu. Durumlar: start → defined → open → (Dal A: returned → open) | (Dal B: completed → archived).
+const ADMIN_NODES = [{ icon: 'fa-sitemap', title: 'Havale tanımı' }, { icon: 'fa-inbox', title: 'İcra işi' }, { icon: 'fa-box-archive', title: 'Kapanış' }];
+const ASSIGNEES = ['Ayşe Yılmaz · Donanım Birimi', 'Mehmet Kaya · Donanım Birimi', 'Zeynep Demir · Radyoloji'];
+const ADMIN_STEP = { start: 0, defined: 1, open: 1, returned: 1, completed: 2, archived: 3 };
+const ADMIN_LABELS = {
+    start: ['Hazırlanacak', 'Bekliyor', 'Bekliyor'],
+    defined: ['Hazır', 'Son onay bekleniyor', 'Bekliyor'],
+    open: ['Hazır', 'Kabul bekliyor', 'Bekliyor'],
+    returned: ['Hazır', 'Personel iade etti', 'Bekliyor'],
+    completed: ['Hazır', 'Sorumlu tamamladı', 'Arşiv bekliyor'],
+    archived: ['Hazır', 'Tamamlandı', 'Arşivlendi'],
+};
+function renderAdminDispatchSimulation() {
+    const panel = el('div', { cls: 'ebys-sc-panel' });
+    const chain = el('ol', { cls: 'ebys-sc-chain', attrs: { 'aria-label': 'Örnek havale akışı' } });
+    const nodes = ADMIN_NODES.map(n => {
+        const status = el('span', { cls: 'ebys-sc-chain-status' });
+        const li = el('li', { cls: 'ebys-sc-chain-node' }, [el('span', { cls: 'ebys-sc-chain-icon' }, icon(n.icon)), el('strong', { text: n.title }), status]);
+        chain.append(li);
+        return { li, status };
+    });
+    const live = el('p', { cls: 'ebys-sc-sim-log', attrs: { 'aria-live': 'polite' } });
+    const picker = el('select', { cls: 'ebys-sc-input', attrs: { 'aria-label': 'Yeni sorumlu' } });
+    let state = 'start', assignee = ASSIGNEES[0], reassigned = false;
+
+    const fillPicker = () => picker.replaceChildren(...ASSIGNEES.filter(a => a !== assignee).map(a => el('option', { text: a, attrs: { value: a } })));
+    const paint = () => {
+        const step = ADMIN_STEP[state], labels = ADMIN_LABELS[state];
+        nodes.forEach(({ li, status }, i) => {
+            const returned = state === 'returned' && i === 1, done = i < step, active = i === step && !returned;
+            li.className = 'ebys-sc-chain-node' + (done ? ' is-done' : '') + (active ? ' is-active' : '') + (returned ? ' is-returned' : '');
+            status.textContent = labels[i];
+        });
+        live.textContent = {
+            start: 'Henüz havale tanımı yok. İcra Takibi → Havale tanımları bölümünde evrak türü ve bağlı birim için icra birimini ve sorumluyu seçerek başlayın.',
+            defined: 'Havale tanımı hazır. Evrak son onayı aldığında iş otomatik açılır.',
+            open: `Son onay geldi. İş ${assignee} adlı sorumluya Kabul bekliyor olarak açıldı. Sorumlu kabul edip tamamlayabilir veya iade edebilir.`,
+            returned: 'Sorumlu işi gerekçeyle iade etti. İş Havale Bekleyen İadeler listesinde; gerekçeyi okuyup Detay → Yeniden Havale Et ile yeni sorumlu seçin.',
+            completed: 'Sorumlu işi tamamladı ve evrak kapandı. İcra Takibi › Detay › Arşivle ile işi arşive alabilirsiniz.',
+            archived: 'İş arşivlendi. Aynı doğrulama QR bağlantısı güncel durumu (Arşivde) gösterir.',
+        }[state];
+        define.disabled = state !== 'start';
+        approve.disabled = state !== 'defined';
+        branchA.disabled = state !== 'open' || reassigned;
+        branchB.disabled = state !== 'open';
+        picker.disabled = reassign.disabled = state !== 'returned';
+        archive.disabled = state !== 'completed';
+    };
+    const go = next => () => { state = next; paint(); };
+    const define = button('1. Havale Tanımını Hazırla', 'fa-sitemap', go('defined'), 'ebys-sc-btn primary');
+    const approve = button('2. Son Onay Geldi', 'fa-check-double', go('open'), 'ebys-sc-btn primary');
+    const branchA = button('Dal A: Personel İade Etti', 'fa-rotate-left', () => { state = 'returned'; fillPicker(); paint(); }, 'ebys-sc-btn warn');
+    const branchB = button('Dal B: Sorumlu Tamamladı', 'fa-circle-check', go('completed'), 'ebys-sc-btn primary');
+    const reassign = button('Yeni Sorumlu Seç & Yeniden Havale Et', 'fa-share', () => { assignee = picker.value || assignee; reassigned = true; state = 'open'; paint(); }, 'ebys-sc-btn primary');
+    const archive = button('İcra Takibi › Detay › Arşivle', 'fa-box-archive', go('archived'), 'ebys-sc-btn primary');
+    const reset = button('Baştan başlat', 'fa-arrow-rotate-right', () => { state = 'start'; assignee = ASSIGNEES[0]; reassigned = false; fillPicker(); paint(); }, 'ebys-sc-btn ghost');
+    fillPicker();
+
+    panel.append(
+        el('div', { cls: 'ebys-sc-panel-head' }, [el('strong', { text: 'Örnek havale simülasyonu' }), badge('Örnek', 'slate')]),
+        chain, live,
+        el('div', { cls: 'ebys-sc-actions' }, [define, approve, branchA, branchB]),
+        el('div', { cls: 'ebys-sc-fields' }, [el('label', { cls: 'ebys-sc-field' }, [el('span', { text: 'Yeni sorumlu (Dal A)' }), picker])]),
+        el('div', { cls: 'ebys-sc-actions' }, [reassign, archive, reset]));
+    paint();
+    return panel;
+}
+
+// İP-13 · Aşama 6'da rol anahtarı: iki simülasyon da her iki sayfada denenebilir; varsayılan sayfaya göre seçilir.
+function renderExecutionRoles() {
+    const ROLES = [
+        { id: 'admin', label: '🏛️ Yönetici: Havale & İade Simülasyonu', render: renderAdminDispatchSimulation },
+        { id: 'staff', label: '👤 Personel: İcra Kabul & Tamamlama Simülasyonu', render: renderExecutionSimulation },
+    ];
+    const wrap = el('div', { cls: 'ebys-sc-roles' });
+    const switcher = el('div', { cls: 'ebys-sc-roletabs', attrs: { role: 'tablist', 'aria-label': 'Simülasyon rolü' } });
+    const stage = el('div', { attrs: { role: 'tabpanel', id: 'ebysScRolePanel' } });
+    const tabs = ROLES.map((r, i) => {
+        const b = el('button', { cls: 'ebys-sc-roletab', text: r.label, attrs: { type: 'button', role: 'tab', id: `ebysScRole-${r.id}`, 'aria-controls': 'ebysScRolePanel', 'aria-selected': 'false', tabindex: '-1' } });
+        b.addEventListener('click', () => pick(i));
+        b.addEventListener('keydown', e => {
+            const dir = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+            if (!dir) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const next = (i + dir + ROLES.length) % ROLES.length;
+            pick(next);
+            tabs[next].focus();
+        });
+        switcher.append(b);
+        return b;
+    });
+    function pick(i) {
+        tabs.forEach((b, j) => { b.setAttribute('aria-selected', String(i === j)); b.tabIndex = i === j ? 0 : -1; b.classList.toggle('is-active', i === j); });
+        stage.setAttribute('aria-labelledby', tabs[i].id);
+        stage.replaceChildren(ROLES[i].render());
+    }
+    wrap.append(switcher, stage);
+    pick(isAdminPage() ? 0 : 1);
+    return wrap;
+}
+
 function renderExecution() {
     const root = el('div', { cls: 'ebys-sc-section' });
-    const isAdmin = !!document.getElementById('ebysExecutionAdmin');
+    const isAdmin = isAdminPage();
     // İP-9 · 9d: Onay/imza ile icra arasındaki fark ve "havale" kavramı her iki kitleye de açıkça tanımlanır.
     root.append(sectionHead('Aşama 6 · İcra ve Kapanış', 'Onay nedir, icra nedir?',
         'Onay/imza, evrakın içeriğini uygun bulduğunuzu gösterir. İcra ise onaylanan işin gerçekte yapılmasıdır — ürünün teslim edilmesi ya da talep edilen işlemin tamamlanması gibi. Evrak, icra bitmeden kapanmaz.'));
@@ -382,14 +526,14 @@ function renderExecution() {
             text: 'Evrak sahibi, iş tamamlandığında Görevlerim → Evrak Bildirimlerim bölümünde kapanış bildirimini görür.' },
     ];
     root.append(el('div', { cls: 'ebys-sc-bento cols-2' }, cards.map(miniCard)));
-    // 9c: standart personel tarafında işlevsel icra karar simülasyonu her zaman görünür.
-    if (!isAdmin) root.append(el('h4', { cls: 'ebys-sc-subtitle', text: 'Deneyin: örnek icra kararı' }), renderExecutionSimulation());
+    // 9c + İP-13: rol anahtarlı çift simülasyon her iki sayfada da görünür; varsayılan rol sayfaya göre seçilir.
+    root.append(el('h4', { cls: 'ebys-sc-subtitle', text: 'Deneyin: örnek icra simülasyonu' }), renderExecutionRoles());
     return root;
 }
 
 function renderVerification() {
     const root = el('div', { cls: 'ebys-sc-section' });
-    const adminPage = !!document.getElementById('ebysExecutionAdmin');
+    const adminPage = isAdminPage();
     root.append(sectionHead('Aşama 7 · QR ve Doğrulama', 'Evrakı QR ile teyit edin',
         'QR kodunu okutan kişi, evrakın kayıt bilgilerini ve güncel durumunu görebilir.'));
     const cards = [
@@ -457,6 +601,8 @@ function build() {
             if (on) stage.setAttribute('aria-labelledby', tabButtons[i].id);
         });
         currentPanel = RENDERERS[id]();
+        const compass = renderCompass(id);
+        if (compass) currentPanel.querySelector('.ebys-sc-head')?.after(compass);
         stage.replaceChildren(currentPanel);
         stage.scrollTop = 0;
     }
@@ -484,8 +630,8 @@ function build() {
     overlay.addEventListener('keydown', e => {
         if (e.key === 'Escape') { e.stopPropagation(); closeShowcase(); return; }
         if (e.key !== 'Tab') return;
-        // İP-9 · 9c: icra simülasyonu <input> alanları ekledi; odak hapsi bunları da dolaşmalı.
-        const focusable = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), summary, [tabindex="0"], a[href]')].filter(n => n.offsetParent !== null);
+        // İP-9 · 9c / İP-13: icra simülasyonları <input> ve <select> alanları içerir; odak hapsi bunları da dolaşmalı.
+        const focusable = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex="0"], a[href]')].filter(n => n.offsetParent !== null);
         if (!focusable.length) return;
         const first = focusable[0], last = focusable[focusable.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
