@@ -21,7 +21,8 @@ window.inventoryManagementModule = {
     assignTypeFilter: 'all', // 'all' | 'request' | 'b3'
     priorityFilter: 'all',   // 'all' | 'Kritik' | 'Yüksek' | 'Orta' | 'Düşük'
     stateFilter: 'all',      // 'all' | 'teslimBekliyor' | 'zimmetli' | 'iadeBekliyor' | 'iade'  (Faz 3 · B-3)
-    sortOrder: 'newest'      // 'newest' | 'oldest'
+    sortOrder: 'newest',     // 'newest' | 'oldest'
+    dueFilter: 'all'         // 'all' | 'overdue' | 'dueSoon'  (v3.8 · VP-1: Operasyon Merkezi Zimmet Radarı köprüsü)
   },
 
   // ──────────────────────────────────────────
@@ -78,9 +79,34 @@ window.inventoryManagementModule = {
     if (assignTypeFilter !== 'all') result = result.filter(a => a._source === assignTypeFilter);
     if (priorityFilter !== 'all') result = result.filter(a => a.oncelik === priorityFilter);
     if (stateFilter && stateFilter !== 'all') result = result.filter(a => a.durumKey === stateFilter);
+    // v3.8 · VP-1: geciken / 7 gün içinde yaklaşan iadeler — hesap Operasyon Merkezi radarıyla aynı saf modülden (asset-health.js)
+    const AH = window.AppModules && window.AppModules.AssetHealth;
+    if ((this.state.dueFilter === 'overdue' || this.state.dueFilter === 'dueSoon') && AH) {
+      const sum = AH.summarizeActiveAssignments(assignments, Date.now());
+      const ids = new Set(sum[this.state.dueFilter].map(x => `${x.source}:${x.id}`));
+      result = result.filter(a => ids.has(`${a._source}:${a._id}`));
+    }
     if (sortOrder === 'oldest') result.reverse();
 
     return result;
+  },
+
+  // v3.8 · VP-1: Operasyon Merkezi radarından "Zimmet Sekmesine Git (Filtreli)". Diğer süzgeçler sıfırlanır; böylece
+  //        radardaki sayı ile tablo birebir aynı kalemleri gösterir (gizli bir arama/durum süzgeci sonucu boşaltmaz).
+  focusDue: function (kind) {
+    Object.assign(this.state, { searchTerm: '', typeFilter: 'all', assignTypeFilter: 'all', priorityFilter: 'all', stateFilter: 'all',
+      dueFilter: kind === 'overdue' || kind === 'dueSoon' ? kind : 'all' });
+    this._syncFilterControls();
+    this.renderTable();
+  },
+
+  _syncFilterControls: function () {
+    const map = { invSearchInput: 'searchTerm', invTypeFilter: 'typeFilter', invPriorityFilter: 'priorityFilter',
+      invStateFilter: 'stateFilter', invSortOrder: 'sortOrder', invDueFilter: 'dueFilter' };
+    Object.entries(map).forEach(([id, key]) => {
+      const el = document.getElementById(id);
+      if (el && el.value !== this.state[key]) el.value = this.state[key];
+    });
   },
 
   // ──────────────────────────────────────────
@@ -189,6 +215,12 @@ window.inventoryManagementModule = {
               <option value="iadeBekliyor">↩️ İade Onayı Bekliyor</option>
               <option value="iade">✅ İade Edildi</option>
             </select>
+            <select id="invDueFilter" aria-label="İade tarihi durumu"
+              style="padding:10px 14px; border-radius:10px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px; cursor:pointer;">
+              <option value="all">📅 Tüm İade Tarihleri</option>
+              <option value="overdue">🚨 Geciken İadeler</option>
+              <option value="dueSoon">⏰ 7 Gün İçinde Yaklaşan</option>
+            </select>
             <select id="invSortOrder" onchange="window.inventoryManagementModule.state.sortOrder=this.value; window.inventoryManagementModule.renderTable();"
               style="padding:10px 14px; border-radius:10px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px; cursor:pointer;">
               <option value="newest">🕐 En Yeni</option>
@@ -223,6 +255,11 @@ window.inventoryManagementModule = {
 
         </div>
         `;
+
+    // v3.8 · VP-1: yeni süzgeç satır içi nitelik yerine dinleyiciyle bağlanır
+    const dueSel = document.getElementById('invDueFilter');
+    if (dueSel) dueSel.addEventListener('change', () => { this.state.dueFilter = dueSel.value; this.renderTable(); });
+    this._syncFilterControls();
 
     // Zimmet modalı HTML'ini body'e ekle (eğer yoksa)
     this._injectAssignModal();

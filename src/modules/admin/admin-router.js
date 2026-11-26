@@ -12,6 +12,8 @@ const ROUTES = [
     { cols: ['locations'], renders: ['renderLocationsTable'] },
     { cols: ['units'], renders: ['renderUnitManagement'] },
     { cols: ['tasks'], renders: ['renderTodoTab', 'checkPendingTasks'] },
+    // v3.8 · VP-1: Operasyon Merkezi radar rozetleri (aktif zimmet / servis & hurda) ve açıksa radar penceresi
+    { cols: ['b1', 'b2', 'b3', 'requests', 'assignments', 'returnRequests', 'serviceRecords'], renders: ['renderOpsRadarBadges', 'refreshOpsRadar'] },
 ];
 const INVENTORY_MGMT_COLS = ['b1', 'b2', 'b3', 'requests', 'assignments', 'returnRequests'];   // returnRequests: "İade Onayı Bekliyor" rozeti
 

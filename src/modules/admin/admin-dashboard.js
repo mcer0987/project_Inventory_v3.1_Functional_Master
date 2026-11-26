@@ -150,6 +150,7 @@ window.LoadingCoordinator = {
             window.dispatchEvent(new Event('resize'));
             try { if (typeof window.renderDashboardStats === 'function') window.renderDashboardStats(); } catch (e) { console.error('[reveal] renderDashboardStats:', e); }
             try { if (typeof window.renderCriticalStockTable === 'function') window.renderCriticalStockTable(); } catch (e) { console.error('[reveal] renderCriticalStockTable:', e); }
+            try { if (typeof window.renderOpsRadarBadges === 'function') window.renderOpsRadarBadges(); } catch (e) { console.error('[reveal] renderOpsRadarBadges:', e); }
             try { if (typeof window.renderAdminRequestTable === 'function') window.renderAdminRequestTable(); } catch (e) { console.error('[reveal] renderAdminRequestTable:', e); }
         }, 800); // Reveal başladıktan 800ms sonra (Animasyon ortasında)
     }
@@ -1647,6 +1648,7 @@ window.showAdminTab = function (tabId) {
             setTimeout(() => {
                 try { if (typeof window.renderDashboardStats === 'function') window.renderDashboardStats(); } catch (e) { console.error('[showAdminTab] renderDashboardStats:', e); }
                 try { if (typeof window.renderCriticalStockTable === 'function') window.renderCriticalStockTable(); } catch (e) { console.error('[showAdminTab] renderCriticalStockTable:', e); }
+                try { if (typeof window.renderOpsRadarBadges === 'function') window.renderOpsRadarBadges(); } catch (e) { console.error('[showAdminTab] renderOpsRadarBadges:', e); }
             }, 0);
         });
     } else if (tabId === 'productTypeSettings') {
@@ -2434,3 +2436,290 @@ window.renderLocationsTable = function () {
         body.innerHTML = '<tr><td colspan="5" class="text-center p-5 text-muted">Henüz tanımlanmış bir mahal bulunmuyor.</td></tr>';
     }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// v3.8 · VP-1 — Operasyon Merkezi radarları: Aktif Zimmet & İade Radarı, Hurda & Servis Radarı
+// [WHY]: İki "Yakında" kartı statik vizyon metni gösteriyordu; geciken iadeler ve kronik arızalı cihazlar yöneticinin
+//        gözünden kaçıyordu.
+// [HOW]: Hesap saf modülden (AppModules.AssetHealth); bu blok yalnız sayaç rozetlerini ve radar penceresini çizer.
+//        Dinamik metin createElement/textContent ile basılır, olaylar bindActions (data-action) ile bağlanır.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+(function () {
+    const AH = () => window.AppModules && window.AppModules.AssetHealth;
+    let activeRadar = null;   // 'active_assignment' | 'scrap_service' | null
+
+    function node(tag, cls, txt, attrs) {
+        const n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (txt != null) n.textContent = txt;
+        if (attrs) Object.entries(attrs).forEach(([k, v]) => { if (v != null) n.setAttribute(k, v); });
+        return n;
+    }
+
+    function readAssignments() {
+        const h = AH(), A = window.AssignmentService;
+        if (!h || !A) return null;
+        return h.summarizeActiveAssignments(A.getAssignments(), Date.now());
+    }
+    function readService() {
+        const h = AH(), d = window.data;
+        if (!h || !d) return null;
+        return h.analyzeServiceAndScrap(d.b1, d.b2, d.b3, d.serviceRecords);
+    }
+
+    // ── Kart rozetleri ──
+    window.renderOpsRadarBadges = function () {
+        const set = (id, text, tone) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = text;
+            el.classList.remove('is-ok', 'is-warn', 'is-danger', 'is-loading');
+            el.classList.add(tone);
+        };
+        try {
+            const a = readAssignments();
+            if (a) set('opsBadge-active_assignment', `${a.active} Aktif · ${a.overdue.length} Geciken İade`, a.overdue.length ? 'is-danger' : (a.dueSoon.length ? 'is-warn' : 'is-ok'));
+            const s = readService();
+            if (s) set('opsBadge-scrap_service', `${s.counts.inService} Serviste · ${s.counts.chronic} Kronik Risk`, s.counts.chronic ? 'is-danger' : (s.counts.inService ? 'is-warn' : 'is-ok'));
+        } catch (e) { console.error('[renderOpsRadarBadges]', e); }
+    };
+
+    // ── Pencere yapı taşları ──
+    function chip(label, value, tone) {
+        const c = node('div', 'ops-radar-chip' + (tone ? ' is-' + tone : ''));
+        c.append(node('span', 'ops-radar-chip-value', String(value)), node('span', 'ops-radar-chip-label', label));
+        return c;
+    }
+    function section(title, count, tone) {
+        const h = node('h5', 'ops-radar-section-title');
+        h.append(node('span', null, title), node('span', 'ops-radar-count' + (tone ? ' is-' + tone : ''), String(count)));
+        return h;
+    }
+    function emptyNote(text) { return node('p', 'ops-radar-empty', text); }
+    function cell(bento, label, content) {
+        const td = node('td', null, null, { 'data-bento': bento, 'data-label': label });
+        if (content instanceof Node) td.append(content); else if (content != null) td.textContent = content;
+        return td;
+    }
+    function table(headers, rows) {
+        const t = node('table', 'admin-bento-table ops-radar-table');
+        const head = node('thead'), hr = node('tr');
+        headers.forEach(h => hr.append(node('th', null, h)));
+        head.append(hr);
+        const tb = node('tbody');
+        rows.forEach(r => tb.append(r));
+        t.append(head, tb);
+        const wrap = node('div', 'ops-radar-table-wrap');
+        wrap.append(t);
+        return wrap;
+    }
+    function badge(text, tone) { return node('span', 'ops-radar-pill is-' + tone, text); }
+    function actionBtn(label, icon, action, data) {
+        const b = node('button', 'ops-radar-btn', null, { type: 'button', 'data-action': action });
+        Object.entries(data || {}).forEach(([k, v]) => b.setAttribute('data-' + k, v));
+        b.append(node('i', 'fas ' + icon, null, { 'aria-hidden': 'true' }), document.createTextNode(' ' + label));
+        return b;
+    }
+    const deviceIdOf = x => [x.sn, x.envanterNo].find(v => v && !String(v).includes(',')) || '';
+    const idText = x => [x.sn ? 'SN: ' + x.sn : '', x.envanterNo ? 'Env: ' + x.envanterNo : ''].filter(Boolean).join(' · ') || '—';
+
+    function assignmentRows(list, overdue) {
+        return list.map(x => {
+            const tr = node('tr');
+            const title = node('div');
+            title.append(node('strong', null, x.personel), node('div', 'ops-radar-sub', x.urun));
+            const days = overdue ? `${Math.abs(x.daysLeft)} gün gecikti` : (x.daysLeft === 0 ? 'Bugün' : `${x.daysLeft} gün kaldı`);
+            const act = node('div', 'action-buttons');
+            const dev = deviceIdOf(x);
+            if (dev) act.append(actionBtn('Geçmiş', 'fa-history', 'radar-history', { identity: dev }));
+            act.append(actionBtn('İade Al', 'fa-undo', 'radar-return', { id: String(x.id), source: x.source }));
+            tr.append(
+                cell('title', 'Personel / Ürün', title),
+                cell('meta', 'Cihaz', idText(x)),
+                cell('meta', 'İade Tarihi', x.iadeTarihi),
+                cell('status', 'Durum', badge(days, overdue ? 'danger' : 'warn')),
+                cell('actions', 'İşlem', act));
+            return tr;
+        });
+    }
+
+    function buildAssignment(body, actions) {
+        const s = readAssignments();
+        if (!s) { body.append(emptyNote('Zimmet verisi henüz yüklenmedi.')); return; }
+        const chips = node('div', 'ops-radar-chips');
+        chips.append(chip('Aktif zimmet', s.active), chip('Teslim bekleyen', s.awaitingDelivery, s.awaitingDelivery ? 'warn' : ''),
+            chip('Geciken iade', s.overdue.length, s.overdue.length ? 'danger' : 'ok'), chip(`${s.dueSoonDays} gün içinde`, s.dueSoon.length, s.dueSoon.length ? 'warn' : 'ok'));
+        body.append(chips);
+        const heads = ['Personel / Ürün', 'Cihaz', 'İade Tarihi', 'Durum', 'İşlem'];
+        body.append(section('Geciken iadeler', s.overdue.length, s.overdue.length ? 'danger' : 'ok'));
+        body.append(s.overdue.length ? table(heads, assignmentRows(s.overdue, true)) : emptyNote('Geciken iade yok.'));
+        body.append(section(`Yaklaşan iadeler (${s.dueSoonDays} gün)`, s.dueSoon.length, s.dueSoon.length ? 'warn' : 'ok'));
+        body.append(s.dueSoon.length ? table(heads, assignmentRows(s.dueSoon, false)) : emptyNote('Yaklaşan iade yok.'));
+        actions.append(
+            actionBtn('Zimmet Sekmesine Git (Geciken)', 'fa-arrow-right', 'radar-go-assign', { due: 'overdue' }),
+            actionBtn('Zimmet Sekmesine Git (Yaklaşan)', 'fa-arrow-right', 'radar-go-assign', { due: 'dueSoon' }),
+            actionBtn('Tüm Zimmetler', 'fa-list', 'radar-go-assign', { due: 'all' }));
+    }
+
+    function buildService(body, actions) {
+        const s = readService();
+        if (!s) { body.append(emptyNote('Servis verisi henüz yüklenmedi.')); return; }
+        const chips = node('div', 'ops-radar-chips');
+        chips.append(chip('Serviste', s.counts.inService, s.counts.inService ? 'warn' : 'ok'), chip('Kronik risk', s.counts.chronic, s.counts.chronic ? 'danger' : 'ok'), chip('Hurdaya ayrılan', s.counts.scrap));
+        body.append(chips);
+
+        body.append(section('Kronik arıza uyarısı (≥2 servis kaydı)', s.chronic.length, s.chronic.length ? 'danger' : 'ok'));
+        if (s.chronic.length) {
+            body.append(table(['Cihaz', 'Kimlik', 'Servis Sayısı', 'Son Sevk', 'İşlem'], s.chronic.map(c => {
+                const tr = node('tr');
+                const title = node('div');
+                title.append(node('strong', null, c.urun), node('div', 'ops-radar-sub', c.openCount ? `${c.openCount} kayıt şu an serviste` : 'Şu an serviste değil'));
+                const act = node('div', 'action-buttons');
+                const dev = deviceIdOf(c);
+                if (dev) act.append(actionBtn('Geçmiş', 'fa-history', 'radar-history', { identity: dev }));
+                tr.append(cell('title', 'Cihaz', title), cell('meta', 'Kimlik', c.sn || c.envanterNo ? idText(c) : 'Ürün bazlı (SN/Env yok)'),
+                    cell('status', 'Servis Sayısı', badge(`${c.count} kayıt`, 'danger')), cell('meta', 'Son Sevk', c.lastTarih || '—'), cell('actions', 'İşlem', act));
+                return tr;
+            })));
+        } else body.append(emptyNote('Kronik arızalı cihaz tespit edilmedi.'));
+
+        body.append(section('Şu an serviste', s.inService.length, s.inService.length ? 'warn' : 'ok'));
+        if (s.inService.length) {
+            body.append(table(['Cihaz', 'Kimlik', 'Hedef', 'Sevk Tarihi', 'Durum'], s.inService.map(r => {
+                const tr = node('tr');
+                const title = node('div');
+                title.append(node('strong', null, r.urun));
+                if (r.tur) title.append(node('div', 'ops-radar-sub', r.tur));
+                const st = node('div', 'ops-radar-stack');
+                st.append(badge(r.durum, 'warn'));
+                if (r.chronic) st.append(badge(`Kronik Risk · ${r.serviceCount}. kayıt`, 'danger'));
+                tr.append(cell('title', 'Cihaz', title), cell('meta', 'Kimlik', idText(r)), cell('meta', 'Hedef', r.hedef),
+                    cell('meta', 'Sevk Tarihi', r.sevkTarihi || '—'), cell('status', 'Durum', st));
+                return tr;
+            })));
+        } else body.append(emptyNote('Serviste cihaz yok.'));
+
+        body.append(section('Hurda dökümü', s.scrap.length, ''));
+        if (s.scrap.length) {
+            body.append(table(['Ürün', 'Kimlik', 'Adet', 'Tarih', 'Not'], s.scrap.map(r => {
+                const tr = node('tr');
+                tr.append(cell('title', 'Ürün', node('strong', null, r.urun)), cell('meta', 'Kimlik', idText(r)), cell('meta', 'Adet', String(r.adet)),
+                    cell('meta', 'Tarih', r.tarih || '—'), cell('meta', 'Not', r.not || '—'));
+                return tr;
+            })));
+        } else body.append(emptyNote('Hurdaya ayrılmış kayıt yok.'));
+        actions.append(actionBtn('Servis Sekmesine Git', 'fa-arrow-right', 'radar-go-service'));
+    }
+
+    const RADARS = {
+        active_assignment: {
+            icon: 'fa-right-left', title: 'Aktif Zimmet & İade Radarı', build: buildAssignment,
+            intro: 'Personelin üzerindeki aktif zimmetleri ve iade tarihi geçen ya da yaklaşan cihazları tek ekranda görürsünüz; iadeyi buradan başlatabilir veya zimmet listesini filtreli açabilirsiniz.',
+            help: ['Aktif zimmet: teslim alınmış ve henüz iade edilmemiş kalemlerdir; teslim bekleyenler ayrıca sayılır.',
+                'Geciken iade: planlanan iade tarihi (günün sonu) geçmiş zimmetlerdir. Yaklaşan: iadesi 7 gün içinde olanlardır.',
+                '"İade Al", zimmet ekranındaki "Zimmetten Düş" ile aynı işlemi başlatır; zimmeti kapatır ve işlemden önce onay ister.',
+                'Yalnızca iade tarihi girilmiş (geçici) zimmetler geciken ya da yaklaşan sayılır.'],
+        },
+        scrap_service: {
+            icon: 'fa-satellite-dish', title: 'Hurda & Servis Radarı', build: buildService,
+            intro: 'Servisteki cihazları, tekrar tekrar arızalanan (kronik riskli) seri numaralarını ve hurdaya ayrılan donanımı görürsünüz; böylece onarım yerine değişim kararını daha erken verebilirsiniz.',
+            help: ['Kronik risk: aynı cihaz (seri no, yoksa envanter no; demirbaşta ikisi de yoksa ürün) için en az 2 servis kaydı bulunmasıdır.',
+                'Servis kayıtları depoya dönüşte silinmeyip kapatıldığı için eski arızalar da sayılır; ancak kayıt silme uygulaması kaldırılmadan önce silinmiş eski servis kayıtları görünmez, bu cihazların geçmiş arıza sayısı eksik olabilir.',
+                'Sarf malzemeler kronik cihaz sayımına girmez.',
+                'Hurda dökümü, hurdaya ayırma işleminde yazılan hareket kayıtlarından oluşur.'],
+        },
+    };
+
+    function paint(def) {
+        const body = document.getElementById('opsRadarBody'), actions = document.getElementById('opsRadarActions');
+        if (!body || !actions) return;
+        body.replaceChildren();
+        actions.replaceChildren();
+        def.build(body, actions);
+    }
+
+    window.openOpsRadar = function (kind) {
+        const def = RADARS[kind], modal = document.getElementById('opsRadarModal');
+        if (!def || !modal) return;
+        activeRadar = kind;
+        document.getElementById('opsRadarIcon').className = 'fas ' + def.icon;
+        document.getElementById('opsRadarTitle').textContent = def.title;
+        document.getElementById('opsRadarIntro').textContent = def.intro;
+        const help = document.getElementById('opsRadarHelp');
+        help.replaceChildren(...def.help.map(t => node('p', null, t)));
+        help.hidden = true;
+        document.getElementById('opsRadarInfoBtn').setAttribute('aria-expanded', 'false');
+        paint(def);
+        modal.hidden = false;
+        modal.classList.add('show');
+        document.getElementById('opsRadarClose').focus();
+    };
+
+    window.closeOpsRadar = function () {
+        const modal = document.getElementById('opsRadarModal');
+        if (!modal) return;
+        const kind = activeRadar;
+        activeRadar = null;
+        modal.classList.remove('show');
+        modal.hidden = true;
+        const card = kind && document.querySelector(`[data-action="radar-open"][data-radar="${kind}"]`);
+        if (card) card.focus();
+    };
+
+    // Canlı veri geldiğinde açık pencere yerinde yenilenir: odak ve kaydırma konumu korunur.
+    window.refreshOpsRadar = function () {
+        const def = activeRadar && RADARS[activeRadar];
+        if (!def) return;
+        const panel = document.querySelector('#opsRadarModal .ops-radar-panel');
+        const top = panel ? panel.scrollTop : 0;
+        paint(def);
+        if (panel) panel.scrollTop = top;
+    };
+
+    function goTab(tabId) {
+        window.closeOpsRadar();
+        if (typeof window.showAdminTab === 'function') window.showAdminTab(tabId);
+    }
+
+    function wire() {
+        const modal = document.getElementById('opsRadarModal');
+        const row = document.getElementById('futureWidgetRow');
+        if (!modal || !row || modal.__opsWired) return;
+        modal.__opsWired = true;
+        const open = (el) => window.openOpsRadar(el.dataset.radar);
+        window.bindActions(row, { 'radar-open': open });
+        row.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const el = e.target.closest('[data-action="radar-open"]');
+            if (el) { e.preventDefault(); open(el); }
+        });
+        window.bindActions(modal, {
+            'radar-close': () => window.closeOpsRadar(),
+            'radar-backdrop': (el, e) => { if (e.target === el) window.closeOpsRadar(); },
+            'radar-info': (el) => {
+                const help = document.getElementById('opsRadarHelp');
+                help.hidden = !help.hidden;
+                el.setAttribute('aria-expanded', String(!help.hidden));
+            },
+            'radar-history': (el) => {
+                const m = window.inventoryManagementModule;
+                if (m && el.dataset.identity) m.showDeviceHistory(el.dataset.identity);
+            },
+            'radar-return': (el) => {
+                const m = window.inventoryManagementModule;
+                if (m) m.removeAssignment(el.dataset.id, el.dataset.source);   // kendi onay penceresini açar
+            },
+            'radar-go-assign': (el) => {
+                goTab('inventoryManagementTab');
+                const m = window.inventoryManagementModule;
+                if (m && typeof m.focusDue === 'function') m.focusDue(el.dataset.due);
+            },
+            'radar-go-service': () => goTab('purchaseTab'),
+        });
+        modal.addEventListener('keydown', (e) => { if (e.key === 'Escape' && activeRadar) { e.stopPropagation(); window.closeOpsRadar(); } });
+    }
+
+    // Rozetler ve pencere bağları: DOM hazır olduğunda, sonra admin-router (veri olayı) ve showAdminTab (pano açılışı) çağrılarıyla yenilenir.
+    const boot = () => { wire(); window.renderOpsRadarBadges(); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();

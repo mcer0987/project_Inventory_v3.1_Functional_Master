@@ -55,6 +55,7 @@
     <script src="src/utils/ownership.js"></script>
     <script src="src/utils/admin-grants.js"></script>
     <script src="src/services/assignment-service.js"></script>
+    <script src="src/utils/asset-health.js"></script>
     <script src="src/ui/device-ids.js"></script>
     <script src="src/ui/form-keyboard-nav.js"></script>
     <link rel="stylesheet" href="todo-module.css">
@@ -905,17 +906,19 @@
             </div>
 
             <!-- Faz 5 · K3.5: Gelecek analitik paneller için yer tutucu kartlar -->
-            <div class="row mt-4" style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <div class="future-widget-card" style="flex: 1; min-width: 240px; cursor: pointer;"
-                    onclick="window.openFutureFeatureModal('active_assignment')">
-                    <div class="future-widget-icon"><i class="fas fa-right-left"></i></div>
-                    <div class="future-widget-label">Yakında</div>
-                    <div class="future-widget-title">Aktif Zimmet & İade Takibi</div>
+            <div id="futureWidgetRow" class="row mt-4" style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div class="future-widget-card ops-radar-card" style="flex: 1; min-width: 240px; cursor: pointer;"
+                    role="button" tabindex="0" data-action="radar-open" data-radar="active_assignment"
+                    aria-label="Aktif Zimmet ve İade Radarını aç">
+                    <div class="future-widget-icon"><i class="fas fa-right-left" aria-hidden="true"></i></div>
+                    <div id="opsBadge-active_assignment" class="future-widget-label ops-radar-badge is-loading" role="status">Yükleniyor…</div>
+                    <div class="future-widget-title">Aktif Zimmet & İade Radarı</div>
                 </div>
-                <div class="future-widget-card" style="flex: 1; min-width: 240px; cursor: pointer;"
-                    onclick="window.openFutureFeatureModal('scrap_service')">
-                    <div class="future-widget-icon"><i class="fas fa-satellite-dish"></i></div>
-                    <div class="future-widget-label">Yakında</div>
+                <div class="future-widget-card ops-radar-card" style="flex: 1; min-width: 240px; cursor: pointer;"
+                    role="button" tabindex="0" data-action="radar-open" data-radar="scrap_service"
+                    aria-label="Hurda ve Servis Radarını aç">
+                    <div class="future-widget-icon"><i class="fas fa-satellite-dish" aria-hidden="true"></i></div>
+                    <div id="opsBadge-scrap_service" class="future-widget-label ops-radar-badge is-loading" role="status">Yükleniyor…</div>
                     <div class="future-widget-title">Hurda & Servis Radarı</div>
                 </div>
                 <div class="future-widget-card" style="flex: 1; min-width: 240px; cursor: pointer;"
@@ -931,6 +934,24 @@
                     <div class="future-widget-title">🧠 AI Sarf Tüketim & Tahminleme Motoru</div>
                 </div>
             </div>
+
+        <!-- v3.8 · VP-1: Operasyon Merkezi radar penceresi (Aktif Zimmet & İade / Hurda & Servis). İçerik admin-dashboard.js'ten gelir. -->
+        <div id="opsRadarModal" class="ops-radar-modal" role="dialog" aria-modal="true" aria-labelledby="opsRadarTitle" data-action="radar-backdrop" hidden>
+            <div class="ops-radar-panel">
+                <div class="ops-radar-head">
+                    <div class="ops-radar-head-icon"><i id="opsRadarIcon" class="fas fa-right-left" aria-hidden="true"></i></div>
+                    <h4 id="opsRadarTitle" class="ops-radar-title"></h4>
+                    <button id="opsRadarInfoBtn" type="button" class="ops-radar-icon-btn" data-action="radar-info"
+                        aria-label="Bu radar nasıl çalışır? Bilgi" title="Bu radar nasıl çalışır?" aria-expanded="false" aria-controls="opsRadarHelp">ⓘ</button>
+                    <button id="opsRadarClose" type="button" class="ops-radar-icon-btn" data-action="radar-close" aria-label="Kapat">
+                        <i class="fas fa-times" aria-hidden="true"></i></button>
+                </div>
+                <p id="opsRadarIntro" class="ops-radar-intro"></p>
+                <div id="opsRadarHelp" class="ops-radar-help" hidden></div>
+                <div id="opsRadarBody" class="ops-radar-body"></div>
+                <div id="opsRadarActions" class="ops-radar-actions"></div>
+            </div>
+        </div>
 
         <!-- 🔭 Özellik Vizyonu (Blueprint) Modalı — future-widget kartlarına tıklanınca açılır -->
         <div id="futureFeatureModal" class="ff-modal"
@@ -1171,16 +1192,6 @@
             window.openFutureFeatureModal = function (key) {
                 let icon = 'fa-circle-info', title = '', detail = '';
                 switch (key) {
-                    case 'active_assignment':
-                        icon = 'fa-right-left';
-                        title = 'Canlı Zimmet Radarı & Anlık İade Masası';
-                        detail = 'Kurum genelinde personellerin üzerinde bulunan tüm aktif zimmetleri ve yaklaşan iade tarihlerini tek bir kontrol merkezinden izlemek; süresi dolan cihazlar için otomatik uyarılar üretmek ve tek tıkla depoya iade kabulü sağlamak üzere tasarlanmaktadır.';
-                        break;
-                    case 'scrap_service':
-                        icon = 'fa-satellite-dish';
-                        title = 'Donanım Sağlığı & Yaşam Döngüsü İzleme (Lifecycle)';
-                        detail = 'Servisteki cihazların canlı onarım durumlarını izlemek, mükerrer arıza kaydı açılan kronik sorunlu cihazları (SN) otomatik tespit etmek ve hurdaya ayrılan donanımların sicil/maliyet dökümünü raporlamak üzere tasarlanmaktadır.';
-                        break;
                     case 'critical_stock':
                         icon = 'fa-triangle-exclamation';
                         title = 'Kritik Stok Emniyet Kilidi & Otomatik Talep Tetikleyici';
