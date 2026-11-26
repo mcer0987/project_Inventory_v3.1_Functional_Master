@@ -3015,3 +3015,110 @@ table.admin-bento-table tbody tr:hover td {
   line-height: 1 !important;
   flex-shrink: 0;
 }
+
+/* ── UX-5 Rev-2 · Kritik Stok "Ürün Bilgisi" modalı (#criticalStockProductInfoModal) ──────────────────
+   [WHY]: 7 sütunlu ham tablo 390px'te sıkışıp kelimeleri harf harf bölüyor; kapatma düğmesi kare/dar kalıyordu.
+   [HOW]: enhanceBentoTable (admin-dashboard.js) hücrelere data-bento/data-label verir; burada modal kabuğu daraltılır,
+          .table-responsive kaydırması kapatılır ve kart yüzeyleri açık/koyu temada sabitlenir. Satır içi width/max-height
+          (section style="") ezilsin diye !important kullanılır. */
+#criticalStockProductInfoModal .modern-modal-header .modal-close-btn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  flex: 0 0 auto;
+  border: 1px solid var(--color-border-light, #cbd5e1);
+  border-radius: 10px;
+  background: transparent;
+  font-size: 15px;
+}
+
+@media (max-width: 768px) {
+  #criticalStockProductInfoModal {
+    padding: 10px !important;
+  }
+
+  #criticalStockProductInfoModal .modern-modal-content {
+    width: min(100%, 520px) !important;
+    max-height: 88vh !important;
+    box-sizing: border-box;
+  }
+
+  #criticalStockProductInfoModal .modern-modal-header {
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  #criticalStockProductInfoModal .modern-modal-header h3 {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 1.05rem;
+  }
+
+  #criticalStockProductInfoBody {
+    padding: 8px !important;
+  }
+
+  #criticalStockProductInfoBody .table-responsive {
+    overflow-x: visible;
+  }
+
+  #criticalStockProductInfoModal table.admin-bento-table tbody {
+    padding: 4px;
+  }
+
+  /* Başlık (Model / Ürün) solda, Durum rozeti aynı satırda sağ üstte */
+  #criticalStockProductInfoModal table.admin-bento-table tbody td[data-bento="title"] {
+    flex: 1 1 50%;
+    min-width: 0 !important;
+    overflow-wrap: anywhere;
+  }
+
+  #criticalStockProductInfoModal table.admin-bento-table tbody td[data-bento="status"] {
+    flex: 0 1 auto;
+    max-width: 42%;
+    padding: 3px 10px !important;
+    border: 1px solid rgba(37, 99, 235, 0.22) !important;
+    border-radius: 999px;
+    background: rgba(37, 99, 235, 0.1) !important;
+    color: #1d4ed8;
+    font-size: 0.74rem;
+    font-weight: 700;
+    line-height: 1.35;
+    text-align: center !important;
+    overflow-wrap: anywhere;
+  }
+
+  /* Uzun açıklama tam genişlikte; diğer alanlar 2 sütunlu etiket-değer çiftleri */
+  #criticalStockProductInfoModal table.admin-bento-table tbody td[data-label="Açıklama"] {
+    flex-basis: 100%;
+  }
+
+  #criticalStockProductInfoModal table.admin-bento-table tbody td[data-bento="meta"] {
+    min-width: 0 !important;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+
+  [data-theme="dark"] #criticalStockProductInfoModal .modern-modal-content {
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+
+  [data-theme="dark"] #criticalStockProductInfoModal table.admin-bento-table tbody tr,
+  [data-theme="dark"] #criticalStockProductInfoModal table.admin-bento-table tbody tr:hover {
+    border-color: #334155;
+    background: #1e293b;
+    color: #f1f5f9;
+  }
+
+  [data-theme="dark"] #criticalStockProductInfoModal table.admin-bento-table tbody td[data-bento="meta"] {
+    background: #0f172a !important;
+    color: #e2e8f0;
+  }
+
+  [data-theme="dark"] #criticalStockProductInfoModal table.admin-bento-table tbody td[data-bento="status"] {
+    border-color: rgba(96, 165, 250, 0.35) !important;
+    background: rgba(96, 165, 250, 0.16) !important;
+    color: #bfdbfe;
+  }
+}

@@ -1511,7 +1511,7 @@ window.showCriticalProductInfo = function (groupKey) {
             <section class="modern-modal-content" style="width:min(900px,96vw); max-height:90vh; overflow:auto; border-radius:16px;">
                 <header class="modern-modal-header">
                     <h3 id="criticalStockProductInfoTitle" class="mb-0">Kritik Stok Ürün Bilgisi</h3>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-action="closeCriticalProductInfo"
+                    <button type="button" class="btn btn-sm btn-outline-secondary modal-close-btn" data-action="closeCriticalProductInfo"
                         aria-label="Kapat"><i class="fas fa-times"></i></button>
                 </header>
                 <div id="criticalStockProductInfoBody" class="p-3"></div>
@@ -1532,7 +1532,7 @@ window.showCriticalProductInfo = function (groupKey) {
     if (body) {
         body.innerHTML = `
             <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
+                <table class="table table-hover align-middle mb-0 admin-bento-table">
                     <thead><tr>
                         <th>Model / Ürün</th><th>Marka</th><th>Envanter No</th><th>Depo / Raf</th>
                         <th>Adet</th><th>Durum</th><th>Açıklama</th>
@@ -1548,6 +1548,10 @@ window.showCriticalProductInfo = function (groupKey) {
                     </tr>`).join('')}</tbody>
                 </table>
             </div>`;
+        // [WHY]: Mobilde 7 sütun yan yana sıkışıp kelimeleri harf harf bölüyordu.
+        // [HOW]: Sayfadaki diğer admin tablolarıyla aynı enhanceBentoTable ile hücreler data-bento/data-label alır; CSS 2 sütunlu karta çevirir.
+        const infoTable = body.querySelector('table');
+        if (infoTable) enhanceBentoTable(infoTable);
     }
     modal.style.display = 'flex';
 };
@@ -2089,7 +2093,7 @@ const BENTO_TABLE_SELECTORS = [
     '#adminDefUnitTableBody', '#adminDefTemplateTableBody', '#ebysDocumentTypesBody',
 ];
 // Kart başlığı olacak sütun (ilk eşleşen); eşleşme yoksa ilk uygun hücre başlık olur.
-const BENTO_TITLE_LABEL = /^(ürün|cihaz|evrak|kayıt|belge|şablon|tür adı|birim|ad soyad|mahal)/i;
+const BENTO_TITLE_LABEL = /^(model|ürün|cihaz|evrak|kayıt|belge|şablon|tür adı|birim|ad soyad|mahal)/i;
 
 function bentoHeaderLabels(table) {
     const headRow = table.tHead?.rows[table.tHead.rows.length - 1];

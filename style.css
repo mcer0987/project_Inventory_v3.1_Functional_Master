@@ -8149,22 +8149,51 @@ html.auth-hydrating .index-transition-loader {
    [WHY]: Üst çubuk sayfa kenarlarına yapışık düz banttı; kullanıcı kapsülü zeminde kayboluyordu.
    [HOW]: Yalnız CSS (markup/ID/sınıf kancaları değişmez). Kurumsal palet: #0f1e3d lacivert, #1e3a5f slate-lacivert,
           #2563eb kurumsal mavi; koyu temada Space Titanium #0b0f17 / #131a26 / #60a5fa (dark-theme.css). */
+/* UX-5 Rev-2 · [WHY]: Açık temada lacivert blok zeminde "yama" gibi havada kalıyordu; kurumsal bar kenardan kenara olmalı.
+   [HOW]: Açık tema = Warm Platinum / İnci Cam (#fff %92 + blur, #e2e8f0 alt çizgi, #0f172a tipografi, #2563eb vurgu).
+          Koyu tema Space Titanium değerlerini dark-theme.css verir (tema farkı olan her özellik orada yeniden yazılır). */
 .inventory-screen > .header {
     position: relative;
-    margin: 12px 20px 0;
-    padding: 10px 14px 10px 18px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 20px;
-    background:
-        radial-gradient(120% 160% at 0% 0%, rgba(37, 99, 235, 0.38), transparent 58%),
-        linear-gradient(135deg, #0f1e3d 0%, #1e3a5f 100%);
-    box-shadow:
-        0 16px 36px rgba(15, 30, 61, 0.28),
-        0 2px 6px rgba(15, 30, 61, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    margin: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 24px;
+    border: 0;
+    border-bottom: 1px solid #e2e8f0;
+    border-radius: 0;
+    background: rgba(255, 255, 255, 0.92);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    backdrop-filter: blur(14px) saturate(160%);
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+    color: #0f172a;
 }
 
-/* ── Unified Glass Pill Dock (index üst çubuğu · #userDisplay) ──────────────── */
+/* [WHY]: index.html'deki satır içi color:var(--color-primary)/--color-text-muted tipografi kontrastını belirsizleştirir.
+   [HOW]: !important ile açık temada #0f172a / #64748b sabitlenir; koyu karşılığı dark-theme.css'te. */
+.inventory-screen > .header .brand-wordmark {
+    color: #0f172a !important;
+}
+
+.inventory-screen > .header .brand-wordmark-secondary {
+    color: #64748b !important;
+}
+
+/* [WHY]: dark-theme.css'teki genel .theme-toggle-btn (beyaz yarı saydam + beyaz ikon) açık zeminde görünmez olur.
+   [HOW]: Header kapsamlı, açık tema platin buton; hover'da koyulaşır. */
+.inventory-screen > .header .theme-toggle-btn {
+    border: 1px solid #e2e8f0;
+    background: #f1f5f9;
+    color: #334155;
+}
+
+.inventory-screen > .header .theme-toggle-btn:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+/* ── Unified Platinum Capsule Dock (index üst çubuğu · #userDisplay) ──────────
+   [WHY]: Açık platin zeminde zarif, bütünleşik kullanıcı/aksiyon kapsülü.
+   [HOW]: #f8fafc zemin + ince #e2e8f0 çerçeve + iç beyaz highlight; koyu cam hâli dark-theme.css'te. */
 .header .nav-dock {
     margin-left: auto;
     display: inline-flex;
@@ -8173,18 +8202,13 @@ html.auth-hydrating .index-transition-loader {
     min-width: 0;
     max-width: 100%;
     padding: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    border: 1px solid #e2e8f0;
     border-radius: 999px;
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07)),
-        rgba(15, 30, 61, 0.55);
+    background: #f8fafc;
     box-shadow:
-        0 10px 24px rgba(2, 8, 23, 0.42),
-        inset 0 1px 0 rgba(255, 255, 255, 0.32),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.25);
-    -webkit-backdrop-filter: blur(14px) saturate(160%);
-    backdrop-filter: blur(14px) saturate(160%);
-    color: var(--color-text-white, #fff);
+        inset 0 1px 0 #ffffff,
+        0 2px 6px rgba(15, 23, 42, 0.04);
+    color: #0f172a;
     z-index: 999;
     box-sizing: border-box;
 }
@@ -8193,7 +8217,7 @@ html.auth-hydrating .index-transition-loader {
     align-self: stretch;
     width: 1px;
     margin: 6px 4px;
-    background: rgba(255, 255, 255, 0.26);
+    background: #cbd5e1;
 }
 
 .nav-dock .user-tasks-button {
@@ -8206,12 +8230,13 @@ html.auth-hydrating .index-transition-loader {
     border: 0;
     border-radius: 50%;
     background: transparent;
-    color: inherit;
+    color: #475569;
     transition: background 0.2s ease;
 }
 
 .nav-dock .user-tasks-button:hover {
-    background: rgba(255, 255, 255, 0.14);
+    background: #e2e8f0;
+    color: #0f172a;
 }
 
 .nav-dock .nav-dock-user {
@@ -8244,6 +8269,7 @@ html.auth-hydrating .index-transition-loader {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: inherit;
     font-size: 13px;
     font-weight: 600;
 }
@@ -8266,10 +8292,10 @@ html.auth-hydrating .index-transition-loader {
     height: 34px;
     margin: 0;
     padding: 0 9px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid #cbd5e1;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.1);
-    color: #ffffff;
+    background: #ffffff;
+    color: #0f172a;
     font-size: 12px;
     font-weight: 700;
     white-space: nowrap;
@@ -8307,29 +8333,33 @@ html.auth-hydrating .index-transition-loader {
 }
 
 /* Anlam rengi yalnız ikonda ve hover zemininde; dinlenme hâli nötr cam kalır */
-.nav-dock .user-admin-button > i { color: #93c5fd; }
-.nav-dock .user-security-button > i { color: #fcd34d; }
-.nav-dock .user-logout-button > i { color: #fca5a5; }
+/* Açık zeminde WCAG AA kontrast: #2563eb / #d97706 / #dc2626 ikonlar; hover'da tam renkli dolgu + beyaz ikon/yazı */
+.nav-dock .user-admin-button > i { color: #2563eb; }
+.nav-dock .user-security-button > i { color: #d97706; }
+.nav-dock .user-logout-button > i { color: #dc2626; }
 
 .nav-dock .user-admin-button:hover,
 .nav-dock .user-admin-button:focus-visible {
-    border-color: rgba(147, 197, 253, 0.7);
+    border-color: #2563eb;
     background: #2563eb;
-    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
 }
 
 .nav-dock .user-security-button:hover,
 .nav-dock .user-security-button:focus-visible {
-    border-color: rgba(252, 211, 77, 0.7);
+    border-color: #b45309;
     background: #b45309;
-    box-shadow: 0 4px 14px rgba(180, 83, 9, 0.45);
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(180, 83, 9, 0.35);
 }
 
 .nav-dock .user-logout-button:hover,
 .nav-dock .user-logout-button:focus-visible {
-    border-color: rgba(252, 165, 165, 0.7);
+    border-color: #b91c1c;
     background: #b91c1c;
-    box-shadow: 0 4px 14px rgba(185, 28, 28, 0.45);
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(185, 28, 28, 0.35);
 }
 
 .nav-dock .user-action-button:hover > i,
@@ -8338,7 +8368,7 @@ html.auth-hydrating .index-transition-loader {
 }
 
 .nav-dock button:focus-visible {
-    outline: 2px solid #ffffff;
+    outline: 2px solid #2563eb;
     outline-offset: 2px;
 }
 
