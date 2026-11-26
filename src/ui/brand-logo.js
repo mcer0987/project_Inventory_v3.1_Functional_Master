@@ -4,11 +4,15 @@
  * (Firestore okuma/yazma yalnız src/services/brand-settings-service.js'tedir).
  *
  * [WHY]: Üst çubuktaki / yan menüdeki logo ve marka metni koda gömülüydü; yönetici kurum kimliğini değiştiremiyordu.
- * [HOW]: Ayar 6 kapalı alandır (emblemId, title, subtitle, effect + sunucunun yazdığı updatedAt/updatedBy). Amblemler bu
- *        dosyadaki sabit, beyaz listeli SVG kataloğundan createElementNS ile çizilir; kullanıcıdan ham HTML/SVG/URL alınmaz.
+ * [HOW]: Ayar 7 kapalı alandır (emblemId, title, subtitle, effect, customLogo + sunucunun yazdığı updatedAt/updatedBy).
+ *        Amblemler bu dosyadaki sabit, beyaz listeli SVG kataloğundan createElementNS ile çizilir; kullanıcıdan ham HTML/SVG/URL
+ *        alınmaz. Tek istisna 1 adet özel logodur: png/jpeg/webp dosyası istemcide Canvas ile ≤96×96'ya küçültülüp yeniden
+ *        kodlanır (metadata ve gömülü içerik atılır) ve ≤45000 karakterlik data URI olarak saklanır; '' = özel logo yok.
+ *        SVG (image/svg+xml) MIME, uzantı ve dosya imzası düzeylerinin hepsinde reddedilir.
  *        Önbellek (localStorage brand_settings_<root>) sayfa açılışında senkron uygulanır → titreme yok; sunucu senkronu
  *        servis tarafından gelir. Doğrulama sınırları firestore.rules › brandSettingsOk ile aynıdır.
- * Güvenlik: tüm metinler textContent ile yazılır (innerHTML yok); etiket benzeri "<x" metinleri reddedilir (noTag).
+ * Güvenlik: tüm metinler textContent ile yazılır (innerHTML yok); etiket benzeri "<x" metinleri reddedilir (noTag);
+ *        özel logo yalnız <img src="data:image/(png|jpeg|webp);base64,…"> olarak, desen doğrulamasından sonra çizilir.
  */
 (function () {
     'use strict';
@@ -50,29 +54,118 @@
         { id: 'none', label: 'Sade Kurumsal', hint: 'Hareketsiz, yalın görünüm' },
     ]);
 
-    const DEFAULTS = Object.freeze({ emblemId: 'cube', title: 'ENVANTER', subtitle: 'TAKİP SİSTEMİ', effect: 'none' });
+    const DEFAULTS = Object.freeze({ emblemId: 'cube', title: 'ENVANTER', subtitle: 'TAKİP SİSTEMİ', effect: 'none', customLogo: '' });
     const LIMITS = Object.freeze({ title: 32, subtitle: 40 });
     const TAG_LIKE = /<[a-zA-Z/!?]/; // firestore.rules › noTag ile aynı kural
+
+    // Özel logo: firestore.rules › brandSettingsOk ile aynı sınır ve desen. maxPx/maxFileBytes yalnız istemci ön kontrolüdür.
+    const LOGO = Object.freeze({ maxChars: 45000, maxPx: 96, maxFileBytes: 5 * 1024 * 1024, maxSourcePixels: 25000000 });
+    const LOGO_PATTERN = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+    const LOGO_MIMES = Object.freeze(['image/png', 'image/jpeg', 'image/webp']);
+    const LOGO_EXTENSIONS = Object.freeze(['png', 'jpg', 'jpeg', 'webp']);
 
     const emblemIds = EMBLEMS.map(e => e.id);
     const effectIds = EFFECTS.map(e => e.id);
 
+    /** Sunucuda saklanabilecek özel logo mu? ('' özel logo yok anlamında geçerlidir; bu işlev yalnız dolu değeri sınar.) */
+    const isLogoData = v => typeof v === 'string' && v.length > 0 && v.length <= LOGO.maxChars && LOGO_PATTERN.test(v);
+
     // ─── Doğrulama (firestore.rules › brandSettingsOk ile aynı sınırlar) ─────────────────────────────────────
-    /** @returns {{ok:boolean, value:object|null, errors:object}} value: {emblemId,title,subtitle,effect} (kırpılmış) */
+    /** @returns {{ok:boolean, value:object|null, errors:object}} value: {emblemId,title,subtitle,effect,customLogo} (kırpılmış) */
     function validate(input) {
         const raw = input && typeof input === 'object' ? input : {};
         const errors = {};
         const title = typeof raw.title === 'string' ? raw.title.trim() : '';
         const subtitle = typeof raw.subtitle === 'string' ? raw.subtitle.trim() : '';
+        // customLogo yok (eski 6 alanlı belge / önbellek) → '' sayılır; dolu ise desen + uzunluk zorunlu.
+        const customLogo = raw.customLogo === undefined || raw.customLogo === null ? '' : raw.customLogo;
         if (!emblemIds.includes(raw.emblemId)) errors.emblemId = 'Listeden bir amblem seçin.';
         if (!effectIds.includes(raw.effect)) errors.effect = 'Listeden bir efekt seçin.';
+        if (customLogo !== '' && !isLogoData(customLogo)) errors.customLogo = 'Özel logo geçersiz: yalnız PNG, JPEG veya WebP kabul edilir.';
         if (!title) errors.title = 'Başlık boş bırakılamaz.';
         else if (title.length > LIMITS.title) errors.title = `Başlık en fazla ${LIMITS.title} karakter olabilir.`;
         else if (TAG_LIKE.test(title)) errors.title = 'Başlıkta etiket benzeri "<" ifadesi kullanılamaz.';
         if (subtitle.length > LIMITS.subtitle) errors.subtitle = `Alt başlık en fazla ${LIMITS.subtitle} karakter olabilir.`;
         else if (TAG_LIKE.test(subtitle)) errors.subtitle = 'Alt başlıkta etiket benzeri "<" ifadesi kullanılamaz.';
         const ok = Object.keys(errors).length === 0;
-        return { ok, errors, value: ok ? { emblemId: raw.emblemId, title, subtitle, effect: raw.effect } : null };
+        return { ok, errors, value: ok ? { emblemId: raw.emblemId, title, subtitle, effect: raw.effect, customLogo } : null };
+    }
+
+    // ─── Özel logo hazırlığı (dosya ön kontrolü + imza + ölçek + yeniden kodlama) ─────────────────────────────
+    /** Dosya türünü ilk baytlardan okur: 'png' | 'jpeg' | 'webp' | null (SVG/metin/GIF vb. → null). */
+    function sniffImageType(bytes) {
+        if (!bytes || typeof bytes.length !== 'number') return null;
+        const at = (i, ...sig) => sig.every((b, k) => bytes[i + k] === b);
+        if (bytes.length >= 8 && at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'png';
+        if (bytes.length >= 3 && at(0, 0xff, 0xd8, 0xff)) return 'jpeg';
+        if (bytes.length >= 12 && at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return 'webp'; // RIFF....WEBP
+        return null;
+    }
+
+    /** Seçilen dosyanın (ad/tür/boyut) ön kontrolü. @returns {{ok:boolean, error?:string}} */
+    function checkLogoFile(file) {
+        const name = String((file && file.name) || '').toLowerCase();
+        const type = String((file && file.type) || '').toLowerCase();
+        const ext = name.includes('.') ? name.split('.').pop() : '';
+        if (!file) return { ok: false, error: 'Bir görsel dosyası seçin.' };
+        if (type === 'image/svg+xml' || ext === 'svg' || ext === 'svgz') return { ok: false, error: 'SVG logo güvenlik nedeniyle kabul edilmez; PNG, JPEG veya WebP seçin.' };
+        if (!LOGO_MIMES.includes(type) || (ext && !LOGO_EXTENSIONS.includes(ext))) return { ok: false, error: 'Yalnız PNG, JPEG veya WebP görsel yüklenebilir.' };
+        if (!(file.size > 0)) return { ok: false, error: 'Seçilen dosya boş.' };
+        if (file.size > LOGO.maxFileBytes) return { ok: false, error: `Dosya çok büyük (en fazla ${Math.round(LOGO.maxFileBytes / 1048576)} MB).` };
+        return { ok: true };
+    }
+
+    /** Görseli en uzun kenarı max px olacak şekilde, oranı bozmadan sığdırır; küçük görseli büyütmez. */
+    function fitSize(width, height, max) {
+        const w = Number(width), h = Number(height), m = Number(max) || LOGO.maxPx;
+        if (!(w > 0) || !(h > 0)) return { width: 0, height: 0 };
+        const scale = Math.min(1, m / Math.max(w, h));
+        return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
+    }
+
+    /**
+     * Dosyayı çözer, Canvas ile küçültüp yeniden kodlar ve sunucuya yazılabilir data URI döndürür (≤LOGO.maxChars).
+     * Yeniden kodlama, dosyadaki metadata ve olası gömülü içeriği atar. Hata → Error(Türkçe ileti).
+     */
+    async function prepareLogo(file) {
+        const pre = checkLogoFile(file);
+        if (!pre.ok) throw new Error(pre.error);
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const kind = sniffImageType(bytes);
+        if (!kind) throw new Error('Dosya içeriği PNG, JPEG veya WebP değil; görsel okunamadı.');
+        const url = URL.createObjectURL(new Blob([bytes], { type: `image/${kind}` }));
+        let img;
+        try {
+            img = await new Promise((resolve, reject) => {
+                const el = new Image();
+                el.onload = () => resolve(el);
+                el.onerror = () => reject(new Error('Görsel çözülemedi; dosya bozuk olabilir.'));
+                el.src = url;
+            });
+        } finally { URL.revokeObjectURL(url); }
+        if (!(img.naturalWidth > 0 && img.naturalHeight > 0)) throw new Error('Görsel boyutu okunamadı.');
+        if (img.naturalWidth * img.naturalHeight > LOGO.maxSourcePixels) throw new Error('Görselin çözünürlüğü çok yüksek; daha küçük bir dosya seçin.');
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Bu tarayıcı görsel işlemeyi desteklemiyor.');
+        // Önce 96 px; sığmazsa kademeli küçült. Her adımda WebP (sıkı) → destek yoksa tarayıcı PNG üretir.
+        for (const px of [LOGO.maxPx, 80, 64, 48]) {
+            const size = fitSize(img.naturalWidth, img.naturalHeight, px);
+            canvas.width = size.width;
+            canvas.height = size.height;
+            ctx.clearRect(0, 0, size.width, size.height);
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, size.width, size.height);
+            for (const quality of [0.92, 0.8, 0.6]) {
+                const out = canvas.toDataURL('image/webp', quality);
+                if (isLogoData(out)) return out;
+                if (!out.startsWith('data:image/webp')) break; // WebP kodlanamıyor → PNG denenir
+            }
+            const png = canvas.toDataURL('image/png');
+            if (isLogoData(png)) return png;
+        }
+        throw new Error('Görsel çok ayrıntılı ve küçültülse de sınırı aşıyor; daha sade bir logo seçin.');
     }
 
     // ─── Önbellek ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -117,13 +210,29 @@
         return n;
     }
 
-    /** Katalogdaki amblemi çizer: <span class="brand-emblem"><svg>…</svg></span>. Bilinmeyen kimlik → küp. */
-    function buildEmblem(emblemId, size) {
+    /**
+     * Amblemi çizer: <span class="brand-emblem"><svg>…</svg></span>. Bilinmeyen kimlik → küp.
+     * customLogo geçerli bir data URI ise (isLogoData) SVG yerine <span class="brand-emblem has-custom-logo"><img></span> çizilir.
+     */
+    function buildEmblem(emblemId, size, customLogo) {
         const def = EMBLEMS.find(e => e.id === emblemId) || EMBLEMS[0];
         const px = String(size || 40);
         const wrap = node('span', 'brand-emblem');
         wrap.style.width = `${px}px`;
         wrap.style.height = `${px}px`;
+        if (isLogoData(customLogo)) {
+            wrap.classList.add('has-custom-logo');
+            const img = document.createElement('img');
+            img.alt = '';
+            img.width = Number(px);
+            img.height = Number(px);
+            img.decoding = 'async';
+            img.draggable = false;
+            img.setAttribute('aria-hidden', 'true');
+            img.src = customLogo; // yalnız isLogoData desenini geçen png/jpeg/webp data URI
+            wrap.append(img);
+            return wrap;
+        }
         const svg = document.createElementNS(SVG_NS, 'svg');
         svg.setAttribute('width', px);
         svg.setAttribute('height', px);
@@ -160,7 +269,7 @@
     function applyToLogoWrapper(wrapper, value) {
         const v = value || DEFAULTS;
         const old = wrapper.querySelector('.brand-emblem, svg');
-        const emblem = buildEmblem(v.emblemId, 40);
+        const emblem = buildEmblem(v.emblemId, 40, v.customLogo);
         if (old) old.replaceWith(emblem); else wrapper.prepend(emblem);
         const wordmark = wrapper.querySelector('.brand-wordmark');
         if (wordmark) {
@@ -186,7 +295,7 @@
         const text = node('div', 'brand-sidebar-text');
         text.append(node('small', 'brand-sidebar-eyebrow', 'Admin Panel'), node('strong', 'brand-sidebar-title', value.title));
         if (value.subtitle) text.append(node('small', 'brand-sidebar-sub', value.subtitle));
-        header.append(buildEmblem(value.emblemId, 38), text);
+        header.append(buildEmblem(value.emblemId, 38, value.customLogo), text);
         setEffect(header, value.effect);
     }
 
@@ -227,7 +336,7 @@
         const paintPreview = () => {
             const check = validate(state);
             const v = check.ok ? check.value : { ...DEFAULTS, ...state, title: state.title.trim() || DEFAULTS.title };
-            previewTop.replaceChildren(buildEmblem(v.emblemId, 36));
+            previewTop.replaceChildren(buildEmblem(v.emblemId, 36, v.customLogo));
             const word = node('div', 'brand-wordmark', v.title);
             word.append(node('span', 'brand-wordmark-secondary', v.subtitle));
             previewTop.append(word);
@@ -235,7 +344,7 @@
             const side = node('div', 'brand-sidebar-text');
             side.append(node('small', 'brand-sidebar-eyebrow', 'Admin Panel'), node('strong', 'brand-sidebar-title', v.title));
             if (v.subtitle) side.append(node('small', 'brand-sidebar-sub', v.subtitle));
-            previewSide.replaceChildren(buildEmblem(v.emblemId, 38), side);
+            previewSide.replaceChildren(buildEmblem(v.emblemId, 38, v.customLogo), side);
             setEffect(previewSide, v.effect);
         };
 
@@ -283,7 +392,60 @@
 
         const service = () => window.AppModules && window.AppModules.BrandSettings;
         const say = (text, bad) => { status.textContent = text; status.classList.toggle('is-error', !!bad); };
-        const busy = flag => studio && studio.querySelectorAll('button').forEach(b => { b.disabled = flag; });
+        let focusBeforeBusy = null; // düğmeler devre dışı kalınca odak kaybolmasın (klavye kullanıcısı)
+        const busy = flag => {
+            if (!studio) return;
+            if (flag) focusBeforeBusy = document.activeElement;
+            studio.querySelectorAll('button, input[type="file"]').forEach(b => { b.disabled = flag; });
+            if (flag) return;
+            paintLogo(); // "Özel Logoyu Kaldır" yalnız logo varken etkin kalır
+            if (focusBeforeBusy && focusBeforeBusy.isConnected && !focusBeforeBusy.disabled) focusBeforeBusy.focus();
+        };
+
+        // Özel logo: 1 adet; dosya seçilince istemcide küçültülür, Kaydet'e kadar yalnız önizlemede durur.
+        const logoGroup = node('fieldset', 'brand-fieldset brand-logo-upload');
+        const logoThumb = node('span', 'brand-logo-thumb');
+        const logoMeta = node('small', 'brand-logo-meta');
+        const logoFile = node('input', 'brand-file-input');
+        logoFile.type = 'file';
+        logoFile.accept = 'image/png,image/jpeg,image/webp';
+        logoFile.id = 'brandLogoFile';
+        logoFile.setAttribute('aria-describedby', 'brandLogoHint');
+        const logoRemove = node('button', 'brand-btn ghost', 'Özel Logoyu Kaldır');
+        logoRemove.type = 'button';
+        const paintLogo = () => {
+            const has = isLogoData(state.customLogo);
+            logoThumb.replaceChildren(has ? buildEmblem(state.emblemId, 44, state.customLogo) : node('span', 'brand-logo-empty', 'Yok'));
+            logoMeta.textContent = has
+                ? `Özel logo yüklü · yaklaşık ${Math.max(1, Math.round(state.customLogo.length / 1024))} KB. Kaydedince tüm kullanıcılarda görünür.`
+                : 'Özel logo yok; yukarıda seçili yerleşik amblem kullanılır.';
+            logoRemove.disabled = !has;
+        };
+        logoFile.addEventListener('change', async () => {
+            const file = logoFile.files && logoFile.files[0];
+            if (!file) return;
+            const pre = checkLogoFile(file);
+            if (!pre.ok) { logoFile.value = ''; say(pre.error, true); return; }
+            busy(true); say('Logo hazırlanıyor…');
+            try {
+                state.customLogo = await prepareLogo(file);
+                paintLogo(); paintPreview();
+                say('Logo hazır. Önizlemeyi kontrol edip Kaydet\'e basın.');
+            } catch (e) { say((e && e.message) || 'Logo hazırlanamadı.', true); }
+            finally { logoFile.value = ''; busy(false); }
+        });
+        logoRemove.addEventListener('click', () => {
+            state.customLogo = '';
+            paintLogo(); paintPreview();
+            say('Özel logo kaldırıldı; Kaydet\'e basınca seçili yerleşik amblem tüm kullanıcılarda geçerli olur.');
+        });
+        const logoHint = node('p', 'brand-logo-hint', 'Kare ve sade bir logo en iyi sonucu verir. Görsel otomatik olarak en fazla 96×96 piksele küçültülür; SVG kabul edilmez.');
+        logoHint.id = 'brandLogoHint';
+        const logoRow = node('div', 'brand-logo-row');
+        logoRow.append(logoThumb, node('div', 'brand-logo-controls'));
+        logoRow.lastChild.append(logoFile, logoRemove, logoMeta);
+        logoGroup.append(node('legend', null, 'Özel logo (isteğe bağlı)'), logoHint, logoRow);
+        paintLogo();
 
         const save = node('button', 'brand-btn primary', 'Kaydet');
         save.type = 'button';
@@ -321,10 +483,10 @@
         dialog.setAttribute('aria-modal', 'true');
         dialog.setAttribute('aria-labelledby', 'brandStudioTitle');
         dialog.setAttribute('aria-describedby', 'brandStudioLead');
-        const lead = node('p', 'brand-studio-lead', 'Üst çubuktaki ve yan menüdeki kurumsal logoyu, marka metnini ve efekti seçersiniz. Kaydedince değişiklik tüm kullanıcılarda görünür.');
+        const lead = node('p', 'brand-studio-lead', 'Üst çubuktaki ve yan menüdeki kurumsal logoyu, marka metnini ve efekti seçersiniz; isterseniz kendi logonuzu yüklersiniz. Kaydedince değişiklik tüm kullanıcılarda görünür.');
         lead.id = 'brandStudioLead';
-        const tip = node('p', 'brand-studio-tip', 'İpucu: Sıfırla, varsayılan görünüme döner. Efektler, cihazınızda hareket azaltma açıksa otomatik durur.');
-        dialog.append(node('header', 'brand-studio-head', null), lead, preview, emblemGroup, fields, effectGroup, status, tip,
+        const tip = node('p', 'brand-studio-tip', 'İpucu: Özel logoyu kaldırırsanız seçili yerleşik amblem döner; Sıfırla ise her şeyi varsayılan görünüme çevirir. Efektler, cihazınızda hareket azaltma açıksa otomatik durur.');
+        dialog.append(node('header', 'brand-studio-head', null), lead, preview, emblemGroup, logoGroup, fields, effectGroup, status, tip,
             node('footer', 'brand-studio-foot', null));
         dialog.firstChild.append(title, closeBtn);
         dialog.lastChild.append(reset, save);
@@ -364,8 +526,8 @@
     }
 
     const api = Object.freeze({
-        EMBLEMS, EFFECTS, DEFAULTS, LIMITS, SVG_ALLOWED_TAGS, SVG_ALLOWED_ATTRS,
-        validate, rootName, cacheKey, readCache, writeCache, clearCache,
+        EMBLEMS, EFFECTS, DEFAULTS, LIMITS, LOGO, SVG_ALLOWED_TAGS, SVG_ALLOWED_ATTRS,
+        validate, isLogoData, sniffImageType, checkLogoFile, fitSize, prepareLogo, rootName, cacheKey, readCache, writeCache, clearCache,
         buildEmblem, apply, openStudio, closeStudio: close, current: () => applied,
     });
     window.AppModules.BrandLogo = api;

@@ -68,7 +68,10 @@
 
     .inventory-screen > .header {
         min-height: 56px;
+        /* UX-5 rev: yüzen dock üst çubuk — dar ekranda kenar boşluğu küçülür, taşma olmaz (390px) */
+        margin: 8px 10px 0;
         padding: 8px max(12px, env(safe-area-inset-left, 0px));
+        border-radius: 16px;
         gap: 8px;
         flex-wrap: wrap;
         box-sizing: border-box;
@@ -386,7 +389,8 @@
     }
 }
 
-/* UX-5: dock'ta etiketler yalnız ≥601px'te görünür; daha dar ekranda ikon-only 44px daireler (taşma yok) */
+/* UX-5 rev: ikon-öncelikli pill'ler. ≤600px: yalnız ikon, 44px dokunma hedefi (etiket anlamı aria-label + title'dadır;
+   taşma yok). 601–768px: ikon 44px daire; etiket üzerine gelince / klavye odağında açılır (style.css › .nav-dock). */
 @media (max-width: 600px) {
     .inventory-screen > .header .user-action-button > span {
         display: none;
@@ -401,14 +405,8 @@
     .inventory-screen > .header .user-action-button {
         width: auto !important;
         min-width: 44px;
-        padding-inline: 10px !important;
-        flex: 0 1 auto;
-        gap: 7px;
-    }
-
-    .inventory-screen > .header .user-action-button > span {
-        display: inline;
-        white-space: nowrap;
+        padding-inline: 14px !important;
+        flex: 0 0 auto;
     }
 }
 

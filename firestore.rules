@@ -639,12 +639,16 @@ service cloud.firestore {
     //        Kapalı alan listesi (özel logo URL'si / SVG yok), amblem ve efekt beyaz listesi, kısa ve etiketsiz metin.
     //        updatedAt sunucu zamanı, updatedBy yazanın uid'i olmak zorunda (başkası adına yazılamaz).
     function brandSettingsOk(d) {
-      return d.keys().hasOnly(['emblemId', 'title', 'subtitle', 'effect', 'updatedAt', 'updatedBy'])
-        && d.keys().hasAll(['emblemId', 'title', 'subtitle', 'effect', 'updatedAt', 'updatedBy'])
+      return d.keys().hasOnly(['emblemId', 'title', 'subtitle', 'effect', 'customLogo', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['emblemId', 'title', 'subtitle', 'effect', 'customLogo', 'updatedAt', 'updatedBy'])
         && d.emblemId in ['cube', 'shield', 'crest', 'pulse-node']
         && d.effect in ['shimmer', 'glow', 'pulse', 'none']
         && d.title is string && d.title.size() > 0 && d.title.size() <= 32 && noTag(d.title)
         && d.subtitle is string && d.subtitle.size() <= 40 && noTag(d.subtitle)
+        // UX-5 rev: özel logo = istemcide ≤96×96'ya küçültülmüş png/jpeg/webp data URI ('' = özel logo yok). svg+xml, http(s) ve
+        // base64 dışı karakter deseni geçmez; boyut sınırı (≤45000 karakter ≈ 32 KB) desenden ÖNCE bakılır.
+        && d.customLogo is string && d.customLogo.size() <= 45000 && noTag(d.customLogo)
+        && (d.customLogo == '' || d.customLogo.matches('data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+'))
         && d.updatedAt == request.time
         && d.updatedBy is string && d.updatedBy == request.auth.uid;
     }

@@ -22,7 +22,7 @@ export class BrandSettingsError extends Error {
 }
 
 const DOC_ID = 'brand_settings';
-const DENIED_TEXT = 'Kayıt reddedildi: bu ayarı yalnız yönetici değiştirebilir ve metinlerde etiket benzeri "<" ifadesi olamaz.';
+const DENIED_TEXT = 'Kayıt reddedildi: bu ayarı yalnız yönetici değiştirebilir; metinlerde etiket benzeri "<" ifadesi olamaz ve özel logo yalnız küçültülmüş PNG, JPEG veya WebP olabilir.';
 
 const logo = () => {
     const mod = window.AppModules && window.AppModules.BrandLogo;
@@ -70,7 +70,11 @@ export function stopBrandSync() {
     subscribedUid = null;
 }
 
-/** Ayarı yazar (yalnız yönetici). input: {emblemId,title,subtitle,effect}. */
+/**
+ * Ayarı yazar (yalnız yönetici). input: {emblemId,title,subtitle,effect,customLogo}; customLogo '' ise özel logo yoktur.
+ * Belge her yazımda 7 alanın tamamını içerir (firestore.rules › brandSettingsOk hasAll); özel logo ≤45000 karakterlik
+ * png/jpeg/webp data URI'dir ve BrandLogo.validate'ten geçmeden yazılmaz.
+ */
 export async function saveBrandSettings(input) {
     const mod = logo();
     const checked = mod.validate(input);

@@ -7639,6 +7639,24 @@ html.auth-hydrating .index-transition-loader {
     height: 100%;
 }
 
+/* UX-5 rev · Özel logo: şeffaf PNG/WebP koyu lacivert zeminde de okunsun diye beyaz çerçeveli ince karo. Efekt kuralları
+   (aşağıda) bu bloktan sonra geldiği için halka/ışıma/parıltı özel logoda da çalışır. */
+.brand-emblem.has-custom-logo {
+    box-sizing: border-box;
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(2, 8, 23, 0.25);
+}
+
+.brand-emblem img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 7px;
+    object-fit: contain;
+}
+
 /* Platin Parıltı: belirli aralıklarla akan çapraz ışık */
 .brand-fx-shimmer .brand-emblem {
     overflow: hidden;
@@ -7952,6 +7970,84 @@ html.auth-hydrating .index-transition-loader {
     background: var(--color-secondary, #1e293b);
 }
 
+/* UX-5 rev · Özel logo yükleme alanı */
+.brand-logo-hint {
+    margin: 0 0 10px;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--color-text-muted);
+}
+
+.brand-logo-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+}
+
+.brand-logo-thumb {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 64px;
+    height: 64px;
+    border: 1px solid var(--color-border-light, #e2e8f0);
+    border-radius: 14px;
+    background: #0f1e3d;
+}
+
+.brand-logo-empty {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.brand-logo-controls {
+    display: flex;
+    flex: 1 1 220px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+}
+
+.brand-file-input {
+    max-width: 100%;
+    font: inherit;
+    font-size: 0.82rem;
+    color: var(--color-text-muted);
+}
+
+.brand-file-input::file-selector-button {
+    min-height: 36px;
+    margin-right: 10px;
+    padding: 0 14px;
+    border: 1px solid var(--color-primary, #2563eb);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--color-primary, #2563eb);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.brand-file-input:focus-visible {
+    outline: 3px solid var(--color-primary, #3498db);
+    outline-offset: 2px;
+    border-radius: 10px;
+}
+
+.brand-file-input:disabled::file-selector-button {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.brand-logo-meta {
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: var(--color-text-muted);
+}
+
 .brand-fields {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -8049,19 +8145,43 @@ html.auth-hydrating .index-transition-loader {
     }
 }
 
+/* ── Corporate Floating Dock Navbar (index üst çubuğu · .header) ─────────────────
+   [WHY]: Üst çubuk sayfa kenarlarına yapışık düz banttı; kullanıcı kapsülü zeminde kayboluyordu.
+   [HOW]: Yalnız CSS (markup/ID/sınıf kancaları değişmez). Kurumsal palet: #0f1e3d lacivert, #1e3a5f slate-lacivert,
+          #2563eb kurumsal mavi; koyu temada Space Titanium #0b0f17 / #131a26 / #60a5fa (dark-theme.css). */
+.inventory-screen > .header {
+    position: relative;
+    margin: 12px 20px 0;
+    padding: 10px 14px 10px 18px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 20px;
+    background:
+        radial-gradient(120% 160% at 0% 0%, rgba(37, 99, 235, 0.38), transparent 58%),
+        linear-gradient(135deg, #0f1e3d 0%, #1e3a5f 100%);
+    box-shadow:
+        0 16px 36px rgba(15, 30, 61, 0.28),
+        0 2px 6px rgba(15, 30, 61, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
 /* ── Unified Glass Pill Dock (index üst çubuğu · #userDisplay) ──────────────── */
 .header .nav-dock {
     margin-left: auto;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
     min-width: 0;
     max-width: 100%;
     padding: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07)),
+        rgba(15, 30, 61, 0.55);
+    box-shadow:
+        0 10px 24px rgba(2, 8, 23, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.32),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.25);
     -webkit-backdrop-filter: blur(14px) saturate(160%);
     backdrop-filter: blur(14px) saturate(160%);
     color: var(--color-text-white, #fff);
@@ -8073,7 +8193,7 @@ html.auth-hydrating .index-transition-loader {
     align-self: stretch;
     width: 1px;
     margin: 6px 4px;
-    background: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.26);
 }
 
 .nav-dock .user-tasks-button {
@@ -8087,6 +8207,11 @@ html.auth-hydrating .index-transition-loader {
     border-radius: 50%;
     background: transparent;
     color: inherit;
+    transition: background 0.2s ease;
+}
+
+.nav-dock .user-tasks-button:hover {
+    background: rgba(255, 255, 255, 0.14);
 }
 
 .nav-dock .nav-dock-user {
@@ -8094,7 +8219,7 @@ html.auth-hydrating .index-transition-loader {
     align-items: center;
     gap: 8px;
     min-width: 0;
-    padding: 0 6px 0 2px;
+    padding: 0 8px 0 2px;
 }
 
 .nav-dock .nav-dock-avatar {
@@ -8103,9 +8228,10 @@ html.auth-hydrating .index-transition-loader {
     flex: 0 0 auto;
     width: 30px;
     height: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
     border-radius: 50%;
-    background: linear-gradient(135deg, #60a5fa, #7c3aed);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 6px rgba(0, 0, 0, 0.25);
+    background: linear-gradient(135deg, #2563eb, #60a5fa);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 6px rgba(2, 8, 23, 0.35);
     color: #fff;
     font-size: 0.72rem;
     font-weight: 800;
@@ -8128,46 +8254,99 @@ html.auth-hydrating .index-transition-loader {
     gap: 4px;
 }
 
+/* İkon-öncelikli pill: varsayılan 34px daire (yalnız ikon); üzerine gelince / klavye odağında etiket pürüzsüzce açılır.
+   Anlam her durumda aria-label + title ile de verilir (auth-engine.js, self-approval-reporter.js). */
 .nav-dock .user-action-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 0;
     width: auto;
-    height: 32px;
+    min-width: 34px;
+    height: 34px;
     margin: 0;
-    padding: 0 12px;
-    border: 0;
+    padding: 0 9px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 999px;
-    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
     font-size: 12px;
     font-weight: 700;
     white-space: nowrap;
     cursor: pointer;
-    transition: filter 0.15s ease, transform 0.1s ease;
+    overflow: hidden;
+    transition: background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease, transform 0.1s ease;
 }
 
-.nav-dock .user-action-button:hover {
-    filter: brightness(1.12);
+.nav-dock .user-action-button > i {
+    flex: 0 0 16px;
+    width: 16px;
+    font-size: 14px;
+    text-align: center;
+    transition: color 0.22s ease;
+}
+
+.nav-dock .user-action-button > span {
+    display: inline-block;
+    max-width: 0;
+    margin-left: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease;
+}
+
+.nav-dock .user-action-button:hover > span,
+.nav-dock .user-action-button:focus-visible > span {
+    max-width: 9.5em;
+    margin-left: 7px;
+    opacity: 1;
 }
 
 .nav-dock .user-action-button:active {
     transform: scale(0.97);
 }
 
-.nav-dock .user-admin-button {
-    background: rgba(52, 152, 219, 0.9);
+/* Anlam rengi yalnız ikonda ve hover zemininde; dinlenme hâli nötr cam kalır */
+.nav-dock .user-admin-button > i { color: #93c5fd; }
+.nav-dock .user-security-button > i { color: #fcd34d; }
+.nav-dock .user-logout-button > i { color: #fca5a5; }
+
+.nav-dock .user-admin-button:hover,
+.nav-dock .user-admin-button:focus-visible {
+    border-color: rgba(147, 197, 253, 0.7);
+    background: #2563eb;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
 }
 
-.nav-dock .user-security-button {
-    background: rgba(230, 126, 34, 0.92);
+.nav-dock .user-security-button:hover,
+.nav-dock .user-security-button:focus-visible {
+    border-color: rgba(252, 211, 77, 0.7);
+    background: #b45309;
+    box-shadow: 0 4px 14px rgba(180, 83, 9, 0.45);
 }
 
-.nav-dock .user-logout-button {
-    background: rgba(231, 76, 60, 0.92);
+.nav-dock .user-logout-button:hover,
+.nav-dock .user-logout-button:focus-visible {
+    border-color: rgba(252, 165, 165, 0.7);
+    background: #b91c1c;
+    box-shadow: 0 4px 14px rgba(185, 28, 28, 0.45);
+}
+
+.nav-dock .user-action-button:hover > i,
+.nav-dock .user-action-button:focus-visible > i {
+    color: #ffffff;
 }
 
 .nav-dock button:focus-visible {
-    outline: 2px solid #fff;
+    outline: 2px solid #ffffff;
     outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nav-dock .user-action-button,
+    .nav-dock .user-action-button > i,
+    .nav-dock .user-action-button > span,
+    .nav-dock .user-tasks-button {
+        transition: none;
+    }
 }

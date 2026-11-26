@@ -1,6 +1,6 @@
 // [WHY]: v3.8 UX-5 — Marka ayarı ({root}/system_config/items/brand_settings) tüm üyelerce okunur; yalnız yönetici, kapalı şemaya
-//        (6 alan, amblem/efekt beyaz listesi, ≤32 / ≤40 etiketsiz metin, sunucu saati, yazanın uid'i) uygun yazar.
-//        Genel system_config yazma davranışı (admin_settings vb.) değişmemeli.
+//        (7 alan, amblem/efekt beyaz listesi, ≤32 / ≤40 etiketsiz metin, özel logo = ≤45000 karakterlik png/jpeg/webp data URI
+//        ya da '', sunucu saati, yazanın uid'i) uygun yazar. Genel system_config yazma davranışı (admin_settings vb.) değişmemeli.
 // [HOW]: `npm run test:rules` → firebase emulators:exec içinde node:test. Yazımlar src/services/brand-settings-service.js ile aynı
 //        biçimde: setDoc(tüm belge) + serverTimestamp() + updatedBy = auth uid. Birim tarafı: tests/unit/brand-settings.test.mjs.
 import { test, before, after, beforeEach, describe } from 'node:test';
@@ -25,10 +25,16 @@ const ctx = {
 const brand = (db, root = LIVE) => doc(db, root, 'system_config', 'items', 'brand_settings');
 const seed = fn => env.withSecurityRulesDisabled(async c => fn(c.firestore()));
 
+// Özel logo örnekleri (yalnız desen ve uzunluk sınanır; gerçek piksel verisi gerekmez)
+const PNG_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const WEBP_URI = 'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==';
+const JPEG_URI = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////';
+const uriOfLength = n => 'data:image/webp;base64,'.padEnd(n, 'A'); // tam n karakter
+
 /** İstemci servisiyle aynı belge; o ile alan bazında bozulabilir (undefined → alan silinir). */
 const payload = (o = {}) => {
     const d = {
-        emblemId: 'shield', title: 'MEDİPOL', subtitle: 'Envanter Takip', effect: 'glow',
+        emblemId: 'shield', title: 'MEDİPOL', subtitle: 'Envanter Takip', effect: 'glow', customLogo: '',
         updatedAt: serverTimestamp(), updatedBy: ADMIN_UID, ...o,
     };
     for (const k of Object.keys(d)) if (d[k] === undefined) delete d[k];
@@ -106,8 +112,8 @@ describe('UX-5 · şema sıkılığı (hasOnly / beyaz liste / uzunluk / noTag)'
         await assertFails(write({ svg: '<svg onload=alert(1)>' }));
         await assertFails(write({ customEmblem: 'data:image/png;base64,AAAA' }));
     });
-    test('eksik alan → ✗ (her biri tek tek)', async () => {
-        for (const k of ['emblemId', 'title', 'subtitle', 'effect', 'updatedAt', 'updatedBy']) await assertFails(write({ [k]: undefined }));
+    test('eksik alan → ✗ (her biri tek tek; eski 6 alanlı belge de artık yazılamaz)', async () => {
+        for (const k of ['emblemId', 'title', 'subtitle', 'effect', 'customLogo', 'updatedAt', 'updatedBy']) await assertFails(write({ [k]: undefined }));
     });
     test('amblem ve efekt beyaz listesi dışı → ✗', async () => {
         await assertFails(write({ emblemId: 'star' }));
@@ -135,6 +141,49 @@ describe('UX-5 · şema sıkılığı (hasOnly / beyaz liste / uzunluk / noTag)'
         await assertFails(write({ subtitle: 'son </div>' }));
         await assertSucceeds(write({ title: 'a < b' }));
         await assertSucceeds(write({ subtitle: '<5mm' }));
+    });
+    test('özel logo: geçerli PNG / WebP / JPEG data URI → ✓; boş "" (özel logo yok) → ✓', async () => {
+        await assertSucceeds(write({ customLogo: PNG_URI }));
+        await assertSucceeds(write({ customLogo: WEBP_URI }));
+        await assertSucceeds(write({ customLogo: JPEG_URI }));
+        await assertSucceeds(write({ customLogo: '' }));
+        await assertSucceeds(write({ customLogo: PNG_URI }, DEMO));
+    });
+    test('özel logo: svg+xml, http(s), javascript:, gif, html → ✗', async () => {
+        await assertFails(write({ customLogo: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=' }));
+        await assertFails(write({ customLogo: 'data:image/svg+xml;utf8,<svg onload=alert(1)>' }));
+        await assertFails(write({ customLogo: 'https://ornek.com/logo.png' }));
+        await assertFails(write({ customLogo: 'http://ornek.com/logo.png' }));
+        await assertFails(write({ customLogo: 'javascript:alert(1)' }));
+        await assertFails(write({ customLogo: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }));
+        await assertFails(write({ customLogo: 'data:text/html;base64,PHNjcmlwdD4=' }));
+    });
+    test('özel logo: boş yük, desen dışı karakter (etiket, tırnak, boşluk, satır sonu), büyük harfli şema, dize değil → ✗', async () => {
+        await assertFails(write({ customLogo: 'data:image/png;base64,' }));
+        await assertFails(write({ customLogo: 'data:image/png;charset=utf-8;base64,AAAA' }));
+        await assertFails(write({ customLogo: `${PNG_URI}<img src=x onerror=1>` }));
+        await assertFails(write({ customLogo: `${PNG_URI}"onerror="x` }));
+        await assertFails(write({ customLogo: `${PNG_URI} ` }));
+        await assertFails(write({ customLogo: `${PNG_URI}\nAAAA` }));
+        await assertFails(write({ customLogo: 'DATA:image/png;base64,AAAA' }));
+        await assertFails(write({ customLogo: 'iVBORw0KGgo=' }));
+        await assertFails(write({ customLogo: 123 }));
+        await assertFails(write({ customLogo: null }));
+        await assertFails(write({ customLogo: ['data:image/png;base64,AAAA'] }));
+    });
+    test('özel logo boyut sınırı: 45000 karakter → ✓ (RE2 matches sınırı), 45001 → ✗', async () => {
+        await assertSucceeds(write({ customLogo: uriOfLength(45000) }));
+        await assertFails(write({ customLogo: uriOfLength(45001) }));
+        await assertFails(write({ customLogo: uriOfLength(90000) }));
+    });
+    test('özel logo: yönetici ekler ve kaldırır ("" → yerleşik amblem); personel yazamaz, ama okuyabilir', async () => {
+        await assertSucceeds(write({ customLogo: PNG_URI }));
+        const snap = await assertSucceeds(getDoc(brand(ctx.staff())));
+        if (snap.data().customLogo !== PNG_URI) throw new Error('personel özel logoyu göremedi');
+        await assertFails(write({ customLogo: WEBP_URI, updatedBy: 'uid-s1' }, LIVE, ctx.staff()));
+        await assertSucceeds(write({ customLogo: '' }));
+        let kept; await seed(async db => { kept = (await getDoc(brand(db))).data(); });
+        if (kept.customLogo !== '' || kept.emblemId !== 'shield') throw new Error('logo kaldırma belgeyi yanlış yazdı');
     });
     test('updatedAt sunucu saati olmak zorunda (istemci tarihi ✗); updatedBy yazanın uid\'i (başkası adına ✗)', async () => {
         await assertFails(write({ updatedAt: new Date() }));

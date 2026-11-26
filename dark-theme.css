@@ -1739,14 +1739,73 @@ body *::after {
    v3.8 · UX-5 — Logo Stüdyosu ve Glass Pill Dock · Space Titanium ince ayarları
    (renkler çoğunlukla --color-* token'larından gelir; burada yalnız tema farkı olan yerler)
    ============================================================================= */
+/* UX-5 rev · Corporate Floating Dock: Space Titanium (#0b0f17 / #131a26) zemin, #60a5fa vurgu */
+[data-theme="dark"] .inventory-screen > .header {
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    background:
+        radial-gradient(120% 160% at 0% 0%, rgba(96, 165, 250, 0.16), transparent 58%),
+        linear-gradient(135deg, #131a26 0%, #0b0f17 100%);
+    box-shadow:
+        0 18px 40px rgba(0, 0, 0, 0.55),
+        0 2px 6px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
 [data-theme="dark"] .header .nav-dock {
-    border-color: rgba(255, 255, 255, 0.12);
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    border-color: rgba(96, 165, 250, 0.32);
+    background:
+        linear-gradient(180deg, rgba(96, 165, 250, 0.16), rgba(255, 255, 255, 0.04)),
+        rgba(11, 15, 23, 0.72);
+    box-shadow:
+        0 10px 26px rgba(0, 0, 0, 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.4);
 }
 
 [data-theme="dark"] .nav-dock .nav-dock-sep {
-    background: rgba(255, 255, 255, 0.14);
+    background: rgba(96, 165, 250, 0.22);
+}
+
+[data-theme="dark"] .nav-dock .nav-dock-avatar {
+    border-color: rgba(147, 197, 253, 0.5);
+    background: linear-gradient(135deg, #1d4ed8, #60a5fa);
+}
+
+[data-theme="dark"] .nav-dock .user-action-button {
+    border-color: rgba(96, 165, 250, 0.24);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* Karanlık dinlenme zemini (yukarıda) hover zeminini ezmesin diye hover/odak durumları burada yeniden verilir */
+[data-theme="dark"] .nav-dock .user-admin-button:hover,
+[data-theme="dark"] .nav-dock .user-admin-button:focus-visible {
+    border-color: rgba(147, 197, 253, 0.7);
+    background: #2563eb;
+}
+
+[data-theme="dark"] .nav-dock .user-security-button:hover,
+[data-theme="dark"] .nav-dock .user-security-button:focus-visible {
+    border-color: rgba(252, 211, 77, 0.7);
+    background: #b45309;
+}
+
+[data-theme="dark"] .nav-dock .user-logout-button:hover,
+[data-theme="dark"] .nav-dock .user-logout-button:focus-visible {
+    border-color: rgba(252, 165, 165, 0.7);
+    background: #b91c1c;
+}
+
+[data-theme="dark"] .nav-dock .user-tasks-button:hover {
+    background: rgba(96, 165, 250, 0.16);
+}
+
+[data-theme="dark"] .brand-emblem.has-custom-logo {
+    border-color: rgba(147, 197, 253, 0.45);
+}
+
+[data-theme="dark"] .brand-logo-thumb {
+    border-color: var(--color-border);
+    background: #0b0f17;
 }
 
 [data-theme="dark"] .brand-studio {
