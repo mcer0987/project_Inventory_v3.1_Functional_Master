@@ -40,7 +40,7 @@ function select(file, names) {
         await page.evaluate(fs.readFileSync('src/utils/html.js', 'utf8'));
         await page.evaluate(`var _sortColumn = 'lastUpdate', _isAscending = false, _currentPage = 1; const PAGE_SIZE = 25;
             ${select('src/ui/table-engine.js', ['getProcessedData', '_buildQtyDisplay', '_buildRowInnerHtml', '_buildRowHtml',
-                '_bindTableActions', '_setupCardViewSelection', 'renderMobileCards', 'renderCardSearchResults', 'toggleCardGroup'])}
+            '_renderCountLockNotice', '_bindTableActions', '_setupCardViewSelection', 'renderMobileCards', 'renderCardSearchResults', 'toggleCardGroup'])}
             ${select('src/ui/ui-components.js', ['_dom', '_bindProductActions', 'UIComponents'])}
             ${select('src/modules/admin/admin-dashboard.js', ['renderAdminRequestTable', 'renderProductTypesTable',
                 'renderLocationsTable', 'searchPersonnelForLocation', '_renderLocationPersons', 'customConfirmAlert'])}
@@ -54,8 +54,11 @@ function select(file, names) {
                 'openLocationModal', 'deleteLocation', 'addPersonToLocation', 'removePersonFromLocation',
                 'openProductModal', 'cloneProduct', 'deleteItem', 'toggleWatch', 'updateStock',
                 'openTransferModal', 'clearRowSelection', 'closeMobileBottomSheet']) window[name] = (...args) => calls.push([name, ...args]);
-            window.data = { requests: [{ id: hostile }], locations: [{ id: hostile, persons: [] }],
-                b1: [{ id: hostile, ürün: hostile, tür: 'Tür', adet: 1 }], personel: [{ name: hostile, unit: hostile }] };
+            window.isDbAdmin = () => true;
+            window.data = {
+                requests: [{ id: hostile }], locations: [{ id: hostile, persons: [] }],
+                b1: [{ id: hostile, ürün: hostile, tür: 'Tür', adet: 1 }], personel: [{ name: hostile, unit: hostile }]
+            };
             window.getActiveProductTypes = () => [{ id: hostile, name: hostile, isDemirbas: true }];
             const click = selector => document.querySelector(selector).click();
             const confirm = window.customConfirmAlert('Başlık', hostile);
@@ -93,9 +96,11 @@ function select(file, names) {
             row.className = 'selectable-row'; document.querySelector('#tableB1 tbody').append(row);
             UIComponents.setupRowSelection(document.getElementById('tableB1'));
             click('#tableB1 [data-action="mobileTooltip"] i');
-            return { calls, hostile, expanded, noCheckboxSelection, selectionCalls, confirmed, cancelled,
+            return {
+                calls, hostile, expanded, noCheckboxSelection, selectionCalls, confirmed, cancelled,
                 injected: !!document.querySelector('img,[onerror],[onclick],[onmouseenter],[onmousemove],[onmouseleave]'),
-                pwned: !!window.pwned, tooltipSelected: row.classList.contains('selected-row') };
+                pwned: !!window.pwned, tooltipSelected: row.classList.contains('selected-row')
+            };
         });
         assert.equal(result.injected, false); assert.equal(result.pwned, false);
         assert.equal(result.expanded, true); assert.equal(result.noCheckboxSelection, true);

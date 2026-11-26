@@ -1650,11 +1650,20 @@
     // [HOW]: window.syncShelfCounters() (firebase-handler.js) sunucudan taze b1/b2/shelves okuyup
     //        StockLedger.planShelfSync ile uzlaştırır; hiçbir raf diğerini engellemez ("hepsi ya da hiçbiri" değildir).
     //        Sonuç bu dosyanın KENDİ diyalog altyapısıyla (createDialog + DialogStack) özetlenir.
-    function renderSyncResultHtml(result) {
+    function renderSyncSummaryHtml(result, { preview = false } = {}) {
         const rows = [];
-        rows.push(`<p>${escapeHtml(result.updated.length)} raf sayacı güncellendi · ${escapeHtml(result.unchanged)} raf zaten doğruydu.</p>`);
+        const counterTotal = result.updated.length + result.capacityRaised.length;
+        const lockList = Array.isArray(result.lockFixed) ? result.lockFixed : [];
+        const lockedCount = lockList.filter(f => f.rafPasif === true).length;
+        const unlockedCount = lockList.length - lockedCount;
+        if (preview) {
+            rows.push(`<p><strong>Önizleme (Dry-Run):</strong> Toplam <strong>${escapeHtml(counterTotal + lockList.length)}</strong> kayıt güncellenecek (henüz hiçbir yazma yapılmadı).</p>`);
+            rows.push(`<p>Raf sayacı güncellenecek: <strong>${escapeHtml(result.updated.length)}</strong> · Zaten doğru raf: <strong>${escapeHtml(result.unchanged)}</strong>.</p>`);
+        } else {
+            rows.push(`<p>${escapeHtml(result.updated.length)} raf sayacı güncellendi · ${escapeHtml(result.unchanged)} raf zaten doğruydu.</p>`);
+        }
         if (result.capacityRaised.length) {
-            rows.push(`<p class="shelf-sync-warning">⚠️ ${escapeHtml(result.capacityRaised.length)} rafta gerçek doluluk kayıtlı kapasiteyi aşıyordu; kapasite otomatik olarak gerçek sayıma yükseltildi. İnceleyin:</p>`);
+            rows.push(`<p class="shelf-sync-warning">⚠️ ${escapeHtml(result.capacityRaised.length)} rafta gerçek doluluk kayıtlı kapasiteyi aşıyordu; kapasite gerçek sayıma yükseltilece${preview ? 'k' : 'k şekilde düzeltildi'}:</p>`);
             rows.push('<ul class="shelf-sync-list">' + result.capacityRaised.map(r =>
                 `<li>${escapeHtml(r.depot.toUpperCase())} / <strong>${escapeHtml(r.code)}</strong>: kapasite ${escapeHtml(r.capacityBefore)}→${escapeHtml(r.after)}, doluluk ${escapeHtml(r.before)}→${escapeHtml(r.after)}</li>`
             ).join('') + '</ul>');
@@ -1666,35 +1675,73 @@
             ).join('') + '</ul>');
         }
         rows.push(`<p>Havuzda (rafsız) <strong>${escapeHtml(result.pool.total)}</strong> ürün var (B1: ${escapeHtml(result.pool.b1)} · B2: ${escapeHtml(result.pool.b2)}) — "Havuz" sekmesinden atayabilirsiniz.</p>`);
-        const lockFixed = Array.isArray(result.lockFixed) ? result.lockFixed.length : 0;
-        rows.push(`<p>Sayım işareti raf durumuna göre düzeltilen kayıt: <strong>${escapeHtml(lockFixed)}</strong>.</p>`);
+        rows.push(`<p>${preview ? 'Sayım işareti (<code>rafPasif</code>) eklenecek / düzeltilecek' : 'Sayım işareti raf durumuna göre düzeltilen'} kayıt: <strong>${escapeHtml(lockList.length)}</strong> (${escapeHtml(lockedCount)} kilitli, ${escapeHtml(unlockedCount)} açık/kanonik).</p>`);
         return rows.join('');
     }
 
     function showSyncResultDialog(result) {
-        const dialog = createDialog('GÖÇ ARACI · SONUÇ', 'Raf Sayaçları Eşitlendi', '', 'Tamam');
-        dialog.fields.innerHTML = renderSyncResultHtml(result);
+        const dialog = createDialog('GÖÇ ARACI · SONUÇ', 'Raf Sayaçları ve Sayım İşareti Eşitlendi', '', 'Tamam');
+        dialog.fields.innerHTML = renderSyncSummaryHtml(result, { preview: false });
         dialog.form.addEventListener('submit', event => { event.preventDefault(); dialog.finish(true); });
         dialog.result.then(() => {});
+    }
+
+    function confirmSyncDryRunDialog(preview) {
+        const total = preview.updated.length + preview.capacityRaised.length + (preview.lockFixed ? preview.lockFixed.length : 0);
+        if (total === 0) {
+            const infoDialog = createDialog('ÖNİZLEME (DRY-RUN) · GÜNCEL', 'Tüm Kayıtlar Zaten Güncel', '', 'Kapat');
+            infoDialog.fields.innerHTML = renderSyncSummaryHtml(preview, { preview: true });
+            infoDialog.form.addEventListener('submit', event => { event.preventDefault(); infoDialog.finish(false); });
+            return infoDialog.result;
+        }
+        const dialog = createDialog('ÖNİZLEME (DRY-RUN)', `${total} Kayıt Güncellenecek — Onaylayın`, '', `${total} Değişikliği Uygula`);
+        dialog.fields.innerHTML = renderSyncSummaryHtml(preview, { preview: true });
+        dialog.form.addEventListener('submit', event => { event.preventDefault(); dialog.finish(true); });
+        return dialog.result;
+    }
+
+    // [WHY]: VP-5 — Kullanıcıya canlı veriye yazılmadan önce Dry-Run yapılacağını ve eksik rafPasif bayraklarının
+    //        tamamlandığını AGENTS.md uyarınca görünür kılmak (admin.html dosyasına dokunmadan DOM eklemesi).
+    // [HOW]: #shelfMatrixHelp içindeki Sayım listesine bir madde ekler (zaten varsa tekrarlamaz).
+    function ensureSyncHelpNote() {
+        const help = document.getElementById('shelfMatrixHelp');
+        if (!help || help.querySelector('[data-vp5-sync-help]')) return;
+        const lists = help.querySelectorAll('ul');
+        const target = lists[lists.length - 1] || help;
+        const li = document.createElement('li');
+        li.setAttribute('data-vp5-sync-help', '1');
+        const strong = document.createElement('strong');
+        strong.textContent = 'Sayaç ve Sayım İşareti Eşitleme (Dry-Run): ';
+        const text = document.createTextNode('Üstteki "Sistem Raf Sayaçlarını Eşitle" düğmesi önce veritabanına hiçbir şey yazmadan önizleme (Dry-Run) çıkarır; eski ürün kayıtlarındaki eksik sayım işaretlerini (rafPasif) ve raf sayaçlarını yalnız onayınızla günceller.');
+        li.append(strong, text);
+        target.appendChild(li);
     }
 
     async function syncShelfCountersAction() {
         if (typeof window.requireDbAdmin === 'function' && !window.requireDbAdmin('Raf sayaçlarını eşitleme')) return;
         const button = document.getElementById('shelfMatrixSyncBtn');
-        const question = 'B1 ve B2\'deki TÜM stok taranacak, raf doluluk sayaçları (usedSlots) gerçek veriyle eşitlenecek. '
-            + 'Ürünlerdeki sayım işareti de rafın sayım durumuna göre düzeltilir; başka ürün verisine dokunulmaz. Devam edilsin mi?';
-        const confirmed = typeof window.showCustomConfirm === 'function'
-            ? await window.showCustomConfirm('Raf Sayaçlarını Eşitle', question, { confirmText: 'Eşitle' })
-            : window.confirm(question);
-        if (confirmed !== true) return;
         if (typeof window.syncShelfCounters !== 'function') {
             if (typeof window.showAppAlert === 'function') window.showAppAlert('Stok defteri servisi yüklenemedi; eşitleme yapılamadı.', 'error');
             return;
         }
+        const syncOpts = { canonicalize: true };
         const originalLabel = button ? button.textContent : '';
-        if (button) { button.disabled = true; button.textContent = '⏳ Eşitleniyor…'; }
+        if (button) { button.disabled = true; button.textContent = '⏳ Önizleniyor (Dry-Run)…'; }
+        let confirmed = false;
         try {
-            const result = await window.syncShelfCounters();
+            if (typeof window.previewShelfCounters === 'function') {
+                const preview = await window.previewShelfCounters(syncOpts);
+                if (button) { button.disabled = false; button.textContent = originalLabel; }
+                confirmed = await confirmSyncDryRunDialog(preview) === true;
+            } else {
+                const q = 'B1 ve B2\'deki TÜM stok taranacak, raf doluluk sayaçları ve eksik sayım işaretleri (rafPasif) eşitlenecek. Devam edilsin mi?';
+                confirmed = typeof window.showCustomConfirm === 'function'
+                    ? await window.showCustomConfirm('Raf Sayaçlarını Eşitle', q, { confirmText: 'Eşitle' }) === true
+                    : window.confirm(q);
+            }
+            if (!confirmed) return;
+            if (button) { button.disabled = true; button.textContent = '⏳ Eşitleniyor…'; }
+            const result = await window.syncShelfCounters(syncOpts);
             showSyncResultDialog(result);
             render();
         } catch (error) {
@@ -1764,6 +1811,7 @@
     }
 
     function init() {
+        ensureSyncHelpNote();
         bindUI();
     }
 

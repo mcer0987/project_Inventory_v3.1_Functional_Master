@@ -513,6 +513,13 @@ test('v3.6 planShelfSync bayrakları raf kilidine eşitler: kilitli rafta eksik 
         { col: 'b1', id: 'x2', rafPasif: false },
         { col: 'b1', id: 'x3', rafPasif: false },
     ]);
+    const rCanon = L.planShelfSync(items, shelfDocs, { uid: 'u', canonicalize: true });
+    assert.deepEqual(plain(rCanon.lockFixed), [
+        { col: 'b1', id: 'doc_x1', rafPasif: true },
+        { col: 'b1', id: 'x2', rafPasif: false },
+        { col: 'b1', id: 'x3', rafPasif: false },
+        { col: 'b1', id: 'x4', rafPasif: false },
+    ], 'canonicalize:true kilitsiz rafta rafPasif alanı eksik eski kayda da false yazar');
 });
 
 test('v3.6 Envanter No kilidi: dolu numara ürün kaydından değişmez; boş numara atanır; yazım farkı değişiklik sayılmaz', () => {

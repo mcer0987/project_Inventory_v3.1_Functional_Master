@@ -1331,9 +1331,14 @@ const SCENARIOS = {
             out.edit = { op: last()[0], col: last()[1][0], id: last()[1][1], name: last()[1][2].ürün, keepsLimitUntouched: !('limit' in last()[1][2]) };
             window.runProductSave = realProductSave;
 
-            // bulk "pasife al" via checkboxes (data-id)
+            // bulk "pasife al" via UX-4 click-to-select rows (fallback .row-select for legacy compatibility)
             window.renderTable('b1');
-            document.querySelectorAll('#tableB1 .row-select').forEach(cb => { cb.checked = ['b1_A', 'b1_C'].includes(cb.dataset.id); });
+            ['b1_A', 'b1_C'].forEach(id => {
+                const tr = document.querySelector(`#tableB1 tbody tr.selectable-row[data-id="${id}"]`);
+                if (tr) tr.classList.add('selected-row');
+                const cb = document.querySelector(`#tableB1 .row-select[data-id="${id}"]`);
+                if (cb) cb.checked = true;
+            });
             shift();
             await window.bulkDelete('b1');
             out.bulkPassive = last()[0] === 'updateItems' ? last()[1][1].map(x => x.id + ':' + x.fields.durumu) : last();
@@ -3508,7 +3513,7 @@ const SCENARIOS = {
                 window.renderCardSearchResults('b1', window.data.b1);
                 window.renderMobileCards('b1');
                 const row = document.querySelector('tr.selectable-row[data-id="x1"]');
-                if (row) row.dispatchEvent(new MouseEvent('mouseenter'));
+                if (row) row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
                 out.table = { rowRendered: !!row, nameAsText: !!row && row.textContent.includes('<img src=x'), dataName: row && row.dataset.name === PAY.tag, tooltipShown: getComputedStyle(document.getElementById('custom-tooltip') || document.body).display === 'block', tooltipNoImg: !document.querySelector('#custom-tooltip img') };
 
                 // Ürün modalı tür seçenekleri (ui-components)
@@ -3520,9 +3525,9 @@ const SCENARIOS = {
                 out.productTypeOption = !!opt;
                 if (typeof window.closeProductModal === 'function') window.closeProductModal();
 
-                // Navbar adı (auth-engine)
+                // Navbar adı (auth-engine · v3.8 UX-5 nav-dock .user-display-name)
                 window.updateNavbarUI({ name: PAY.tag });
-                out.navbarAsText = (document.getElementById('user-display')?.textContent || document.body.textContent).includes('👤 <img');
+                out.navbarAsText = (document.querySelector('#userDisplay .user-display-name')?.textContent || document.getElementById('user-display')?.textContent || '').includes('<img');
 
                 // Akış başlatma personel araması → delegation ham adı taşır (edm-workflow)
                 window.data.personel = [{ id: 'p1', name: 'Zz ' + PAY.js }, { id: 'p2', name: 'Zz ' + PAY.attr }];

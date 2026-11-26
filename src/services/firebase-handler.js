@@ -1922,14 +1922,28 @@ export const runProductSave = window.runProductSave = async function (input = {}
 //        Rafı katalogda olmayan (unregistered) ya da kapasiteyi aşan (capacityRaised — kapasite otomatik sayıma
 //        yükseltilir, firestore.rules'un "usedSlots yalnız capacity içinde artabilir" kuralı bunu gerektirir) durumlar
 //        işlemi DURDURMAZ; yalnız dönüş değerinde raporlanır (admin incelemesi gerekir).
-export const syncShelfCounters = window.syncShelfCounters = async function () {
+// [WHY]: VP-5 — Önizleme (Dry-Run) önce yazma sayısını döner; admin onaylarsa syncShelfCounters({ canonicalize }) çalıştırılır.
+// [HOW]: StockLedger.previewShelfSync veritabanına hiçbir şey yazmadan sunucu durumunu hesaplar.
+export const previewShelfCounters = window.previewShelfCounters = async function (opts = {}) {
+    _ledgerPreflight(['b1', 'b2'], 'Raf eşitleme önizlemesi yalnız yönetici oturumuyla yapılabilir.');
+    try {
+        return await window.StockLedger.previewShelfSync({
+            db: fireDb, root: COLLECTION_ROOT, uid: window.userAuth.uid,
+            fns: { getDocsFromServer, collection },
+        }, opts);
+    } catch (e) {
+        throw _ledgerError(e, 'previewShelfCounters');
+    }
+};
+
+export const syncShelfCounters = window.syncShelfCounters = async function (opts = {}) {
     _ledgerPreflight(['b1', 'b2'], 'Raf sayaçlarını eşitleme yalnız yönetici oturumuyla yapılabilir.');
     let out;
     try {
         out = await window.StockLedger.runShelfSync({
             db: fireDb, root: COLLECTION_ROOT, uid: window.userAuth.uid,
             fns: { doc, serverTimestamp, getDocsFromServer, collection, writeBatch },
-        });
+        }, opts);
     } catch (e) {
         throw _ledgerError(e, 'syncShelfCounters');
     }

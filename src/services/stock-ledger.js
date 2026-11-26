@@ -547,16 +547,21 @@
 
     /**
      * SAF — kayıt bayraklarının (rafPasif) raf kilidiyle uzlaştırılması (WMS eşitleme ve geri yükleme sonrası). Raf belgesi
-     * yoksa ya da kilitsizse bayrak kalkar; kilitliyse konur. Yalnız farklı olan kayıtlar yazılır.
+     * yoksa ya da kilitsizse bayrak kalkar; kilitliyse konur. Varsayılan olarak yalnız farklı olan kayıtlar yazılır;
+     * opts.canonicalize === true iken `rafPasif` alanı eksik/boolean olmayan eski kayıtlar da kanonik `false` alır.
      */
-    function planShelfLockSync(itemsByDepot, shelfDocs) {
+    function planShelfLockSync(itemsByDepot, shelfDocs, opts = {}) {
         const S = schema();
+        const canonicalize = !!(opts && opts.canonicalize);
         const writes = [];
         STOCK_COLS.forEach(depot => {
             ((itemsByDepot && itemsByDepot[depot]) || []).forEach(row => {
                 const sid = shelfIdOf(depot, S.itemShelfCode(row));
                 const locked = !!sid && S.isShelfCountLocked((shelfDocs || {})[sid]);
-                if ((row.rafPasif === true) === locked) return;
+                const needsFix = canonicalize
+                    ? (typeof row.rafPasif !== 'boolean' || row.rafPasif !== locked)
+                    : ((row.rafPasif === true) !== locked);
+                if (!needsFix) return;
                 const id = row.__docId ?? row.id;
                 if (id === undefined || id === null || String(id) === '') return;
                 writes.push({ col: depot, id: String(id), data: { rafPasif: locked } });
@@ -1006,22 +1011,17 @@
                 }
             });
         });
-        // v3.6: sayım bayrakları da aynı araçla raf kilidine eşitlenir (bayrak raf belgesinin kopyasıdır).
-        const lockWrites = planShelfLockSync(itemsByDepot, shelfDocs);
+        // v3.6 / v3.8 VP-5: sayım bayrakları da aynı araçla raf kilidine eşitlenir (canonicalize:true eski eksik alanları tamamlar).
+        const lockWrites = planShelfLockSync(itemsByDepot, shelfDocs, { canonicalize: !!opts.canonicalize });
         lockWrites.forEach(w => writes.push(w));
         const lockFixed = lockWrites.map(w => ({ col: w.col, id: w.id, rafPasif: w.data.rafPasif }));
         return { writes, updated, capacityRaised, unregistered, pool, unchanged, lockFixed };
     }
 
-    /**
-     * planShelfSync'i Firestore'a karşı yürütür (v3.3 Aşama 6). b1/b2/shelves SUNUCUDAN TAZE okunur (transaction
-     * DIŞINDA — bu bir transaction DEĞİLDİR: her raf bağımsız düzeltilir, "hepsi ya da hiçbiri" uygulanmaz).
-     * Düzeltmeler 450'lik parçalar hâlinde writeBatch ile yazılır (atomic-writer.js'teki LIMITS.maxOps ile aynı pay).
-     * deps.fns: { getDocsFromServer, collection, writeBatch, doc, serverTimestamp }.
-     * @returns {{updated, capacityRaised, unregistered, pool, unchanged}} (planShelfSync ile aynı — writes hariç)
-     */
-    async function runShelfSync(deps) {
-        const ref = makeRef(deps);
+    // [WHY]: VP-5 — Raf sayaçlarını ve eski kayıtların rafPasif bayrağını yazmadan önce yöneticiye kesin sayılarla
+    //        Dry-Run önizlemesi sunmak; canlı veriye körlemesine yazmayı önlemek.
+    // [HOW]: Sunucudan taze b1/b2/shelves okunur, planShelfSync çalıştırılır; hiçbir batch commit atılmaz.
+    async function _buildShelfSyncPlan(deps, opts = {}) {
         const [b1Snap, b2Snap, shelfSnap] = await Promise.all([
             deps.fns.getDocsFromServer(deps.fns.collection(deps.db, deps.root, 'b1', 'items')),
             deps.fns.getDocsFromServer(deps.fns.collection(deps.db, deps.root, 'b2', 'items')),
@@ -1032,8 +1032,24 @@
         const itemsByDepot = { b1: b1Snap.docs.map(withDocId), b2: b2Snap.docs.map(withDocId) };
         const shelfDocs = {};
         shelfSnap.docs.forEach(d => { shelfDocs[d.id] = d.data(); });
+        return planShelfSync(itemsByDepot, shelfDocs, { uid: deps.uid, canonicalize: !!opts.canonicalize });
+    }
 
-        const plan = planShelfSync(itemsByDepot, shelfDocs, { uid: deps.uid });
+    async function previewShelfSync(deps, opts = {}) {
+        const plan = await _buildShelfSyncPlan(deps, opts);
+        const { writes, ...out } = plan;
+        return { ...out, totalWrites: writes.length };
+    }
+
+    /**
+     * planShelfSync'i Firestore'a karşı yürütür (v3.3 Aşama 6 · v3.8 VP-5 canonicalize desteği). b1/b2/shelves SUNUCUDAN
+     * TAZE okunur (transaction DIŞINDA — her raf/bayrak bağımsız düzeltilir). Düzeltmeler 450'lik parçalar hâlinde writeBatch ile yazılır.
+     * deps.fns: { getDocsFromServer, collection, writeBatch, doc, serverTimestamp }.
+     * @returns {{updated, capacityRaised, unregistered, pool, unchanged, lockFixed}}
+     */
+    async function runShelfSync(deps, opts = {}) {
+        const ref = makeRef(deps);
+        const plan = await _buildShelfSyncPlan(deps, opts);
         const CHUNK = 450;
         for (let i = 0; i < plan.writes.length; i += CHUNK) {
             const batch = deps.fns.writeBatch(deps.db);
@@ -1047,7 +1063,7 @@
     window.StockLedger = Object.freeze({
         STOCK_COLS, SHELF_COL, OP_COL, OP_ID_RE, SERVER_TIME, DELETE_FIELD, AUDIT_COL, LedgerError,
         newOperationId, checkTransferInput, transferShelfIds, shelfIdOf, planShelfCounterWrites,
-        planTransfer, planShelfSave, planProductSave, planShelfSync, runTransfer, saveShelf, runProductSave, runShelfSync,
+        planTransfer, planShelfSave, planProductSave, planShelfSync, previewShelfSync, runTransfer, saveShelf, runProductSave, runShelfSync,
         assertNotCountLocked, planShelfLock, planShelfDelete, planShelfRename, planShelfLockSync,
         createShelf, setShelfCountLock, setBatchShelfCountLock, applyCountFixes, deleteShelf, renameShelf,
     });
