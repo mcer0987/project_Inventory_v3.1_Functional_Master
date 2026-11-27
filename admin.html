@@ -56,6 +56,7 @@
     <script src="src/utils/admin-grants.js"></script>
     <script src="src/services/assignment-service.js"></script>
     <script src="src/utils/asset-health.js"></script>
+    <script src="src/utils/burn-rate-engine.js"></script>
     <script src="src/ui/device-ids.js"></script>
     <script src="src/ui/form-keyboard-nav.js"></script>
     <link rel="stylesheet" href="todo-module.css">
@@ -921,16 +922,18 @@
                     <div id="opsBadge-scrap_service" class="future-widget-label ops-radar-badge is-loading" role="status">Yükleniyor…</div>
                     <div class="future-widget-title">Hurda & Servis Radarı</div>
                 </div>
-                <div class="future-widget-card" style="flex: 1; min-width: 240px; cursor: pointer;"
-                    onclick="window.openFutureFeatureModal('critical_stock')">
-                    <div class="future-widget-icon"><i class="fas fa-triangle-exclamation"></i></div>
-                    <div class="future-widget-label">Yakında</div>
+                <div class="future-widget-card ops-radar-card" style="flex: 1; min-width: 240px; cursor: pointer;"
+                    role="button" tabindex="0" data-action="radar-open" data-radar="critical_stock"
+                    aria-label="Kritik Sipariş İhtiyacı Radarını aç">
+                    <div class="future-widget-icon"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i></div>
+                    <div id="opsBadge-critical_stock" class="future-widget-label ops-radar-badge is-loading" role="status">Yükleniyor…</div>
                     <div class="future-widget-title">Kritik Sipariş İhtiyacı</div>
                 </div>
-                <div class="future-widget-card" style="flex: 1; min-width: 240px; cursor: pointer;"
-                    onclick="window.openFutureFeatureModal('ai_burn_rate')">
-                    <div class="future-widget-icon"><i class="fas fa-brain"></i></div>
-                    <div class="future-widget-label">Yakında</div>
+                <div class="future-widget-card ops-radar-card" style="flex: 1; min-width: 240px; cursor: pointer;"
+                    role="button" tabindex="0" data-action="radar-open" data-radar="ai_burn_rate"
+                    aria-label="AI Sarf Tüketim ve Tahminleme Motorunu aç">
+                    <div class="future-widget-icon"><i class="fas fa-brain" aria-hidden="true"></i></div>
+                    <div id="opsBadge-ai_burn_rate" class="future-widget-label ops-radar-badge is-loading" role="status">Yükleniyor…</div>
                     <div class="future-widget-title">🧠 AI Sarf Tüketim & Tahminleme Motoru</div>
                 </div>
             </div>
@@ -1190,6 +1193,9 @@
             // [WHY]: Kartlar şu an statik yer tutucu; adminin ne geleceğini merak etmesine karşılık
             //        verip beklenti yönetmek için her kartın vizyon metnini gösteren hafif bir modal.
             window.openFutureFeatureModal = function (key) {
+                if (typeof window.openOpsRadar === 'function' && ['active_assignment', 'scrap_service', 'critical_stock', 'ai_burn_rate'].includes(key)) {
+                    return window.openOpsRadar(key);
+                }
                 let icon = 'fa-circle-info', title = '', detail = '';
                 switch (key) {
                     case 'critical_stock':

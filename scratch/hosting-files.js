@@ -75,7 +75,8 @@ const expected = f => /^(index|admin|404|verify)\.html$/.test(f) || /^[^/]+\.(cs
 // v3.8 · UX-5: kurumsal logo stüdyosu — saf çekirdek + arayüz src/ui/brand-logo.js ve Firestore servisi
 //        src/services/brand-settings-service.js (2).
 // v3.8 · VP-1: Operasyon Merkezi radarları için saf hesaplama modülü src/utils/asset-health.js (1).
-const EXPECTED_COUNT = 136;
+// v3.8 · VP-2: AI Sarf Tüketim & Tahminleme Motoru saf modülü src/utils/burn-rate-engine.js (1).
+const EXPECTED_COUNT = 137;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {

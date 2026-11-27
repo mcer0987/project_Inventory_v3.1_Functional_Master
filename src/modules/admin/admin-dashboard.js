@@ -1472,7 +1472,10 @@ window.renderCriticalStockTable = function () {
                             data-key="${escapeHtml(data.key)}" title="Ürün Bilgisi" aria-label="Ürün Bilgisi">
                             <i class="fas fa-circle-info"></i>
                         </button>
-                        <button type="button" class="btn-action btn-buy" title="Satın Al" aria-label="Satın Al"><i class="fas fa-shopping-cart"></i></button>
+                        <button type="button" class="btn-action btn-buy" data-action="buyCriticalGroup"
+                            data-key="${escapeHtml(data.key)}" title="EBYS Satın Almaya Aktar" aria-label="EBYS Satın Almaya Aktar">
+                            <i class="fas fa-shopping-cart"></i>
+                        </button>
                         <button type="button" class="btn-action btn-mail" title="Bildirim Gönder" aria-label="Bildirim Gönder"><i class="fas fa-envelope"></i></button>
                         <button type="button" class="btn-action btn-passive" title="Pasif Yap" aria-label="Pasif Yap"><i class="fas fa-eye-slash"></i></button>
                         <button type="button" class="btn-action btn-danger" data-action="deleteCriticalGroup" data-key="${escapeHtml(data.key)}" title="Ürünü Sil" aria-label="Ürünü Sil"><i class="fas fa-trash"></i></button>
@@ -1489,6 +1492,18 @@ window.renderCriticalStockTable = function () {
     window.bindActions(tableBody, {
         deleteCriticalGroup: el => window.deleteCriticalGroup(el.dataset.key),
         showCriticalProductInfo: el => window.showCriticalProductInfo(el.dataset.key),
+        buyCriticalGroup: el => {
+            const group = criticalStockGroupsByKey.get(el.dataset.key);
+            if (!group) return;
+            const limit = group.limit > 0 ? group.limit : 3;
+            window.requestPurchase({
+                name: group.displayName,
+                category: group.typeName || (group.isDemirbas ? 'Demirbaş' : 'Sarf Malzeme'),
+                currentStock: group.mevcut,
+                limit,
+                suggestedOrderQty: Math.max(1, (limit * 2) - group.mevcut),
+            });
+        },
     });
 };
 
@@ -2049,8 +2064,42 @@ window.openWatchDetail = function (item) {
     console.log("DETAIL:", item);
 };
 
+// [WHY]: v3.8 · VP-2 — Özel İzleme ve Kritik Stok satırlarındaki "Satın Al" tetikleyicisi konsola yazmak yerine
+//        EBYS satın alma penceresini ilgili ürün ve önerilen miktarla ön-doldurmalı (otomatik kaydetmez).
+// [HOW]: Açık radar varsa önce kapatılır; BurnRate.buildPurchasePrefillPayload zarfı EBYSPurchaseUI.openPrefilled'e
+//        verilir; modül henüz yüklenmediyse geriye uyumlu olarak window.openNewPurchaseModal açılır.
 window.requestPurchase = function (item) {
-    console.log("PURCHASE REQUEST:", item);
+    if (typeof window.closeOpsRadar === 'function') window.closeOpsRadar();
+    const list = Array.isArray(item) ? item : (item ? [item] : []);
+    const BR = window.AppModules && window.AppModules.BurnRate;
+    const normalized = list.map(x => ({
+        name: x.name || x.displayName || x.ürün || x.urun || '',
+        category: x.category || x.tür || x.type || x.prodType || 'Sarf Malzeme',
+        currentStock: Number(x.currentStock ?? x.mevcut ?? x.adet ?? x.qty ?? 0) || 0,
+        limit: Number(x.limit || 3) || 3,
+        dailyRate: Number(x.dailyRate || 0) || 0,
+        daysRemaining: x.daysRemaining ?? null,
+        suggestedOrderQty: Math.max(1, Math.round(Number(x.suggestedOrderQty) || Math.max(1, ((Number(x.limit) || 3) * 2) - (Number(x.currentStock ?? x.mevcut ?? x.adet ?? 0) || 0)))),
+    })).filter(x => x.name);
+
+    const maxItems = window.AppModules?.PurchaseMoney?.MAX_ITEMS || 3;
+    const payload = BR && normalized.length
+        ? BR.buildPurchasePrefillPayload(normalized, { maxItems })
+        : {
+            subject: normalized[0] ? `Kritik Stok Tedariği: ${normalized[0].name}` : '',
+            description: '',
+            priority: 'Hızlı',
+            items: normalized.slice(0, maxItems).map(x => ({
+                description: x.name, category: x.category, quantity: x.suggestedOrderQty,
+                unit: 'Adet', unitPrice: '', currency: 'TRY', taxRate: 0,
+            })),
+        };
+
+    if (window.AppModules?.EBYSPurchaseUI?.openPrefilled) {
+        window.AppModules.EBYSPurchaseUI.openPrefilled(payload);
+    } else if (typeof window.openNewPurchaseModal === 'function') {
+        window.openNewPurchaseModal();
+    }
 };
 
 window.addToOrderList = function (item) {
@@ -2446,7 +2495,12 @@ window.renderLocationsTable = function () {
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 (function () {
     const AH = () => window.AppModules && window.AppModules.AssetHealth;
-    let activeRadar = null;   // 'active_assignment' | 'scrap_service' | null
+    const BR = () => window.AppModules && window.AppModules.BurnRate;
+    let activeRadar = null;   // 'active_assignment' | 'scrap_service' | 'critical_stock' | 'ai_burn_rate' | null
+    let burnWindowDays = 30;
+    let burnStatusFilter = 'all';
+    let burnQuery = '';
+    const selectedCriticalKeys = new Set();
 
     function node(tag, cls, txt, attrs) {
         const n = document.createElement(tag);
@@ -2466,6 +2520,22 @@ window.renderLocationsTable = function () {
         if (!h || !d) return null;
         return h.analyzeServiceAndScrap(d.b1, d.b2, d.b3, d.serviceRecords);
     }
+    function readBurnRate(winDays) {
+        const b = BR(), d = window.data;
+        if (!b || !d) return null;
+        return b.analyzeBurnRate({
+            b1: d.b1, b2: d.b2, b3: d.b3,
+            productTypes: d.productTypes,
+            windowDays: winDays || burnWindowDays,
+            nowMs: Date.now(),
+        });
+    }
+    function readCriticalOrders() {
+        const b = BR(), d = window.data;
+        if (!b || !d) return null;
+        const br = readBurnRate(30);
+        return b.buildCriticalOrderCandidates(br, { b1: d.b1, b2: d.b2, productTypes: d.productTypes });
+    }
 
     // ── Kart rozetleri ──
     window.renderOpsRadarBadges = function () {
@@ -2481,6 +2551,17 @@ window.renderLocationsTable = function () {
             if (a) set('opsBadge-active_assignment', `${a.active} Aktif · ${a.overdue.length} Geciken İade`, a.overdue.length ? 'is-danger' : (a.dueSoon.length ? 'is-warn' : 'is-ok'));
             const s = readService();
             if (s) set('opsBadge-scrap_service', `${s.counts.inService} Serviste · ${s.counts.chronic} Kronik Risk`, s.counts.chronic ? 'is-danger' : (s.counts.inService ? 'is-warn' : 'is-ok'));
+            const c = readCriticalOrders();
+            if (c) set('opsBadge-critical_stock', `${c.counts.total} Kritik Stok · ${c.counts.outOfStock} Tükendi`, c.counts.outOfStock || c.counts.danger ? 'is-danger' : (c.counts.total ? 'is-warn' : 'is-ok'));
+            const br = readBurnRate(30);
+            if (br) {
+                const hasAnyForecast = br.counts.critical + br.counts.warning + br.counts.safe > 0;
+                const brText = hasAnyForecast
+                    ? `${br.counts.critical} Kalem ≤14 Gün · ${br.counts.warning} Uyarı`
+                    : `${br.counts.total} Sarf · Veri Birikiyor`;
+                const brTone = br.counts.critical ? 'is-danger' : (br.counts.warning ? 'is-warn' : 'is-ok');
+                set('opsBadge-ai_burn_rate', brText, brTone);
+            }
         } catch (e) { console.error('[renderOpsRadarBadges]', e); }
     };
 
@@ -2611,6 +2692,209 @@ window.renderLocationsTable = function () {
         actions.append(actionBtn('Servis Sekmesine Git', 'fa-arrow-right', 'radar-go-service'));
     }
 
+    const TREND_LABEL = { accelerating: 'Hızlanıyor ↗', steady: 'Sabit →', slowing: 'Yavaşlıyor ↘', insufficient: 'Yetersiz veri' };
+    const CONF_LABEL = { high: 'Yüksek', medium: 'Orta', low: 'Düşük', insufficient: '—' };
+
+    // [WHY]: VP-2 — Sarf malzemelerin günlük tüketim hızını (30/60/90 gün EWMA) ve tahmini tükenme gününü
+    //        güvenli DOM düğümleriyle sunar; yetersiz veride uydurma gün göstermez.
+    // [HOW]: Pencere/filtre değişiminde yalnızca modal gövdesi yeniden çizilir; her kalemden EBYS ön-doldurmaya geçilebilir.
+    function buildBurnRate(body, actions) {
+        const s = readBurnRate(burnWindowDays);
+        if (!s) { body.append(emptyNote('Tüketim tahminleme motoru henüz yüklenmedi.')); return; }
+
+        const chips = node('div', 'ops-radar-chips');
+        chips.append(
+            chip('≤14 Gün Kritik', s.counts.critical, s.counts.critical ? 'danger' : 'ok'),
+            chip('≤30 Gün Uyarı', s.counts.warning, s.counts.warning ? 'warn' : ''),
+            chip('Güvende (>30g)', s.counts.safe, 'ok'),
+            chip('Yetersiz Veri', s.counts.insufficient)
+        );
+        body.append(chips);
+
+        const toolbar = node('div', 'ops-radar-toolbar');
+        const winGroup = node('div', 'ops-radar-seg', null, { role: 'group', 'aria-label': 'Analiz penceresi' });
+        [30, 60, 90].forEach(days => {
+            const b = node('button', 'ops-radar-seg-btn' + (burnWindowDays === days ? ' is-active' : ''), `${days} Gün`, {
+                type: 'button', 'data-action': 'radar-br-window', 'data-window': String(days),
+                'aria-pressed': String(burnWindowDays === days),
+            });
+            winGroup.append(b);
+        });
+
+        const filterGroup = node('div', 'ops-radar-seg', null, { role: 'group', 'aria-label': 'Durum filtresi' });
+        [['all', 'Tümü'], ['critical', 'Kritik'], ['warning', 'Uyarı'], ['safe', 'Güvende'], ['insufficient', 'Yetersiz']].forEach(([val, lbl]) => {
+            const b = node('button', 'ops-radar-seg-btn' + (burnStatusFilter === val ? ' is-active' : ''), lbl, {
+                type: 'button', 'data-action': 'radar-br-filter', 'data-status': val,
+                'aria-pressed': String(burnStatusFilter === val),
+            });
+            filterGroup.append(b);
+        });
+
+        const search = node('input', 'ops-radar-search', null, {
+            type: 'search', placeholder: 'Sarf malzeme ara…', 'aria-label': 'Sarf malzeme ara',
+            value: burnQuery, 'data-br-search': '1',
+        });
+        search.value = burnQuery;
+        toolbar.append(winGroup, filterGroup, search);
+        body.append(toolbar);
+
+        const q = burnQuery.trim().toLocaleLowerCase('tr-TR');
+        const filtered = s.items.filter(item => {
+            if (burnStatusFilter !== 'all' && item.status !== burnStatusFilter) return false;
+            if (q && !item.name.toLocaleLowerCase('tr-TR').includes(q) && !item.category.toLocaleLowerCase('tr-TR').includes(q)) return false;
+            return true;
+        });
+
+        body.append(section(`Sarf tüketim tahminleri (${burnWindowDays} günlük pencere)`, filtered.length, s.counts.critical ? 'danger' : ''));
+        if (filtered.length) {
+            body.append(table(['Sarf Malzeme', 'Mevcut Stok', 'Tüketim Hızı', 'Tahmini Tükenme', 'İşlem'], filtered.map(item => {
+                const tr = node('tr');
+                const title = node('div');
+                title.append(node('strong', null, item.name));
+                const subParts = [item.category, item.depots.length ? item.depots.join('/') : 'Depo kaydı yok'];
+                title.append(node('div', 'ops-radar-sub', subParts.join(' · ')));
+
+                const stockCell = node('div');
+                stockCell.append(node('strong', null, `${item.currentStock} adet`), node('div', 'ops-radar-sub', `Limit: ${item.minLimit}`));
+
+                const rateCell = node('div');
+                if (item.status === 'insufficient') {
+                    rateCell.append(node('span', 'ops-radar-sub', `${item.totalConsumed} adet / ${item.activeDays} gün`));
+                } else {
+                    rateCell.append(
+                        node('strong', null, `${item.dailyRate} / gün`),
+                        node('div', 'ops-radar-sub', `~${item.monthlyRate}/ay · ${TREND_LABEL[item.trend] || ''}`)
+                    );
+                }
+
+                const statusWrap = node('div', 'ops-radar-stack');
+                if (item.status === 'insufficient') {
+                    statusWrap.append(badge('Yetersiz veri (≥2 gün)', 'muted'));
+                } else if (item.daysRemaining === 0) {
+                    statusWrap.append(badge('Stok tükendi (0 gün)', 'danger'));
+                } else if (item.status === 'critical') {
+                    statusWrap.append(badge(`~${item.daysRemaining} günde tükenecek`, 'danger'));
+                } else if (item.status === 'warning') {
+                    statusWrap.append(badge(`~${item.daysRemaining} gün kaldı`, 'warn'));
+                } else {
+                    statusWrap.append(badge(`~${item.daysRemaining} gün güvende`, 'ok'));
+                }
+                if (item.status !== 'insufficient') {
+                    statusWrap.append(node('span', 'ops-radar-sub', `Güven: ${CONF_LABEL[item.confidence]}`));
+                }
+
+                const act = node('div', 'action-buttons');
+                const qtyHint = Math.max(1, item.suggestedOrderQty || 1);
+                act.append(actionBtn(`EBYS Aktar (${qtyHint})`, 'fa-shopping-cart', 'radar-ebys-one', { source: 'burn', key: item.key }));
+
+                tr.append(
+                    cell('title', 'Sarf Malzeme', title),
+                    cell('meta', 'Mevcut Stok', stockCell),
+                    cell('meta', 'Tüketim Hızı', rateCell),
+                    cell('status', 'Tahmini Tükenme', statusWrap),
+                    cell('actions', 'İşlem', act)
+                );
+                return tr;
+            })));
+        } else {
+            body.append(emptyNote(s.items.length ? 'Seçili filtrede eşleşen sarf malzeme yok.' : 'Analiz edilecek sarf malzeme veya B3 tüketim kaydı bulunamadı.'));
+        }
+
+        actions.append(
+            actionBtn('Kritik Sipariş İhtiyacına Geç', 'fa-triangle-exclamation', 'radar-switch', { radar: 'critical_stock' }),
+            actionBtn('Satın Alma Sekmesine Git', 'fa-arrow-right', 'radar-go-service')
+        );
+    }
+
+    // [WHY]: VP-2 — Minimum stok altı ve ≤14 günde tükenecek kalemlerden tekil veya en fazla 3 kalemlik toplu EBYS
+    //        satın alma talebini ön-doldurarak yönetici onayına sunar.
+    // [HOW]: PurchaseMoney.MAX_ITEMS (3) seçici sınırı zorlanır; otomatik submit yapılmaz.
+    function buildCriticalStock(body, actions) {
+        const c = readCriticalOrders();
+        if (!c) { body.append(emptyNote('Kritik sipariş analizi henüz yüklenmedi.')); return; }
+
+        const maxItems = window.AppModules?.PurchaseMoney?.MAX_ITEMS || (BR()?.MAX_PURCHASE_ITEMS || 3);
+        const validKeys = new Set(c.items.map(x => x.key));
+        [...selectedCriticalKeys].forEach(k => { if (!validKeys.has(k)) selectedCriticalKeys.delete(k); });
+
+        const chips = node('div', 'ops-radar-chips');
+        chips.append(
+            chip('Kritik Aday', c.counts.total, c.counts.total ? 'danger' : 'ok'),
+            chip('Tükendi (0)', c.counts.outOfStock, c.counts.outOfStock ? 'danger' : 'ok'),
+            chip('Proaktif ≤14 Gün', c.counts.burnOnly, c.counts.burnOnly ? 'warn' : ''),
+            chip(`EBYS Seçimi (Max ${maxItems})`, `${selectedCriticalKeys.size} / ${maxItems}`, selectedCriticalKeys.size ? 'warn' : '')
+        );
+        body.append(chips);
+
+        body.append(node('p', 'ops-radar-note', `EBYS satın alma pilot kuralı gereği tek talepte en fazla ${maxItems} kalem aktarılabilir. Aktarım formu ön-doldurur; birim ve fiyatları girip siz onaylamadan kayıt oluşturulmaz.`));
+
+        body.append(section('Sipariş önerilen kritik kalemler', c.items.length, c.items.length ? 'danger' : 'ok'));
+        if (c.items.length) {
+            body.append(table(['Seç', 'Ürün / Kategori', 'Stok / Limit', 'Durum', 'Öneri', 'İşlem'], c.items.map(item => {
+                const tr = node('tr', selectedCriticalKeys.has(item.key) ? 'is-selected' : '');
+                const checked = selectedCriticalKeys.has(item.key);
+                const limitReached = selectedCriticalKeys.size >= maxItems && !checked;
+
+                const cb = node('input', 'ops-radar-check', null, {
+                    type: 'checkbox', 'data-crit-key': item.key,
+                    'aria-label': `${item.name} kalemini EBYS talebine seç`,
+                });
+                cb.checked = checked;
+                cb.disabled = limitReached;
+
+                const title = node('div');
+                title.append(node('strong', null, item.name));
+                const sub = [item.category, item.depots.length ? item.depots.join('/') : ''].filter(Boolean).join(' · ');
+                if (sub) title.append(node('div', 'ops-radar-sub', sub));
+
+                const stockCell = node('div');
+                stockCell.append(node('strong', null, `${item.currentStock} / ${item.limit}`));
+                if (item.dailyRate > 0) stockCell.append(node('div', 'ops-radar-sub', `${item.dailyRate}/gün`));
+
+                const act = node('div', 'action-buttons');
+                act.append(actionBtn('EBYS Satın Almaya Aktar', 'fa-shopping-cart', 'radar-ebys-one', { source: 'critical', key: item.key }));
+
+                tr.append(
+                    cell('select', 'Seç', cb),
+                    cell('title', 'Ürün / Kategori', title),
+                    cell('meta', 'Stok / Limit', stockCell),
+                    cell('status', 'Durum', badge(item.reason, item.severity)),
+                    cell('meta', 'Önerilen Sipariş', `${item.suggestedOrderQty} Adet`),
+                    cell('actions', 'İşlem', act)
+                );
+                return tr;
+            })));
+        } else {
+            body.append(emptyNote('Minimum limit altında veya 14 gün içinde tükenecek kritik kalem bulunmuyor.'));
+        }
+
+        const bulkBtn = actionBtn(`Seçilenlerle EBYS Talebi Başlat (${selectedCriticalKeys.size}/${maxItems})`, 'fa-file-invoice', 'radar-ebys-bulk');
+        bulkBtn.classList.add('ops-radar-btn-primary');
+        if (selectedCriticalKeys.size === 0) bulkBtn.disabled = true;
+        actions.append(bulkBtn);
+
+        if (c.items.length > 0 && selectedCriticalKeys.size < Math.min(maxItems, c.items.length)) {
+            actions.append(actionBtn(`İlk ${Math.min(maxItems, c.items.length)} Acil Kalemi Seç`, 'fa-check-double', 'radar-crit-top'));
+        }
+        if (selectedCriticalKeys.size > 0) {
+            actions.append(actionBtn('Seçimi Temizle', 'fa-eraser', 'radar-crit-clear'));
+        }
+        actions.append(actionBtn('Tüketim Tahminleme Motoru', 'fa-brain', 'radar-switch', { radar: 'ai_burn_rate' }));
+    }
+
+    function launchEbysPrefill(candidates) {
+        const b = BR();
+        if (!b || !candidates.length) return;
+        const maxItems = window.AppModules?.PurchaseMoney?.MAX_ITEMS || b.MAX_PURCHASE_ITEMS || 3;
+        const payload = b.buildPurchasePrefillPayload(candidates, { maxItems });
+        window.closeOpsRadar();
+        if (window.AppModules?.EBYSPurchaseUI?.openPrefilled) {
+            window.AppModules.EBYSPurchaseUI.openPrefilled(payload);
+        } else if (typeof window.openNewPurchaseModal === 'function') {
+            window.openNewPurchaseModal();
+        }
+    }
+
     const RADARS = {
         active_assignment: {
             icon: 'fa-right-left', title: 'Aktif Zimmet & İade Radarı', build: buildAssignment,
@@ -2627,6 +2911,20 @@ window.renderLocationsTable = function () {
                 'Servis kayıtları depoya dönüşte silinmeyip kapatıldığı için eski arızalar da sayılır; ancak kayıt silme uygulaması kaldırılmadan önce silinmiş eski servis kayıtları görünmez, bu cihazların geçmiş arıza sayısı eksik olabilir.',
                 'Sarf malzemeler kronik cihaz sayımına girmez.',
                 'Hurda dökümü, hurdaya ayırma işleminde yazılan hareket kayıtlarından oluşur.'],
+        },
+        critical_stock: {
+            icon: 'fa-triangle-exclamation', title: 'Kritik Sipariş İhtiyacı', build: buildCriticalStock,
+            intro: 'Minimum stok limitinin altına düşen ürünlerle 14 gün içinde tükeneceği öngörülen sarf malzemelerini tek listede görür, seçtiğiniz kalemlerle tek tıkla EBYS satın alma taslağı hazırlayabilirsiniz.',
+            help: ['Bu liste, minimum stok eşiği altındaki tüm aktif kayıtlar ile Tüketim Tahminleme Motorunun ≤14 gün kritik işaretlediği sarf malzemelerini birleştirir.',
+                'Tek bir EBYS satın alma talebinde pilot sınır gereği en fazla 3 kalem seçilebilir.',
+                '"EBYS Satın Almaya Aktar" veya "Seçilenlerle EBYS Talebi Başlat" düğmesi formu ön-doldurarak açar; birim, belge türü ve fiyatları kontrol edip siz göndermedikçe kayıt açılmaz.'],
+        },
+        ai_burn_rate: {
+            icon: 'fa-brain', title: '🧠 AI Sarf Tüketim & Tahminleme Motoru', build: buildBurnRate,
+            intro: 'B3 çıkış geçmişinizi analiz ederek sarf malzemelerin günlük tüketim hızını ve tahmini tükenme gününü hesaplar; hızlı tükenen kalemleri erkenden yakalamanızı sağlar.',
+            help: ['Hesaplama tamamen tarayıcınız içinde deterministik zaman serisi (30/60/90 günlük pencere + son döneme ağırlık veren EWMA) ile yapılır; dış bir yapay zeka servisine veri gönderilmez.',
+                'Yanlış alarmı önlemek için seçili pencerede en az 2 farklı günde tüketim kaydı olmayan kalemlerde gün tahmini üretilmez ("Yetersiz veri" olarak işaretlenir).',
+                'Demirbaş zimmetleri, hurda ve iade edilmiş hareketler sarf tüketim hesabına katılmaz.'],
         },
     };
 
@@ -2715,6 +3013,68 @@ window.renderLocationsTable = function () {
                 if (m && typeof m.focusDue === 'function') m.focusDue(el.dataset.due);
             },
             'radar-go-service': () => goTab('purchaseTab'),
+            'radar-switch': (el) => { if (el.dataset.radar) window.openOpsRadar(el.dataset.radar); },
+            'radar-br-window': (el) => {
+                const w = Number(el.dataset.window);
+                if ([30, 60, 90].includes(w)) { burnWindowDays = w; window.refreshOpsRadar(); }
+            },
+            'radar-br-filter': (el) => {
+                if (el.dataset.status) { burnStatusFilter = el.dataset.status; window.refreshOpsRadar(); }
+            },
+            'radar-ebys-one': (el) => {
+                const src = el.dataset.source, key = el.dataset.key;
+                if (src === 'burn') {
+                    const br = readBurnRate(burnWindowDays);
+                    const hit = br && br.items.find(x => x.key === key);
+                    if (hit) launchEbysPrefill([{ ...hit, limit: hit.minLimit }]);
+                } else {
+                    const crit = readCriticalOrders();
+                    const hit = crit && crit.items.find(x => x.key === key);
+                    if (hit) launchEbysPrefill([hit]);
+                }
+            },
+            'radar-ebys-bulk': () => {
+                const crit = readCriticalOrders();
+                if (!crit) return;
+                const picked = crit.items.filter(x => selectedCriticalKeys.has(x.key));
+                if (!picked.length) return;
+                selectedCriticalKeys.clear();
+                launchEbysPrefill(picked);
+            },
+            'radar-crit-top': () => {
+                const crit = readCriticalOrders();
+                if (!crit) return;
+                const maxItems = window.AppModules?.PurchaseMoney?.MAX_ITEMS || (BR()?.MAX_PURCHASE_ITEMS || 3);
+                selectedCriticalKeys.clear();
+                crit.items.slice(0, maxItems).forEach(x => selectedCriticalKeys.add(x.key));
+                window.refreshOpsRadar();
+            },
+            'radar-crit-clear': () => {
+                selectedCriticalKeys.clear();
+                window.refreshOpsRadar();
+            },
+        });
+        modal.addEventListener('change', (e) => {
+            const cb = e.target.closest('input[data-crit-key]');
+            if (!cb) return;
+            const key = cb.dataset.critKey;
+            const maxItems = window.AppModules?.PurchaseMoney?.MAX_ITEMS || (BR()?.MAX_PURCHASE_ITEMS || 3);
+            if (cb.checked) {
+                if (selectedCriticalKeys.size < maxItems) selectedCriticalKeys.add(key);
+                else cb.checked = false;
+            } else {
+                selectedCriticalKeys.delete(key);
+            }
+            window.refreshOpsRadar();
+        });
+        modal.addEventListener('input', (e) => {
+            const inp = e.target.closest('input[data-br-search]');
+            if (!inp) return;
+            const pos = inp.selectionStart;
+            burnQuery = inp.value;
+            window.refreshOpsRadar();
+            const fresh = modal.querySelector('input[data-br-search]');
+            if (fresh) { fresh.focus(); if (pos != null) fresh.setSelectionRange(pos, pos); }
         });
         modal.addEventListener('keydown', (e) => { if (e.key === 'Escape' && activeRadar) { e.stopPropagation(); window.closeOpsRadar(); } });
     }

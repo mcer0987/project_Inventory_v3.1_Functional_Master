@@ -147,5 +147,42 @@ async function handleSubmitClick(button) {
     }
 }
 
+// [WHY]: v3.8 · VP-2 — Kritik Sipariş Radarı ve Tahminleme Motorundan seçilen 1–3 kalem tek tıkla satın alma
+//        modalına aktarılmalı; kullanıcı birim ve fiyat girip kendi onayıyla kaydetmeli (otomatik submit yasak).
+// [HOW]: Açık bir Operasyon Radarı varsa (#opsRadarModal z-index:10500) önce kapatılır, yeni satın alma modalı
+//        açılıp başlık, gerekçe, öncelik ve 1–3 kalem satırı ön-doldurulur; unitPrice boş bırakılır.
+function openPrefilled(payload = {}) {
+    if (typeof window.closeOpsRadar === 'function') window.closeOpsRadar();
+    if (typeof window.openNewPurchaseModal !== 'function') {
+        window.showAppAlert?.('Satın alma penceresi henüz hazır değil.', 'warning');
+        return false;
+    }
+    window.openNewPurchaseModal();
+    clearPending();
+
+    const maxItems = window.AppModules?.PurchaseMoney?.MAX_ITEMS || 3;
+    const rawItems = Array.isArray(payload.items) ? payload.items.slice(0, maxItems) : [];
+    const set = (id, val) => { const field = document.getElementById(id); if (field && val != null) field.value = String(val); };
+
+    set('purName', payload.subject || (rawItems[0]?.description ? `Kritik Stok Tedariği: ${rawItems[0].description}` : ''));
+    set('purDesc', payload.description || '');
+    if (payload.priority) {
+        const prioEl = document.getElementById('purPriority');
+        if (prioEl && [...prioEl.options].some(o => o.value === payload.priority)) prioEl.value = payload.priority;
+    }
+
+    if (rawItems.length && window.AppModules?.PurchaseItemsUI?.open) {
+        window.AppModules.PurchaseItemsUI.open({ items: rawItems, budgetMode: 'auto' }, false);
+    }
+
+    const status = document.getElementById('purEbysStatus');
+    if (status) {
+        status.hidden = false;
+        const truncNote = payload.truncatedCount > 0 ? ` Not: Pilot sınırı gereği ilk ${maxItems} kalem aktarıldı.` : '';
+        status.textContent = `Kritik sipariş analizinden ön-dolduruldu.${truncNote} İlgili birimi, belge türünü ve birim fiyatları doldurduktan sonra "EBYS süreciyle gönder" veya "Talebi Kaydet" ile onaylayın.`;
+    }
+    return true;
+}
+
 window.AppModules = window.AppModules || {};
-window.AppModules.EBYSPurchaseUI = { handleSubmitClick, openForRevision, clearPending };
+window.AppModules.EBYSPurchaseUI = { handleSubmitClick, openForRevision, openPrefilled, clearPending };
