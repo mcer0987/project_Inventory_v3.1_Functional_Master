@@ -17,11 +17,31 @@
     const WARNING_DAYS = 30;
     const DEFAULT_MIN_LIMIT = 3;
     const MAX_PURCHASE_ITEMS = 3;
+    const MAX_SUBJECT_LEN = 220;
+    const MAX_LINE_DESC_LEN = 240;
+    const MAX_LINE_CAT_LEN = 120;
+    const MAX_CONSOLIDATED_DESC_LEN = 35000;
     const AUTO_EMPTY_STATUSES = Object.freeze(['Tükendi', 'Zimmetlendi', 'Serviste', 'Hurda', 'Çıkış Yapıldı']);
+    const CLOSED_PO_RE = /(^|[\s·\-_/])(iptal|reddedildi|tamamland[ıi]|onayland[ıi]|kapand[ıi]|ar[şs]iv|teslim al[ıi]nd[ıi]|cancelled|canceled|rejected|completed|closed|archived|approved|withdrawn)([\s·\-_/]|$)/i;
+    const CLOSED_EBYS_STATES = Object.freeze(['closed', 'archived', 'rejected', 'withdrawn', 'cancelled', 'canceled', 'completed']);
+    const GENERIC_BULK_LINE_RE = /^toplu\s+(sarf|envanter|tedarik|malzeme)/i;
+    const SUBJECT_PREFIX_RE = /^(?:kritik\s+stok\s+(?:toplu\s+)?tedariği|toplu\s+(?:sarf\s+malzeme|envanter\s*\/\s*sarf|sarf)\s+(?:ihtiyacı|tedariği)|satın\s+alma\s+talebi|acil\s+tedarik)(?:\s*\([^)]*\))?\s*[:\-–—]\s*/i;
 
     function text(v) { return v == null ? '' : String(v).trim(); }
     function toList(x) { return Array.isArray(x) ? x : Object.values(x || {}); }
     function round2(n) { return Math.round(n * 100) / 100; }
+
+    // [WHY]: Firestore Rules (noTag) ve PurchaseMoney metinlerde "<harf", "</", "<!", "<?" dizilerini reddeder.
+    // [HOW]: Etiket benzeri "<" karakterlerini güvenli "‹" karakterine çevirir; matematiksel "a < b" boşluklu ifadeyi korur.
+    function sanitizeNoTag(raw) {
+        return text(raw).replace(/<(?=[a-zA-Z/!?])/g, '‹');
+    }
+
+    function clipText(raw, maxLen) {
+        const s = sanitizeNoTag(raw);
+        if (!maxLen || s.length <= maxLen) return s;
+        return maxLen > 3 ? `${s.slice(0, maxLen - 1).trimEnd()}…` : s.slice(0, maxLen);
+    }
 
     function cleanProductName(raw) {
         const s = text(raw);
@@ -40,6 +60,10 @@
 
     function normKey(raw) {
         return text(raw).toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ');
+    }
+
+    function normalizeProductKey(raw) {
+        return normKey(cleanProductName(raw));
     }
 
     function parseDateMs(v) {
@@ -471,25 +495,26 @@
         const truncatedCount = Math.max(0, clean.length - selected.length);
 
         const items = selected.map(c => ({
-            description: text(c.name || c.description),
-            category: text(c.category) || 'Sarf Malzeme',
+            description: clipText(c.name || c.description, MAX_LINE_DESC_LEN),
+            category: clipText(text(c.category) || 'Sarf Malzeme', MAX_LINE_CAT_LEN),
             quantity: Math.max(1, Math.round(Number(c.suggestedOrderQty || c.quantity) || 1)),
-            unit: text(c.unit) || 'Adet',
+            unit: clipText(text(c.unit) || 'Adet', 40),
             unitPrice: '',
             currency: 'TRY',
             taxRate: 0,
         }));
 
-        const subject = items.length === 1
+        const subject = clipText(items.length === 1
             ? `Kritik Stok Tedariği: ${items[0].description}`
-            : (items.length > 1 ? `Kritik Stok Toplu Tedariği (${items.length} kalem)` : 'Kritik Stok Tedariği');
+            : (items.length > 1 ? `Kritik Stok Toplu Tedariği (${items.length} kalem)` : 'Kritik Stok Tedariği'), MAX_SUBJECT_LEN);
 
         const urgent = selected.some(c => Number(c.currentStock) === 0 || (c.daysRemaining != null && Number(c.daysRemaining) <= 7));
         const priority = urgent ? 'Acil' : 'Hızlı';
 
         const detailLines = selected.map(c => {
-            const parts = [`- ${text(c.name || c.description)}: Mevcut ${Number(c.currentStock) || 0}`];
-            if (c.limit != null) parts.push(`Limit ${c.limit}`);
+            const parts = [`- ${sanitizeNoTag(c.name || c.description)}: Mevcut ${Number(c.currentStock) || 0}`];
+            const lim = c.limit ?? c.minLimit;
+            if (lim != null) parts.push(`Limit ${lim}`);
             if (c.dailyRate > 0) parts.push(`Günlük tüketim ${c.dailyRate}/gün`);
             if (c.daysRemaining != null) parts.push(c.daysRemaining === 0 ? 'Stok tükendi' : `Tahmini ~${c.daysRemaining} gün`);
             parts.push(`Önerilen sipariş: ${Math.max(1, Math.round(Number(c.suggestedOrderQty || c.quantity) || 1))} Adet`);
@@ -503,6 +528,409 @@
         return { subject, description, priority, items, truncatedCount, maxItems };
     }
 
+    // [WHY]: v3.8 Hotfix HF-1 — EBYS satın alma formu PurchaseMoney.MAX_ITEMS (3) kalem satırı sınırı taşır;
+    //        yönetici AI Sarf Tüketim veya Kritik Sipariş radarından 1..N (sınırsız) ürünü tek talepte aktarmak istiyor.
+    // [HOW]: Seçili tüm benzersiz ürünleri 1 adet birleştirilmiş kalem satırında (quantity: 1, unit: 'Adet') toplar;
+    //        her ürünün mevcut stok, limit, günlük tüketim hızı, tahmini günü ve önerilen adet dökümünü Açıklama
+    //        (payload.description) alanına yapılandırılmış satırlar halinde yazar. Otomatik gönderim yapmaz.
+    function buildConsolidatedPurchasePrefill(selectedCandidates, opts = {}) {
+        const seen = new Set();
+        const clean = [];
+        toList(selectedCandidates).forEach(c => {
+            if (!c) return;
+            const rawName = sanitizeNoTag(c.name || c.description);
+            if (!rawName) return;
+            const k = normalizeProductKey(rawName) || normKey(rawName);
+            if (!k || seen.has(k)) return;
+            seen.add(k);
+            const qty = Math.max(1, Math.round(Number(c.suggestedOrderQty ?? c.quantity) || 1));
+            const lim = c.limit ?? c.minLimit;
+            clean.push({
+                key: k,
+                name: rawName,
+                category: clipText(text(c.category) || (c.isDemirbas ? 'Demirbaş' : 'Sarf Malzeme'), MAX_LINE_CAT_LEN),
+                isDemirbas: c.isDemirbas === true,
+                currentStock: Math.max(0, Number(c.currentStock) || 0),
+                limit: lim != null && Number.isFinite(Number(lim)) ? Number(lim) : null,
+                dailyRate: Number(c.dailyRate) > 0 ? round2(Number(c.dailyRate)) : 0,
+                daysRemaining: c.daysRemaining != null && Number.isFinite(Number(c.daysRemaining)) ? Number(c.daysRemaining) : null,
+                suggestedOrderQty: qty,
+            });
+        });
+
+        if (!clean.length) {
+            return {
+                subject: 'Toplu Sarf Malzeme Tedariği',
+                description: '',
+                priority: 'Hızlı',
+                items: [],
+                consolidated: true,
+                itemCount: 0,
+                truncatedCount: 0,
+                totalSuggestedQty: 0,
+                includedKeys: [],
+                includedNames: [],
+            };
+        }
+
+        const count = clean.length;
+        const totalSuggestedQty = clean.reduce((sum, c) => sum + c.suggestedOrderQty, 0);
+        const hasDemirbas = clean.some(c => c.isDemirbas);
+        const baseTitle = hasDemirbas
+            ? `Toplu Envanter / Sarf Tedariği (${count} Kalem)`
+            : `Toplu Sarf Malzeme İhtiyacı (${count} Kalem)`;
+
+        const previewNames = clean.slice(0, 3).map(c => c.name).join(', ');
+        const subject = clipText(
+            count === 1
+                ? `${baseTitle}: ${clean[0].name}`
+                : `${baseTitle}: ${previewNames}${count > 3 ? ' vb.' : ''}`,
+            MAX_SUBJECT_LEN
+        );
+
+        const urgent = clean.some(c => c.currentStock === 0 || (c.daysRemaining != null && c.daysRemaining <= 7));
+        const priority = urgent ? 'Acil' : 'Hızlı';
+
+        const singleItem = {
+            description: clipText(baseTitle, MAX_LINE_DESC_LEN),
+            category: clipText(text(opts.category) || (hasDemirbas ? 'Toplu Tedarik' : 'Sarf Malzeme'), MAX_LINE_CAT_LEN),
+            quantity: 1,
+            unit: 'Adet',
+            unitPrice: '',
+            currency: 'TRY',
+            taxRate: 0,
+        };
+
+        const header = `Toplu EBYS Tedarik Listesi (${count} Kalem · Toplam Önerilen: ${totalSuggestedQty} Adet):`;
+        const lines = [header];
+        let totalLen = header.length;
+        let omitted = 0;
+
+        for (let i = 0; i < clean.length; i++) {
+            const c = clean[i];
+            const meta = [`Mevcut: ${c.currentStock}`];
+            if (c.limit != null) meta.push(`Limit: ${c.limit}`);
+            if (c.dailyRate > 0) meta.push(`Hız: ${c.dailyRate}/gün`);
+            if (c.daysRemaining === 0) meta.push('Stok tükendi');
+            else if (c.daysRemaining != null) meta.push(`Tahmini ~${c.daysRemaining} gün`);
+            meta.push(`Önerilen: ${c.suggestedOrderQty} Adet`);
+            const line = `${i + 1}. ${c.name} [${c.category}] — ${meta.join(' · ')}`;
+            if (totalLen + line.length + 1 > MAX_CONSOLIDATED_DESC_LEN) {
+                omitted = clean.length - i;
+                break;
+            }
+            lines.push(line);
+            totalLen += line.length + 1;
+        }
+        if (omitted > 0) lines.push(`… ve ${omitted} kalem daha.`);
+
+        return {
+            subject,
+            description: lines.join('\n'),
+            priority,
+            items: [singleItem],
+            consolidated: true,
+            itemCount: count,
+            truncatedCount: 0,
+            totalSuggestedQty,
+            includedKeys: clean.map(c => c.key),
+            includedNames: clean.map(c => c.name),
+        };
+    }
+
+    function extractRecordTs(rec) {
+        if (!rec || typeof rec !== 'object') return 0;
+        const candidates = [rec.updatedAt, rec.createdAt, rec.ts, rec.tarih, rec.date, rec.id];
+        for (const v of candidates) {
+            if (v == null || v === '') continue;
+            if (typeof v === 'number' && Number.isFinite(v) && v >= 1e11) return v;
+            if (typeof v === 'object') {
+                if (typeof v.toMillis === 'function') {
+                    const ms = v.toMillis();
+                    if (Number.isFinite(ms) && ms > 0) return ms;
+                }
+                if (Number.isFinite(v.seconds)) return v.seconds * 1000;
+            }
+            const parsed = parseDateMs(v);
+            if (parsed > 0) return parsed;
+        }
+        return 0;
+    }
+
+    function resolvePurchaseOrderStatus(po) {
+        if (!po || typeof po !== 'object') return null;
+        const rawStatus = text(po.durum || po.status);
+        const normStatus = normKey(rawStatus);
+        if (normStatus && CLOSED_PO_RE.test(normStatus)) return null;
+
+        const wf = po.workflow;
+        const wfState = normKey(wf && wf.currentState);
+        if (wf && (wf.finished === true || wfState === 'completed' || wfState === 'cancelled' || wfState === 'canceled')) {
+            return null;
+        }
+        if (wf && Array.isArray(wf.steps) && wf.steps.length > 0 && wf.steps.every(s => normKey(s && s.status) === 'approved')) {
+            return null;
+        }
+
+        if (po.engineVersion === 'ebys-v1') return 'EBYS Sürecinde';
+        if (wfState === 'suspended') return 'Askıda';
+        if (wf && wf.started === true) return 'Onayda';
+        if (normStatus === 'taslak' || normStatus === 'draft') return 'Taslak';
+        if (normStatus.includes('inceleme')) return 'İncelemede';
+        if (normStatus.includes('dondurul')) return 'Donduruldu';
+        if (rawStatus) return rawStatus;
+        return 'Onay Bekliyor';
+    }
+
+    function isPurchaseEbysDoc(doc) {
+        if (!doc || typeof doc !== 'object') return false;
+        const meta = doc.metadata || doc.metadataSnapshot || {};
+        return Boolean(
+            doc.purchaseOrderId ||
+            doc.isPurchase === true ||
+            doc.documentTypeCode === 'PURCHASE_REQUEST' ||
+            doc.filePlanCode === 'PURCHASE_REQUEST' ||
+            meta.filePlanCode === 'PURCHASE_REQUEST' ||
+            doc.purchaseSnapshot
+        );
+    }
+
+    function resolveEbysDocStatus(doc) {
+        const rawState = text(doc.state || doc.status || doc.durum);
+        const st = normKey(rawState);
+        const openMap = {
+            draft: 'Taslak',
+            taslak: 'Taslak',
+            registered: 'Kayıtlı',
+            'kayıtlı': 'Kayıtlı',
+            in_review: 'Onay Sürecinde',
+            donduruldu: 'Onay Sürecinde',
+            internally_approved: 'Onaylandı (İcra)',
+            pending_execution: 'İcra Bekliyor',
+            returned: 'İade · Revizyon',
+        };
+        if (openMap[st]) return { closed: false, label: openMap[st] };
+        if (CLOSED_EBYS_STATES.includes(st) || (st && CLOSED_PO_RE.test(st))) {
+            return { closed: true, label: null };
+        }
+        return { closed: false, label: text(doc.statusLabel) || rawState || 'EBYS Sürecinde' };
+    }
+
+    function addCandidateProductKey(raw, keySet) {
+        const s = text(raw);
+        if (!s || GENERIC_BULK_LINE_RE.test(s)) return;
+        const k = normalizeProductKey(s);
+        if (k && k.length >= 2 && !GENERIC_BULK_LINE_RE.test(k)) keySet.add(k);
+    }
+
+    function extractStructuredKeys(rec, keySet) {
+        if (!rec || typeof rec !== 'object') return;
+        const meta = rec.metadata || rec.metadataSnapshot || {};
+        const snap = rec.purchaseSnapshot || {};
+
+        // 1) Kalem listesi (items[].description)
+        const itemLists = [rec.items, snap.items].filter(Array.isArray);
+        itemLists.forEach(list => {
+            list.forEach(line => {
+                if (!line) return;
+                const d = typeof line === 'string' ? line : (line.description || line.name || line['ürün'] || line.urun);
+                addCandidateProductKey(d, keySet);
+            });
+        });
+
+        // 2) Önceden çözümlenmiş toplu ad/anahtar listeleri
+        if (Array.isArray(rec.includedNames)) rec.includedNames.forEach(n => addCandidateProductKey(n, keySet));
+        if (Array.isArray(rec.includedKeys)) rec.includedKeys.forEach(k => { const nk = normKey(k); if (nk.length >= 2) keySet.add(nk); });
+
+        // 3) Konu / Ürün başlığı
+        const titles = [rec.urun, rec['ürün'], rec.subject, meta.subject];
+        titles.forEach(rawTitle => {
+            const t = text(rawTitle);
+            if (!t) return;
+            const stripped = t.replace(SUBJECT_PREFIX_RE, '').trim();
+            if (stripped && stripped !== t) {
+                stripped.replace(/\s+vb\.?$/i, '').split(/\s*[,;]\s*/).forEach(part => addCandidateProductKey(part, keySet));
+            } else {
+                addCandidateProductKey(t, keySet);
+            }
+        });
+
+        // 4) Açıklama / EBYS gövdesindeki yapılandırılmış madde satırları (- Ürün: ... veya 1. Ürün [...] — ...)
+        const bodies = [rec.aciklama, rec['açıklama'], rec.description, rec.content];
+        bodies.forEach(body => {
+            const b = text(body);
+            if (!b) return;
+            b.split(/\r?\n/).forEach(line => {
+                const m = line.match(/^\s*(?:[-•*]|\d+[.)])\s+([^:\n—–\[]+?)(?:\s*\[[^\]]+\])?\s*(?:—|–|:|$)/);
+                if (m && m[1]) addCandidateProductKey(m[1], keySet);
+            });
+        });
+    }
+
+    function buildEntryHaystack(rec) {
+        const meta = rec.metadata || rec.metadataSnapshot || {};
+        const snap = rec.purchaseSnapshot || {};
+        const itemDesc = [...(Array.isArray(rec.items) ? rec.items : []), ...(Array.isArray(snap.items) ? snap.items : [])]
+            .map(x => (typeof x === 'string' ? x : text(x && (x.description || x.name || x.urun || x['ürün']))))
+            .filter(Boolean)
+            .join('\n');
+        return normKey([
+            rec.urun, rec['ürün'], rec.subject, meta.subject,
+            itemDesc,
+            rec.aciklama, rec['açıklama'], rec.description, rec.content,
+            Array.isArray(rec.includedNames) ? rec.includedNames.join('\n') : '',
+        ].filter(Boolean).join('\n'));
+    }
+
+    function isWordChar(ch) {
+        return Boolean(ch) && /[\p{L}\p{N}]/u.test(ch);
+    }
+
+    function hasBoundaryMatch(haystack, needle) {
+        if (!haystack || !needle || needle.length < 3) return false;
+        let idx = haystack.indexOf(needle);
+        while (idx !== -1) {
+            const before = idx > 0 ? haystack[idx - 1] : '';
+            const after = idx + needle.length < haystack.length ? haystack[idx + needle.length] : '';
+            if (!isWordChar(before) && !isWordChar(after)) return true;
+            idx = haystack.indexOf(needle, idx + 1);
+        }
+        return false;
+    }
+
+    // [WHY]: v3.8 Hotfix HF-1 — Yönetici bir sarf/stok kalemi için hâlihazırda açık satın alma/EBYS talebi olup
+    //        olmadığını sıfır ek Firestore okumasıyla radar ekranında görmek ister (çift sipariş önleme).
+    // [HOW]: Mevcut purchaseOrders ve ebysDocuments kayıtlarından kapalı/iptal/reddedilmiş olanları eler, belge ID'siyle
+    //        tekilleştirir, konu/kalem/açıklama satırlarından normalize ürün anahtarları çıkarır ve sınır-güvenli eşler.
+    function indexActivePurchaseRequests(purchaseOrders = [], ebysDocuments = []) {
+        const closedEbysIds = new Set();
+        const ebysActiveById = new Map();
+
+        toList(ebysDocuments).forEach(doc => {
+            if (!isPurchaseEbysDoc(doc)) return;
+            const id = text(doc.id || doc.purchaseOrderId || doc.ebysDocumentId);
+            const st = resolveEbysDocStatus(doc);
+            if (st.closed) {
+                if (id) closedEbysIds.add(id);
+                return;
+            }
+            const meta = doc.metadata || doc.metadataSnapshot || {};
+            const keySet = new Set();
+            extractStructuredKeys(doc, keySet);
+            const entry = {
+                id: id || `ebys-${ebysActiveById.size + 1}`,
+                ref: text(doc.registrationNo || doc.evrakNo || (id ? `EBYS · ${id.slice(0, 8)}` : '')),
+                title: text(doc.subject || meta.subject || doc.urun || doc['ürün']) || 'EBYS Satın Alma Talebi',
+                status: st.label,
+                ts: extractRecordTs(doc),
+                keys: [...keySet],
+                haystack: buildEntryHaystack(doc),
+            };
+            ebysActiveById.set(entry.id, entry);
+        });
+
+        const entries = [];
+        const usedIds = new Set();
+
+        toList(purchaseOrders).forEach((po, idx) => {
+            if (!po || typeof po !== 'object') return;
+            const id = text(po.ebysDocumentId || po.id) || `po-${idx + 1}`;
+            if (po.engineVersion === 'ebys-v1' && closedEbysIds.has(id)) return;
+
+            const status = resolvePurchaseOrderStatus(po);
+            if (!status) return;
+
+            const ebysMatch = ebysActiveById.get(id);
+            const keySet = new Set(ebysMatch ? ebysMatch.keys : []);
+            extractStructuredKeys(po, keySet);
+            const poHaystack = buildEntryHaystack(po);
+            const haystack = ebysMatch
+                ? [ebysMatch.haystack, poHaystack].filter(Boolean).join('\n')
+                : poHaystack;
+            const ts = Math.max(extractRecordTs(po), ebysMatch ? ebysMatch.ts : 0);
+            const title = (ebysMatch && ebysMatch.title !== 'EBYS Satın Alma Talebi' ? ebysMatch.title : '')
+                || text(po.urun || po['ürün'] || po.subject)
+                || (ebysMatch ? ebysMatch.title : 'Satın Alma Talebi');
+            const ref = text(po.evrakNo) || (ebysMatch ? ebysMatch.ref : '') || id;
+
+            entries.push({
+                id,
+                ref,
+                title,
+                status: ebysMatch ? ebysMatch.status : status,
+                ts,
+                keys: [...keySet],
+                haystack,
+            });
+            usedIds.add(id);
+        });
+
+        ebysActiveById.forEach((entry, id) => {
+            if (!usedIds.has(id)) entries.push(entry);
+        });
+
+        entries.sort((a, b) => (b.ts - a.ts) || a.id.localeCompare(b.id));
+
+        const byKey = {};
+        entries.forEach(entry => {
+            entry.keys.forEach(k => {
+                if (!byKey[k]) {
+                    byKey[k] = {
+                        count: 1,
+                        latestTitle: entry.title,
+                        latestStatus: entry.status,
+                        latestDocId: entry.id,
+                        latestRef: entry.ref,
+                        latestTs: entry.ts,
+                    };
+                } else {
+                    byKey[k].count += 1;
+                    if (entry.ts > byKey[k].latestTs) {
+                        byKey[k].latestTitle = entry.title;
+                        byKey[k].latestStatus = entry.status;
+                        byKey[k].latestDocId = entry.id;
+                        byKey[k].latestRef = entry.ref;
+                        byKey[k].latestTs = entry.ts;
+                    }
+                }
+            });
+        });
+
+        const index = {
+            totalActive: entries.length,
+            byKey,
+            entries,
+            match(nameOrKey) {
+                return matchActivePurchaseRequest(index, nameOrKey);
+            },
+        };
+        return index;
+    }
+
+    function matchActivePurchaseRequest(index, productName) {
+        if (!index || !Array.isArray(index.entries) || !index.entries.length) return null;
+        const target = normalizeProductKey(productName) || normKey(productName);
+        if (!target) return null;
+
+        let count = 0;
+        let latest = null;
+        for (let i = 0; i < index.entries.length; i++) {
+            const e = index.entries[i];
+            const hit = (Array.isArray(e.keys) && e.keys.includes(target)) || hasBoundaryMatch(e.haystack, target);
+            if (!hit) continue;
+            count += 1;
+            if (!latest || e.ts > latest.ts) latest = e;
+        }
+        if (!count || !latest) return null;
+        return {
+            count,
+            latestTitle: latest.title,
+            latestStatus: latest.status,
+            latestDocId: latest.id,
+            latestRef: latest.ref,
+        };
+    }
+
     const api = Object.freeze({
         WINDOWS,
         DEFAULT_WINDOW_DAYS,
@@ -511,9 +939,13 @@
         WARNING_DAYS,
         MAX_PURCHASE_ITEMS,
         cleanProductName,
+        normalizeProductKey,
         analyzeBurnRate,
         buildCriticalOrderCandidates,
         buildPurchasePrefillPayload,
+        buildConsolidatedPurchasePrefill,
+        indexActivePurchaseRequests,
+        matchActivePurchaseRequest,
     });
 
     if (typeof window !== 'undefined') {

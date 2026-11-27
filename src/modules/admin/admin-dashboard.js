@@ -363,6 +363,20 @@ window.renderAdminRequestTable = function () {
 // [WHY]: "Bekleyen Envanter Talepleri" Talep Ve Süreçler sekmesine taşınınca Operasyon Merkezi'nde
 //        açılan alana, son çıkış hareketlerini özetleyen hafif bir masa eklendi (B3 hareket defterinden).
 // [HOW]: Index tasarım diline uygun olarak tarih/personel ikonları ve .p-badge adet rozetiyle listeler.
+// [WHY]: v3.8 Hotfix HF-1 — Hızlı Çıkış Masası'nda tarih + saat tek uzun satırda hücre sınırını zorluyordu.
+// [HOW]: TR (GG.AA.YYYY SS:DD[:SN]) veya ISO (YYYY-AA-GG[T ]SS:DD[:SN]) metnini iki kompakt parçaya böler.
+function splitQuickExitDateTime(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return { date: '-', time: '' };
+    let m = s.match(/^(\d{1,2}\.\d{1,2}\.\d{4})[\s,]+(\d{1,2}:\d{2})(?::\d{2})?/);
+    if (m) return { date: m[1], time: m[2] };
+    m = s.match(/^(\d{4}-\d{2}-\d{2})[T\s]+(\d{1,2}:\d{2})(?::\d{2})?/);
+    if (m) return { date: m[1], time: m[2] };
+    const parts = s.split(/[\s,]+/).filter(Boolean);
+    if (parts.length >= 2) return { date: parts[0], time: parts[1].replace(/^(\d{1,2}:\d{2}):\d{2}$/, '$1') };
+    return { date: s, time: '' };
+}
+
 window.renderQuickExitDesk = function () {
     const tableBody = document.getElementById('quickExitDeskBody');
     if (!tableBody) return;
@@ -378,10 +392,15 @@ window.renderQuickExitDesk = function () {
         return;
     }
 
-    tableBody.innerHTML = entries.map(n => `
+    tableBody.innerHTML = entries.map(n => {
+        const dt = splitQuickExitDateTime(n.tarih);
+        return `
         <tr style="border-bottom: 1px solid var(--color-border-light); transition: background 0.15s ease;">
-            <td style="padding: 11px 16px; font-size: 12.5px; white-space: nowrap; color: var(--color-text-muted);">
-                <i class="far fa-calendar-alt me-1 text-primary" style="opacity: 0.7;"></i>${esc(n.tarih || '-')}
+            <td style="padding: 10px 14px; color: var(--color-text-muted);">
+                <div class="qe-dt">
+                    <span class="qe-date"><i class="far fa-calendar-alt me-1 text-primary" style="opacity: 0.7;" aria-hidden="true"></i>${esc(dt.date)}</span>
+                    ${dt.time ? `<small class="qe-time">${esc(dt.time)}</small>` : ''}
+                </div>
             </td>
             <td style="padding: 11px 16px; font-size: 13px; font-weight: 600; color: var(--color-text);">
                 <i class="far fa-user me-1 text-muted" style="font-size: 11px;"></i>${esc(n.alanKisi || '-')}
@@ -395,7 +414,8 @@ window.renderQuickExitDesk = function () {
                 </span>
             </td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
 };
 
 // [WHY]: Envanter çıkış modalı (#exitModal, ui-components.js) yalnız index.html'de var; admin panelinde
@@ -415,6 +435,30 @@ window.openBulkExitComingSoon = function () {
         alert('Toplu Çıkış / Sepet özelliği yakında eklenecektir.');
     }
 };
+
+// [WHY]: v3.8 Hotfix HF-1 — Servis Takip sekmesinden, sevk modülüyle (ui-components.js) aynı stok/durum
+//        sözleşmesine sahip doğrudan "Servise Kaydı Aç" akışı planlandı. UI düğmesi (HF-3) şimdiden hazır
+//        olduğu için gelecek modülün giriş noktası ve namespace köprüsü (Anayasa §2) burada tanımlanır.
+// [HOW]: Gelecek sürümde B1/B2 cihaz seçici (SN/Envanter No), servis hedefi ve arıza notu ile atomik
+//        servis kaydı + durum 'Serviste' güncellemesi bu kancaya bağlanacaktır; şimdilik bilgi uyarısı verir.
+window.openDirectServiceRecordModal = function () {
+    const msg = '🛠️ Doğrudan Servis Kaydı Açma modülü (sevk akışıyla eşdeğer) planlandı ve yakında burada aktif olacak.';
+    if (typeof window.showAppAlert === 'function') {
+        window.showAppAlert(msg, 'info');
+    } else {
+        alert(msg);
+    }
+};
+window.AppModules = window.AppModules || {};
+window.AppModules.DirectServiceIntake = Object.freeze({
+    open: window.openDirectServiceRecordModal,
+    planned: true,
+});
+document.addEventListener('click', (e) => {
+    const trigger = e.target && e.target.closest ? e.target.closest('[data-action="openDirectServiceRecord"]') : null;
+    if (!trigger || trigger.hasAttribute('onclick')) return;
+    window.openDirectServiceRecordModal();
+});
 
 // 3. FİREBASE DİNLEYİCİSİ
 // Hem envanteri hem de çıkışları/talepleri dinlemek için döngüye alıyoruz
@@ -2142,7 +2186,10 @@ const BENTO_TABLE_SELECTORS = [
     '#adminPendingRequestsBody', '#adminReturnRequestsBody', '#serviceTableBody',
     '#templateTableBody', '#locationTableBody', '#adminDefProductTypeTableBody',
     '#adminDefUnitTableBody', '#adminDefTemplateTableBody', '#ebysDocumentTypesBody',
+    '#ebysFilePlanPanel table', '#ebysTemplatePanel table', '#invTableBody', '#purchaseTableBody',
 ];
+// Dinamik olarak içine <table> basılan kapsayıcılar (EBYS Katalog/Şablon & Zimmet tablosu · HF-1/HF-3)
+const BENTO_DYNAMIC_HOSTS = ['#ebysFilePlanPanel', '#ebysTemplatePanel', '#inventoryManagementTab'];
 // Kart başlığı olacak sütun (ilk eşleşen); eşleşme yoksa ilk uygun hücre başlık olur.
 const BENTO_TITLE_LABEL = /^(model|ürün|cihaz|evrak|kayıt|belge|şablon|tür adı|birim|ad soyad|mahal)/i;
 
@@ -2194,26 +2241,47 @@ function enhanceBentoTable(table) {
     });
 }
 
-function initAdminBentoTables() {
+// [WHY]: v3.8 Hotfix HF-1/HF-3 — EBYS Katalog/Şablon ve Zimmet tabloları DOM'a dinamik olarak eklendiği için
+//        enhanceAdminBentoTables tekrar çağrıldığında mükerrer MutationObserver yaratmamalı ve yeni tabloları yakalamalıdır.
+// [HOW]: Her tablo __bentoObserved bayrağıyla bir kez izlenir; dinamik kapsayıcılar (__bentoHostObserved) yeni
+//        <table> eklenince requestAnimationFrame ile bu işlevi yeniden tetikler.
+function enhanceAdminBentoTables() {
     const tables = new Set();
     BENTO_TABLE_SELECTORS.forEach(selector => document.querySelectorAll(selector).forEach(node => {
         const table = node.closest('table');
         if (table) tables.add(table);
     }));
     tables.forEach(table => {
-        let queued = false;
-        const run = () => { queued = false; enhanceBentoTable(table); };
-        new MutationObserver(() => {
-            if (queued) return;
-            queued = true;
-            requestAnimationFrame(run);
-        }).observe(table, { childList: true, subtree: true });
+        if (!table.__bentoObserved) {
+            table.__bentoObserved = true;
+            let queued = false;
+            const run = () => { queued = false; enhanceBentoTable(table); };
+            new MutationObserver(() => {
+                if (queued) return;
+                queued = true;
+                requestAnimationFrame(run);
+            }).observe(table, { childList: true, subtree: true });
+        }
         enhanceBentoTable(table);
     });
+    BENTO_DYNAMIC_HOSTS.forEach(hostSel => {
+        const host = document.querySelector(hostSel);
+        if (!host || host.__bentoHostObserved) return;
+        host.__bentoHostObserved = true;
+        let hostQueued = false;
+        new MutationObserver(() => {
+            if (hostQueued) return;
+            hostQueued = true;
+            requestAnimationFrame(() => {
+                hostQueued = false;
+                enhanceAdminBentoTables();
+            });
+        }).observe(host, { childList: true, subtree: true });
+    });
 }
-window.enhanceAdminBentoTables = initAdminBentoTables;
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAdminBentoTables, { once: true });
-else initAdminBentoTables();
+window.enhanceAdminBentoTables = enhanceAdminBentoTables;
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', enhanceAdminBentoTables, { once: true });
+else enhanceAdminBentoTables();
 
 // 🕒 ADMIN STATUS TIMER
 window.lastSyncTimestamp = Date.now();
@@ -2500,7 +2568,20 @@ window.renderLocationsTable = function () {
     let burnWindowDays = 30;
     let burnStatusFilter = 'all';
     let burnQuery = '';
+    let burnHideOpenRequests = false;
+    let critHideOpenRequests = false;
+    let prevBodyOverflow = '';
     const selectedCriticalKeys = new Set();
+    const selectedBurnKeys = new Set();
+
+    // [WHY]: v3.8 Hotfix HF-1 — #opsRadarModal admin.html içinde #dashboard-content (.admin-tab-content) altındadır;
+    //        tabFadeIn/transform üst öğesi position: fixed'i viewport yerine içerik akışına kilitliyordu.
+    // [HOW]: admin.html'e dokunmadan modalı çalışma zamanında doğrudan document.body altına taşır.
+    function ensureModalInBody(modal) {
+        if (modal && document.body && modal.parentElement !== document.body) {
+            document.body.appendChild(modal);
+        }
+    }
 
     function node(tag, cls, txt, attrs) {
         const n = document.createElement(tag);
@@ -2535,6 +2616,37 @@ window.renderLocationsTable = function () {
         if (!b || !d) return null;
         const br = readBurnRate(30);
         return b.buildCriticalOrderCandidates(br, { b1: d.b1, b2: d.b2, productTypes: d.productTypes });
+    }
+    // [WHY]: v3.8 Hotfix HF-1 — Sıfır ek Firestore okumasıyla açık satın alma/EBYS taleplerini radar satırlarıyla eşler.
+    // [HOW]: window.data.purchaseOrders + varsa window.data.ebysDocuments + canlı ebys-v1 işaretçisiyle doğrulanan
+    //        oturum EBYS önbelleği BurnRate.indexActivePurchaseRequests'e verilir.
+    function readActivePurchaseIndex() {
+        const b = BR(), d = window.data;
+        if (!b || !d || typeof b.indexActivePurchaseRequests !== 'function') return null;
+        const orders = Array.isArray(d.purchaseOrders) ? d.purchaseOrders : Object.values(d.purchaseOrders || {});
+        const liveEbysIds = new Set(
+            orders
+                .filter(p => p && p.engineVersion === 'ebys-v1')
+                .map(p => String(p.ebysDocumentId || p.id || ''))
+                .filter(Boolean)
+        );
+        const cached = (window.AppModules?.EBYSPurchaseUI?.getCachedSubmittedPurchases?.() || [])
+            .filter(entry => entry && liveEbysIds.has(String(entry.id || entry.purchaseOrderId || '')));
+        const ebysDocs = [
+            ...(Array.isArray(d.ebysDocuments) ? d.ebysDocuments : Object.values(d.ebysDocuments || {})),
+            ...cached,
+        ];
+        return b.indexActivePurchaseRequests(orders, ebysDocs);
+    }
+    function openReqBadge(reqInfo) {
+        if (!reqInfo) return null;
+        const label = reqInfo.count > 1
+            ? `⏳ ${reqInfo.count} Açık Talep · ${reqInfo.latestStatus}`
+            : `⏳ Talebi Açık · ${reqInfo.latestStatus}`;
+        const pill = badge(label, 'ok');
+        const refPart = reqInfo.latestRef ? ` (${reqInfo.latestRef})` : '';
+        pill.setAttribute('title', `Açık satın alma/EBYS talebi: ${reqInfo.latestTitle}${refPart}`);
+        return pill;
     }
 
     // ── Kart rozetleri ──
@@ -2695,19 +2807,36 @@ window.renderLocationsTable = function () {
     const TREND_LABEL = { accelerating: 'Hızlanıyor ↗', steady: 'Sabit →', slowing: 'Yavaşlıyor ↘', insufficient: 'Yetersiz veri' };
     const CONF_LABEL = { high: 'Yüksek', medium: 'Orta', low: 'Düşük', insufficient: '—' };
 
-    // [WHY]: VP-2 — Sarf malzemelerin günlük tüketim hızını (30/60/90 gün EWMA) ve tahmini tükenme gününü
-    //        güvenli DOM düğümleriyle sunar; yetersiz veride uydurma gün göstermez.
-    // [HOW]: Pencere/filtre değişiminde yalnızca modal gövdesi yeniden çizilir; her kalemden EBYS ön-doldurmaya geçilebilir.
+    // [WHY]: VP-2 + Hotfix HF-1 — Sarf malzemelerin günlük tüketim hızını (30/60/90g EWMA), açık EBYS taleplerini
+    //        ve sınırsız çoklu seçimle tek-kalem/ayrı-kalem EBYS aktarımını güvenli DOM düğümleriyle sunar.
+    // [HOW]: Pencere/filtre değişiminde yalnız modal gövdesi yenilenir; 1..3 seçimde ayrı kalem, 1..N seçimde
+    //        tek birleştirilmiş kalemle EBYS formu ön-doldurulur (otomatik submit yapılmaz).
     function buildBurnRate(body, actions) {
         const s = readBurnRate(burnWindowDays);
         if (!s) { body.append(emptyNote('Tüketim tahminleme motoru henüz yüklenmedi.')); return; }
+
+        const maxItems = window.AppModules?.PurchaseMoney?.MAX_ITEMS || (BR()?.MAX_PURCHASE_ITEMS || 3);
+        const validKeys = new Set(s.items.map(x => x.key));
+        [...selectedBurnKeys].forEach(k => { if (!validKeys.has(k)) selectedBurnKeys.delete(k); });
+
+        const reqIdx = readActivePurchaseIndex();
+        const reqMap = new Map();
+        let openReqTotal = 0;
+        s.items.forEach(item => {
+            const hit = reqIdx ? reqIdx.match(item.name) : null;
+            if (hit) { reqMap.set(item.key, hit); openReqTotal += 1; }
+        });
+        if (!openReqTotal) burnHideOpenRequests = false;
 
         const chips = node('div', 'ops-radar-chips');
         chips.append(
             chip('≤14 Gün Kritik', s.counts.critical, s.counts.critical ? 'danger' : 'ok'),
             chip('≤30 Gün Uyarı', s.counts.warning, s.counts.warning ? 'warn' : ''),
             chip('Güvende (>30g)', s.counts.safe, 'ok'),
-            chip('Yetersiz Veri', s.counts.insufficient)
+            openReqTotal > 0
+                ? chip('Açık Talepli', openReqTotal, 'ok')
+                : chip('Yetersiz Veri', s.counts.insufficient),
+            chip('Seçili Kalem', `${selectedBurnKeys.size} kalem`, selectedBurnKeys.size ? 'warn' : '')
         );
         body.append(chips);
 
@@ -2730,25 +2859,53 @@ window.renderLocationsTable = function () {
             filterGroup.append(b);
         });
 
+        toolbar.append(winGroup, filterGroup);
+        if (openReqTotal > 0) {
+            const openWrap = node('div', 'ops-radar-seg', null, { role: 'group', 'aria-label': 'Açık talep filtresi' });
+            openWrap.append(node(
+                'button',
+                'ops-radar-seg-btn' + (burnHideOpenRequests ? ' is-active' : ''),
+                burnHideOpenRequests ? `Açık Talepliler Gizli (${openReqTotal})` : `Açık Taleplileri Gizle (${openReqTotal})`,
+                { type: 'button', 'data-action': 'radar-br-toggle-open', 'aria-pressed': String(burnHideOpenRequests) }
+            ));
+            toolbar.append(openWrap);
+        }
+
         const search = node('input', 'ops-radar-search', null, {
             type: 'search', placeholder: 'Sarf malzeme ara…', 'aria-label': 'Sarf malzeme ara',
             value: burnQuery, 'data-br-search': '1',
         });
         search.value = burnQuery;
-        toolbar.append(winGroup, filterGroup, search);
+        toolbar.append(search);
         body.append(toolbar);
+
+        body.append(node('p', 'ops-radar-note', `İstediğiniz kadar kalem seçebilirsiniz: 1–${maxItems} kalemi ayrı satırlarda veya tüm seçili kalemleri (sınırsız) tek birleştirilmiş EBYS kaleminde ayrıntılı dökümüyle aktarabilirsiniz. Form siz onaylamadan kaydedilmez.`));
+
+        const selectedOpenCount = [...selectedBurnKeys].filter(k => reqMap.has(k)).length;
+        if (selectedOpenCount > 0) {
+            body.append(node('p', 'ops-radar-note', `⏳ Bilgi: Seçili ${selectedOpenCount} kalem için hâlihazırda açık satın alma/EBYS talebi bulunuyor. Çift sipariş açmamaya dikkat edin; dilerseniz yine de talep oluşturabilirsiniz.`));
+        }
 
         const q = burnQuery.trim().toLocaleLowerCase('tr-TR');
         const filtered = s.items.filter(item => {
             if (burnStatusFilter !== 'all' && item.status !== burnStatusFilter) return false;
+            if (burnHideOpenRequests && reqMap.has(item.key)) return false;
             if (q && !item.name.toLocaleLowerCase('tr-TR').includes(q) && !item.category.toLocaleLowerCase('tr-TR').includes(q)) return false;
             return true;
         });
 
         body.append(section(`Sarf tüketim tahminleri (${burnWindowDays} günlük pencere)`, filtered.length, s.counts.critical ? 'danger' : ''));
         if (filtered.length) {
-            body.append(table(['Sarf Malzeme', 'Mevcut Stok', 'Tüketim Hızı', 'Tahmini Tükenme', 'İşlem'], filtered.map(item => {
-                const tr = node('tr');
+            body.append(table(['Seç', 'Sarf Malzeme', 'Mevcut Stok', 'Tüketim Hızı', 'Tahmini Tükenme', 'İşlem'], filtered.map(item => {
+                const checked = selectedBurnKeys.has(item.key);
+                const tr = node('tr', checked ? 'is-selected' : '');
+
+                const cb = node('input', 'ops-radar-check', null, {
+                    type: 'checkbox', 'data-burn-key': item.key,
+                    'aria-label': `${item.name} sarf kalemini toplu EBYS talebine seç`,
+                });
+                cb.checked = checked;
+
                 const title = node('div');
                 title.append(node('strong', null, item.name));
                 const subParts = [item.category, item.depots.length ? item.depots.join('/') : 'Depo kaydı yok'];
@@ -2779,6 +2936,8 @@ window.renderLocationsTable = function () {
                 } else {
                     statusWrap.append(badge(`~${item.daysRemaining} gün güvende`, 'ok'));
                 }
+                const openReq = reqMap.get(item.key);
+                if (openReq) statusWrap.append(openReqBadge(openReq));
                 if (item.status !== 'insufficient') {
                     statusWrap.append(node('span', 'ops-radar-sub', `Güven: ${CONF_LABEL[item.confidence]}`));
                 }
@@ -2788,6 +2947,7 @@ window.renderLocationsTable = function () {
                 act.append(actionBtn(`EBYS Aktar (${qtyHint})`, 'fa-shopping-cart', 'radar-ebys-one', { source: 'burn', key: item.key }));
 
                 tr.append(
+                    cell('select', 'Seç', cb),
                     cell('title', 'Sarf Malzeme', title),
                     cell('meta', 'Mevcut Stok', stockCell),
                     cell('meta', 'Tüketim Hızı', rateCell),
@@ -2800,15 +2960,32 @@ window.renderLocationsTable = function () {
             body.append(emptyNote(s.items.length ? 'Seçili filtrede eşleşen sarf malzeme yok.' : 'Analiz edilecek sarf malzeme veya B3 tüketim kaydı bulunamadı.'));
         }
 
+        const selCount = selectedBurnKeys.size;
+        if (selCount >= 1 && selCount <= maxItems) {
+            actions.append(actionBtn(`📄 Ayrı Kalemlerle EBYS Talebi (${selCount}/${maxItems})`, 'fa-file-invoice', 'radar-ebys-separate', { source: 'burn' }));
+        }
+        const mergedBtn = actionBtn(`📦 Tamamını Tek Kalemde Birleştir & EBYS Talebi Aç (${selCount} Kalem)`, 'fa-boxes-stacked', 'radar-ebys-consolidated', { source: 'burn' });
+        mergedBtn.classList.add('ops-radar-btn-primary');
+        if (selCount === 0) mergedBtn.disabled = true;
+        actions.append(mergedBtn);
+
+        const urgentPool = s.items.filter(x => (x.status === 'critical' || x.status === 'warning') && !(burnHideOpenRequests && reqMap.has(x.key)));
+        if (urgentPool.length > 0) {
+            actions.append(actionBtn(`Tüm Kritik/Uyarıları Tek Kalemde Aktar (${urgentPool.length})`, 'fa-bolt', 'radar-ebys-all-urgent', { source: 'burn' }));
+        }
+        if (selCount > 0) {
+            actions.append(actionBtn('Seçimi Temizle', 'fa-eraser', 'radar-br-clear'));
+        }
         actions.append(
             actionBtn('Kritik Sipariş İhtiyacına Geç', 'fa-triangle-exclamation', 'radar-switch', { radar: 'critical_stock' }),
             actionBtn('Satın Alma Sekmesine Git', 'fa-arrow-right', 'radar-go-service')
         );
     }
 
-    // [WHY]: VP-2 — Minimum stok altı ve ≤14 günde tükenecek kalemlerden tekil veya en fazla 3 kalemlik toplu EBYS
-    //        satın alma talebini ön-doldurarak yönetici onayına sunar.
-    // [HOW]: PurchaseMoney.MAX_ITEMS (3) seçici sınırı zorlanır; otomatik submit yapılmaz.
+    // [WHY]: VP-2 + Hotfix HF-1 — Minimum stok altı ve ≤14 günde tükenecek kalemlerden 1–3 ayrı kalem veya
+    //        sınırsız sayıda tek-kalem toplu EBYS satın alma talebi ön-doldurur; açık talepleri görünür kılar.
+    // [HOW]: 3 kalem checkbox kilidi kaldırılmıştır; 1..3 seçimde ayrı kalem, 1..N seçimde birleştirilmiş tek
+    //        kalem aksiyonu sunulur. Otomatik submit yapılmaz.
     function buildCriticalStock(body, actions) {
         const c = readCriticalOrders();
         if (!c) { body.append(emptyNote('Kritik sipariş analizi henüz yüklenmedi.')); return; }
@@ -2817,30 +2994,58 @@ window.renderLocationsTable = function () {
         const validKeys = new Set(c.items.map(x => x.key));
         [...selectedCriticalKeys].forEach(k => { if (!validKeys.has(k)) selectedCriticalKeys.delete(k); });
 
+        const reqIdx = readActivePurchaseIndex();
+        const reqMap = new Map();
+        let openReqTotal = 0;
+        c.items.forEach(item => {
+            const hit = reqIdx ? reqIdx.match(item.name) : null;
+            if (hit) { reqMap.set(item.key, hit); openReqTotal += 1; }
+        });
+        if (!openReqTotal) critHideOpenRequests = false;
+
         const chips = node('div', 'ops-radar-chips');
         chips.append(
             chip('Kritik Aday', c.counts.total, c.counts.total ? 'danger' : 'ok'),
             chip('Tükendi (0)', c.counts.outOfStock, c.counts.outOfStock ? 'danger' : 'ok'),
             chip('Proaktif ≤14 Gün', c.counts.burnOnly, c.counts.burnOnly ? 'warn' : ''),
-            chip(`EBYS Seçimi (Max ${maxItems})`, `${selectedCriticalKeys.size} / ${maxItems}`, selectedCriticalKeys.size ? 'warn' : '')
+            chip('Seçili Kalem', `${selectedCriticalKeys.size} kalem`, selectedCriticalKeys.size ? 'warn' : '')
         );
+        if (openReqTotal > 0) chips.append(chip('Açık Talepli', openReqTotal, 'ok'));
         body.append(chips);
 
-        body.append(node('p', 'ops-radar-note', `EBYS satın alma pilot kuralı gereği tek talepte en fazla ${maxItems} kalem aktarılabilir. Aktarım formu ön-doldurur; birim ve fiyatları girip siz onaylamadan kayıt oluşturulmaz.`));
+        if (openReqTotal > 0) {
+            const toolbar = node('div', 'ops-radar-toolbar');
+            const openWrap = node('div', 'ops-radar-seg', null, { role: 'group', 'aria-label': 'Açık talep filtresi' });
+            openWrap.append(node(
+                'button',
+                'ops-radar-seg-btn' + (critHideOpenRequests ? ' is-active' : ''),
+                critHideOpenRequests ? `Açık Talepliler Gizli (${openReqTotal})` : `Açık Taleplileri Gizle (${openReqTotal})`,
+                { type: 'button', 'data-action': 'radar-crit-toggle-open', 'aria-pressed': String(critHideOpenRequests) }
+            ));
+            toolbar.append(openWrap);
+            body.append(toolbar);
+        }
 
-        body.append(section('Sipariş önerilen kritik kalemler', c.items.length, c.items.length ? 'danger' : 'ok'));
-        if (c.items.length) {
-            body.append(table(['Seç', 'Ürün / Kategori', 'Stok / Limit', 'Durum', 'Öneri', 'İşlem'], c.items.map(item => {
-                const tr = node('tr', selectedCriticalKeys.has(item.key) ? 'is-selected' : '');
+        body.append(node('p', 'ops-radar-note', `1–${maxItems} kalemi ayrı satırlarda veya sınırsız sayıda seçili kalemi tek birleştirilmiş EBYS kaleminde (ayrıntılı dökümü Açıklama alanına eklenerek) aktarabilirsiniz. Form siz onaylamadan kaydedilmez.`));
+
+        const selectedOpenCount = [...selectedCriticalKeys].filter(k => reqMap.has(k)).length;
+        if (selectedOpenCount > 0) {
+            body.append(node('p', 'ops-radar-note', `⏳ Bilgi: Seçili ${selectedOpenCount} kalem için hâlihazırda açık satın alma/EBYS talebi bulunuyor. Dilerseniz yine de yeni talep açabilirsiniz.`));
+        }
+
+        const visibleItems = critHideOpenRequests ? c.items.filter(x => !reqMap.has(x.key)) : c.items;
+
+        body.append(section('Sipariş önerilen kritik kalemler', visibleItems.length, visibleItems.length ? 'danger' : 'ok'));
+        if (visibleItems.length) {
+            body.append(table(['Seç', 'Ürün / Kategori', 'Stok / Limit', 'Durum', 'Öneri', 'İşlem'], visibleItems.map(item => {
                 const checked = selectedCriticalKeys.has(item.key);
-                const limitReached = selectedCriticalKeys.size >= maxItems && !checked;
+                const tr = node('tr', checked ? 'is-selected' : '');
 
                 const cb = node('input', 'ops-radar-check', null, {
                     type: 'checkbox', 'data-crit-key': item.key,
                     'aria-label': `${item.name} kalemini EBYS talebine seç`,
                 });
                 cb.checked = checked;
-                cb.disabled = limitReached;
 
                 const title = node('div');
                 title.append(node('strong', null, item.name));
@@ -2851,6 +3056,11 @@ window.renderLocationsTable = function () {
                 stockCell.append(node('strong', null, `${item.currentStock} / ${item.limit}`));
                 if (item.dailyRate > 0) stockCell.append(node('div', 'ops-radar-sub', `${item.dailyRate}/gün`));
 
+                const statusWrap = node('div', 'ops-radar-stack');
+                statusWrap.append(badge(item.reason, item.severity));
+                const openReq = reqMap.get(item.key);
+                if (openReq) statusWrap.append(openReqBadge(openReq));
+
                 const act = node('div', 'action-buttons');
                 act.append(actionBtn('EBYS Satın Almaya Aktar', 'fa-shopping-cart', 'radar-ebys-one', { source: 'critical', key: item.key }));
 
@@ -2858,35 +3068,47 @@ window.renderLocationsTable = function () {
                     cell('select', 'Seç', cb),
                     cell('title', 'Ürün / Kategori', title),
                     cell('meta', 'Stok / Limit', stockCell),
-                    cell('status', 'Durum', badge(item.reason, item.severity)),
+                    cell('status', 'Durum', statusWrap),
                     cell('meta', 'Önerilen Sipariş', `${item.suggestedOrderQty} Adet`),
                     cell('actions', 'İşlem', act)
                 );
                 return tr;
             })));
         } else {
-            body.append(emptyNote('Minimum limit altında veya 14 gün içinde tükenecek kritik kalem bulunmuyor.'));
+            body.append(emptyNote(c.items.length ? 'Açık talebi olmayan başka kritik kalem kalmadı.' : 'Minimum limit altında veya 14 gün içinde tükenecek kritik kalem bulunmuyor.'));
         }
 
-        const bulkBtn = actionBtn(`Seçilenlerle EBYS Talebi Başlat (${selectedCriticalKeys.size}/${maxItems})`, 'fa-file-invoice', 'radar-ebys-bulk');
-        bulkBtn.classList.add('ops-radar-btn-primary');
-        if (selectedCriticalKeys.size === 0) bulkBtn.disabled = true;
-        actions.append(bulkBtn);
-
-        if (c.items.length > 0 && selectedCriticalKeys.size < Math.min(maxItems, c.items.length)) {
-            actions.append(actionBtn(`İlk ${Math.min(maxItems, c.items.length)} Acil Kalemi Seç`, 'fa-check-double', 'radar-crit-top'));
+        const selCount = selectedCriticalKeys.size;
+        if (selCount >= 1 && selCount <= maxItems) {
+            actions.append(actionBtn(`📄 Ayrı Kalemlerle EBYS Talebi (${selCount}/${maxItems})`, 'fa-file-invoice', 'radar-ebys-separate', { source: 'critical' }));
         }
-        if (selectedCriticalKeys.size > 0) {
+        const mergedBtn = actionBtn(`📦 Tamamını Tek Kalemde Birleştir & EBYS Talebi Aç (${selCount} Kalem)`, 'fa-boxes-stacked', 'radar-ebys-consolidated', { source: 'critical' });
+        mergedBtn.classList.add('ops-radar-btn-primary');
+        if (selCount === 0) mergedBtn.disabled = true;
+        actions.append(mergedBtn);
+
+        if (visibleItems.length > 0) {
+            actions.append(actionBtn(`Tüm Kritik Kalemleri Tek Kalemde Aktar (${visibleItems.length})`, 'fa-bolt', 'radar-ebys-all-urgent', { source: 'critical' }));
+        }
+        if (visibleItems.length > 0 && selCount < visibleItems.length) {
+            actions.append(actionBtn(`Tümünü Seç (${visibleItems.length})`, 'fa-check-double', 'radar-crit-all'));
+        }
+        if (selCount > 0) {
             actions.append(actionBtn('Seçimi Temizle', 'fa-eraser', 'radar-crit-clear'));
         }
         actions.append(actionBtn('Tüketim Tahminleme Motoru', 'fa-brain', 'radar-switch', { radar: 'ai_burn_rate' }));
     }
 
-    function launchEbysPrefill(candidates) {
+    function launchEbysPrefill(candidates, opts = {}) {
         const b = BR();
         if (!b || !candidates.length) return;
         const maxItems = window.AppModules?.PurchaseMoney?.MAX_ITEMS || b.MAX_PURCHASE_ITEMS || 3;
-        const payload = b.buildPurchasePrefillPayload(candidates, { maxItems });
+        const payload = opts.consolidated && typeof b.buildConsolidatedPurchasePrefill === 'function'
+            ? b.buildConsolidatedPurchasePrefill(candidates)
+            : b.buildPurchasePrefillPayload(candidates, { maxItems });
+        if (opts.openReqCount > 0) {
+            payload.openRequestWarning = `Not: Seçilenlerden ${opts.openReqCount} kalem için hâlihazırda açık satın alma/EBYS talebi mevcut.`;
+        }
         window.closeOpsRadar();
         if (window.AppModules?.EBYSPurchaseUI?.openPrefilled) {
             window.AppModules.EBYSPurchaseUI.openPrefilled(payload);
@@ -2914,16 +3136,19 @@ window.renderLocationsTable = function () {
         },
         critical_stock: {
             icon: 'fa-triangle-exclamation', title: 'Kritik Sipariş İhtiyacı', build: buildCriticalStock,
-            intro: 'Minimum stok limitinin altına düşen ürünlerle 14 gün içinde tükeneceği öngörülen sarf malzemelerini tek listede görür, seçtiğiniz kalemlerle tek tıkla EBYS satın alma taslağı hazırlayabilirsiniz.',
+            intro: 'Minimum stok limitinin altına düşen ürünlerle 14 gün içinde tükeneceği öngörülen sarf malzemelerini tek listede görür, 1–3 kalemi ayrı veya sınırsız kalemi tek toplu EBYS talebiyle ön-doldurabilirsiniz.',
             help: ['Bu liste, minimum stok eşiği altındaki tüm aktif kayıtlar ile Tüketim Tahminleme Motorunun ≤14 gün kritik işaretlediği sarf malzemelerini birleştirir.',
-                'Tek bir EBYS satın alma talebinde pilot sınır gereği en fazla 3 kalem seçilebilir.',
-                '"EBYS Satın Almaya Aktar" veya "Seçilenlerle EBYS Talebi Başlat" düğmesi formu ön-doldurarak açar; birim, belge türü ve fiyatları kontrol edip siz göndermedikçe kayıt açılmaz.'],
+                '1–3 kalemi "Ayrı Kalemlerle EBYS Talebi" ile tek tek satırlara, sınırsız sayıda kalemi ise "Tamamını Tek Kalemde Birleştir" düğmesiyle tek toplu kaleme (ayrıntılı dökümü Açıklama alanında) aktarabilirsiniz.',
+                '"⏳ Talebi Açık" rozeti, mevcut açık satın alma veya EBYS taleplerini sıfır ek sorguyla gösterir; isterseniz açık talepli ürünleri filtreleyebilirsiniz.',
+                'Aktarım düğmeleri formu yalnızca ön-doldurur; birim ve fiyatları kontrol edip siz göndermedikçe kayıt açılmaz.'],
         },
         ai_burn_rate: {
             icon: 'fa-brain', title: '🧠 AI Sarf Tüketim & Tahminleme Motoru', build: buildBurnRate,
-            intro: 'B3 çıkış geçmişinizi analiz ederek sarf malzemelerin günlük tüketim hızını ve tahmini tükenme gününü hesaplar; hızlı tükenen kalemleri erkenden yakalamanızı sağlar.',
+            intro: 'B3 çıkış geçmişinizi analiz ederek sarf malzemelerin günlük tüketim hızını, tahmini tükenme gününü ve açık EBYS taleplerini gösterir; seçtiğiniz tüm kalemleri tek tıkla toplu EBYS talebine aktarabilirsiniz.',
             help: ['Hesaplama tamamen tarayıcınız içinde deterministik zaman serisi (30/60/90 günlük pencere + son döneme ağırlık veren EWMA) ile yapılır; dış bir yapay zeka servisine veri gönderilmez.',
                 'Yanlış alarmı önlemek için seçili pencerede en az 2 farklı günde tüketim kaydı olmayan kalemlerde gün tahmini üretilmez ("Yetersiz veri" olarak işaretlenir).',
+                'Satır onay kutularıyla sınırsız sayıda sarf seçip tek toplu EBYS kaleminde birleştirebilir veya 1–3 kalemi ayrı satırlarda gönderebilirsiniz.',
+                '"⏳ Talebi Açık" rozeti o ürün için hâlihazırda başlatılmış ve kapanmamış bir satın alma/EBYS talebi olduğunu gösterir.',
                 'Demirbaş zimmetleri, hurda ve iade edilmiş hareketler sarf tüketim hesabına katılmaz.'],
         },
     };
@@ -2939,6 +3164,8 @@ window.renderLocationsTable = function () {
     window.openOpsRadar = function (kind) {
         const def = RADARS[kind], modal = document.getElementById('opsRadarModal');
         if (!def || !modal) return;
+        ensureModalInBody(modal);
+        const wasOpen = Boolean(activeRadar);
         activeRadar = kind;
         document.getElementById('opsRadarIcon').className = 'fas ' + def.icon;
         document.getElementById('opsRadarTitle').textContent = def.title;
@@ -2948,9 +3175,17 @@ window.renderLocationsTable = function () {
         help.hidden = true;
         document.getElementById('opsRadarInfoBtn').setAttribute('aria-expanded', 'false');
         paint(def);
+        if (!wasOpen) {
+            prevBodyOverflow = document.body.style.overflow || '';
+            document.body.classList.add('ops-radar-open');
+            document.body.style.overflow = 'hidden';
+        }
         modal.hidden = false;
         modal.classList.add('show');
-        document.getElementById('opsRadarClose').focus();
+        const panel = modal.querySelector('.ops-radar-panel');
+        if (panel) panel.scrollTop = 0;
+        const closeBtn = document.getElementById('opsRadarClose');
+        if (closeBtn) closeBtn.focus({ preventScroll: true });
     };
 
     window.closeOpsRadar = function () {
@@ -2960,8 +3195,10 @@ window.renderLocationsTable = function () {
         activeRadar = null;
         modal.classList.remove('show');
         modal.hidden = true;
+        document.body.classList.remove('ops-radar-open');
+        document.body.style.overflow = prevBodyOverflow;
         const card = kind && document.querySelector(`[data-action="radar-open"][data-radar="${kind}"]`);
-        if (card) card.focus();
+        if (card) card.focus({ preventScroll: true });
     };
 
     // Canlı veri geldiğinde açık pencere yerinde yenilenir: odak ve kaydırma konumu korunur.
@@ -2979,11 +3216,36 @@ window.renderLocationsTable = function () {
         if (typeof window.showAdminTab === 'function') window.showAdminTab(tabId);
     }
 
+    function pickRadarCandidates(source, allUrgent) {
+        if (source === 'burn') {
+            const br = readBurnRate(burnWindowDays);
+            if (!br) return [];
+            const reqIdx = readActivePurchaseIndex();
+            const list = allUrgent
+                ? br.items.filter(x => (x.status === 'critical' || x.status === 'warning') && !(burnHideOpenRequests && reqIdx && reqIdx.match(x.name)))
+                : br.items.filter(x => selectedBurnKeys.has(x.key));
+            return list.map(x => ({ ...x, limit: x.minLimit }));
+        }
+        const crit = readCriticalOrders();
+        if (!crit) return [];
+        const reqIdx = readActivePurchaseIndex();
+        return allUrgent
+            ? crit.items.filter(x => !(critHideOpenRequests && reqIdx && reqIdx.match(x.name)))
+            : crit.items.filter(x => selectedCriticalKeys.has(x.key));
+    }
+
+    function countOpenInList(candidates) {
+        const reqIdx = readActivePurchaseIndex();
+        if (!reqIdx) return 0;
+        return candidates.filter(c => reqIdx.match(c.name || c.description)).length;
+    }
+
     function wire() {
         const modal = document.getElementById('opsRadarModal');
         const row = document.getElementById('futureWidgetRow');
         if (!modal || !row || modal.__opsWired) return;
         modal.__opsWired = true;
+        ensureModalInBody(modal);
         const open = (el) => window.openOpsRadar(el.dataset.radar);
         window.bindActions(row, { 'radar-open': open });
         row.addEventListener('keydown', (e) => {
@@ -3021,25 +3283,72 @@ window.renderLocationsTable = function () {
             'radar-br-filter': (el) => {
                 if (el.dataset.status) { burnStatusFilter = el.dataset.status; window.refreshOpsRadar(); }
             },
+            'radar-br-toggle-open': () => {
+                burnHideOpenRequests = !burnHideOpenRequests;
+                window.refreshOpsRadar();
+            },
+            'radar-br-clear': () => {
+                selectedBurnKeys.clear();
+                window.refreshOpsRadar();
+            },
+            'radar-crit-toggle-open': () => {
+                critHideOpenRequests = !critHideOpenRequests;
+                window.refreshOpsRadar();
+            },
             'radar-ebys-one': (el) => {
                 const src = el.dataset.source, key = el.dataset.key;
                 if (src === 'burn') {
                     const br = readBurnRate(burnWindowDays);
                     const hit = br && br.items.find(x => x.key === key);
-                    if (hit) launchEbysPrefill([{ ...hit, limit: hit.minLimit }]);
+                    if (hit) {
+                        const list = [{ ...hit, limit: hit.minLimit }];
+                        launchEbysPrefill(list, { consolidated: false, openReqCount: countOpenInList(list) });
+                    }
                 } else {
                     const crit = readCriticalOrders();
                     const hit = crit && crit.items.find(x => x.key === key);
-                    if (hit) launchEbysPrefill([hit]);
+                    if (hit) launchEbysPrefill([hit], { consolidated: false, openReqCount: countOpenInList([hit]) });
                 }
             },
+            'radar-ebys-separate': (el) => {
+                const src = el.dataset.source || 'critical';
+                const picked = pickRadarCandidates(src, false);
+                if (!picked.length) return;
+                const openReqCount = countOpenInList(picked);
+                if (src === 'burn') selectedBurnKeys.clear(); else selectedCriticalKeys.clear();
+                launchEbysPrefill(picked, { consolidated: false, openReqCount });
+            },
+            'radar-ebys-consolidated': (el) => {
+                const src = el.dataset.source || 'critical';
+                const picked = pickRadarCandidates(src, false);
+                if (!picked.length) return;
+                const openReqCount = countOpenInList(picked);
+                if (src === 'burn') selectedBurnKeys.clear(); else selectedCriticalKeys.clear();
+                launchEbysPrefill(picked, { consolidated: true, openReqCount });
+            },
+            'radar-ebys-all-urgent': (el) => {
+                const src = el.dataset.source || 'critical';
+                const picked = pickRadarCandidates(src, true);
+                if (!picked.length) return;
+                const openReqCount = countOpenInList(picked);
+                if (src === 'burn') selectedBurnKeys.clear(); else selectedCriticalKeys.clear();
+                launchEbysPrefill(picked, { consolidated: true, openReqCount });
+            },
             'radar-ebys-bulk': () => {
+                const picked = pickRadarCandidates('critical', false);
+                if (!picked.length) return;
+                const openReqCount = countOpenInList(picked);
+                selectedCriticalKeys.clear();
+                launchEbysPrefill(picked, { consolidated: picked.length > 3, openReqCount });
+            },
+            'radar-crit-all': () => {
                 const crit = readCriticalOrders();
                 if (!crit) return;
-                const picked = crit.items.filter(x => selectedCriticalKeys.has(x.key));
-                if (!picked.length) return;
+                const reqIdx = readActivePurchaseIndex();
+                const visible = critHideOpenRequests ? crit.items.filter(x => !(reqIdx && reqIdx.match(x.name))) : crit.items;
                 selectedCriticalKeys.clear();
-                launchEbysPrefill(picked);
+                visible.forEach(x => selectedCriticalKeys.add(x.key));
+                window.refreshOpsRadar();
             },
             'radar-crit-top': () => {
                 const crit = readCriticalOrders();
@@ -3055,17 +3364,21 @@ window.renderLocationsTable = function () {
             },
         });
         modal.addEventListener('change', (e) => {
-            const cb = e.target.closest('input[data-crit-key]');
-            if (!cb) return;
-            const key = cb.dataset.critKey;
-            const maxItems = window.AppModules?.PurchaseMoney?.MAX_ITEMS || (BR()?.MAX_PURCHASE_ITEMS || 3);
-            if (cb.checked) {
-                if (selectedCriticalKeys.size < maxItems) selectedCriticalKeys.add(key);
-                else cb.checked = false;
-            } else {
-                selectedCriticalKeys.delete(key);
+            const critCb = e.target.closest('input[data-crit-key]');
+            if (critCb) {
+                const key = critCb.dataset.critKey;
+                if (critCb.checked) selectedCriticalKeys.add(key);
+                else selectedCriticalKeys.delete(key);
+                window.refreshOpsRadar();
+                return;
             }
-            window.refreshOpsRadar();
+            const burnCb = e.target.closest('input[data-burn-key]');
+            if (burnCb) {
+                const key = burnCb.dataset.burnKey;
+                if (burnCb.checked) selectedBurnKeys.add(key);
+                else selectedBurnKeys.delete(key);
+                window.refreshOpsRadar();
+            }
         });
         modal.addEventListener('input', (e) => {
             const inp = e.target.closest('input[data-br-search]');
@@ -3074,9 +3387,15 @@ window.renderLocationsTable = function () {
             burnQuery = inp.value;
             window.refreshOpsRadar();
             const fresh = modal.querySelector('input[data-br-search]');
-            if (fresh) { fresh.focus(); if (pos != null) fresh.setSelectionRange(pos, pos); }
+            if (fresh) { fresh.focus({ preventScroll: true }); if (pos != null) fresh.setSelectionRange(pos, pos); }
         });
         modal.addEventListener('keydown', (e) => { if (e.key === 'Escape' && activeRadar) { e.stopPropagation(); window.closeOpsRadar(); } });
+        window.addEventListener('onInventoryDataUpdated', (e) => {
+            const col = e && e.detail && (e.detail.collection || e.detail.repo);
+            if (col === 'purchaseOrders' && (activeRadar === 'ai_burn_rate' || activeRadar === 'critical_stock')) {
+                window.refreshOpsRadar();
+            }
+        });
     }
 
     // Rozetler ve pencere bağları: DOM hazır olduğunda, sonra admin-router (veri olayı) ve showAdminTab (pano açılışı) çağrılarıyla yenilenir.

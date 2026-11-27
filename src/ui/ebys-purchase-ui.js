@@ -27,6 +27,48 @@ function resolveUnitId(selectedOption, unitName) {
 //        dondurmaya geçilir. İçerik değişirse yeni işlem kimlikleri alınır ama kaydedilmiş taslak güncellenir (yeni talep açılmaz).
 let draftTarget = null, pendingSubmission = null;
 const docSchema = () => window.AppModules.EBYSDocumentSchema;
+const EBYS_PO_CACHE_PREFIX = 'medipol_ebys_po_index_v1:';
+const EBYS_PO_CACHE_MAX = 50;
+
+// [WHY]: v3.8 Hotfix HF-1 — EBYS motorundaki (engineVersion: 'ebys-v1') purchaseOrders işaretçisi konu ve
+//        toplu kalem dökümünü taşımaz; radar açık talep eşlemesinin sıfır ek Firestore okumasıyla çalışması için
+//        gönderilen EBYS taleplerinin hafif özeti ortam-köküyle izole edilerek önbelleklenir.
+// [HOW]: Anahtar window.AppEnv.COLLECTION_ROOT ile ayrılır; hassas veri/PII saklamaz, yalnız belge ID, konu,
+//        kalem adları ve açıklama özeti tutulur. admin-dashboard.js canlı purchaseOrders işaretçileriyle çapraz doğrular.
+function ebysPurchaseCacheKey() {
+    const root = window.AppEnv?.COLLECTION_ROOT || window.COLLECTION_ROOT || 'inventory_demo';
+    return `${EBYS_PO_CACHE_PREFIX}${root}`;
+}
+
+function getCachedSubmittedPurchases() {
+    try {
+        const raw = localStorage.getItem(ebysPurchaseCacheKey());
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function recordSubmittedPurchase({ id, subject, description, items }) {
+    if (!id) return;
+    try {
+        const key = ebysPurchaseCacheKey();
+        const prev = getCachedSubmittedPurchases().filter(x => x && String(x.id) !== String(id));
+        const entry = {
+            id: String(id),
+            purchaseOrderId: String(id),
+            isPurchase: true,
+            state: 'in_review',
+            subject: String(subject || '').slice(0, 240),
+            description: String(description || '').slice(0, 8000),
+            items: Array.isArray(items) ? items.map(x => ({ description: String(x?.description || '').slice(0, 240) })) : [],
+            updatedAt: Date.now(),
+        };
+        localStorage.setItem(key, JSON.stringify([entry, ...prev].slice(0, EBYS_PO_CACHE_MAX)));
+    } catch { /* depolama kapalıysa sessiz devam */ }
+}
 
 function clearPending() {
     draftTarget = null;
@@ -40,9 +82,12 @@ async function organizationCodeForNew() {
     return cat?.profile?.code || 'MED';
 }
 
-async function submitPurchaseViaEbys({ unitSelect, unitName, subject, items, butce, budgetMode }) {
+// [WHY]: Toplu tek-kalem EBYS aktarımında 1..N kalemin ayrıntılı ürün/adet dökümü #purDesc alanında taşınır.
+// [HOW]: #purDesc doluysa EBYS evrak gövdesine (content, en çok 40.000 karakter) eklenir ve idempotency imzasına katılır.
+async function submitPurchaseViaEbys({ unitSelect, unitName, subject, description, items, butce, budgetMode }) {
     const unitId = resolveUnitId(unitSelect?.selectedOptions?.[0], unitName);
-    const content = docSchema().canonical({ unitId, subject, items, butce, budgetMode });
+    const desc = String(description || '').trim();
+    const content = docSchema().canonical({ unitId, subject, description: desc, items, butce, budgetMode });
     if (!pendingSubmission || pendingSubmission.content !== content) {
         // İmza = içerik + bağlanılan taslak başı (documentId/expectedRevision). Hedef, deneme başında sabitlenir;
         // draftTarget yalnız başarılı kayıtta (saved dolar) ya da yeni düzenleme açılınca (pending sıfırlanır) değişir.
@@ -54,7 +99,9 @@ async function submitPurchaseViaEbys({ unitSelect, unitName, subject, items, but
         const target = pending.target, today = new Date().toISOString().slice(0, 10);
         const metadata = { ...(target?.metadataBase || {}), subject, correspondent: unitName, date: today,
             filePlanCode: 'PURCHASE_REQUEST', confidentiality: 'Normal' };
-        const common = { unitId, content: `Satın alma talebi: ${subject}`, metadata, items, butce, budgetMode, operationId: pending.saveOpId };
+        const rawBody = desc ? `Satın alma talebi: ${subject}\n\n${desc}` : `Satın alma talebi: ${subject}`;
+        const bodyContent = rawBody.length > 40000 ? `${rawBody.slice(0, 39990)}\n…` : rawBody;
+        const common = { unitId, content: bodyContent, metadata, items, butce, budgetMode, operationId: pending.saveOpId };
         const saved = target
             ? await savePurchaseDraft({ ...common, id: target.id, expectedRevision: target.expectedRevision, reopen: target.reopen,
                 organizationCode: target.organizationCode })
@@ -93,6 +140,11 @@ async function openForRevision(documentId, expectedVersionId = null) {
     const set = (id, value) => { const field = document.getElementById(id); if (field) field.value = value ?? ''; };
     set('purDocName', head.registrationNo || `EBYS · ${head.id.slice(0, 8)}`);
     set('purName', metadata.subject);
+    const rawContent = String(body?.content || '');
+    const splitIdx = rawContent.indexOf('\n\n');
+    if (splitIdx !== -1 && rawContent.startsWith('Satın alma talebi:')) {
+        set('purDesc', rawContent.slice(splitIdx + 2));
+    }
     set('purBudget', snapshot.butce);
     const unitSelect = document.getElementById('purUnit');
     const option = [...(unitSelect?.options || [])].find(o => o.dataset.unitId === head.unitId);
@@ -114,6 +166,7 @@ async function handleSubmitClick(button) {
     const unitSelect = document.getElementById('purUnit');
     const unitName = unitSelect?.value || '';
     const subject = document.getElementById('purName')?.value || '';
+    const description = document.getElementById('purDesc')?.value || '';
     if (!unitName || !subject) { form?.reportValidity(); return; }
     let purchaseLines, budget;
     try { purchaseLines = window.AppModules.PurchaseItemsUI.read(); }
@@ -130,12 +183,14 @@ async function handleSubmitClick(button) {
     if (status) { status.hidden = false; status.textContent = revising ? 'Yeni sürüm hazırlanıyor…' : 'Evrak oluşturuluyor…'; }
     try {
         const frozen = await submitPurchaseViaEbys({
-            unitSelect, unitName, subject, items: purchaseLines.items, butce: budget.amount, budgetMode: budget.mode
+            unitSelect, unitName, subject, description, items: purchaseLines.items, butce: budget.amount, budgetMode: budget.mode
         });
+        recordSubmittedPurchase({ id: frozen.documentId, subject, description, items: purchaseLines.items });
         clearPending();
         if (typeof window.closePurchaseModal === 'function') window.closePurchaseModal();
         else { document.getElementById('purchaseModal').style.display = 'none'; document.getElementById('purchaseForm')?.reset(); }
         window.renderPurchaseModule?.();
+        window.refreshOpsRadar?.();
         window.showAppAlert?.(revising ? 'Yeni sürüm dondu. Onay rotasını yeniden seçin.' : 'Evrak oluşturuldu ve dondu. Onay rotasını şimdi seçin.', 'success');
         window.AppModules.EBYSProcessUI?.open(frozen.versionId, frozen.documentId, true);
     } catch (error) {
@@ -147,10 +202,10 @@ async function handleSubmitClick(button) {
     }
 }
 
-// [WHY]: v3.8 · VP-2 — Kritik Sipariş Radarı ve Tahminleme Motorundan seçilen 1–3 kalem tek tıkla satın alma
-//        modalına aktarılmalı; kullanıcı birim ve fiyat girip kendi onayıyla kaydetmeli (otomatik submit yasak).
-// [HOW]: Açık bir Operasyon Radarı varsa (#opsRadarModal z-index:10500) önce kapatılır, yeni satın alma modalı
-//        açılıp başlık, gerekçe, öncelik ve 1–3 kalem satırı ön-doldurulur; unitPrice boş bırakılır.
+// [WHY]: v3.8 · VP-2 + Hotfix HF-1 — Kritik Sipariş Radarı ve Tahminleme Motorundan seçilen 1–3 ayrı kalem veya
+//        1..N birleştirilmiş toplu kalem tek tıkla satın alma modalına aktarılmalı; otomatik submit yapılmaz.
+// [HOW]: Açık bir Operasyon Radarı varsa önce kapatılır, yeni satın alma modalı açılıp başlık, gerekçe/döküm,
+//        öncelik ve kalem satırları ön-doldurulur; consolidated: true ise tek toplu kalem bilgilendirmesi yazılır.
 function openPrefilled(payload = {}) {
     if (typeof window.closeOpsRadar === 'function') window.closeOpsRadar();
     if (typeof window.openNewPurchaseModal !== 'function') {
@@ -178,11 +233,17 @@ function openPrefilled(payload = {}) {
     const status = document.getElementById('purEbysStatus');
     if (status) {
         status.hidden = false;
-        const truncNote = payload.truncatedCount > 0 ? ` Not: Pilot sınırı gereği ilk ${maxItems} kalem aktarıldı.` : '';
-        status.textContent = `Kritik sipariş analizinden ön-dolduruldu.${truncNote} İlgili birimi, belge türünü ve birim fiyatları doldurduktan sonra "EBYS süreciyle gönder" veya "Talebi Kaydet" ile onaylayın.`;
+        const openNote = payload.openRequestWarning ? ` ${payload.openRequestWarning}` : '';
+        if (payload.consolidated === true) {
+            const count = Number(payload.itemCount) || rawItems.length;
+            status.textContent = `${count} kalem Blaze/çok-kalem sınırı beklemeden tek toplu kalemde EBYS talebine birleştirildi (ayrıntılı ürün/adet dökümü Açıklama alanına eklendi).${openNote} İlgili birimi ve tahmini toplam bedeli girip "EBYS süreciyle gönder" veya "Talebi Kaydet" ile onaylayın.`;
+        } else {
+            const truncNote = payload.truncatedCount > 0 ? ` Not: Pilot sınırı gereği ilk ${maxItems} kalem aktarıldı.` : '';
+            status.textContent = `Kritik sipariş analizinden ön-dolduruldu.${truncNote}${openNote} İlgili birimi, belge türünü ve birim fiyatları doldurduktan sonra "EBYS süreciyle gönder" veya "Talebi Kaydet" ile onaylayın.`;
+        }
     }
     return true;
 }
 
 window.AppModules = window.AppModules || {};
-window.AppModules.EBYSPurchaseUI = { handleSubmitClick, openForRevision, openPrefilled, clearPending };
+window.AppModules.EBYSPurchaseUI = { handleSubmitClick, openForRevision, openPrefilled, clearPending, getCachedSubmittedPurchases };

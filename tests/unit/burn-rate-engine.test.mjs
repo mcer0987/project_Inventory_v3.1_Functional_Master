@@ -205,4 +205,137 @@ test('boş veya geçersiz girdilerde çökmez', () => {
     assert.equal(c.items.length, 0);
     const p = BR.buildPurchasePrefillPayload([]);
     assert.equal(p.items.length, 0);
+    const cons = BR.buildConsolidatedPurchasePrefill([]);
+    assert.equal(cons.items.length, 0);
+    assert.equal(cons.consolidated, true);
+    assert.equal(cons.itemCount, 0);
+    const idx = BR.indexActivePurchaseRequests();
+    assert.equal(idx.totalActive, 0);
+    assert.equal(idx.match('A4 Kağıdı'), null);
+});
+
+test('HF-1 buildConsolidatedPurchasePrefill: 3 kalem üstü (6 kalem) sınırsız tek satırda birleşir ve noTag uyumludur', () => {
+    const candidates = [
+        { name: 'A4 Kağıdı', category: 'Sarf Malzeme', currentStock: 2, minLimit: 10, dailyRate: 2, daysRemaining: 1, suggestedOrderQty: 58 },
+        { name: 'Toner 85A', category: 'Sarf Malzeme', currentStock: 0, limit: 3, dailyRate: 0.5, daysRemaining: 0, suggestedOrderQty: 15 },
+        { name: 'Etiket Rulosu', category: 'Sarf Malzeme', currentStock: 5, limit: 5, dailyRate: 1, daysRemaining: 5, suggestedOrderQty: 25 },
+        { name: 'Kalem Pil', category: 'Sarf Malzeme', currentStock: 10, limit: 6, dailyRate: 0.8, daysRemaining: 12, suggestedOrderQty: 14 },
+        { name: 'HDMI Kablo <script>', category: 'Sarf Malzeme', currentStock: 1, limit: 4, dailyRate: 0, daysRemaining: null, suggestedOrderQty: 7 },
+        { name: 'Mouse Pad', category: 'Sarf Malzeme', currentStock: 3, limit: 5, dailyRate: 0.3, daysRemaining: 10, suggestedOrderQty: 6 },
+        { name: 'A4 Kağıdı', category: 'Sarf Malzeme', currentStock: 2, minLimit: 10, suggestedOrderQty: 58 }, // mükerrer → tekilleştirilir
+    ];
+
+    const payload = plain(BR.buildConsolidatedPurchasePrefill(candidates));
+    assert.equal(payload.consolidated, true);
+    assert.equal(payload.itemCount, 6);
+    assert.equal(payload.truncatedCount, 0);
+    assert.equal(payload.priority, 'Acil');
+    assert.equal(payload.items.length, 1);
+    assert.equal(payload.items[0].quantity, 1);
+    assert.equal(payload.items[0].unit, 'Adet');
+    assert.equal(payload.items[0].unitPrice, '');
+    assert.ok(payload.items[0].description.includes('6 Kalem'));
+    assert.ok(payload.items[0].description.length <= 240);
+    assert.ok(payload.subject.length <= 240);
+    assert.equal(payload.totalSuggestedQty, 58 + 15 + 25 + 14 + 7 + 6);
+    assert.ok(!/<[a-zA-Z/!?]/.test(payload.subject));
+    assert.ok(!/<[a-zA-Z/!?]/.test(payload.description));
+    assert.ok(!/<[a-zA-Z/!?]/.test(payload.items[0].description));
+    for (const name of ['A4 Kağıdı', 'Toner 85A', 'Etiket Rulosu', 'Kalem Pil', 'Mouse Pad']) {
+        assert.ok(payload.description.includes(name), `description içinde ${name} bulunmalı`);
+    }
+});
+
+test('HF-1 indexActivePurchaseRequests: açık klasik ve toplu/EBYS talepleri eşler, kapalı/iptalleri eler ve sınır güvenlidir', () => {
+    const consolidatedDesc = BR.buildConsolidatedPurchasePrefill([
+        { name: 'Toner 85A', category: 'Sarf Malzeme', currentStock: 0, limit: 3, suggestedOrderQty: 10 },
+        { name: 'Pil', category: 'Sarf Malzeme', currentStock: 2, limit: 5, suggestedOrderQty: 20 },
+    ]).description;
+
+    const purchaseOrders = [
+        // 1) Açık klasik tek/çok kalemli talep
+        {
+            id: 'po-1', evrakNo: 'SAT-20261125-1001', durum: 'Onay Bekliyor',
+            urun: 'Kritik Stok Tedariği: A4 Kağıdı', createdAt: NOW - 2 * DAY_MS,
+            items: [{ description: 'A4 Kağıdı', quantity: 40 }],
+            workflow: { started: false, steps: [] },
+        },
+        // 2) Daha yeni aktif workflow talebi (aynı ürün → count: 2, latestStatus: Onayda)
+        {
+            id: 'po-2', evrakNo: 'SAT-20261126-2002', durum: 'Onay Bekliyor',
+            urun: 'A4 Kağıdı Ek Alım', createdAt: NOW - DAY_MS,
+            items: [{ description: 'A4 Kağıdı', quantity: 20 }],
+            workflow: { started: true, currentState: 'manager_approval', steps: [{ status: 'pending' }] },
+        },
+        // 3) Kapalı / iptal / reddedilmiş kayıtlar → HARİÇ
+        {
+            id: 'po-cancel', evrakNo: 'SAT-CANCEL', durum: 'İptal Edildi',
+            urun: 'Etiket Rulosu', items: [{ description: 'Etiket Rulosu' }],
+        },
+        {
+            id: 'po-done', evrakNo: 'SAT-DONE', durum: 'Tamamlandı',
+            urun: 'USB Kablo', items: [{ description: 'USB Kablo' }],
+            workflow: { started: true, finished: true, currentState: 'completed', steps: [{ status: 'approved' }] },
+        },
+        // 4) EBYS-v1 işaretçi + eşleşen EBYS belgesi (tekilleştirilmeli → count: 1)
+        {
+            id: 'ebys-doc-open', ebysDocumentId: 'ebys-doc-open', engineVersion: 'ebys-v1',
+            createdAt: NOW - 3600 * 1000,
+        },
+        // 5) Kapalı EBYS-v1 işaretçisi → ebysDocuments state:'closed' nedeniyle dışlanmalı
+        {
+            id: 'ebys-doc-closed', ebysDocumentId: 'ebys-doc-closed', engineVersion: 'ebys-v1',
+            createdAt: NOW - 5000 * 1000,
+        },
+        // 6) Sınır güvenliği testi: "Pilot Kalem" açık ama "Pil" ile yanlış eşleşmemeli
+        {
+            id: 'po-pilot', evrakNo: 'SAT-PILOT', durum: 'Onay Bekliyor',
+            urun: 'Pilot Kalem', items: [{ description: 'Pilot Kalem' }],
+            createdAt: NOW - 7200 * 1000,
+        },
+    ];
+
+    const ebysDocuments = [
+        {
+            id: 'ebys-doc-open', purchaseOrderId: 'ebys-doc-open', state: 'in_review',
+            registrationNo: 'EBYS-MED-261126-AA01',
+            metadata: { subject: 'Toplu Sarf Malzeme İhtiyacı (2 Kalem)', filePlanCode: 'PURCHASE_REQUEST' },
+            content: `Satın alma talebi: Toplu Sarf Malzeme İhtiyacı (2 Kalem)\n\n${consolidatedDesc}`,
+            updatedAt: NOW - 1800 * 1000,
+        },
+        {
+            id: 'ebys-doc-closed', purchaseOrderId: 'ebys-doc-closed', state: 'closed',
+            metadata: { subject: 'Kapalı Talep: Mouse Pad', filePlanCode: 'PURCHASE_REQUEST' },
+            updatedAt: NOW - 4000 * 1000,
+        },
+        // Satın alma olmayan genel evrak → yoksayılır
+        {
+            id: 'ebys-general', state: 'in_review',
+            metadata: { subject: 'Etiket Rulosu Bilgilendirme', filePlanCode: 'GENEL' },
+        },
+    ];
+
+    const idx = BR.indexActivePurchaseRequests(purchaseOrders, ebysDocuments);
+    assert.equal(idx.totalActive, 4); // po-1, po-2, ebys-doc-open (merged), po-pilot
+
+    const a4 = plain(idx.match('A4 Kağıdı'));
+    assert.equal(a4.count, 2);
+    assert.equal(a4.latestDocId, 'po-2');
+    assert.equal(a4.latestStatus, 'Onayda');
+    assert.equal(a4.latestTitle, 'A4 Kağıdı Ek Alım');
+
+    const toner = plain(idx.match('Toner 85A'));
+    assert.equal(toner.count, 1);
+    assert.equal(toner.latestDocId, 'ebys-doc-open');
+    assert.equal(toner.latestStatus, 'Onay Sürecinde');
+
+    // "Pil" yalnız ebys-doc-open'da var; "Pilot Kalem" ile yanlış eşleşip count=2 OLMAMALI
+    const pil = plain(idx.match('Pil'));
+    assert.equal(pil.count, 1);
+    assert.equal(pil.latestDocId, 'ebys-doc-open');
+
+    // İptal, tamamlanmış, kapalı EBYS ve genel evraklar eşleşmemeli
+    assert.equal(idx.match('Etiket Rulosu'), null);
+    assert.equal(idx.match('USB Kablo'), null);
+    assert.equal(idx.match('Mouse Pad'), null);
 });
