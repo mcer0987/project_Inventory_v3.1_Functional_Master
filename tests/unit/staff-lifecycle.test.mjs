@@ -182,6 +182,48 @@ describe('VP-3 · 24 Saat Cooldown, TTL ve Şema Planlayıcıları', () => {
         assert.match(cmd, /--pri ayse\.yilmaz/);
         assert.doesNotMatch(cmd, /--password|--code|--pin/);
     });
+
+    test('HF-2 · Yerel anti-spam kilidi (24s kişi kilidi + 1s cihaz flood sınırı) ve analyzeResetRequests raporlaması', () => {
+        const mem = new Map();
+        const storage = {
+            getItem: k => (mem.has(k) ? mem.get(k) : null),
+            setItem: (k, v) => mem.set(k, String(v)),
+        };
+        const t0 = 1_700_000_000_000;
+
+        // 1. İlk talep serbest
+        assert.equal(SL.checkLocalResetGuard({ pri: 'Ayşe.Yılmaz', storage, nowMs: t0 }).allowed, true);
+        SL.recordLocalResetAttempt({ pri: 'Ayşe.Yılmaz', allowed: true, outcome: 'submitted', storage, nowMs: t0 });
+
+        // 2. Aynı PRI için 10 dakika sonra tekrar tıklama yerelde engellenir
+        const blockedSame = SL.checkLocalResetGuard({ pri: 'ayse.yilmaz', storage, nowMs: t0 + 10 * 60 * 1000 });
+        assert.equal(blockedSame.allowed, false);
+        assert.equal(blockedSame.code, 'local-pri-cooldown');
+        assert.ok(blockedSame.remainingMs > 23 * 60 * 60 * 1000);
+        SL.recordLocalResetAttempt({ pri: 'ayse.yilmaz', allowed: false, outcome: blockedSame.code, storage, nowMs: t0 + 10 * 60 * 1000 });
+
+        // 3. Aynı cihazdan 2. farklı PRI serbest, 3. farklı PRI (1 saat içinde) device-flood ile engellenir
+        assert.equal(SL.checkLocalResetGuard({ pri: 'mehmet.demir', storage, nowMs: t0 + 15 * 60 * 1000 }).allowed, true);
+        SL.recordLocalResetAttempt({ pri: 'mehmet.demir', allowed: true, outcome: 'submitted', storage, nowMs: t0 + 15 * 60 * 1000 });
+
+        const floodCheck = SL.checkLocalResetGuard({ pri: 'zeynep.kaya', storage, nowMs: t0 + 20 * 60 * 1000 });
+        assert.equal(floodCheck.allowed, false);
+        assert.equal(floodCheck.code, 'local-device-flood');
+        SL.recordLocalResetAttempt({ pri: 'zeynep.kaya', allowed: false, outcome: floodCheck.code, storage, nowMs: t0 + 20 * 60 * 1000 });
+
+        // 4. 1 saat geçince 3. farklı PRI açılır, ama ilk PRI'nin 24 saatlik kilidi devam eder
+        assert.equal(SL.checkLocalResetGuard({ pri: 'zeynep.kaya', storage, nowMs: t0 + 65 * 60 * 1000 }).allowed, true);
+        assert.equal(SL.checkLocalResetGuard({ pri: 'ayse.yilmaz', storage, nowMs: t0 + 65 * 60 * 1000 }).allowed, false);
+
+        // 5. Yönetici raporlaması (analyzeResetRequests) engellenen deneme sayılarını doğru döner
+        const report = SL.analyzeResetRequests([
+            { id: 'ayse.yilmaz', pri: 'ayse.yilmaz', status: 'pending', requestedAtMs: t0 },
+        ], { storage, nowMs: t0 + 30 * 60 * 1000 });
+        assert.equal(report.totalLocalBlocked, 2);
+        assert.equal(report.requests[0].localBlockedCount, 1);
+        assert.equal(report.requests[0].isRepeatedAttempt, true);
+        assert.equal(report.deviceFloodActive, true);
+    });
 });
 
 describe('VP-3 · Çevrimdışı CLI Betiği Güvenlik Sözleşmesi (tools/staff-password-reset.mjs)', () => {

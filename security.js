@@ -246,6 +246,10 @@ const SecurityConfig = {
             const warningDiv = document.getElementById('sessionWarning');
             if (warningDiv) warningDiv.style.display = 'none';
 
+            // [WHY]: v3.8 HF-2 · clearSession() ve asenkron _auth() beklenirken açık kalan onSnapshot dinleyicileri
+            //        (özellikle purchaseOrders / purchaseAccess) signOut sırasında permission-denied hatası fırlatıyordu.
+            // [HOW]: Oturum sonlandırma zincirinin en başında dinleyiciler senkron olarak susturulur.
+            if (typeof window.stopRealtimeSync === 'function') window.stopRealtimeSync();
             if (typeof window.clearSession === 'function') window.clearSession();
             await this.logout();
             window.dispatchEvent(new CustomEvent('onAppLogout', { detail: { reason } }));

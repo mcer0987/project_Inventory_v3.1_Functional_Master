@@ -172,11 +172,18 @@ window.tsToTurkiye = window.tsToTurkiye || function (timestamp) {
 };
 
 // 🔐 KİMLİK DOĞRULAMA (Fallback bridges)
+// [WHY]: admin.html auth-engine.js'i yüklemez (yalnız index.html yükler); AppModules.Auth yokken checkIsAdmin ve
+//        validateAdminAction daima false dönüp #tablePersonel satır aksiyonlarını (Düzenle, Geçici PIN, Askıya Al) kilitliyordu.
+// [HOW]: AppModules.Auth yoksa session-store / firebase-handler köprülerine (isDbAdmin / requireDbAdmin) düşer.
 window.checkIsAdmin = window.checkIsAdmin || function () {
-    return window.AppModules?.Auth?.checkIsAdmin ? window.AppModules.Auth.checkIsAdmin() : false;
+    return window.AppModules?.Auth?.checkIsAdmin
+        ? window.AppModules.Auth.checkIsAdmin()
+        : (typeof window.isDbAdmin === 'function' ? window.isDbAdmin() : false);
 };
 window.validateAdminAction = window.validateAdminAction || function () {
-    return window.AppModules?.Auth?.validateAdminAction ? window.AppModules.Auth.validateAdminAction() : false;
+    return window.AppModules?.Auth?.validateAdminAction
+        ? window.AppModules.Auth.validateAdminAction()
+        : (typeof window.requireDbAdmin === 'function' ? window.requireDbAdmin('Bu yönetici işlemi') : false);
 };
 window.setupUI = window.setupUI || function () {
     if (window.AppModules?.Auth?.setupUI) window.AppModules.Auth.setupUI();

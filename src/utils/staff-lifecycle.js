@@ -43,6 +43,12 @@
     const NEUTRAL_RESET_MESSAGE =
         'Talebiniz işleme alındı veya aynı hesap için 24 saatlik bekleme süresi devam ediyor. Yönetici onayından sonra yeni giriş kodunuzu teslim alabilirsiniz.';
 
+    const RESET_GUARD_STORAGE_KEY = 'medipol_reset_guard_v1';
+    const DEVICE_FLOOD_WINDOW_MS = 60 * 60 * 1000;
+    const DEVICE_FLOOD_MAX_PRIS = 2;
+    const LOCAL_GUARD_BLOCKED_MESSAGE =
+        'Aynı kurumsal kimlik veya bu cihaz için kısa süre önce talep kaydedildi; mükerrer istek sunucuya iletilmedi (24 saatlik yerel koruma aktif).';
+
     const WEAK_BLACKLIST = new Set([
         '0000', '00000', '000000', '1111', '11111', '111111', '2222', '22222', '222222',
         '1234', '12345', '123456', '1234567', '12345678', '4321', '54321', '654321', '98765', '987654',
@@ -389,8 +395,202 @@
         return Number.isInteger(h) ? `${h} saat` : `${m} dakika`;
     }
 
+    // [WHY]: v3.8 HF-2 · Kalan bekleme süresini kullanıcıya ve yöneticiye okunaklı göstermek için.
+    // [HOW]: Milisaniyeyi saat ve dakika cinsinden yuvarlayarak Türkçe biçimler (ör. "23 saat 45 dk").
+    function formatRemainingCooldown(remainingMs) {
+        const ms = Math.max(0, Number(remainingMs) || 0);
+        if (ms <= 0) return '0 dk';
+        const totalMin = Math.max(1, Math.ceil(ms / 60000));
+        const hours = Math.floor(totalMin / 60);
+        const mins = totalMin % 60;
+        if (hours > 0 && mins > 0) return `${hours} saat ${mins} dk`;
+        if (hours > 0) return `${hours} saat`;
+        return `${mins} dk`;
+    }
+
+    function _resolveStorage(storage) {
+        if (storage && typeof storage.getItem === 'function') return storage;
+        try {
+            if (typeof localStorage !== 'undefined' && localStorage) return localStorage;
+        } catch (_) { /* depolama kapalı */ }
+        return null;
+    }
+
+    // [WHY]: v3.8 HF-2 · Yerel anti-spam koruma durumunu (medipol_reset_guard_v1) güvenli biçimde okur.
+    // [HOW]: Bozuk veya eksik JSON durumunda temiz başlangıç nesnesi döner; süresi 48 saati aşmış kayıtları budar.
+    function readResetGuardState(storage, nowMs = Date.now()) {
+        const store = _resolveStorage(storage);
+        const empty = { entries: {}, submissions: [], totalBlocked: 0 };
+        if (!store) return empty;
+        try {
+            const raw = store.getItem(RESET_GUARD_STORAGE_KEY);
+            if (!raw) return empty;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return empty;
+            const now = Number(nowMs) || Date.now();
+            const cutoff = now - RESET_COOLDOWN_MS * 2;
+            const entries = {};
+            if (parsed.entries && typeof parsed.entries === 'object') {
+                for (const [k, v] of Object.entries(parsed.entries)) {
+                    if (!v || typeof v !== 'object') continue;
+                    const lastTs = Number(v.lastAttemptAtMs || v.firstRequestedAtMs || 0);
+                    if (lastTs > 0 && lastTs < cutoff) continue;
+                    entries[k] = {
+                        pri: str(v.pri || k),
+                        firstRequestedAtMs: Number(v.firstRequestedAtMs) || 0,
+                        lastAttemptAtMs: Number(v.lastAttemptAtMs) || 0,
+                        submittedCount: Number(v.submittedCount) || 0,
+                        blockedCount: Number(v.blockedCount) || 0,
+                        lastBlockedAtMs: Number(v.lastBlockedAtMs) || 0,
+                    };
+                }
+            }
+            const submissions = Array.isArray(parsed.submissions)
+                ? parsed.submissions
+                    .filter(s => s && s.pri && Number(s.atMs) > now - RESET_COOLDOWN_MS)
+                    .map(s => ({ pri: normalizePri(s.pri), atMs: Number(s.atMs) }))
+                : [];
+            return {
+                entries,
+                submissions,
+                totalBlocked: Math.max(0, Number(parsed.totalBlocked) || 0),
+            };
+        } catch (_) {
+            return empty;
+        }
+    }
+
+    // [WHY]: v3.8 HF-2 · Aynı PRI veya aynı cihazdan art arda sıfırlama talebi tıklamalarını Firestore'a gitmeden durdurur.
+    // [HOW]: 1) Aynı PRI için 24 saatlik yerel kilit; 2) Aynı cihazdan 1 saat içinde en fazla 2 farklı PRI flood sınırı.
+    function checkLocalResetGuard({ pri, storage, nowMs = Date.now() } = {}) {
+        const priId = normalizePri(pri);
+        if (!isValidPriId(priId)) {
+            return { allowed: true, code: null, remainingMs: 0, remainingLabel: '', blockedCount: 0, message: null };
+        }
+        const now = Number(nowMs) || Date.now();
+        const state = readResetGuardState(storage, now);
+        const entry = state.entries[priId];
+
+        if (entry && entry.firstRequestedAtMs > 0) {
+            const check = canResubmitResetRequest(entry.firstRequestedAtMs, now);
+            if (!check.allowed) {
+                const remLabel = formatRemainingCooldown(check.remainingMs);
+                return {
+                    allowed: false,
+                    code: 'local-pri-cooldown',
+                    remainingMs: check.remainingMs,
+                    remainingLabel: remLabel,
+                    blockedCount: (entry.blockedCount || 0) + 1,
+                    message: LOCAL_GUARD_BLOCKED_MESSAGE,
+                };
+            }
+        }
+
+        const recentWindowStart = now - DEVICE_FLOOD_WINDOW_MS;
+        const recentSubs = state.submissions.filter(s => s.atMs > recentWindowStart);
+        const distinctOtherPris = new Set(recentSubs.map(s => s.pri).filter(p => p && p !== priId));
+        if (distinctOtherPris.size >= DEVICE_FLOOD_MAX_PRIS) {
+            const oldestRecent = recentSubs.reduce((min, s) => (s.atMs < min ? s.atMs : min), now);
+            const remMs = Math.max(1000, DEVICE_FLOOD_WINDOW_MS - (now - oldestRecent));
+            return {
+                allowed: false,
+                code: 'local-device-flood',
+                remainingMs: remMs,
+                remainingLabel: formatRemainingCooldown(remMs),
+                blockedCount: (entry ? entry.blockedCount || 0 : 0) + 1,
+                message: LOCAL_GUARD_BLOCKED_MESSAGE,
+            };
+        }
+
+        return { allowed: true, code: null, remainingMs: 0, remainingLabel: '', blockedCount: 0, message: null };
+    }
+
+    // [WHY]: v3.8 HF-2 · Gönderilen veya yerelde engellenen her sıfırlama denemesini sıfır Firestore maliyetiyle kaydeder.
+    // [HOW]: Başarılı gönderimde 24s penceresini başlatır; engellenen denemede blockedCount ve totalBlocked sayaçlarını artırır.
+    function recordLocalResetAttempt({ pri, allowed = true, outcome = 'submitted', storage, nowMs = Date.now() } = {}) {
+        const priId = normalizePri(pri);
+        if (!isValidPriId(priId)) return null;
+        const store = _resolveStorage(storage);
+        const now = Number(nowMs) || Date.now();
+        const state = readResetGuardState(store, now);
+        const prev = state.entries[priId] || {
+            pri: priId,
+            firstRequestedAtMs: 0,
+            lastAttemptAtMs: 0,
+            submittedCount: 0,
+            blockedCount: 0,
+            lastBlockedAtMs: 0,
+        };
+
+        if (allowed) {
+            const cooldownCheck = prev.firstRequestedAtMs > 0
+                ? canResubmitResetRequest(prev.firstRequestedAtMs, now)
+                : { allowed: true };
+            if (cooldownCheck.allowed) {
+                prev.firstRequestedAtMs = now;
+                prev.blockedCount = 0;
+            }
+            prev.submittedCount = (prev.submittedCount || 0) + 1;
+            prev.lastAttemptAtMs = now;
+            state.submissions.push({ pri: priId, atMs: now });
+        } else {
+            prev.blockedCount = (prev.blockedCount || 0) + 1;
+            prev.lastBlockedAtMs = now;
+            prev.lastAttemptAtMs = now;
+            state.totalBlocked = (state.totalBlocked || 0) + 1;
+        }
+
+        state.entries[priId] = prev;
+        if (store && typeof store.setItem === 'function') {
+            try {
+                store.setItem(RESET_GUARD_STORAGE_KEY, JSON.stringify(state));
+            } catch (_) { /* kota/gizli mod */ }
+        }
+        return { entry: { ...prev }, outcome, totalBlocked: state.totalBlocked };
+    }
+
+    // [WHY]: v3.8 HF-2 · Yönetici panelindeki sıfırlama taleplerini yerel anti-spam telemetrisiyle zenginleştirir.
+    // [HOW]: Her talebe localBlockedCount ve kalan bekleme süresini ekler; cihaz bazlı toplam engellenen spam sayısını raporlar.
+    function analyzeResetRequests(requests = [], { storage, nowMs = Date.now() } = {}) {
+        const now = Number(nowMs) || Date.now();
+        const state = readResetGuardState(storage, now);
+        const list = Array.isArray(requests) ? requests : [];
+
+        const enriched = list.map(req => {
+            const priId = normalizePri((req && (req.pri || req.id)) || '');
+            const g = state.entries[priId];
+            const baseReqMs = Number(req && req.requestedAtMs) || (g && g.firstRequestedAtMs) || 0;
+            const cd = baseReqMs > 0 ? canResubmitResetRequest(baseReqMs, now) : { allowed: true, remainingMs: 0 };
+            const localBlockedCount = g ? Number(g.blockedCount) || 0 : 0;
+            return {
+                ...req,
+                localBlockedCount,
+                isRepeatedAttempt: localBlockedCount > 0,
+                cooldownRemainingMs: cd.remainingMs,
+                cooldownLabel: cd.allowed ? '' : formatRemainingCooldown(cd.remainingMs),
+            };
+        });
+
+        const recentSubs = state.submissions.filter(s => s.atMs > now - DEVICE_FLOOD_WINDOW_MS);
+        const recentDistinctPriCount = new Set(recentSubs.map(s => s.pri)).size;
+        const activeLockedPris = Object.values(state.entries)
+            .filter(e => e.firstRequestedAtMs > 0 && !canResubmitResetRequest(e.firstRequestedAtMs, now).allowed)
+            .map(e => e.pri);
+
+        return {
+            requests: enriched,
+            totalLocalBlocked: state.totalBlocked || 0,
+            activeLockedPris,
+            recentDistinctPriCount,
+            deviceFloodActive: recentDistinctPriCount >= DEVICE_FLOOD_MAX_PRIS,
+        };
+    }
+
     const StaffLifecycle = Object.freeze({
         RESET_COOLDOWN_MS,
+        RESET_GUARD_STORAGE_KEY,
+        DEVICE_FLOOD_WINDOW_MS,
+        DEVICE_FLOOD_MAX_PRIS,
         MIN_TEMP_PIN_TTL_MINUTES,
         MAX_TEMP_PIN_TTL_MINUTES,
         TEMP_PIN_TTL_OPTIONS,
@@ -404,6 +604,7 @@
         REASON_MAX_LEN,
         AUDIT_TYPES,
         NEUTRAL_RESET_MESSAGE,
+        LOCAL_GUARD_BLOCKED_MESSAGE,
         normalizePri,
         isValidPriId,
         noTag,
@@ -413,6 +614,11 @@
         secureRandomInt,
         generateSecureCode,
         canResubmitResetRequest,
+        formatRemainingCooldown,
+        readResetGuardState,
+        checkLocalResetGuard,
+        recordLocalResetAttempt,
+        analyzeResetRequests,
         validateResetNote,
         validateResolutionNote,
         validateLifecycleReason,

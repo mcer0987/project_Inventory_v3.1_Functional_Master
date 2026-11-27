@@ -11,7 +11,7 @@ window.renderPersonelTable = function () {
     const accountStates = window._staffAccountStates || {};
     const account = item => {
         const pri = item.pri ? `<code>${escapeHtml(item.pri)}</code> ` : '<span style="color:#b45309;">PRI yok</span> ';
-        if (!item.uid) return pri + (isAdmin ? `<button class="edit-btn" onclick="openPersonelAccount(${jsArg(item.id)})">Hesap Aç</button>` : '· hesap yok');
+        if (!item.uid) return pri + (isAdmin ? `<button type="button" class="edit-btn" data-action="personelOpenAccount" data-id="${escapeHtml(item.id ?? '')}">Hesap Aç</button>` : '· hesap yok');
         const onPri = SP && String(item.authEmail || '').toLowerCase() === SP.accountEmailOf(item);
         const st = accountStates[item.uid];
         const statusTag = item.active === false || (st && st.status === 'suspended')
@@ -38,14 +38,15 @@ window.renderPersonelTable = function () {
     const hasSelectCol = !!(firstTh && /^seç$/i.test((firstTh.textContent || '').trim()));
 
     const actionButtons = item => {
+        const idAttr = escapeHtml(item.id ?? '');
         const suspended = item.active === false;
         const pinBtn = (isAdmin && item.uid && !suspended)
-            ? `<button class="edit-btn" onclick="if(validateAdminAction()) openPersonelTempPin(${jsArg(item.id)})">Geçici PIN</button> `
+            ? `<button type="button" class="edit-btn" data-action="personelTempPin" data-id="${idAttr}">Geçici PIN</button> `
             : '';
         const toggleBtn = suspended
-            ? `<button class="edit-btn" onclick="if(validateAdminAction()) togglePersonelSuspend(${jsArg(item.id)}, false)">Yeniden Aktifleştir</button>`
-            : `<button class="delete-btn" onclick="if(validateAdminAction()) togglePersonelSuspend(${jsArg(item.id)}, true)">Askıya Al</button>`;
-        return `<button class="edit-btn" onclick="if(validateAdminAction()) openPersonelModal('edit', ${jsArg(item.id)})">Düzenle</button> ` + pinBtn + toggleBtn;
+            ? `<button type="button" class="edit-btn" data-action="personelReactivate" data-id="${idAttr}">Yeniden Aktifleştir</button>`
+            : `<button type="button" class="delete-btn" data-action="personelSuspend" data-id="${idAttr}">Askıya Al</button>`;
+        return `<button type="button" class="edit-btn" data-action="personelEdit" data-id="${idAttr}">Düzenle</button> ` + pinBtn + toggleBtn;
     };
 
     tbody.innerHTML = (window.data.personel || []).map((item, idx) => {
@@ -55,16 +56,66 @@ window.renderPersonelTable = function () {
             ${selectTd /* xss-ok: yalnız sabit checkbox hücresi + escapeHtml(item.id) */}
             <td>${escapeHtml(item.name || '-')}<br><small>ID: ${escapeHtml(item.id)} · UID: ${escapeHtml(item.uid || 'yok')} · ${item.active === false ? 'Askıda / Pasif' : 'Aktif'}</small></td>
             <td>${unitCell(item) /* xss-ok: unitCell() escapeHtml kullanır (linter ayrıca denetler) */}</td>
-            <td>${account(item) /* xss-ok: account() kendi şablonlarında escapeHtml / jsArg kullanır (linter ayrıca denetler) */}</td>
-            <td>${actionButtons(item) /* xss-ok: actionButtons() yalnız sabit düğmeler + jsArg(item.id) kullanır */}</td>
+            <td>${account(item) /* xss-ok: account() kendi şablonlarında escapeHtml kullanır (linter ayrıca denetler) */}</td>
+            <td>${actionButtons(item) /* xss-ok: actionButtons() yalnız sabit düğmeler + escapeHtml(item.id) kullanır */}</td>
         </tr>`;
     }).join('');
 
+    _bindPersonelRowActions(tbody);
     if (!hasSelectCol) {
         _bindPersonelRowSelection(tbody);
         _syncPersonelSelectionUI();
     }
+    if (typeof window.enhanceAdminBentoTables === 'function') {
+        try { window.enhanceAdminBentoTables(); } catch (_) { /* yoksay */ }
+    }
 };
+
+// [WHY]: v3.8 HF-2 · admin.html auth-engine.js'i yüklemediği için satır içi validateAdminAction() çağrıları
+//        false dönüp #tablePersonel'deki tüm işlem düğmelerini (Düzenle, Geçici PIN, Askıya Al) engelliyordu.
+// [HOW]: CSP uyumlu data-action + window.bindActions delegasyonu ve requireDbAdmin/validateAdminAction ortak kapısı.
+function _guardPersonelAdmin(actionLabel) {
+    if (typeof window.requireDbAdmin === 'function') return window.requireDbAdmin(actionLabel);
+    if (typeof window.validateAdminAction === 'function') return window.validateAdminAction();
+    return false;
+}
+
+function _bindPersonelRowActions(tbody) {
+    if (!tbody) return;
+    const handlers = {
+        personelEdit: el => {
+            if (!_guardPersonelAdmin('Personel düzenleme')) return;
+            if (typeof window.openPersonelModal === 'function') window.openPersonelModal('edit', el.dataset.id);
+        },
+        personelTempPin: el => {
+            if (!_guardPersonelAdmin('Geçici PIN / Kod')) return;
+            if (typeof window.openPersonelTempPin === 'function') window.openPersonelTempPin(el.dataset.id);
+        },
+        personelSuspend: el => {
+            if (!_guardPersonelAdmin('Personel askıya alma')) return;
+            if (typeof window.togglePersonelSuspend === 'function') window.togglePersonelSuspend(el.dataset.id, true);
+        },
+        personelReactivate: el => {
+            if (!_guardPersonelAdmin('Personel yeniden aktifleştirme')) return;
+            if (typeof window.togglePersonelSuspend === 'function') window.togglePersonelSuspend(el.dataset.id, false);
+        },
+        personelOpenAccount: el => {
+            if (!_guardPersonelAdmin('Giriş hesabı açma')) return;
+            if (typeof window.openPersonelAccount === 'function') window.openPersonelAccount(el.dataset.id);
+        },
+    };
+    if (typeof window.bindActions === 'function') {
+        window.bindActions(tbody, handlers);
+    } else if (!tbody._personelActionsFallbackBound) {
+        tbody._personelActionsFallbackBound = true;
+        tbody.addEventListener('click', e => {
+            const btn = e.target.closest('[data-action]');
+            if (!btn || !tbody.contains(btn)) return;
+            const fn = handlers[btn.dataset.action];
+            if (typeof fn === 'function') fn(btn, e);
+        });
+    }
+}
 
 // [WHY]: v3.8 UX-4 · index.html Personel tablosunda "Seç" sütunu olmadan satıra tıkla-seç + Shift aralık seçimi sağlar.
 // [HOW]: Satır içi buton/bağlantı tıklamalarını yoksayar; seçili satır sayısını #personelSelectionPill içinde gösterir.

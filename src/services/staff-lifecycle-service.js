@@ -24,17 +24,17 @@ export class StaffLifecycleError extends Error {
 }
 
 const LOCK_COLLECTIONS = ['personel', 'staffAccounts'];
+const DEMO_RESET_STORAGE_KEY = 'medipol_demo_reset_requests_v1';
 const REAUTH_TEXT = {
     suspend: ['Personel Hesabını Askıya Al', 'Seçilen personelin sistem erişimi kapatılacak; geçmiş zimmet, talep ve EBYS kayıtları korunacaktır. Devam etmek için yönetici parolanızı doğrulayın.'],
     reactivate: ['Personel Hesabını Yeniden Aktifleştir', 'Askıdaki personelin sistem erişimi yeniden açılacaktır. Devam etmek için yönetici parolanızı doğrulayın.'],
     tempPin: ['Geçici PIN / Kod Yenileme Onayı', 'Seçilen personel için süreli tek kullanımlık geçici kod tanımlanacaktır. Devam etmek için yönetici parolanızı doğrulayın.'],
 };
 
-const _newAuditId = prefix => `${prefix}_${Date.now().toString(36)}_${
-    (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
+const _newAuditId = prefix => `${prefix}_${Date.now().toString(36)}_${(globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
         ? globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 12)
         : Math.random().toString(36).slice(2, 12)
-}`;
+    }`;
 
 const _toMillis = ts => {
     if (!ts) return null;
@@ -82,7 +82,82 @@ export function createStaffLifecycleService(deps = {}) {
     const getProvisioner = deps.getProvisioner || (() => (typeof window.getStaffProvisioner === 'function' ? window.getStaffProvisioner() : null));
     const updateOwnPassword = deps.updateOwnPassword || (pw => window.updateOwnStaffPassword(pw));
     const makeAuditId = deps.makeAuditId || _newAuditId;
+    const storage = () => (deps.storage ? deps.storage() : (typeof localStorage !== 'undefined' ? localStorage : null));
+    const nowMs = () => (deps.nowMs ? Number(deps.nowMs()) : Date.now());
     const ref = (col, id) => fns.doc(db(), root(), col, 'items', String(id));
+
+    // [WHY]: v3.8 HF-2 · Lokal testte (127.0.0.1 / localhost → inventory_demo) VP-3 firestore.rules henüz buluta
+    //        deploy edilmediği için passwordResetRequests yazma/okuma permission-denied döner.
+    // [HOW]: Yalnızca COLLECTION_ROOT === 'inventory_demo' VE hostname localhost/127.0.0.1 iken güvenli yerel demo yedeği
+    //        devreye girer. Canlı lifeserver_master kökünde KESİNLİKLE kapalıdır.
+    function isLocalDemoFallbackAllowed() {
+        if (deps.allowLocalDemoFallback !== undefined) return !!deps.allowLocalDemoFallback;
+        try {
+            if (root() !== 'inventory_demo') return false;
+            if (typeof window === 'undefined' || !window.location) return false;
+            const host = window.location.hostname;
+            return host === 'localhost' || host === '127.0.0.1';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function _readDemoResetRequests() {
+        const store = storage();
+        if (!store || typeof store.getItem !== 'function') return [];
+        try {
+            const raw = store.getItem(DEMO_RESET_STORAGE_KEY);
+            if (!raw) return [];
+            const list = JSON.parse(raw);
+            return Array.isArray(list) ? list.filter(x => x && x.pri) : [];
+        } catch (_) {
+            return [];
+        }
+    }
+
+    function _writeDemoResetRequests(list) {
+        const store = storage();
+        if (!store || typeof store.setItem !== 'function') return;
+        try {
+            store.setItem(DEMO_RESET_STORAGE_KEY, JSON.stringify(Array.isArray(list) ? list : []));
+        } catch (_) { /* kota/gizli mod */ }
+    }
+
+    function _upsertDemoResetRequest(entry) {
+        const L = SL();
+        const now = nowMs();
+        const list = _readDemoResetRequests();
+        const idx = list.findIndex(x => String(x.pri) === String(entry.pri));
+        if (idx !== -1) {
+            const prev = list[idx];
+            if (prev.requestedAtMs && L.canResubmitResetRequest && !L.canResubmitResetRequest(prev.requestedAtMs, now).allowed) {
+                return false;
+            }
+            list[idx] = { ...prev, ...entry };
+        } else {
+            list.unshift(entry);
+        }
+        _writeDemoResetRequests(list);
+        return true;
+    }
+
+    function _resolveDemoResetRequest(priId, { status, resolutionNote = '', resolvedBy = '' } = {}) {
+        const list = _readDemoResetRequests();
+        const idx = list.findIndex(x => String(x.pri) === String(priId));
+        if (idx === -1) return null;
+        const now = nowMs();
+        const updated = {
+            ...list[idx],
+            status,
+            resolvedAtMs: now,
+            resolvedBy: String(resolvedBy || ''),
+            resolutionNote: String(resolutionNote || ''),
+            source: 'local-demo-fallback',
+        };
+        list[idx] = updated;
+        _writeDemoResetRequests(list);
+        return updated;
+    }
 
     const actorFields = () => {
         const me = actor();
@@ -121,20 +196,61 @@ export function createStaffLifecycleService(deps = {}) {
     }
 
     // [WHY]: Oturumsuz giriş ekranında 24 saat limitli şifre sıfırlama talebi oluşturulur; hesap varlığı sızdırılmaz.
-    // [HOW]: setDoc ile passwordResetRequests/items/{priNorm} yazılır; hem başarı hem permission-denied (24s kilidi)
-    //        aynı nötr kullanıcı mesajını döner (zero-enumeration).
+    // [HOW]: 1) Yerel anti-spam kilidi (checkLocalResetGuard) aynı PRI/cihazdan mükerrer tıklamaları Firestore'a gitmeden durdurur.
+    //        2) setDoc ile passwordResetRequests/items/{priNorm} yazılır; hem başarı hem permission-denied (24s kilidi)
+    //           aynı nötr kullanıcı mesajını döner (zero-enumeration).
+    //        3) Yalnızca localhost + inventory_demo modunda bulut kuralları henüz deploy edilmemişse yerel demo yedeğine yazar.
     async function submitPasswordResetRequest({ pri, note = '' } = {}) {
         const L = SL();
         const plan = L.planResetRequest({ pri, note, now: fns.serverTimestamp() });
         if (!plan.ok) {
             return { ok: false, code: plan.code, message: plan.error };
         }
+        const now = nowMs();
+        const store = storage();
+        if (typeof L.checkLocalResetGuard === 'function') {
+            const guard = L.checkLocalResetGuard({ pri: plan.docId, storage: store, nowMs: now });
+            if (!guard.allowed) {
+                if (typeof L.recordLocalResetAttempt === 'function') {
+                    L.recordLocalResetAttempt({ pri: plan.docId, allowed: false, outcome: guard.code, storage: store, nowMs: now });
+                }
+                return {
+                    ok: true,
+                    code: guard.code,
+                    localBlocked: true,
+                    remainingMs: guard.remainingMs,
+                    message: guard.message || L.NEUTRAL_RESET_MESSAGE,
+                };
+            }
+        }
         try {
             await fns.setDoc(ref('passwordResetRequests', plan.docId), plan.payload);
+            if (typeof L.recordLocalResetAttempt === 'function') {
+                L.recordLocalResetAttempt({ pri: plan.docId, allowed: true, outcome: 'submitted', storage: store, nowMs: now });
+            }
             return { ok: true, code: 'submitted', message: L.NEUTRAL_RESET_MESSAGE };
         } catch (e) {
             const code = String((e && e.code) || '');
             if (code === 'permission-denied') {
+                if (typeof L.recordLocalResetAttempt === 'function') {
+                    L.recordLocalResetAttempt({ pri: plan.docId, allowed: true, outcome: 'permission-denied', storage: store, nowMs: now });
+                }
+                if (isLocalDemoFallbackAllowed()) {
+                    _upsertDemoResetRequest({
+                        id: plan.docId,
+                        pri: plan.docId,
+                        note: plan.payload.note,
+                        status: 'pending',
+                        requestedAt: null,
+                        requestedAtMs: now,
+                        resolvedAt: null,
+                        resolvedAtMs: null,
+                        resolvedBy: '',
+                        resolutionNote: '',
+                        source: 'local-demo-fallback',
+                    });
+                    return { ok: true, code: 'local-demo-fallback', message: L.NEUTRAL_RESET_MESSAGE };
+                }
                 return { ok: true, code: 'neutral-guarded', message: L.NEUTRAL_RESET_MESSAGE };
             }
             if (code === 'unavailable' || code === 'network-request-failed') {
@@ -146,11 +262,13 @@ export function createStaffLifecycleService(deps = {}) {
 
     // [WHY]: Yönetici açık ve geçmiş sıfırlama taleplerini sunucudan taze okur.
     // [HOW]: Ek bileşik indeks gerektirmemek için getDocsFromServer sonrası bellek içi zaman sırası uygulanır.
+    //        Lokal demo modunda (inventory_demo @ localhost) bulut kuralları deploy edilene kadar yerel demo talepleriyle birleştirilir.
     async function listPasswordResetRequests() {
         requireAdmin();
-        const snap = await fns.getDocsFromServer(fns.collection(db(), root(), 'passwordResetRequests', 'items'));
-        return snap.docs
-            .map(d => {
+        let serverRows = [];
+        try {
+            const snap = await fns.getDocsFromServer(fns.collection(db(), root(), 'passwordResetRequests', 'items'));
+            serverRows = snap.docs.map(d => {
                 const data = d.data() || {};
                 return {
                     id: d.id,
@@ -163,16 +281,40 @@ export function createStaffLifecycleService(deps = {}) {
                     resolvedAtMs: _toMillis(data.resolvedAt),
                     resolvedBy: data.resolvedBy || '',
                     resolutionNote: data.resolutionNote || '',
+                    source: 'firestore',
                 };
-            })
-            .sort((a, b) => (b.requestedAtMs || 0) - (a.requestedAtMs || 0));
+            });
+        } catch (e) {
+            if (!(e && e.code === 'permission-denied' && isLocalDemoFallbackAllowed())) {
+                throw e;
+            }
+        }
+        if (isLocalDemoFallbackAllowed()) {
+            const demoRows = _readDemoResetRequests();
+            const byPri = new Map(serverRows.map(r => [String(r.pri), r]));
+            for (const dr of demoRows) {
+                if (!byPri.has(String(dr.pri))) {
+                    byPri.set(String(dr.pri), { ...dr, source: 'local-demo-fallback' });
+                }
+            }
+            serverRows = [...byPri.values()];
+        }
+        return serverRows.sort((a, b) => (b.requestedAtMs || 0) - (a.requestedAtMs || 0));
     }
 
     // [WHY]: Personel tablosu ve yaşam döngüsü kartı hesapların askı / geçici PIN durumunu bilmelidir.
     // [HOW]: staffAccounts/items sunucudan okunup uid → özet haritasına dönüştürülür (gizli bilgi içermez).
     async function listStaffAccountStates() {
         requireAdmin();
-        const snap = await fns.getDocsFromServer(fns.collection(db(), root(), 'staffAccounts', 'items'));
+        let snap;
+        try {
+            snap = await fns.getDocsFromServer(fns.collection(db(), root(), 'staffAccounts', 'items'));
+        } catch (e) {
+            if (e && e.code === 'permission-denied' && isLocalDemoFallbackAllowed()) {
+                return {};
+            }
+            throw e;
+        }
         const map = {};
         snap.docs.forEach(d => {
             const data = d.data() || {};
@@ -196,7 +338,8 @@ export function createStaffLifecycleService(deps = {}) {
     }
 
     // [WHY]: Yönetici bir sıfırlama talebini çözdüğünde veya kapattığında requestedAt korunmalı ve iz bırakılmalıdır.
-    // [HOW]: Tek transaction içinde passwordResetRequests güncellenir ve auditLogs kaydı yazılır.
+    // [HOW]: Tek transaction içinde passwordResetRequests güncellenir ve auditLogs kaydı yazılır;
+    //        lokal demo modunda yerel demo kaydı da çözümlenir.
     async function resolvePasswordResetRequest(priId, { status = 'resolved', resolutionNote = '' } = {}) {
         requireWritableAdmin();
         const L = SL();
@@ -205,7 +348,7 @@ export function createStaffLifecycleService(deps = {}) {
         const uidActor = actorUid();
         const auditId = makeAuditId('al_vp3_rst');
         try {
-            return await fns.runTransaction(db(), async tx => {
+            const res = await fns.runTransaction(db(), async tx => {
                 const reqRef = ref('passwordResetRequests', cleanPri);
                 const snap = await tx.get(reqRef);
                 if (!snap.exists()) throw new StaffLifecycleError('not-found', 'Sıfırlama talebi bulunamadı.');
@@ -222,7 +365,17 @@ export function createStaffLifecycleService(deps = {}) {
                 tx.set(ref('auditLogs', auditId), rec.data);
                 return { ok: true, pri: cleanPri, status, auditId };
             });
+            if (isLocalDemoFallbackAllowed()) {
+                _resolveDemoResetRequest(cleanPri, { status, resolutionNote, resolvedBy: uidActor });
+            }
+            return res;
         } catch (e) {
+            if (isLocalDemoFallbackAllowed() && ((e && e.code === 'not-found') || (e && e.code === 'permission-denied'))) {
+                const resolvedLocal = _resolveDemoResetRequest(cleanPri, { status, resolutionNote, resolvedBy: uidActor });
+                if (resolvedLocal) {
+                    return { ok: true, pri: cleanPri, status, auditId, source: 'local-demo-fallback' };
+                }
+            }
             if (e instanceof StaffLifecycleError) throw e;
             if (e && e.code === 'permission-denied') {
                 throw new StaffLifecycleError('forbidden', 'Kurallar talebi güncellemeyi reddetti. Yönetici oturumunuzu yenileyip tekrar deneyin.');
@@ -453,6 +606,17 @@ export function createStaffLifecycleService(deps = {}) {
                     if (resPlan.ok) tx.set(reqRef, resPlan.patch);
                 }
             });
+
+            if (cleanResolvePri && isLocalDemoFallbackAllowed()) {
+                const resNote = authUpdated
+                    ? 'Yönetici tarafından yeni tek kullanımlık geçici kod tanımlandı'
+                    : 'Geçici kod üretildi; çevrimdışı Auth sıfırlama adımı bekleniyor';
+                _resolveDemoResetRequest(cleanResolvePri, {
+                    status: 'resolved',
+                    resolutionNote: resNote,
+                    resolvedBy: uidActor,
+                });
+            }
 
             return {
                 ok: true,

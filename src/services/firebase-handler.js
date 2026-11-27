@@ -305,6 +305,8 @@ let _syncUnsubscribers = [];
 let _syncRunning = false;
 let _syncUid = null;          // senkronun başlatıldığı oturum (J3 · M10)
 let _syncStopping = false;
+let _lastSyncStopAt = 0;      // v3.8 HF-2: çıkış sırasında gecikmeli mikro-görev permission-denied süzgeci
+let _syncGeneration = 0;      // v3.8 HF-2: eski dinleyici neslinden gelen hataları yoksay
 const _deniedListeners = new Set();
 
 export const registerSyncListener = window.registerSyncListener = function (key, subscribe) {
@@ -334,10 +336,12 @@ function _renderSyncHealth() {
     if (dot) dot.classList.toggle('online', !denied.length);
 }
 
-export const reportListenerError = window.reportListenerError = function (name, err) {
+export const reportListenerError = window.reportListenerError = function (name, err, gen = _syncGeneration) {
     if (err && err.code === 'permission-denied') {
-        if (_syncStopping || !window.userAuth) {
-            console.warn(`⏳ [Güvenlik] ${name}: oturum kapalıyken yetki reddi (beklenen).`);
+        const isEnding = !!(window.SecurityConfig && window.SecurityConfig._ending);
+        const recentStop = (Date.now() - _lastSyncStopAt) < 2500;
+        const noAuth = !window.userAuth || (typeof auth !== 'undefined' && auth && auth.currentUser === null);
+        if (gen !== _syncGeneration || _syncStopping || !_syncRunning || isEnding || recentStop || noAuth) {
             return;
         }
         console.error(`⛔ [Güvenlik] ${name}: Firestore okuma yetkisi reddedildi.`, err);
@@ -403,6 +407,8 @@ function _markAuthKnown() {
 // [HOW]: Her onSnapshot'ın unsubscribe'ı saklanır; yeniden başlatmada önce eskiler kapatılır (stopRealtimeSync).
 export const stopRealtimeSync = window.stopRealtimeSync = function () {
     _syncStopping = true;
+    _lastSyncStopAt = Date.now();
+    _syncGeneration++;
     _syncUnsubscribers.forEach(unsub => { try { unsub(); } catch (e) { } });
     _syncUnsubscribers = [];
     _syncRunning = false;
@@ -413,8 +419,10 @@ export const stopRealtimeSync = window.stopRealtimeSync = function () {
 
 window.startRealtimeSync = function () {
     stopRealtimeSync();
+    _lastSyncStopAt = 0;
     _syncRunning = true;
     _syncUid = window.userAuth ? window.userAuth.uid : null;
+    const gen = _syncGeneration;
 
     // J10: senkron yalnız oturum açıldıktan sonra çalışır; giriş ekranı (rehber, kutu, odak) auth-engine'de yönetilir.
 
@@ -428,7 +436,7 @@ window.startRealtimeSync = function () {
                 _bumpDataRevision(); _markListenerHealthy('purchaseOrders');
                 window.LoadingCoordinator?.markLoaded('purchaseOrders');
                 window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'purchaseOrders', isPatch: false } }));
-            }, error => reportListenerError('purchaseOrders', error)));
+            }, error => reportListenerError('purchaseOrders', error, gen)));
             return;
         }
         // Faz 4: kurallar personele yalnız KENDİ iade taleplerini okutur; koleksiyonun tamamını dinlemek reddedilirdi.
@@ -441,7 +449,7 @@ window.startRealtimeSync = function () {
                 _bumpDataRevision(); _markListenerHealthy('returnRequests');
                 window.LoadingCoordinator?.markLoaded('returnRequests');
                 window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'returnRequests', isPatch: false } }));
-            }, error => reportListenerError('returnRequests', error)));
+            }, error => reportListenerError('returnRequests', error, gen)));
             return;
         }
         _syncUnsubscribers.push(onSnapshot(collection(fireDb, COLLECTION_ROOT, colName, "items"), (snapshot) => {
@@ -505,7 +513,7 @@ window.startRealtimeSync = function () {
             if (colName === 'personel' && items.length >= 0) {
                 window.isFirebaseLoaded = true;
             }
-        }, (err) => reportListenerError(colName, err)));
+        }, (err) => reportListenerError(colName, err, gen)));
     });
 
     // A2. RAF KATALOĞU (v3.3 Aşama 2 · P1-02): ortak kapasite/slot sayaçları. Yalnız yönetici oturumunda (raf ekranı ve
@@ -516,7 +524,7 @@ window.startRealtimeSync = function () {
             window.data.shelves = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
             _bumpDataRevision();
             window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'shelves', isPatch: false, changes: [] } }));
-        }, (err) => reportListenerError('shelves', err)));
+        }, (err) => reportListenerError('shelves', err, gen)));
     }
 
     // B. SİSTEM AYARLARINI DİNLE
@@ -563,7 +571,7 @@ window.startRealtimeSync = function () {
             // Faz 5 denetimi · P0: yarım kalmış toplu yazma kilidi → yönetici sekmesinde otomatik kurtarma
             if (data.restoreLock) _scheduleBulkRecovery();
         }
-    }, (err) => reportListenerError('admin_settings', err)));
+    }, (err) => reportListenerError('admin_settings', err, gen)));
 
     // C. SİSTEM MESAJLARINI DİNLE
     // [WHY]: God-Eye panelinden gönderilen yönetici mesajlarını gerçek zamanlı yakalamak için.
@@ -599,7 +607,7 @@ window.startRealtimeSync = function () {
                 }
             }
         }
-    }, (err) => reportListenerError('admin_messages', err)));
+    }, (err) => reportListenerError('admin_messages', err, gen)));
 
     // C2. J11 · P0 PERSONEL ERİŞİM KİLİDİ — yönetici panelde durumu görür; personel oturumu kilit kapanınca sonlandırılır
     //     (kurallar yeni okumaları zaten reddeder; açık dinleyicinin sunucuda hemen kesileceği garanti değil → istemci de keser).
@@ -612,7 +620,7 @@ window.startRealtimeSync = function () {
         if (_staffGate.state !== 'open' && window.AppModules && window.AppModules.Session && window.AppModules.Session.isStaffAccountSession()) {
             revokeStaffAccess('gate-closed');
         }
-    }, (err) => reportListenerError('accessGate', err)));
+    }, (err) => reportListenerError('accessGate', err, gen)));
 
     // D. MODÜLLERİN KAYDETTİĞİ EK DİNLEYİCİLER (ör. iş akışı şablonları)
     _extraListeners.forEach((subscribe, key) => {
@@ -1215,7 +1223,7 @@ onAuthStateChanged(auth, async (user) => {
 
         // [WHY]: v3.8 · VP-3 — askıda veya geçici kod değişimi bekleyen hesapta dinleyiciler açılmaz (kurallar reddeder).
         const lifecycleBlocked = !!(grant && (grant.status === 'suspended' || grant.mustChangeCode === true));
-        if (!lifecycleBlocked && (!isSyncStarted || !_syncRunning || (user.isAnonymous && _syncUid !== user.uid))) {
+        if (!lifecycleBlocked && (!isSyncStarted || !_syncRunning || _syncUid !== user.uid)) {
             isSyncStarted = true;
             window.startRealtimeSync();
         }
