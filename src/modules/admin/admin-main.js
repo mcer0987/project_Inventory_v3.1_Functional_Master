@@ -18,6 +18,7 @@ import '../../ui/ebys-catalog-ui.js';  // v3.4 EBYS H6b: Tanımlar › Kurum Kü
 import '../self-approval-reporter.js';   // J4: Güvenlik Raporu iki sayfada (EBYS-05)
 import '../../services/admin-grant-service.js';   // İP-7: VIP › Yönetici Yetkileri (ana yöneticinin verdiği yetki)
 import '../../services/brand-settings-service.js'; // v3.8 UX-5: Marka & Logo Ayarları (system_config/items/brand_settings)
+import '../../services/staff-lifecycle-service.js'; // v3.8 VP-3: Personel Hesap Yaşam Döngüsü (sıfırlama, geçici PIN, askıya alma)
 
 window.AppModules = window.AppModules || {};
 

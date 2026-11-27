@@ -558,6 +558,9 @@ const _LOGIN_MSG = {
     invalid: "<span style='color:var(--danger-color); font-weight:bold;'>❌ Kurumsal kimlik ya da giriş kodu hatalı!</span>",
     contact: "<span style='color:var(--danger-color); font-weight:bold;'>⚠️ Giriş yapılamadı, lütfen yöneticiye başvurun.</span>",
     disabled: "<span style='color:var(--danger-color); font-weight:bold;'>⛔ Giriş hesabınız devre dışı. Lütfen yöneticiye başvurun.</span>",
+    suspended: "<span style='color:var(--danger-color); font-weight:bold;'>⛔ Hesabınız askıya alınmıştır. Lütfen yöneticiye başvurun.</span>",
+    tempPinExpired: "<span style='color:var(--danger-color); font-weight:bold;'>⏳ Geçici giriş kodunuzun süresi dolmuştur. Yöneticiden yeni kod isteyin.</span>",
+    tempPinRequired: "<span style='color:var(--warning-color); font-weight:bold;'>🔐 Devam etmek için geçici kodunuzu yeni kişisel kodla değiştirmeniz gerekir.</span>",
     rateLimited: "<span style='color:var(--danger-color); font-weight:bold;'>⏳ Çok fazla deneme yapıldı. Birkaç dakika sonra tekrar deneyin.</span>",
     network: "<span style='color:var(--danger-color)'>⚠️ Sunucuya bağlanılamadı. Bağlantınızı kontrol edip tekrar deneyin.</span>",
     gateClosed: "<span style='color:var(--warning-color); font-weight:bold;'>🔒 Personel erişimi şu an kapalı (sistem geçişi sürüyor). Lütfen daha sonra yeniden deneyin.</span>",
@@ -587,12 +590,50 @@ async function completeStaffLogin(pri, code, { priInput, codeInput, loginModal }
     setLoginStatus("<span style='color:var(--warning-color)'>⏳ Giriş yapılıyor…</span>");
     // Aynı sekmede açık kalmış başka bir oturum (başka personel / yönetici) önce kapatılır: kimlikler karışmasın.
     if (window.userAuth && window.SecurityConfig) await window.SecurityConfig.logout();
+    window._staffCodeChangePending = true;
     try {
-        await window.signInStaffAccount(email, password);
-    } catch (e) {
-        console.warn('🔒 [auth-engine] Personel girişi reddedildi:', e && e.code);
-        _rejectStaffLogin(_staffLoginError(e && e.code), codeInput);
-        return;
+        try {
+            await window.signInStaffAccount(email, password);
+        } catch (e) {
+            console.warn('🔒 [auth-engine] Personel girişi reddedildi:', e && e.code);
+            _rejectStaffLogin(_staffLoginError(e && e.code), codeInput);
+            return;
+        }
+
+        // [WHY]: v3.8 · VP-3 — askıya alınmış veya geçici PIN ile ilk giriş yapan hesap, veri erişimi başlamadan
+        //        önce kendi staffAccounts/{uid} belgesinden denetlenir (0 ek personel listesi sızıntısı).
+        // [HOW]: Askıda → oturumu kapat; geçici PIN süresi doldu → kapat; geçerli geçici PIN → zorunlu yeni kod modalı.
+        const lifeSvc = window.AppModules && window.AppModules.StaffLifecycleService;
+        const lifePanel = window.AppModules && window.AppModules.StaffLifecyclePanel;
+        if (lifeSvc && typeof lifeSvc.readOwnAccountLifecycle === 'function') {
+            const life = await lifeSvc.readOwnAccountLifecycle();
+            if (life && life.suspended) {
+                if (window.userAuth && window.SecurityConfig) await window.SecurityConfig.logout();
+                _rejectStaffLogin(_LOGIN_MSG.suspended, codeInput);
+                return;
+            }
+            if (life && life.mustChangeCode) {
+                if (life.tempPinExpired) {
+                    if (window.userAuth && window.SecurityConfig) await window.SecurityConfig.logout();
+                    _rejectStaffLogin(_LOGIN_MSG.tempPinExpired, codeInput);
+                    return;
+                }
+                setLoginStatus("<span style='color:var(--warning-color)'>🔐 Geçici kod doğrulandı — yeni giriş kodunuzu belirleyin…</span>");
+                const changed = lifePanel && typeof lifePanel.promptMandatoryCodeChange === 'function'
+                    ? await lifePanel.promptMandatoryCodeChange({ pri, currentCode: code, expiresAtMs: life.tempPinExpiresAtMs })
+                    : false;
+                if (!changed) {
+                    if (window.userAuth && window.SecurityConfig) await window.SecurityConfig.logout();
+                    _rejectStaffLogin(_LOGIN_MSG.tempPinRequired, codeInput);
+                    return;
+                }
+                // Zorunlu kod değişimi tamamlandı → Firestore senkronunu hemen başlat.
+                window._staffCodeChangePending = false;
+                if (typeof window.startRealtimeSync === 'function') window.startRealtimeSync();
+            }
+        }
+    } finally {
+        window._staffCodeChangePending = false;
     }
 
     // J11 · P0: girişten SONRA (zero-lookup korunur) personel erişim kilidi okunur. Kapalıysa (doküman yok / false / geçersiz) ya da

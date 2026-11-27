@@ -389,6 +389,20 @@
                 await fns.updateEmail(cred.user, toEmail);
                 return cred.user.uid;
             }),
+            // [WHY]: v3.8 · VP-3 — bilinen mevcut/geçici kodla personelin Auth parolasını ana yönetici oturumunu bozmadan yeniler.
+            // [HOW]: İkincil bellek-içi 'provisioner' örneğinde giriş yapar, uid eşleşmesini doğrular, updatePassword uygular ve signOut eder.
+            //        Düz metin kod/parola hiçbir hata metnine veya loga basılmaz.
+            updateAccountPassword: (email, currentPassword, newPassword, { expectUid } = {}) => withSession(async a => {
+                if (typeof fns.updatePassword !== 'function') {
+                    throw Object.assign(new Error('Parola güncelleme köprüsü (updatePassword) yapılandırılmamış.'), { code: 'not-supported' });
+                }
+                const cred = await fns.signInWithEmailAndPassword(a, email, currentPassword);
+                if (expectUid && String(cred.user.uid) !== String(expectUid)) {
+                    throw Object.assign(new Error('Hesap kimliği (UID) personel kaydıyla uyuşmuyor.'), { code: 'uid-mismatch' });
+                }
+                await fns.updatePassword(cred.user, newPassword);
+                return cred.user.uid;
+            }),
             get auth() { return getAuthOnce(); },
         };
     }

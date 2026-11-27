@@ -52,6 +52,7 @@
     <script src="src/utils/inventory-no-rename.js"></script>
     <script src="src/utils/staff-code-registry.js"></script>
     <script src="src/services/staff-provisioning.js"></script>
+    <script src="src/utils/staff-lifecycle.js"></script>
     <script src="src/utils/ownership.js"></script>
     <script src="src/utils/admin-grants.js"></script>
     <script src="src/services/assignment-service.js"></script>
@@ -1816,6 +1817,9 @@
                     </button>
                 </div>
             </div>
+            <!-- v3.8 · VP-3: 24 saat limitli şifre sıfırlama talepleri ve geçici PIN yönetim kartı -->
+            <div id="staffLifecycleContainer" class="mb-4"></div>
+
             <div class="modern-card">
                 <div class="table-responsive" style="min-height: 400px;">
                     <table class="modern-table" id="tablePersonel">
@@ -1865,6 +1869,9 @@
                     window.renderLocationsTable();
                 } else if (tabId === 'personnel' && typeof window.renderPersonelTable === 'function') {
                     window.renderPersonelTable();
+                    if (window.AppModules && window.AppModules.StaffLifecyclePanel) {
+                        window.AppModules.StaffLifecyclePanel.renderAdminLifecyclePanel();
+                    }
                 }
 
                 // 💡 Contextual tip for definitions sub-tabs
@@ -3216,6 +3223,7 @@
     <script src="src/modules/admin/admin-system-control.js"></script>
     <script src="src/ui/brand-logo.js"></script>
     <script src="src/ui/admin-grant-panel.js"></script>
+    <script src="src/ui/staff-lifecycle-panel.js"></script>
     <script src="src/utils/return-request-schema.js"></script>
     <script src="src/modules/return-requests.js"></script>
     <script src="src/ui/request-badge.js"></script>

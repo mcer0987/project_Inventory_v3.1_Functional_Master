@@ -1,24 +1,11 @@
 (function () {
+    // [WHY]: v3.8 · VP-3 ile passwordResetRequest, temporaryPinLogin ve staffAccountRoadmap hayata geçirildi.
+    //        Yalnız Firebase Storage (Blaze planı) gerektiren purchaseFileUpload yer tutucu olarak kalır.
     const notices = Object.freeze({
         purchaseFileUpload: {
             title: 'Dosya yükleme şu anda kullanılamıyor',
             status: 'Bu dağıtımda kullanılamıyor',
             description: 'Satın alma talebine dosya eklemek için Firebase Storage gerekir. Mevcut Spark yapılandırmasında Storage etkin değil; ücretli plana geçiş yapılmadı. Talebi dosya eklemeden kaydedebilirsiniz.'
-        },
-        passwordResetRequest: {
-            title: 'Şifre sıfırlama talebi',
-            status: 'Geliştirme aşamasında',
-            description: 'Bu ekrandan henüz sıfırlama talebi gönderilmez. Planlanan işlem, güvenli sıfırlama akışını ve 24 saatte bir talep sınırını içerecek.'
-        },
-        temporaryPinLogin: {
-            title: 'Geçici PIN ile giriş',
-            status: 'Geliştirme aşamasında',
-            description: 'Yöneticinin seçtiği personel hesaplarına geçici PIN ile giriş henüz etkin değil. Bu, yönetici panelindeki mevcut sekme kilidi PIN’inden farklıdır. Bu seçenek herhangi bir PIN istemez ve giriş yapmaz.'
-        },
-        staffAccountRoadmap: {
-            title: 'Planlanan personel hesap işlemleri',
-            status: 'Geliştirme aşamasında',
-            description: 'Yönetici tarafından şifre sıfırlama (yeni şifrenin ilk hesap açılışındaki gibi bir kez gösterilmesi), seçili kullanıcılara geçici PIN, SMS ile şifre işlemi ve Firebase hesabı yaşam döngüsü henüz uygulanmadı. Bu bildirim hiçbir hesabı veya şifreyi değiştirmez. SMS sağlayıcısı sonraki karara bırakılmıştır; üçüncü taraf bağımlılık eklenmeyecek ve şifre SMS ile gönderilmeyecektir. Hesap kapatma tasarımında geçmiş ve atanmış iş akışları korunmalıdır.'
         }
     });
 

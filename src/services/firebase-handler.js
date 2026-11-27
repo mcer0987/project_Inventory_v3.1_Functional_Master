@@ -13,7 +13,7 @@ import { subscribeRestrictedPurchases, ensurePurchaseAccess, appendPurchaseWithd
 import {
     initializeAuth, onAuthStateChanged, connectAuthEmulator, setPersistence,
     browserSessionPersistence, browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence,
-    createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateEmail
+    createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateEmail, updatePassword
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
     initializeFirestore,
@@ -246,7 +246,7 @@ export const handleForceLogoutCommand = window.handleForceLogoutCommand = functi
     const localUser = window.currentUser || window.getActiveUser();
     const targetId = String(cmd.targetId);
     const isMatch = !!localUser && (
-        (localUser.id   && String(localUser.id)   === targetId) ||
+        (localUser.id && String(localUser.id) === targetId) ||
         (localUser.code && String(localUser.code) === targetId) ||
         (localUser.name && String(localUser.name) === targetId)
     );
@@ -423,12 +423,12 @@ window.startRealtimeSync = function () {
     // Bu, demo/localhost ortamında yanlışlıkla üretim verisi dinlenmesini engeller.
     COLLECTIONS.forEach(colName => {
         if (colName === 'purchaseOrders' && !window.isDbAdmin()) {
-            _syncUnsubscribers.push(subscribeRestrictedPurchases(fireDb,COLLECTION_ROOT,window.userAuth.uid,items=>{
-                window.data.purchaseOrders=items; window._dbMirror.purchaseOrders=typeof structuredClone==='function'?structuredClone(items):JSON.parse(JSON.stringify(items));
+            _syncUnsubscribers.push(subscribeRestrictedPurchases(fireDb, COLLECTION_ROOT, window.userAuth.uid, items => {
+                window.data.purchaseOrders = items; window._dbMirror.purchaseOrders = typeof structuredClone === 'function' ? structuredClone(items) : JSON.parse(JSON.stringify(items));
                 _bumpDataRevision(); _markListenerHealthy('purchaseOrders');
                 window.LoadingCoordinator?.markLoaded('purchaseOrders');
-                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated',{detail:{collection:'purchaseOrders',isPatch:false}}));
-            },error=>reportListenerError('purchaseOrders',error)));
+                window.dispatchEvent(new CustomEvent('onInventoryDataUpdated', { detail: { collection: 'purchaseOrders', isPatch: false } }));
+            }, error => reportListenerError('purchaseOrders', error)));
             return;
         }
         // Faz 4: kurallar personele yalnız KENDİ iade taleplerini okutur; koleksiyonun tamamını dinlemek reddedilirdi.
@@ -572,22 +572,22 @@ window.startRealtimeSync = function () {
         _markListenerHealthy('admin_messages');
         if (docSnap.exists()) {
             const data = docSnap.data();
-            
+
             const localUser = window.currentUser || window.getActiveUser();
 
             if (localUser && data.timestamp && data.message) {
                 const targetId = data.target_user_id;
                 const isMatch = (
                     targetId === 'broadcast' ||
-                    (localUser.id   && String(localUser.id)   === String(targetId)) ||
+                    (localUser.id && String(localUser.id) === String(targetId)) ||
                     (localUser.code && String(localUser.code) === String(targetId)) ||
                     (localUser.name && String(localUser.name) === String(targetId))
                 );
-                
+
                 if (isMatch) {
                     const msgTime = data.timestamp?.seconds || data.timestamp;
                     const msgKey = `last_msg_ts_${msgTime}`;
-                    
+
                     if (localStorage.getItem(msgKey) !== 'true') {
                         localStorage.setItem(msgKey, 'true');
                         if (typeof showAppAlert === 'function') {
@@ -718,7 +718,7 @@ window.addEventListener('unhandledrejection', ev => {
     if (_SHOWN_BY_DATA_LAYER.includes(e.code)) return; // veri katmanı kendi uyarısını zaten gösterdi
     const text = e.code === 'no-auth' ? 'Oturum yok; kayıt yapılamadı. Sayfayı yenileyip tekrar giriş yapın.'
         : e.code === 'not-found' ? 'Kayıt bulunamadı; başka biri değiştirmiş veya silmiş olabilir.'
-        : `Kayıt yapılamadı: ${e.message}`;
+            : `Kayıt yapılamadı: ${e.message}`;
     if (typeof window.showAppAlert === 'function') window.showAppAlert(text, 'error');
 });
 
@@ -1069,8 +1069,8 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
                 await appendPurchaseWithdrawalHistory(fireDb, COLLECTION_ROOT, batch, p.id, p.data);
             }
             if (p.col === 'purchaseOrders' && p.op === 'set' && p.data.exchangeRate && p.data.workflow?.steps?.[0]?.status === 'approved'
-                && !(window._dbMirror.purchaseOrders || []).find(x=>String(x.id)===String(p.id))?.exchangeRate) {
-                batch.set(doc(fireDb,COLLECTION_ROOT,'purchaseFinance','items',String(p.id)),Object.fromEntries(['exchangeRate','exchangeRateDate','exchangeRateSource','reportingTotalTRY'].map(k=>[k,p.data[k]])));
+                && !(window._dbMirror.purchaseOrders || []).find(x => String(x.id) === String(p.id))?.exchangeRate) {
+                batch.set(doc(fireDb, COLLECTION_ROOT, 'purchaseFinance', 'items', String(p.id)), Object.fromEntries(['exchangeRate', 'exchangeRateDate', 'exchangeRateSource', 'reportingTotalTRY'].map(k => [k, p.data[k]])));
             }
         }
         await batch.commit();
@@ -1095,21 +1095,21 @@ export const applyItemOps = window.applyItemOps = async function (ops, opts = {}
 export const upsertItem = window.upsertItem = async (col, item, opts) => {
     const result = await applyItemOps([{ op: 'set', col, item }], opts);
     if (col === 'purchaseOrders' && result?.written) {
-        try { await ensurePurchaseAccess(fireDb,COLLECTION_ROOT,[item],window.userAuth.uid,window.isDbAdmin()); }
-        catch (error) { console.error('Satın alma kaydedildi; görev eşlemesi onarılmalı:',error.code); window.showAppAlert?.('Talep kaydedildi; onay kuyruğu eşlemesi tamamlanamadı. Yönetici erişim eşlemesini onarmalı.','warning'); }
+        try { await ensurePurchaseAccess(fireDb, COLLECTION_ROOT, [item], window.userAuth.uid, window.isDbAdmin()); }
+        catch (error) { console.error('Satın alma kaydedildi; görev eşlemesi onarılmalı:', error.code); window.showAppAlert?.('Talep kaydedildi; onay kuyruğu eşlemesi tamamlanamadı. Yönetici erişim eşlemesini onarmalı.', 'warning'); }
     }
     return result;
 };
 window.previewLegacyPurchaseAccess = async () => {
     if (!window.isDbAdmin()) throw new Error('Yönetici yetkisi gerekli.');
-    const snapshot = await getDocsFromServer(collection(fireDb,COLLECTION_ROOT,'purchaseOrders','items'));
-    const orders = snapshot.docs.map(d=>({...d.data(),id:d.id}));
-    return {orders:orders.length,unresolved:orders.flatMap(p=>(p.workflow?.steps||[]).filter(s=>!s.userUid).map(s=>({id:String(p.id),name:s.user||''})))};
+    const snapshot = await getDocsFromServer(collection(fireDb, COLLECTION_ROOT, 'purchaseOrders', 'items'));
+    const orders = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+    return { orders: orders.length, unresolved: orders.flatMap(p => (p.workflow?.steps || []).filter(s => !s.userUid).map(s => ({ id: String(p.id), name: s.user || '' }))) };
 };
 window.prepareLegacyPurchaseAccess = async () => {
     if (!window.isDbAdmin()) throw new Error('Yönetici yetkisi gerekli.');
-    const snapshot = await getDocsFromServer(collection(fireDb,COLLECTION_ROOT,'purchaseOrders','items'));
-    return ensurePurchaseAccess(fireDb,COLLECTION_ROOT,snapshot.docs.map(d=>({...d.data(),id:d.id})),window.userAuth.uid,true);
+    const snapshot = await getDocsFromServer(collection(fireDb, COLLECTION_ROOT, 'purchaseOrders', 'items'));
+    return ensurePurchaseAccess(fireDb, COLLECTION_ROOT, snapshot.docs.map(d => ({ ...d.data(), id: d.id })), window.userAuth.uid, true);
 };
 export const appendItem = window.appendItem = (col, item, opts) => applyItemOps([{ op: 'set', col, item, mustBeNew: true }], opts);
 export const updateItems = window.updateItems = (col, list, opts) => applyItemOps((list || []).map(x => ({ op: 'update', col, id: x.id, fields: x.fields })), opts);
@@ -1183,6 +1183,11 @@ function _watchOwnAdminGrant(user, session) {
         if (snap.metadata && snap.metadata.fromCache) return;
         if (!window.userAuth || window.userAuth.uid !== user.uid) return;
         const data = snap.exists() ? snap.data() : null;
+        // [WHY]: v3.8 · VP-3 — aktif oturumdaki personel yönetici tarafından askıya alındığında anında oturum kesilir.
+        if (data && data.status === 'suspended' && (document.body.classList.contains('logged-in') || (typeof window.getActiveUser === 'function' && window.getActiveUser()))) {
+            revokeStaffAccess('suspended');
+            return;
+        }
         const wasAdmin = session.isDbAdmin();
         session.setStaffAdminGrant(user, data);
         const isAdmin = session.isDbAdmin();
@@ -1208,14 +1213,9 @@ onAuthStateChanged(auth, async (user) => {
         resolvers.forEach(r => { try { r(user); } catch (e) { } });
         window.dispatchEvent(new CustomEvent('onAuthReady', { detail: { uid: user.uid, isAnonymous: !!user.isAnonymous } }));
 
-        // [BUGFIX] Bug 1: isSyncStarted=false (reset by onAppLogout) allows this block
-        // to re-fire startRealtimeSync() after a logout+re-login without a page refresh.
-        // Faz 3.8: SecurityConfig.logout dinleyicileri kapatır (_syncRunning=false). Çıkış sonrası anonim oturum
-        // 'onAppLogout' olayından önce gelse bile senkron yeniden başlar; aksi halde dinleyiciler ölü kalırdı.
-        // J3 (M10): çıkış/kilit sonrası gelen YENİ anonim oturum, başka bir oturum adına açılmış (signOut ile ölmüş) senkronu
-        //     devralmaz — yeniden başlatır. Anonim → admin geçişinde (giriş, kilit açma) Firestore aynı dinleyicileri yeni
-        //     kimlikle sürdürür; orada yeniden okuma yapılmaz (kota), kilit açma ayrıca ensureRealtimeSync çağırır.
-        if (!isSyncStarted || !_syncRunning || (user.isAnonymous && _syncUid !== user.uid)) {
+        // [WHY]: v3.8 · VP-3 — askıda veya geçici kod değişimi bekleyen hesapta dinleyiciler açılmaz (kurallar reddeder).
+        const lifecycleBlocked = !!(grant && (grant.status === 'suspended' || grant.mustChangeCode === true));
+        if (!lifecycleBlocked && (!isSyncStarted || !_syncRunning || (user.isAnonymous && _syncUid !== user.uid))) {
             isSyncStarted = true;
             window.startRealtimeSync();
         }
@@ -2220,10 +2220,28 @@ window.addEventListener('onAuthReady', () => {
 //        hesaba / eşleme başka bir personele bağlıysa hiçbir şey yazılmaz. Yalnız Firebase admin.
 let _staffProvisioner = null;
 const _getStaffProvisioner = () => _staffProvisioner || (_staffProvisioner = window.StaffProvisioning.createAuthProvisioner({
-    fns: { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateEmail },
+    fns: { initializeApp, getApps, initializeAuth, inMemoryPersistence, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateEmail, updatePassword },
     options: firebaseConfig,
     emulatorUrl: EMULATOR_MODE ? `http://${EMULATOR_HOST}:9099` : null,
 }));
+// [WHY]: v3.8 · VP-3 — staff-lifecycle-service.js ikincil 'provisioner' örneğini ve personelin kendi oturumundaki
+//        parola güncelleme köprüsünü ana oturuma zarar vermeden, düz metin parola basmadan kullanır.
+// [HOW]: Yönetici köprüsü isDbAdmin() şartına bağlıdır; öz-parola güncelleme yalnız aktif oturumdaki kullanıcıya işler.
+export const getStaffProvisioner = window.getStaffProvisioner = function () {
+    _requireProvisioningAdmin();
+    return _getStaffProvisioner();
+};
+export const updateOwnStaffPassword = window.updateOwnStaffPassword = async function (newPassword) {
+    const user = (window.fireAuth && window.fireAuth.currentUser) || window.userAuth;
+    if (!user) throw new SaveDataError('unauthenticated', 'Parola güncellemek için aktif bir oturum gerekir.');
+    try {
+        await updatePassword(user, newPassword);
+        return true;
+    } catch (e) {
+        const code = (e && e.code) || 'auth/update-failed';
+        throw Object.assign(new Error('Giriş kodu güncellenemedi.'), { code });
+    }
+};
 const _staffAccountRef = uid => doc(fireDb, COLLECTION_ROOT, 'staffAccounts', 'items', String(uid));
 let _staffLinker = null;
 async function _linkStaffAccount(person, fields) {
@@ -2488,6 +2506,7 @@ let _staffGate = { state: 'unknown' };
 const STAFF_REVOKE_MESSAGES = {
     'gate-closed': 'Personel erişimi şu an kapalı (sistem geçişi sürüyor). Lütfen daha sonra yeniden deneyin; sorun sürerse yöneticiye başvurun.',
     unlinked: 'Giriş hesabınız bir personel kaydına bağlı değil. Lütfen yöneticiye başvurun.',
+    suspended: 'Hesabınız yönetici tarafından askıya alınmıştır. Lütfen yöneticiye başvurun.',
 };
 export const getStaffRevokeMessage = window.getStaffRevokeMessage = reason => STAFF_REVOKE_MESSAGES[reason] || STAFF_REVOKE_MESSAGES['gate-closed'];
 
@@ -2557,7 +2576,7 @@ export const revokeStaffAccess = window.revokeStaffAccess = function (reason = '
 
 let _resolvingDenial = null;
 function _resolveStaffDenial(name) {
-    if (_resolvingDenial || _staffRevoking) return;
+    if (_resolvingDenial || _staffRevoking || window._staffCodeChangePending) return;
     _resolvingDenial = (async () => {
         const g = await readStaffAccessGate();
         if (['closed', 'missing', 'invalid'].includes(g.state)) return revokeStaffAccess('gate-closed');

@@ -48,21 +48,24 @@ service cloud.firestore {
       return request.auth.token.email.lower().replace('@staff[.]medipol[.]local$', '');
     }
     function staffAccount(root) { return /databases/$(database)/documents/$(root)/staffAccounts/items/$(request.auth.uid); }
-    function staffPersonOk(root, pid) {
+    function staffPersonOk(root, acctData) {
       // Eksik/geçersiz pid yolu veya eksik kimlik alanı fail-closed olur; tekrar get/replace maliyeti yok.
-      let person = get(/databases/$(database)/documents/$(root)/personel/items/$(pid)).data;
-      return person.uid == request.auth.uid && request.auth.token.email.lower() == person.pri + '@staff.medipol.local'
+      let person = get(/databases/$(database)/documents/$(root)/personel/items/$(acctData.get('personelId', ''))).data;
+      return acctData.get('status', 'active') != 'suspended'
+        && acctData.get('mustChangeCode', false) != true
+        && person.uid == request.auth.uid && request.auth.token.email.lower() == person.pri + '@staff.medipol.local'
         && person.get('active', true) == true;
     }
     // Kimlik (kilitten bağımsız): yalnız kilit dokümanının kendisini okumak için kullanılır (istemci "neden reddedildim" sorusunu
     // yanıtlayabilsin). Veri erişimi için HER ZAMAN isStaff.
     // J11: eşleme yolu ve personelId bir kez hesaplanır (kilit +1 okuma getirdi; en ağır onay isteği 1000 ifade sınırında kalsın).
+    // v3.8 · VP-3: zaten okunan staffAccounts/{uid} belgesinden askı durumu (status != 'suspended') ve geçici kod zorunlu değişim
+    //              kilidi (mustChangeCode != true) ek belge okuması (+0 okuma) olmadan doğrulanır.
     function staffIdentity(root) {
-      let acct = staffAccount(root);
       return signedIn()
         && request.auth.token.firebase.sign_in_provider == 'password'
         && request.auth.token.get('email', '').lower().matches('[a-z0-9]+([._-][a-z0-9]+)*@staff[.]medipol[.]local')
-        && staffPersonOk(root, get(acct).data.get('personelId', ''));
+        && staffPersonOk(root, get(staffAccount(root)).data);
     }
 
     // ─── J11 · P0 personel erişim kilidi (TEK KAYNAK) ─────────────────────────────────────────────────────
@@ -853,8 +856,11 @@ service cloud.firestore {
     //        da yeniden doğrulanmış (auth_time, saniye); denetim kaydı commit öncesinde YOK, commit sonrasında doğru tür /
     //        refId / yazan / sonuçla VAR (envanterNoAuditOk deseni). Verilirken personel kaydı taze: aynı uid, aynı PRI, aktif.
     function adminGrantWriteOk(root, uid, d, old) {
-      return d.keys().hasOnly(['personelId', 'pri', 'linkedAt', 'adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId'])
+      return d.keys().hasOnly(['personelId', 'pri', 'linkedAt', 'adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId',
+               'status', 'statusChangedAt', 'statusChangedBy', 'statusReason', 'statusAuditId',
+               'mustChangeCode', 'tempPinExpiresAt', 'tempPinIssuedAt', 'tempPinIssuedBy', 'tempPinAuditId', 'codeChangedAt'])
         && d.keys().hasAll(['adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId'])
+        && d.diff(old).affectedKeys().hasOnly(['adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId'])
         && d.adminGranted is bool
         && d.adminChangedAt == request.time && d.adminChangedBy == request.auth.uid
         && d.adminReason is string && d.adminReason.size() >= 5 && d.adminReason.size() <= 300 && noTag(d.adminReason)
@@ -862,7 +868,7 @@ service cloud.firestore {
         && d.personelId == old.personelId && d.pri == old.pri && d.get('linkedAt', null) == old.get('linkedAt', null)
         && request.time.toMillis() - request.auth.token.get('auth_time', 0) * 1000 <= 600000
         && grantAuditOk(root, uid, d)
-        && (!d.adminGranted || grantPersonOk(root, uid, d));
+        && (!d.adminGranted || (grantPersonOk(root, uid, d) && d.get('status', 'active') != 'suspended'));
     }
     function grantAuditOk(root, uid, d) {
       let a = getAfter(auditDoc(root, d.adminAuditId)).data;
@@ -875,14 +881,120 @@ service cloud.firestore {
       let p = get(/databases/$(database)/documents/$(root)/personel/items/$(d.personelId)).data;
       return p.get('uid', '') == uid && p.get('pri', '') == d.pri && p.get('active', true) == true;
     }
+    // ─── v3.8 · VP-3 · Personel hesap yaşam döngüsü (askıya alma / geçici PIN) ──────────────────────────────────────
+    // [WHY]: Hesap kapatmada deleteDoc yasaktır (ownerUid / EBYS geçmişi korunur); askıya alma personel.active ile
+    //        aynı transaction'da senkron yürür. Geçici PIN düz metin saklanmaz; yalnız mustChangeCode + tempPinExpiresAt
+    //        sunucuda tutulur, süresi dolunca veya değiştirilene kadar veri erişimi kapalı kalır.
+    // [HOW]: status ve tempPin güncellemeleri ayrı kapalı alan listeleri + aynı commit'te auditLogs zorunluluğu taşır.
+    //        adminGranted == true hesaplara yalnız ana yönetici dokunabilir (İP-7 K1).
+    function lifecycleFieldsChanged(d, old) {
+      return d.diff(old).affectedKeys().hasAny(['status', 'statusChangedAt', 'statusChangedBy', 'statusReason', 'statusAuditId',
+        'mustChangeCode', 'tempPinExpiresAt', 'tempPinIssuedAt', 'tempPinIssuedBy', 'tempPinAuditId', 'codeChangedAt']);
+    }
+    function statusAuditOk(root, uid, d) {
+      let a = getAfter(auditDoc(root, d.statusAuditId)).data;
+      return !exists(auditDoc(root, d.statusAuditId))
+        && a.get('type', '') == (d.status == 'suspended' ? 'personel-hesabi-askiya-alindi' : 'personel-hesabi-aktiflestirildi')
+        && a.get('refCol', '') == 'staffAccounts' && a.get('refId', '') == uid
+        && a.get('uid', '') == request.auth.uid && a.get('result', '') == 'approved';
+    }
+    function tempPinAuditOk(root, uid, d) {
+      let a = getAfter(auditDoc(root, d.tempPinAuditId)).data;
+      return !exists(auditDoc(root, d.tempPinAuditId))
+        && a.get('type', '') in ['gecici-pin-tanimlandi', 'personel-kodu-sifirlandi']
+        && a.get('refCol', '') == 'staffAccounts' && a.get('refId', '') == uid
+        && a.get('uid', '') == request.auth.uid && a.get('result', '') == 'approved';
+    }
+    function staffSuspendWriteOk(root, uid, d, old) {
+      return d.diff(old).affectedKeys().hasOnly(['status', 'statusChangedAt', 'statusChangedBy', 'statusReason', 'statusAuditId'])
+        && d.keys().hasAll(['status', 'statusChangedAt', 'statusChangedBy', 'statusReason', 'statusAuditId'])
+        && d.status in ['active', 'suspended']
+        && d.statusChangedAt == request.time && d.statusChangedBy == request.auth.uid
+        && d.statusReason is string && d.statusReason.size() >= 5 && d.statusReason.size() <= 300 && noTag(d.statusReason)
+        && d.statusAuditId is string && d.statusAuditId.size() >= 1 && d.statusAuditId.size() <= 80 && noTag(d.statusAuditId)
+        && d.personelId == old.personelId && d.pri == old.pri && d.get('linkedAt', null) == old.get('linkedAt', null)
+        && statusAuditOk(root, uid, d)
+        && getAfter(/databases/$(database)/documents/$(root)/personel/items/$(old.personelId)).data.get('active', true) == (d.status == 'active');
+    }
+    function staffTempPinWriteOk(root, uid, d, old) {
+      return d.diff(old).affectedKeys().hasOnly(['mustChangeCode', 'tempPinExpiresAt', 'tempPinIssuedAt', 'tempPinIssuedBy', 'tempPinAuditId'])
+        && d.keys().hasAll(['mustChangeCode', 'tempPinExpiresAt', 'tempPinIssuedAt', 'tempPinIssuedBy', 'tempPinAuditId'])
+        && d.get('status', 'active') != 'suspended'
+        && d.mustChangeCode == true
+        && d.tempPinExpiresAt is timestamp
+        && d.tempPinExpiresAt > request.time
+        && d.tempPinExpiresAt <= request.time + duration.value(24, 'h')
+        && d.tempPinIssuedAt == request.time && d.tempPinIssuedBy == request.auth.uid
+        && d.tempPinAuditId is string && d.tempPinAuditId.size() >= 1 && d.tempPinAuditId.size() <= 80 && noTag(d.tempPinAuditId)
+        && d.personelId == old.personelId && d.pri == old.pri && d.get('linkedAt', null) == old.get('linkedAt', null)
+        && tempPinAuditOk(root, uid, d);
+    }
+    function selfClearTempPinOk(old, d) {
+      return old.get('status', 'active') != 'suspended'
+        && old.get('mustChangeCode', false) == true
+        && old.get('tempPinExpiresAt', null) is timestamp
+        && request.time <= old.tempPinExpiresAt
+        && d.diff(old).affectedKeys().hasOnly(['mustChangeCode', 'tempPinExpiresAt', 'codeChangedAt'])
+        && d.mustChangeCode == false
+        && d.tempPinExpiresAt == null
+        && d.codeChangedAt == request.time;
+    }
     match /{root}/staffAccounts/items/{uid} {
       allow read: if validRoot(root) && ((signedIn() && request.auth.uid == uid) || isAdmin(root));
       allow create: if validRoot(root) && isAdmin(root)
-        && !request.resource.data.keys().hasAny(['adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId']);
+        && !request.resource.data.keys().hasAny(['adminGranted', 'adminChangedAt', 'adminChangedBy', 'adminReason', 'adminAuditId',
+             'status', 'statusChangedAt', 'statusChangedBy', 'statusReason', 'statusAuditId',
+             'mustChangeCode', 'tempPinExpiresAt', 'tempPinIssuedAt', 'tempPinIssuedBy', 'tempPinAuditId', 'codeChangedAt']);
       allow update: if validRoot(root) && (grantFieldsChanged(request.resource.data, resource.data)
         ? isPrimaryAdmin() && adminGrantWriteOk(root, uid, request.resource.data, resource.data)
-        : isPrimaryAdmin() || (isAdmin(root) && resource.data.get('adminGranted', false) != true));
+        : lifecycleFieldsChanged(request.resource.data, resource.data)
+          ? (isPrimaryAdmin() || (isAdmin(root) && resource.data.get('adminGranted', false) != true))
+            && (staffSuspendWriteOk(root, uid, request.resource.data, resource.data)
+                || staffTempPinWriteOk(root, uid, request.resource.data, resource.data))
+          : isPrimaryAdmin() || (isAdmin(root) && resource.data.get('adminGranted', false) != true));
+      allow update: if validRoot(root) && signedIn() && request.auth.uid == uid
+        && selfClearTempPinOk(resource.data, request.resource.data);
       allow delete: if validRoot(root) && (isPrimaryAdmin() || (isAdmin(root) && resource.data.get('adminGranted', false) != true));
+    }
+
+    // ─── v3.8 · VP-3 · 24 saat limitli şifre sıfırlama talepleri — ${root}/passwordResetRequests/items/{priId} ──────
+    // [WHY]: Giriş ekranından oturumsuz bırakılan sıfırlama talepleri spam ve hesap varlığı sızıntısına (enumeration) kapalı
+    //        olmalı; 24 saatlik oran sınırı istemciye bırakılmadan sunucu kurallarıyla zorlanmalıdır.
+    // [HOW]: Okuma yalnız aktif yönetici (isAdmin). Ziyaretçi create (0 okuma) ya da requestedAt + 24 saat sonrası update
+    //        (0 ek okuma) yapabilir. Yönetici çözümü requestedAt'ı korur; delete tamamen yasaktır (24 saat ankrajı bozulmaz).
+    function resetReqIdOk(priId) {
+      return priId is string && priId.size() >= 1 && priId.size() <= 64
+        && priId.matches('[a-z0-9]+([._-][a-z0-9]+)*');
+    }
+    function resetReqCreateOk(priId, d) {
+      return d.keys().hasOnly(['pri', 'note', 'status', 'requestedAt'])
+        && d.keys().hasAll(['pri', 'note', 'status', 'requestedAt'])
+        && d.pri == priId
+        && d.status == 'pending'
+        && d.note is string && d.note.size() <= 160 && noTag(d.note)
+        && d.requestedAt == request.time;
+    }
+    function resetReqAdminUpdateOk(old, d) {
+      return d.keys().hasOnly(['pri', 'note', 'status', 'requestedAt', 'resolvedAt', 'resolvedBy', 'resolutionNote'])
+        && d.keys().hasAll(['pri', 'note', 'status', 'requestedAt', 'resolvedAt', 'resolvedBy', 'resolutionNote'])
+        && d.pri == old.pri
+        && d.note == old.note
+        && d.requestedAt == old.requestedAt
+        && d.status in ['resolved', 'dismissed']
+        && d.resolvedAt == request.time
+        && d.resolvedBy == request.auth.uid
+        && d.resolutionNote is string && d.resolutionNote.size() <= 200 && noTag(d.resolutionNote);
+    }
+    match /{root}/passwordResetRequests/items/{priId} {
+      allow read: if validRoot(root) && isAdmin(root);
+      allow create: if validRoot(root) && resetReqIdOk(priId) && resetReqCreateOk(priId, request.resource.data);
+      allow update: if validRoot(root) && resetReqIdOk(priId)
+        && resource.data.get('requestedAt', null) is timestamp
+        && request.time >= resource.data.requestedAt + duration.value(24, 'h')
+        && resetReqCreateOk(priId, request.resource.data);
+      allow update: if validRoot(root) && isAdmin(root)
+        && resetReqAdminUpdateOk(resource.data, request.resource.data);
+      allow delete: if false;
     }
 
     // J11 · P0 erişim kilidi. Okuma: yönetici ve (kilit kapalıyken de) kimliği doğrulanmış personel — yalnız durum + sayılar, kişisel
@@ -1195,8 +1307,8 @@ service cloud.firestore {
       allow get: if validRoot(r) && member(r) && (!exists(ebysPath(r,'ebysDrafts',id)) || resource.data.ownerUid == request.auth.uid);
       allow list: if ebysOwn(r,resource.data);
       allow create: if ebysDraftOk(r,id,request.resource.data,{});
-      allow update: if ebysOwn(r,resource.data) && request.resource.data.ownerUid == resource.data.ownerUid && ebysDraftOk(r,id,request.resource.data,resource.data)
-        && request.resource.data.revision == getAfter(ebysPath(r,'ebysDocuments',id)).data.revision;
+      allow update: if request.resource.data.ownerUid == resource.data.ownerUid
+        && ebysDraftOk(r, id, request.resource.data, resource.data);
       allow delete: if false;
     }
     function ebysVersionOk(r, id, d) {

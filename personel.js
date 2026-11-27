@@ -8,11 +8,20 @@ window.renderPersonelTable = function () {
     //              Hesabı olmayana "Hesap Aç" (yalnız yönetici; yeni kodla). PRI'si olmayan / J7 adresinde kalmış hesap → göç aracı.
     const isAdmin = typeof window.isDbAdmin === 'function' && window.isDbAdmin();
     const SP = window.StaffProvisioning;
+    const accountStates = window._staffAccountStates || {};
     const account = item => {
         const pri = item.pri ? `<code>${escapeHtml(item.pri)}</code> ` : '<span style="color:#b45309;">PRI yok</span> ';
         if (!item.uid) return pri + (isAdmin ? `<button class="edit-btn" onclick="openPersonelAccount(${jsArg(item.id)})">Hesap Aç</button>` : '· hesap yok');
         const onPri = SP && String(item.authEmail || '').toLowerCase() === SP.accountEmailOf(item);
-        return pri + (onPri ? '✓' : '<span style="color:#b45309;" title="Hesap kurumsal kimlik adresinde değil: VIP → PRI / Hesap Göç Aracı">⚠ göç bekliyor</span>');
+        const st = accountStates[item.uid];
+        const statusTag = item.active === false || (st && st.status === 'suspended')
+            ? ' <span style="color:#dc2626; font-weight:700;">⛔ Askıda</span>'
+            : (st && st.mustChangeCode
+                ? (st.tempPinExpired
+                    ? ' <span style="color:#b45309; font-weight:700;">⏳ Geçici PIN süresi doldu</span>'
+                    : ' <span style="color:#2563eb; font-weight:700;">🔑 Geçici PIN bekliyor</span>')
+                : '');
+        return pri + (onPri ? '✓' : '<span style="color:#b45309;" title="Hesap kurumsal kimlik adresinde değil: VIP → PRI / Hesap Göç Aracı">⚠ göç bekliyor</span>') + statusTag;
     };
     // [WHY]: Bu hücre eskiden item.birim (serbest metin) gösterip gerçek item.unitId'yi "Birim ID: eski ad
     //        kaydı" gibi anlamsız bir alt satıra düşürüyordu; Birim Yönetimi tablosu (edm-workflow.js
@@ -28,18 +37,26 @@ window.renderPersonelTable = function () {
     const firstTh = document.querySelector('#tablePersonel thead th');
     const hasSelectCol = !!(firstTh && /^seç$/i.test((firstTh.textContent || '').trim()));
 
+    const actionButtons = item => {
+        const suspended = item.active === false;
+        const pinBtn = (isAdmin && item.uid && !suspended)
+            ? `<button class="edit-btn" onclick="if(validateAdminAction()) openPersonelTempPin(${jsArg(item.id)})">Geçici PIN</button> `
+            : '';
+        const toggleBtn = suspended
+            ? `<button class="edit-btn" onclick="if(validateAdminAction()) togglePersonelSuspend(${jsArg(item.id)}, false)">Yeniden Aktifleştir</button>`
+            : `<button class="delete-btn" onclick="if(validateAdminAction()) togglePersonelSuspend(${jsArg(item.id)}, true)">Askıya Al</button>`;
+        return `<button class="edit-btn" onclick="if(validateAdminAction()) openPersonelModal('edit', ${jsArg(item.id)})">Düzenle</button> ` + pinBtn + toggleBtn;
+    };
+
     tbody.innerHTML = (window.data.personel || []).map((item, idx) => {
         const selectTd = hasSelectCol ? `<td><input type="checkbox" class="row-select" data-id="${escapeHtml(item.id ?? '')}"></td>` : '';
         return `
         <tr class="${hasSelectCol ? '' : 'selectable-row personel-selectable-row'}" data-depo="personel" data-id="${escapeHtml(item.id ?? '')}" data-index="${escapeHtml(idx)}" data-name="${escapeHtml(item.name || '-')}">
             ${selectTd /* xss-ok: yalnız sabit checkbox hücresi + escapeHtml(item.id) */}
-            <td>${escapeHtml(item.name || '-')}<br><small>ID: ${escapeHtml(item.id)} · UID: ${escapeHtml(item.uid || 'yok')} · ${item.active === false ? 'Pasif' : 'Aktif'}</small></td>
+            <td>${escapeHtml(item.name || '-')}<br><small>ID: ${escapeHtml(item.id)} · UID: ${escapeHtml(item.uid || 'yok')} · ${item.active === false ? 'Askıda / Pasif' : 'Aktif'}</small></td>
             <td>${unitCell(item) /* xss-ok: unitCell() escapeHtml kullanır (linter ayrıca denetler) */}</td>
             <td>${account(item) /* xss-ok: account() kendi şablonlarında escapeHtml / jsArg kullanır (linter ayrıca denetler) */}</td>
-            <td>
-                <button class="edit-btn" onclick="if(validateAdminAction()) openPersonelModal('edit', ${jsArg(item.id)})">Düzenle</button>
-                <button class="delete-btn" onclick="if(validateAdminAction()) deletePersonel(${jsArg(item.id)})">Pasifleştir</button>
-            </td>
+            <td>${actionButtons(item) /* xss-ok: actionButtons() yalnız sabit düğmeler + jsArg(item.id) kullanır */}</td>
         </tr>`;
     }).join('');
 
@@ -97,15 +114,19 @@ document.addEventListener('click', e => {
 });
 
 window.deletePersonel = async function (id) {
-    if (!window.requireDbAdmin('Personel pasifleştirme')) return;
-    const person =(window.data.personel || []).find(p => String(p.id) === String(id));
+    if (!window.requireDbAdmin('Personel askıya alma')) return;
+    if (typeof window.togglePersonelSuspend === 'function') {
+        window.togglePersonelSuspend(id, true);
+        return;
+    }
+    const person = (window.data.personel || []).find(p => String(p.id) === String(id));
     if (!person) { showAppAlert('Personel bulunamadı; liste güncellenmiş olabilir.', 'error'); return; }
-    const ok = await showCustomConfirm('Personeli Pasifleştir', `"${person.name || '-'}" kaydı ve geçmişi korunacak; uygulama verilerine erişimi kapatılacak. Onaylıyor musunuz?`);
+    const ok = await showCustomConfirm('Personeli Askıya Al', `"${person.name || '-'}" kaydı ve geçmişi korunacak; uygulama verilerine erişimi kapatılacak. Onaylıyor musunuz?`);
     if (ok !== true) return;
     try { await window.AppModules.EBYSDefinitions.setActive('personel', person.id, false); }
     catch (error) { showAppAlert(error.message, 'error'); return; }
     renderPersonelTable();
-    showAppAlert('Personel pasifleştirildi. Yeniden etkinleştirmek için Düzenle kullanın.', 'info');
+    showAppAlert('Personel askıya alındı. Yeniden etkinleştirmek için "Yeniden Aktifleştir" kullanın.', 'info');
 };
 
 window.getRandomCode = function () {

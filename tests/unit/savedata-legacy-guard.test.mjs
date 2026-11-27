@@ -24,7 +24,7 @@ export const getApps = () => [];
 export const initializeAuth = () => ({});
 export const onAuthStateChanged = noop, connectAuthEmulator = noop, setPersistence = async () => {};
 export const browserSessionPersistence = {}, browserLocalPersistence = {}, indexedDBLocalPersistence = {}, inMemoryPersistence = {};
-export const createUserWithEmailAndPassword = async () => ({}), signInWithEmailAndPassword = async () => ({}), signOut = async () => {}, updateEmail = async () => {};
+export const createUserWithEmailAndPassword = async () => ({}), signInWithEmailAndPassword = async () => ({}), signOut = async () => {}, updateEmail = async () => {}, updatePassword = async () => {};
 export const initializeFirestore = () => ({}), connectFirestoreEmulator = noop;
 export const collection = (...p) => p.slice(1).join('/');
 export const doc = (...p) => p.slice(1).join('/');

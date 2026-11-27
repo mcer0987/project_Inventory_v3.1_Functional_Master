@@ -76,7 +76,9 @@ const expected = f => /^(index|admin|404|verify)\.html$/.test(f) || /^[^/]+\.(cs
 //        src/services/brand-settings-service.js (2).
 // v3.8 · VP-1: Operasyon Merkezi radarları için saf hesaplama modülü src/utils/asset-health.js (1).
 // v3.8 · VP-2: AI Sarf Tüketim & Tahminleme Motoru saf modülü src/utils/burn-rate-engine.js (1).
-const EXPECTED_COUNT = 137;
+// v3.8 · VP-3: Personel Hesap Yaşam Döngüsü — saf çekirdek src/utils/staff-lifecycle.js, servis
+//        src/services/staff-lifecycle-service.js, çift ekran arayüz src/ui/staff-lifecycle-panel.js (3).
+const EXPECTED_COUNT = 140;
 const unexpected = files.filter(f => !expected(f));
 console.log(`Yayınlanacak dosya: ${files.length} (kök: ${files.filter(f => !f.includes('/')).length}, src/: ${files.filter(f => f.startsWith('src/')).length}, pdf-fonts/: ${files.filter(f => f.startsWith('pdf-fonts/')).length}) · beklenen: ${EXPECTED_COUNT}`);
 if (unexpected.length) {
