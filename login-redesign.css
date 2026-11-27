@@ -1,5 +1,13 @@
 /* Reversible v3 login presentation layer. Remove its link to restore the prior design. */
 
+/* v3.8 · HF-3 — "Hiçbir şartta scroll yok" ölçekleme sistemi
+   WHY: Kart `min(760px, …)` tavanlı ve `overflow-y:auto` idi; şifre sıfırlama paneli (~280px) giriş formunun ALTINA ekleniyor,
+        içerik ekranı aşıp dikey scrollbar çıkarıyordu.
+   HOW: (1) Dikey boşluklar/alan yükseklikleri görünür yüksekliğe (dvh) göre SÜREKLİ ölçeklenir (--lg-*).
+        (2) Sıfırlama açılınca görünüm YER DEĞİŞTİRİR: form + "VEYA" + Yönetici Paneli gizlenir, yalnız sıfırlama formu kalır.
+        (3) Düşük yükseklikte süs ikonu, sonra açıklama (görsel olarak) gizlenir; yatay telefonda iki sütun olur.
+   Kart `overflow-y:auto` yalnız EMNİYET payıdır (yatay telefon + "Bilgi" açık gibi fiziksel olarak sığmayan tek durum). */
+
 #loginModal.login-modal-v3 {
     --login-accent: #3276d2;
     --login-button-bg: #3276d2;
@@ -12,11 +20,18 @@
     --login-copy: #68758a;
     --login-soft-shadow: 0 32px 90px rgba(15, 23, 42, 0.24), 0 8px 24px rgba(15, 23, 42, 0.08);
 
+    /* dikey ölçek (vh yedeği) */
+    --lg-pad-y: clamp(14px, 3.4vh, 34px);
+    --lg-gap: clamp(8px, 1.7vh, 16px);
+    --lg-field: clamp(42px, 6vh, 54px);
+    --lg-btn: clamp(42px, 5.8vh, 52px);
+    --lg-foot: clamp(8px, 1.4vh, 15px);
+
     z-index: 10000;
-    padding: max(20px, env(safe-area-inset-top, 0px))
-        max(16px, env(safe-area-inset-right, 0px))
-        max(20px, env(safe-area-inset-bottom, 0px))
-        max(16px, env(safe-area-inset-left, 0px));
+    padding: max(12px, env(safe-area-inset-top, 0px))
+        max(12px, env(safe-area-inset-right, 0px))
+        max(12px, env(safe-area-inset-bottom, 0px))
+        max(12px, env(safe-area-inset-left, 0px));
     box-sizing: border-box;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -25,6 +40,16 @@
         radial-gradient(ellipse at 50% 12%, rgba(119, 160, 219, 0.2), transparent 48%),
         rgba(229, 235, 244, 0.74);
     backdrop-filter: blur(18px) saturate(135%);
+}
+
+@supports (height: 100dvh) {
+    #loginModal.login-modal-v3 {
+        --lg-pad-y: clamp(14px, 3.4dvh, 34px);
+        --lg-gap: clamp(8px, 1.7dvh, 16px);
+        --lg-field: clamp(42px, 6dvh, 54px);
+        --lg-btn: clamp(42px, 5.8dvh, 52px);
+        --lg-foot: clamp(8px, 1.4dvh, 15px);
+    }
 }
 
 [data-theme="dark"] #loginModal.login-modal-v3 {
@@ -49,7 +74,8 @@
     display: block !important;
     width: min(100%, 440px) !important;
     max-width: 440px !important;
-    max-height: min(760px, calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 40px));
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     margin: auto;
     padding: 0 !important;
     overflow-x: hidden;
@@ -69,12 +95,12 @@
 }
 
 #loginModal.login-modal-v3 .login-inner-body {
-    padding: 34px 38px 30px;
+    padding: var(--lg-pad-y) 38px calc(var(--lg-pad-y) * 0.9);
     text-align: left;
 }
 
 #loginModal.login-modal-v3 .login-eyebrow {
-    margin: 0 0 20px;
+    margin: 0 0 clamp(8px, 2vh, 20px);
     color: var(--login-accent);
     font-size: 0.68rem;
     font-weight: 800;
@@ -87,7 +113,7 @@
     display: grid;
     width: 58px;
     height: 58px;
-    margin: 0 auto 18px;
+    margin: 0 auto clamp(8px, 1.8vh, 18px);
     place-items: center;
     border: 1px solid rgba(111, 157, 221, 0.2);
     border-radius: 19px;
@@ -108,7 +134,7 @@
 
 #loginModal.login-modal-v3 .login-description {
     max-width: 330px;
-    margin: 12px auto 28px;
+    margin: clamp(6px, 1.2vh, 12px) auto clamp(12px, 3vh, 28px);
     color: var(--login-copy);
     font-size: 0.9rem;
     line-height: 1.65;
@@ -118,7 +144,7 @@
 #loginModal.login-modal-v3 #loginForm {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--lg-gap);
 }
 
 #loginModal.login-modal-v3 .modern-input-group {
@@ -136,10 +162,12 @@
 }
 
 #loginModal.login-modal-v3 #login-pri,
-#loginModal.login-modal-v3 #access-val-node {
+#loginModal.login-modal-v3 #access-val-node,
+#loginModal.login-modal-v3 #loginResetPri,
+#loginModal.login-modal-v3 #loginResetNote {
     display: block;
     width: 100% !important;
-    height: 54px !important;
+    height: var(--lg-field) !important;
     box-sizing: border-box;
     padding: 0 16px !important;
     border: 1px solid var(--login-field-border) !important;
@@ -156,14 +184,18 @@
 }
 
 #loginModal.login-modal-v3 #login-pri::placeholder,
-#loginModal.login-modal-v3 #access-val-node::placeholder {
+#loginModal.login-modal-v3 #access-val-node::placeholder,
+#loginModal.login-modal-v3 #loginResetPri::placeholder,
+#loginModal.login-modal-v3 #loginResetNote::placeholder {
     color: #8995a8;
     font-size: 0.9rem !important;
     letter-spacing: normal !important;
 }
 
 #loginModal.login-modal-v3 #login-pri:focus,
-#loginModal.login-modal-v3 #access-val-node:focus {
+#loginModal.login-modal-v3 #access-val-node:focus,
+#loginModal.login-modal-v3 #loginResetPri:focus,
+#loginModal.login-modal-v3 #loginResetNote:focus {
     border-color: var(--login-accent) !important;
     background: var(--login-card-bg) !important;
     box-shadow: 0 0 0 4px rgba(74, 133, 211, 0.14) !important;
@@ -181,7 +213,7 @@
 #loginModal.login-modal-v3 .login-admin-button {
     display: flex;
     width: 100%;
-    min-height: 52px;
+    min-height: var(--lg-btn);
     align-items: center;
     justify-content: center;
     gap: 10px;
@@ -234,7 +266,7 @@
 }
 
 #loginModal.login-modal-v3 .login-mini-footer {
-    padding: 15px 20px 17px;
+    padding: var(--lg-foot) 20px calc(var(--lg-foot) * 1.1);
     border-top: 1px solid var(--login-card-border);
     background: transparent;
     color: var(--login-copy);
@@ -253,6 +285,163 @@
     outline-offset: 3px;
 }
 
+/* ── v3.8 · HF-3 · Şifre sıfırlama (satır içi stillerden sınıflara; açık + koyu tema) ───────────────────── */
+#loginModal.login-modal-v3 .login-reset-toggle-row {
+    margin: 0;
+    text-align: center;
+}
+
+#loginModal.login-modal-v3 .login-reset-toggle,
+#loginModal.login-modal-v3 .login-reset-link,
+#loginModal.login-modal-v3 .login-reset-back {
+    margin: 0;
+    padding: 6px 10px;
+    border: 0;
+    background: none;
+    color: var(--login-accent);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+#loginModal.login-modal-v3 .login-reset-toggle {
+    min-height: 32px;
+}
+
+#loginModal.login-modal-v3 .login-reset-back {
+    align-self: flex-start;
+    min-height: 36px;
+    padding-inline: 4px;
+    font-size: 0.82rem;
+}
+
+#loginModal.login-modal-v3 .login-reset-panel {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(6px, 1.2vh, 10px);
+    padding: 12px;
+    border: 1px solid var(--login-field-border);
+    border-radius: 12px;
+    background: var(--login-field-bg);
+    text-align: left;
+}
+
+/* display: flex, `hidden` niteliğini ezmesin */
+#loginModal.login-modal-v3 .login-reset-panel[hidden],
+#loginModal.login-modal-v3 .login-reset-help[hidden] {
+    display: none !important;
+}
+
+#loginModal.login-modal-v3 .login-reset-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--login-heading);
+    font-size: 0.86rem;
+}
+
+#loginModal.login-modal-v3 .login-reset-intro {
+    margin: 0;
+    color: var(--login-copy);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+#loginModal.login-modal-v3 .login-reset-help {
+    padding: 8px 10px;
+    border: 1px solid var(--login-field-border);
+    border-radius: 8px;
+    color: var(--login-copy);
+    font-size: 0.74rem;
+    line-height: 1.45;
+}
+
+#loginModal.login-modal-v3 .login-reset-status {
+    min-height: 1.2em;
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.35;
+}
+
+/* staff-lifecycle-panel.js durum rengini satır içi (#dc2626 / #15803d / #2563eb) yazar; koyu zeminde AA kontrast için
+   yalnız koyu temada, tarayıcının serileştirdiği rgb() değerine göre açılır (JS'e dokunulmaz). */
+[data-theme="dark"] #loginModal.login-modal-v3 .login-reset-status[style*="220, 38, 38"] { color: #fca5a5 !important; }
+[data-theme="dark"] #loginModal.login-modal-v3 .login-reset-status[style*="21, 128, 61"] { color: #86efac !important; }
+[data-theme="dark"] #loginModal.login-modal-v3 .login-reset-status[style*="37, 99, 235"] { color: #93c5fd !important; }
+
+#loginModal.login-modal-v3 .login-reset-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+#loginModal.login-modal-v3 .login-reset-btn {
+    min-height: 40px;
+    margin: 0;
+    padding: 8px 16px;
+    border: 1px solid var(--login-field-border);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--login-heading);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+#loginModal.login-modal-v3 .login-reset-btn--primary {
+    border-color: transparent;
+    background: var(--login-button-bg);
+    color: #fff;
+}
+
+#loginModal.login-modal-v3 .login-reset-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* ── v3.8 · HF-3 · GÖRÜNÜM YER DEĞİŞTİRME (sıfırlama modu) ──────────────────────────────────────────────
+   #loginResetPanel, #loginForm'un İÇİNDE olduğundan #loginForm gizlenemez; panel dışındaki çocuklar gizlenir.
+   Anahtar: #loginModal.is-reset-mode (index.html'deki küçük betik, panelin `hidden` niteliğini yansıtır).
+   Aşağıdaki @supports bloğu aynı kuralların `:has()` ikizidir (betik çalışmasa bile modern tarayıcıda yer değiştirir). */
+#loginModal.is-reset-mode #loginForm > :not(#loginResetPanel) {
+    display: none !important;
+}
+
+#loginModal.is-reset-mode .login-icon-box,
+#loginModal.is-reset-mode .login-description {
+    display: none;
+}
+
+#loginModal.is-reset-mode .login-reset-panel {
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+#loginModal.is-reset-mode .login-eyebrow {
+    margin-bottom: clamp(6px, 1.4vh, 12px);
+}
+
+@supports selector(:has(*)) {
+    #loginModal:has(#loginResetPanel:not([hidden])) #loginForm > :not(#loginResetPanel) {
+        display: none !important;
+    }
+
+    #loginModal:has(#loginResetPanel:not([hidden])) .login-icon-box,
+    #loginModal:has(#loginResetPanel:not([hidden])) .login-description {
+        display: none;
+    }
+
+    #loginModal:has(#loginResetPanel:not([hidden])) .login-reset-panel {
+        padding: 0;
+        border: 0;
+        background: transparent;
+    }
+}
+
 @media (hover: hover) {
     #loginModal.login-modal-v3 .btn-login-new:hover {
         transform: translateY(-1px);
@@ -265,79 +454,123 @@
         border-color: var(--login-accent);
         background: rgba(105, 154, 219, 0.08);
     }
+
+    #loginModal.login-modal-v3 .login-reset-btn:hover:not(:disabled) {
+        border-color: var(--login-accent);
+        background: rgba(105, 154, 219, 0.08);
+    }
+
+    #loginModal.login-modal-v3 .login-reset-btn--primary:hover:not(:disabled) {
+        background: var(--login-button-hover);
+    }
 }
 
 @media (max-width: 480px) {
-    #loginModal.login-modal-v3 {
-        padding: max(14px, env(safe-area-inset-top, 0px))
-            max(12px, env(safe-area-inset-right, 0px))
-            max(14px, env(safe-area-inset-bottom, 0px))
-            max(12px, env(safe-area-inset-left, 0px));
-    }
-
     #loginModal.login-modal-v3 > .login-card-v3 {
         width: 100% !important;
-        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 28px);
         border-radius: 24px !important;
     }
 
     #loginModal.login-modal-v3 .login-inner-body {
-        padding: 28px 22px 24px;
+        padding-inline: 22px;
     }
 
     #loginModal.login-modal-v3 .login-description {
-        margin-bottom: 22px;
         font-size: 0.86rem;
     }
 }
 
-@media (max-width: 480px) and (max-height: 700px) {
-    #loginModal.login-modal-v3 .login-inner-body {
-        padding: 18px 22px;
-    }
-
-    #loginModal.login-modal-v3 .login-eyebrow {
-        margin-bottom: 10px;
-    }
-
+/* Düşük yükseklik kademeleri — süs önce gider, sonra açıklama görsel olarak (aria-describedby hedefi olduğu için DOM'da kalır) */
+@media (max-height: 700px) {
     #loginModal.login-modal-v3 .login-icon-box {
-        width: 46px;
-        height: 46px;
-        margin-bottom: 12px;
-        border-radius: 15px;
-        font-size: 1.4rem;
+        display: none;
+    }
+}
+
+@media (max-height: 600px) {
+    #loginModal.login-modal-v3 .login-description {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
     }
 
     #loginModal.login-modal-v3 #loginModalTitle {
-        font-size: 1.45rem;
+        font-size: 1.4rem;
     }
 
-    #loginModal.login-modal-v3 .login-description {
-        margin: 8px auto 14px;
-        font-size: 0.82rem;
-        line-height: 1.5;
+    #loginModal.is-reset-mode .login-eyebrow {
+        display: none;
+    }
+}
+
+@media (max-height: 560px) {
+    #loginModal.is-reset-mode .login-mini-footer {
+        display: none;
+    }
+}
+
+/* Yatay telefon: iki sütun (sol: başlık, sağ: form). "Bilgi" açıkken fiziksel olarak sığmazsa kart içi scroll emniyeti kalır. */
+@media (max-height: 500px) and (orientation: landscape) {
+    #loginModal.login-modal-v3 > .login-card-v3 {
+        width: min(100%, 760px) !important;
+        max-width: 760px !important;
+    }
+
+    #loginModal.login-modal-v3 .login-inner-body {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        column-gap: 24px;
+        align-content: center;
+        align-items: center;
+        padding: 12px 22px;
+    }
+
+    #loginModal.login-modal-v3 .login-eyebrow {
+        grid-column: 1;
+        grid-row: 1;
+        margin: 0 0 6px;
+        text-align: left;
+    }
+
+    #loginModal.login-modal-v3 #loginModalTitle {
+        grid-column: 1;
+        grid-row: 2;
+        text-align: left;
     }
 
     #loginModal.login-modal-v3 #loginForm {
-        gap: 10px;
+        grid-column: 2;
+        grid-row: 1 / span 3;
+        gap: 8px;
+    }
+
+    #loginModal.login-modal-v3 .login-divider,
+    #loginModal.login-modal-v3 .login-mini-footer {
+        display: none;
     }
 
     #loginModal.login-modal-v3 .modern-input-group {
-        gap: 5px;
+        gap: 4px;
     }
 
-    #loginModal.login-modal-v3 #login-pri,
-    #loginModal.login-modal-v3 #access-val-node {
-        height: 48px !important;
+    #loginModal.is-reset-mode .login-eyebrow {
+        display: block;
     }
 
-    #loginModal.login-modal-v3 .btn-login-new,
-    #loginModal.login-modal-v3 .login-admin-button {
-        min-height: 48px;
+    /* Kısa açıklama (AGENTS.md) görünür kalır; yalnız sıkılaşır */
+    #loginModal.is-reset-mode .login-reset-intro {
+        font-size: 0.72rem;
+        line-height: 1.35;
     }
 
-    #loginModal.login-modal-v3 .login-mini-footer {
-        padding-block: 10px;
+    #loginModal.is-reset-mode .login-reset-panel {
+        gap: 6px;
     }
 }
 

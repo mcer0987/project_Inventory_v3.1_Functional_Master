@@ -2476,9 +2476,47 @@ input:checked+.slider::before {
     margin-right: 8px;
   }
 
-  /* LIVE SYNC yazısı gizlenir dar ekranda */
-  #syncText {
-    display: none;
+  /* HF-3: LIVE SYNC kompakt bir canlı durum hapına dönüşür (taşma yok).
+     WHY: #syncText firebase-handler.js tarafından 'LIVE SYNC' ↔ 'YETKİ YOK' yazılır; sabit bir "LIVE" etiketi
+          durumu yanlış gösterirdi. Bu yüzden metin küçültülür, yalnız son eşitleme zamanı gizlenir (title ipucu HTML'de).
+     HOW: .status-right sarma yedeği taşıyor; sığmazsa hap alt satıra iner, scrollWidth <= innerWidth korunur. */
+  .admin-status-bar .status-right {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    row-gap: 6px;
+    gap: 6px !important;
+  }
+
+  .admin-status-bar .action-buttons {
+    margin-right: 0 !important;
+    gap: 6px !important;
+  }
+
+  .admin-status-bar .btn-status-action {
+    margin-right: 0 !important;
+  }
+
+  .admin-status-bar .sync-status {
+    flex: 0 0 auto;
+    margin-left: auto;
+    padding: 6px 10px !important;
+    gap: 6px !important;
+  }
+
+  .admin-status-bar #syncText {
+    display: inline !important;
+    max-width: 11ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.62rem !important;
+    letter-spacing: 0.04em !important;
+  }
+
+  .admin-status-bar #lastSyncTime {
+    display: none !important;
   }
 
   /* ── Sidebar auto-hide — KRITIK FIX ─────────────────────────
@@ -3180,10 +3218,17 @@ table.admin-bento-table tbody tr:hover td {
 
 .ops-radar-title { flex: 1 1 auto; margin: 0; font-size: 1.15rem; font-weight: 800; color: var(--color-text, #1e293b); }
 
+/* HF-3: style.css'teki genel `button { padding: 6px 12px; margin: 0 4px }` kuralı ikonu daire dışına itiyordu. */
 .ops-radar-icon-btn {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
   width: 34px;
   height: 34px;
   flex: 0 0 auto;
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 1 !important;
   border: 1px solid var(--color-border, #e2e8f0);
   border-radius: 50%;
   background: var(--color-surface-alt, #f8fafc);
@@ -3191,6 +3236,10 @@ table.admin-bento-table tbody tr:hover td {
   font-size: 16px;
   cursor: pointer;
 }
+
+/* HF-3: segment ve işlem düğmelerinde genel `margin: 0 4px` genişliği şişiriyordu. */
+.ops-radar-seg-btn,
+.ops-radar-btn { margin: 0; }
 
 .ops-radar-icon-btn:hover, .ops-radar-icon-btn[aria-expanded="true"] { background: rgba(99, 102, 241, 0.14); color: #4f46e5; }
 .ops-radar-icon-btn:focus-visible, .ops-radar-btn:focus-visible { outline: 3px solid var(--color-primary, #6366f1); outline-offset: 2px; }
@@ -3363,21 +3412,361 @@ table.admin-bento-table tbody tr:hover td {
 .ops-radar-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--color-border-light, #e2e8f0); }
 .ops-radar-actions:empty { display: none; }
 
-[data-theme="dark"] .ops-radar-panel { background: var(--color-surface, #1e293b); border-color: var(--color-border, #334155); }
+[data-theme="dark"] .ops-radar-panel { background: var(--color-surface, #131a26); border-color: var(--color-border, #253045); color: var(--color-text, #e2e8f0); }
 [data-theme="dark"] .ops-radar-badge.is-ok, [data-theme="dark"] .ops-radar-chip.is-ok .ops-radar-chip-value, [data-theme="dark"] .ops-radar-count.is-ok, [data-theme="dark"] .ops-radar-pill.is-ok { color: #4ade80; }
 [data-theme="dark"] .ops-radar-badge.is-warn, [data-theme="dark"] .ops-radar-chip.is-warn .ops-radar-chip-value, [data-theme="dark"] .ops-radar-count.is-warn, [data-theme="dark"] .ops-radar-pill.is-warn { color: #fbbf24; }
 [data-theme="dark"] .ops-radar-badge.is-danger, [data-theme="dark"] .ops-radar-chip.is-danger .ops-radar-chip-value, [data-theme="dark"] .ops-radar-count.is-danger, [data-theme="dark"] .ops-radar-pill.is-danger { color: #fca5a5; }
 [data-theme="dark"] .ops-radar-pill.is-muted { color: #cbd5e1; background: rgba(148, 163, 184, 0.2); }
-[data-theme="dark"] .ops-radar-seg { background: #0f172a; border-color: #334155; }
-[data-theme="dark"] .ops-radar-seg-btn { color: #94a3b8; }
-[data-theme="dark"] .ops-radar-search { background: #0f172a; border-color: #334155; color: #f8fafc; }
+/* HF-3 · AI Burn Rate araç çubuğu + radar metinleri — Space Titanium (token'lı, yüksek kontrast) */
+[data-theme="dark"] .ops-radar-seg { background: var(--color-surface-alt, #172030); border-color: var(--color-border, #253045); }
+[data-theme="dark"] .ops-radar-seg-btn { color: #cbd5e1; }
+[data-theme="dark"] .ops-radar-seg-btn:hover:not(.is-active) { background: rgba(148, 163, 184, 0.12); color: #f1f5f9; }
+[data-theme="dark"] .ops-radar-seg-btn.is-active {
+  background: rgba(96, 165, 250, 0.16);
+  color: #bfdbfe;
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.45);
+}
+[data-theme="dark"] .ops-radar-search { background: var(--color-surface-alt, #172030); border-color: var(--color-border, #253045); color: #f1f5f9; }
+[data-theme="dark"] .ops-radar-search::placeholder { color: #94a3b8; opacity: 1; }
+[data-theme="dark"] .ops-radar-search:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25); outline: none; }
 [data-theme="dark"] .ops-radar-note { background: rgba(96, 165, 250, 0.14); color: #e2e8f0; }
 [data-theme="dark"] .ops-radar-table tbody tr.is-selected { background: rgba(96, 165, 250, 0.14); }
-[data-theme="dark"] .ops-radar-icon-btn:hover, [data-theme="dark"] .ops-radar-icon-btn[aria-expanded="true"] { color: #c7d2fe; }
+[data-theme="dark"] .ops-radar-icon-btn { background: var(--color-surface-alt, #172030); border-color: var(--color-border, #253045); color: #cbd5e1; }
+[data-theme="dark"] .ops-radar-icon-btn:hover, [data-theme="dark"] .ops-radar-icon-btn[aria-expanded="true"] { background: rgba(129, 140, 248, 0.2); color: #c7d2fe; }
+[data-theme="dark"] .ops-radar-title { color: #f1f5f9; }
+[data-theme="dark"] .ops-radar-intro,
+[data-theme="dark"] .ops-radar-sub,
+[data-theme="dark"] .ops-radar-chip-label { color: #a8b5c8; }
+[data-theme="dark"] .ops-radar-help { background: var(--color-surface-alt, #172030); color: #e2e8f0; }
+[data-theme="dark"] .ops-radar-chip { background: var(--color-surface-alt, #172030); border-color: var(--color-border, #253045); }
+[data-theme="dark"] .ops-radar-empty { border-color: var(--color-border, #253045); color: #a8b5c8; }
+[data-theme="dark"] .ops-radar-table-wrap { border-color: var(--color-border, #253045); }
+[data-theme="dark"] .ops-radar-count { background: rgba(148, 163, 184, 0.16); color: #e2e8f0; }
+[data-theme="dark"] .ops-radar-actions { border-top-color: var(--color-border, #253045); }
+[data-theme="dark"] .ops-radar-btn { background: var(--color-surface-alt, #172030); border-color: var(--color-border, #253045); color: #e2e8f0; }
+[data-theme="dark"] .ops-radar-btn:hover:not(:disabled) { background: rgba(129, 140, 248, 0.16); border-color: #818cf8; }
+[data-theme="dark"] .ops-radar-btn-primary { background: #2563eb; border-color: #2563eb; color: #ffffff; }
+[data-theme="dark"] .ops-radar-btn-primary:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+[data-theme="dark"] .ops-radar-table thead th { color: #94a3b8; }
+[data-theme="dark"] .ops-radar-table tbody td,
+[data-theme="dark"] .ops-radar-table tbody td strong { color: #e2e8f0; }
 
 @media (max-width: 768px) {
   .ops-radar-modal { padding: 0; align-items: flex-end; }
   .ops-radar-panel { width: 100%; max-height: 94vh; padding: 16px 14px 18px; border-radius: 18px 18px 0 0; }
   .ops-radar-table-wrap { border: 0; overflow: visible; }
   .ops-radar-actions .ops-radar-btn { flex: 1 1 100%; justify-content: center; }
+
+  /* HF-3: dokunma hedefi + araç çubuğu tam genişlik (iOS zoom'suz arama) */
+  .ops-radar-icon-btn { width: 40px; height: 40px; }
+  .ops-radar-toolbar { flex-direction: column; align-items: stretch; }
+  .ops-radar-seg { display: flex; width: 100%; }
+  .ops-radar-seg-btn { flex: 1 1 0; min-height: 40px; white-space: nowrap; }
+  .ops-radar-search { flex: 1 1 100%; font-size: 16px; min-height: 42px; }
 }
+
+/* ── v3.8 · HF-3 · HIZLI ÇIKIŞ MASASI KOMPAKT TARİH/SAAT ───────────────────────
+   WHY: Tarih + saat tek satırda uzayıp kartı taşırıyordu.
+   HOW: renderQuickExitDesk() (HF-1) `.qe-dt > .qe-date + .qe-time` üretir; iki kompakt satır, taşma yok. */
+.qe-dt { display: inline-flex; flex-direction: column; gap: 1px; min-width: 0; line-height: 1.15; }
+.qe-date { font-size: 0.78rem; font-weight: 700; color: var(--color-text, #1e293b); white-space: nowrap; }
+.qe-time { font-size: 0.68rem; font-weight: 600; color: var(--color-text-muted, #64748b); font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-theme="dark"] .qe-date { color: #e2e8f0; }
+[data-theme="dark"] .qe-time { color: #94a3b8; }
+
+/* ── v3.8 · HF-3 · SATIN ALMA & SERVİS KPI KAPSAYICISI ─────────────────────────
+   WHY: style.css (daha geç yüklenir) .kpi-container'ı 3 sütunlu grid yapıyor; yukarıdaki mobil `flex-direction: column`
+        kuralları bu yüzden etkisizdi ve 3 kart 390px'te sıkışıyordu.
+   HOW: Yalnız bu kapsayıcıya `kpi-container--trio` verildi (özgüllük 0,2,0); mobilde 2 sütun + tam genişlik 3. kart. */
+@media (max-width: 768px) {
+  .kpi-container.kpi-container--trio { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .kpi-container--trio .dashboard-card { min-width: 0; padding: 12px; }
+  .kpi-container--trio .dashboard-card:last-child { grid-column: 1 / -1; }
+  .kpi-container--trio .dashboard-card i { flex: 0 0 auto; margin-right: 10px; font-size: 20px; }
+  .kpi-container--trio .dashboard-info { min-width: 0; }
+  .kpi-container--trio .dashboard-title { font-size: 0.64rem; line-height: 1.25; overflow-wrap: anywhere; }
+  .kpi-container--trio .dashboard-value { font-size: 1.35rem; }
+}
+
+@media (max-width: 340px) {
+  .kpi-container.kpi-container--trio { grid-template-columns: 1fr; }
+}
+
+/* Koyu tema: dark-theme.css yalnız kart zeminini veriyor; mavi/sarı/yeşil değerler koyu zeminde düşük kontrastlıydı. */
+[data-theme="dark"] .kpi-container--trio .card-blue i,
+[data-theme="dark"] .kpi-container--trio .card-blue .dashboard-value { color: #93c5fd; }
+[data-theme="dark"] .kpi-container--trio .card-yellow i,
+[data-theme="dark"] .kpi-container--trio .card-yellow .dashboard-value { color: #fcd34d; }
+[data-theme="dark"] .kpi-container--trio .card-green i,
+[data-theme="dark"] .kpi-container--trio .card-green .dashboard-value { color: #86efac; }
+
+/* ── v3.8 · HF-3 · SERVİS TAKİP BAŞLIĞI + "SERVİSE KAYDI AÇ" ───────────────────
+   WHY: Başlık h6 olarak kalır (erişilebilir ad bozulmasın); düğme aynı satırda durur, dar ekranda alta sarar.
+   HOW: .modern-card-title'ın alt boşluğu (20px) satır kapsayıcısına taşınır. */
+.service-card-head { margin-bottom: 20px; }
+.service-card-head .modern-card-title { margin-bottom: 0; }
+
+/* ── v3.8 · HF-3 · purchaseModal (SATIN ALMA TALEBİ) ───────────────────────────
+   WHY: .modern-modal-content { overflow:hidden } (style.css) .modal-content { overflow-y:auto }'u eziyordu; uzun form
+        kırpılıyor, Kaydet'e ulaşılamıyordu. Satır içi `max-width/margin` ve purchase-print.css'in 940px'lik kalem
+        tablosu mobilde yatay taşma yaratıyordu. admin.html mobile-responsive.css'i YÜKLEMEZ.
+   HOW: Kart kendi içinde kayar (ID özgüllüğü); ≤768px'te tek sütun form + kalem satırları 2 sütunlu kompakt kartlar.
+        Kalem tablosu sütun sırası src/ui/purchase-items-ui.js addLine() ile sözleşmelidir:
+        1 açıklama · 2 tür · 3 miktar · 4 birim · 5 fiyat · 6 para · 7 KDV · 8 toplam · 9 çıkar. */
+#purchaseModal > .modal-content {
+  width: min(96vw, 680px);
+  max-width: 680px;
+  max-height: 92dvh;
+  margin: 4dvh auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  #purchaseModal > .modal-content { padding: 14px; margin: 2dvh auto; }
+  #purchaseModal .modern-modal-header { padding: 0 0 10px !important; }
+  #purchaseModal .modal-body { padding: 10px 0 !important; }
+
+  /* admin CSS'inde .col-md-* / .g-3 tanımı yok → satırlar tek sütun ızgara */
+  #purchaseModal .row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  #purchaseModal .row > [class*="col-"] { grid-column: 1 / -1; min-width: 0; }
+  #purchaseModal .form-control,
+  #purchaseModal .form-select,
+  #purchaseModal textarea,
+  #purchaseModal .modern-input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    font-size: 16px !important;     /* iOS odak yakınlaştırması yok */
+    min-height: 44px;
+  }
+  #purchaseModal textarea { min-height: 88px; }
+
+  #purchaseModal .modern-modal-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    padding: 10px 0 0;
+    background: var(--color-surface, #fff);
+    border-top: 1px solid var(--color-border-light, #e2e8f0);
+  }
+  #purchaseModal .modern-modal-footer .btn,
+  #purchaseModal .btn-modern-save { width: 100%; min-height: 44px; }
+
+  /* Kalem satırları: tablo → 2 sütunlu kompakt kart */
+  #purItemsEditor .table-responsive { overflow: visible; }
+  #purItemsEditor .purchase-items-table,
+  #purItemsEditor .purchase-items-table tbody { display: block; width: 100%; min-width: 0 !important; }
+  #purItemsEditor .purchase-items-table thead { display: none; }   /* girişlerde aria-label zaten var */
+  #purItemsEditor .purchase-items-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
+    margin-bottom: 10px;
+    padding: 12px;
+    border: 1px solid var(--color-border-light, #e2e8f0);
+    border-radius: 12px;
+    background: var(--color-surface-alt, #f8fafc);
+  }
+  #purItemsEditor .purchase-items-table tbody td {
+    display: block;
+    min-width: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+  }
+  #purItemsEditor .purchase-items-table tbody td::before {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--color-text-muted, #64748b);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(1)::before { content: "Mal / hizmet"; }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(2)::before { content: "Ürün türü"; }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(3)::before { content: "Miktar"; }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(4)::before { content: "Birim"; }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(5)::before { content: "Birim fiyat"; }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(6)::before { content: "Para"; }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(7)::before { content: "KDV %"; }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(8)::before { content: "Toplam"; }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(1),
+  #purItemsEditor .purchase-items-table tbody td:nth-child(2),
+  #purItemsEditor .purchase-items-table tbody td:nth-child(9) { grid-column: 1 / -1; }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(8) { align-self: end; white-space: normal; }
+  #purItemsEditor .purchase-items-table input,
+  #purItemsEditor .purchase-items-table select {
+    width: 100%;
+    min-width: 0 !important;
+    min-height: 40px;
+    font-size: 16px;
+    box-sizing: border-box;
+  }
+  #purItemsEditor .purchase-items-table tbody td:nth-child(9) button { width: 100%; min-height: 40px; }
+  #purItemsEditor .d-flex.justify-content-between { flex-wrap: wrap; gap: 8px; }
+  #purItemsEditor .btn { min-height: 40px; }
+}
+
+/* ── v3.8 · HF-3 · ZİMMET SEKMESİ (#inventoryManagementTab) + #assignInventoryModal ─────────────
+   WHY: Zimmet tablosu satır içi stilli, kimliksiz ve bento sınıfsızdı; mobilde yatay kayıyordu. Filtre alanları 13px
+        (iOS zoom), zimmet modalı 680px sabitti.
+   HOW: Tablo `modern-table admin-bento-table`; hücreler renderTable()'da data-bento/data-label ile işaretlenir (bento
+        altyapısı ≤768px'te her satırı kart yapar). Bu bölüm yalnız bu tabloya özel eklemeleri içerir. */
+#invAssignmentTable { margin-top: 0; }                /* .modern-table'ın -10px üst boşluğu başlığı kırpıyordu */
+#invAssignmentTable tbody td { font-size: 13px; }
+#invAssignmentTable thead th { white-space: normal; }
+#invAssignmentTable td:last-child { justify-content: center; }
+
+/* .modern-table td:last-child { display:flex } colspan'lı boş/yükleniyor satırını tek sütuna hapsediyordu */
+#invAssignmentTable tbody td[data-bento="empty"] { display: table-cell !important; }
+
+@media (max-width: 768px) {
+  #invAssignmentTable tbody td[data-bento="empty"] { display: block !important; padding: 24px 12px !important; }
+  #invAssignmentTable tbody td[data-label="Personel"] { flex: 1 1 100%; }
+  #invAssignmentTable tbody td[data-bento="actions"] > div {
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    align-items: stretch !important;
+    width: 100%;
+    gap: 8px !important;
+  }
+  #invAssignmentTable tbody td[data-bento="actions"] button {
+    flex: 1 1 auto;
+    min-height: 40px;
+    margin: 0 !important;
+    justify-content: center;
+  }
+  #invFilterBar { display: grid !important; grid-template-columns: 1fr 1fr; gap: 10px !important; padding: 12px !important; }
+  #invFilterBar > div { grid-column: 1 / -1; min-width: 0 !important; }
+  #invFilterBar > select:last-child { grid-column: 1 / -1; }   /* 5 süzgeç: tek kalan son kutu tam genişlik */
+  #invFilterBar select,
+  #invFilterBar input { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; font-size: 16px !important; }
+
+  .assign-modal-overlay { align-items: flex-end !important; padding: 0 !important; }
+  .assign-modal-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 94dvh !important;
+    border-radius: 18px 18px 0 0 !important;
+  }
+  .assign-type-grid { grid-template-columns: 1fr !important; }
+  .assign-product-row { grid-template-columns: minmax(0, 1fr) 44px !important; }
+  .assign-product-row > .assign-warehouse-sel,
+  .assign-product-row > .assign-product-sel,
+  .assign-product-row > .assign-dev-ids { grid-column: 1 / -1; }
+  .assign-modal-card select,
+  .assign-modal-card input,
+  .assign-modal-card textarea { min-height: 44px; font-size: 16px !important; box-sizing: border-box; }
+  .assign-modal-actions { flex-direction: column-reverse; }
+  .assign-modal-actions > button { width: 100%; min-height: 44px; justify-content: center; }
+}
+
+@media (max-width: 480px) {
+  .inv-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; margin-bottom: 18px !important; }
+  .inv-kpi-grid > div { padding: 12px 8px !important; }
+  .inv-head-actions { width: 100%; }
+  .inv-head-actions > button { flex: 1 1 calc(50% - 5px); justify-content: center; min-height: 44px; }
+}
+
+/* Q4 · Zimmet sekmesi / zimmet modalı açık-tema pastel düğmeleri (Tutanak, Geçmiş, Yeni, Yeni Ürün, satır sil).
+   Açık temadaki görünüm birebir korunur (eski satır içi renkler sınıfa taşındı); koyu temada yarı saydam tonlu. */
+.inv-chip-btn { border: 1px solid transparent; transition: 0.2s; }
+.inv-chip-btn--indigo { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
+.inv-chip-btn--indigo:hover { background: #e0e7ff; }
+.inv-chip-btn--blue { background: #eff6ff; color: #1d4ed8; border-color: #93c5fd; }
+.inv-chip-btn--blue:hover { background: #dbeafe; }
+.inv-chip-btn--green { background: #f0fdf4; color: #16a34a; border-color: #86efac; }
+.inv-chip-btn--green:hover { background: #dcfce7; }
+.inv-chip-btn--red { background: #fee2e2; color: #c0392b; border-color: transparent; }
+.inv-chip-btn--red:hover { background: #fecaca; }
+
+[data-theme="dark"] .inv-chip-btn--indigo { background: rgba(129, 140, 248, 0.16) !important; color: #c7d2fe !important; border-color: rgba(129, 140, 248, 0.45) !important; }
+[data-theme="dark"] .inv-chip-btn--indigo:hover { background: rgba(129, 140, 248, 0.28) !important; }
+[data-theme="dark"] .inv-chip-btn--blue { background: rgba(96, 165, 250, 0.16) !important; color: #bfdbfe !important; border-color: rgba(96, 165, 250, 0.45) !important; }
+[data-theme="dark"] .inv-chip-btn--blue:hover { background: rgba(96, 165, 250, 0.28) !important; }
+[data-theme="dark"] .inv-chip-btn--green { background: rgba(74, 222, 128, 0.14) !important; color: #86efac !important; border-color: rgba(74, 222, 128, 0.4) !important; }
+[data-theme="dark"] .inv-chip-btn--green:hover { background: rgba(74, 222, 128, 0.26) !important; }
+[data-theme="dark"] .inv-chip-btn--red { background: rgba(248, 113, 113, 0.16) !important; color: #fca5a5 !important; border-color: rgba(248, 113, 113, 0.4) !important; }
+[data-theme="dark"] .inv-chip-btn--red:hover { background: rgba(248, 113, 113, 0.28) !important; }
+
+/* ── v3.8 · HF-3 · TANIMLAR SEKMESİ (#definitionsTab) + #tablePersonel ─────────────────────────
+   WHY: (1) Alt sekme şeridi satır içi `width: fit-content` olduğundan dar ekranda sayfayı taşırıyordu.
+        (2) style.css `.modern-table td:last-child { display:flex !important; min-width:130px }` SARMA içermiyor: "Düzenle ·
+            Geçici PIN · Askıya Al" tek satıra sıkışıp üst üste biniyor; global `button { margin: 0 4px }` bunu artırıyor.
+        (3) `ID: … · UID: …` boşluksuz uzun metin; kart gövdelerinde satır içi min-height 300/400px mobilde boş alan bırakıyor.
+   HOW: Sekme şeridi mobilde yatay kaydırılır; işlem hücreleri sarar (gap 6px); uzun metinler anywhere ile kırılır.
+        Kurallar `#definitionsTab` kapsamında olduğundan 6 bento tablosunu ve ebys-catalog-ui.js ile çizilen tabloları kapsar. */
+.def-nav-bar { width: fit-content; max-width: 100%; padding: 4px; }
+
+#definitionsTab .modern-table { table-layout: auto; }
+#definitionsTab .modern-table th,
+#definitionsTab .modern-table td { min-width: 0; overflow-wrap: anywhere; }
+#definitionsTab .modern-table td:last-child { flex-wrap: wrap !important; gap: 6px !important; }
+#definitionsTab .modern-table td button,
+#definitionsTab .modern-table td .edit-btn,
+#definitionsTab .modern-table td .delete-btn { margin: 0 !important; }
+#definitionsTab .modern-table td small { overflow-wrap: anywhere; line-height: 1.35; margin-top: 2px; }
+
+/* colspan'lı "kayıt yok" satırı son hücre olduğu için flex'e dönüp tek sütuna sıkışıyordu (yalnız masaüstü tablo düzeni) */
+@media (min-width: 769px) {
+  #definitionsTab .modern-table td[colspan] { display: table-cell !important; }
+}
+
+@media (max-width: 768px) {
+  .def-nav-bar {
+    width: 100%;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+  .def-nav-bar .def-nav-btn { flex: 0 0 auto; min-height: 40px; white-space: nowrap; scroll-snap-align: start; }
+
+  #definitionsTab .admin-section-header {
+    flex-wrap: wrap;
+    align-items: flex-start !important;
+    gap: 10px 12px;
+    padding: 14px 16px;
+  }
+  #definitionsTab .admin-section-header > div:first-child { flex: 1 1 100%; min-width: 0; }
+  #definitionsTab .admin-section-header > .btn,
+  #definitionsTab .admin-section-header > .d-flex { flex: 1 1 auto; }
+  #definitionsTab .admin-section-header .btn,
+  #definitionsTab .admin-section-header .section-guide-link { min-height: 40px; justify-content: center; }
+  #definitionsTab .admin-section-header h2 { font-size: 1.1rem; }
+  #definitionsTab .table-responsive { min-height: 0 !important; }
+
+  /* #tablePersonel — işlem düğmeleri: 2'li sıra, kalan tek düğme tam genişlik; üst üste binme yok */
+  #tablePersonel tbody td[data-bento="actions"] { gap: 6px; flex-wrap: wrap; }
+  #tablePersonel tbody td[data-bento="actions"] .edit-btn {
+    flex: 1 1 calc(50% - 6px);
+    min-height: 40px;
+    margin: 0;
+    justify-content: center;
+    white-space: nowrap;
+  }
+  #tablePersonel tbody td[data-bento="actions"] .edit-btn:nth-child(odd):last-child { flex-basis: 100%; }
+
+  /* Q3 · dosya planı / üst yazı şablonları panelleri (ebys-catalog-ui.js) */
+  #ebysFilePlanPanel .ebys-catalog-inline,
+  #ebysTemplatePanel .ebys-catalog-inline { flex-direction: column; align-items: stretch; }
+  #ebysFilePlanPanel .ebys-catalog-inline .ebys-catalog-field,
+  #ebysTemplatePanel .ebys-catalog-inline .ebys-catalog-field { flex: 1 1 auto; }
+  #ebysFilePlanPanel input:not([type="checkbox"]):not([type="radio"]),
+  #ebysFilePlanPanel select,
+  #ebysFilePlanPanel textarea,
+  #ebysTemplatePanel input:not([type="checkbox"]):not([type="radio"]),
+  #ebysTemplatePanel select,
+  #ebysTemplatePanel textarea { width: 100%; min-height: 44px; box-sizing: border-box; font-size: 16px; }
+  #ebysFilePlanPanel .ebys-catalog-actions,
+  #ebysTemplatePanel .ebys-catalog-actions { width: 100%; }
+  #ebysFilePlanPanel .ebys-catalog-actions .btn,
+  #ebysTemplatePanel .ebys-catalog-actions .btn { flex: 1 1 auto; min-height: 40px; }
+}
+
+#tablePersonel td .edit-btn { margin: 0 !important; white-space: nowrap; }

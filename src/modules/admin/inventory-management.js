@@ -150,7 +150,7 @@ window.inventoryManagementModule = {
               </h2>
               <small style="color:var(--color-text-muted);">Tüm zimmetler, iadeler ve ITSM talep akışları tek ekranda</small>
             </div>
-            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <div class="inv-head-actions" style="display:flex; gap:10px; flex-wrap:wrap;">
               <button onclick="window.inventoryManagementModule.openAssignModal()"
                 style="padding:10px 20px; background:var(--color-primary); color:white; border:none; border-radius:10px; font-weight:700; cursor:pointer; font-size:14px; display:flex; align-items:center; gap:6px; transition:0.2s;"
                 onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
@@ -165,7 +165,7 @@ window.inventoryManagementModule = {
           </div>
 
           <!-- KPI KARTLARI -->
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:14px; margin-bottom:24px;">
+          <div class="inv-kpi-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:14px; margin-bottom:24px;">
             ${[
         { id: 'kpi-total', label: 'Toplam Zimmetli', icon: 'fa-layer-group', color: '#3498db', bg: 'rgba(52,152,219,0.1)' },
         { id: 'kpi-perm', label: 'Kalıcı Zimmet', icon: 'fa-thumbtack', color: '#8e44ad', bg: 'rgba(142,68,173,0.1)' },
@@ -185,7 +185,7 @@ window.inventoryManagementModule = {
           </div>
 
           <!-- FİLTRELER & ARAMA -->
-          <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; padding:16px; margin-bottom:20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+          <div id="invFilterBar" class="inv-filter-bar" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; padding:16px; margin-bottom:20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
             <div style="position:relative; flex:1; min-width:200px;">
               <i class="fas fa-search" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--color-text-muted);"></i>
               <input type="text" id="invSearchInput" placeholder="Personel, ürün veya seri no ara..."
@@ -229,23 +229,24 @@ window.inventoryManagementModule = {
           </div>
 
           <!-- ZİMMET TABLOSU -->
-          <div style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; overflow:hidden;">
-            <div style="overflow-x:auto;">
-              <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                <thead>
-                  <tr style="background:var(--color-surface-alt,#f8fafc); border-bottom:2px solid var(--color-border);">
-                    <th style="padding:14px 16px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px; letter-spacing:0.5px;">Personel</th>
-                    <th style="padding:14px 16px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px; letter-spacing:0.5px;">Ürün / SN</th>
-                    <th style="padding:14px 16px; text-align:center; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px; letter-spacing:0.5px;">Adet</th>
-                    <th style="padding:14px 16px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px; letter-spacing:0.5px;">Talep Türü</th>
-                    <th style="padding:14px 16px; text-align:center; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px; letter-spacing:0.5px;">Öncelik</th>
-                    <th style="padding:14px 16px; text-align:left; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px; letter-spacing:0.5px;">Tarih / İade</th>
-                    <th style="padding:14px 16px; text-align:center; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px; letter-spacing:0.5px;">Durum</th>
-                    <th style="padding:14px 16px; text-align:center; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; font-size:11px; letter-spacing:0.5px;">İşlem</th>
+          <!-- v3.8 · HF-3: kapsayıcı kimlikleri + admin-bento-table (≤768px'te her satır kart; satır içi stiller bento kurallarına taşındı) -->
+          <div id="invTableCard" class="inv-table-card" style="background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; overflow:hidden;">
+            <div id="invTableWrap" class="table-responsive">
+              <table id="invAssignmentTable" class="modern-table admin-bento-table" role="table">
+                <thead role="rowgroup">
+                  <tr role="row">
+                    <th role="columnheader">Personel</th>
+                    <th role="columnheader">Ürün / SN</th>
+                    <th role="columnheader" class="text-center">Adet</th>
+                    <th role="columnheader">Talep Türü</th>
+                    <th role="columnheader" class="text-center">Öncelik</th>
+                    <th role="columnheader">Tarih / İade</th>
+                    <th role="columnheader" class="text-center">Durum</th>
+                    <th role="columnheader" class="text-center">İşlem</th>
                   </tr>
                 </thead>
-                <tbody id="invTableBody">
-                  <tr><td colspan="8" style="padding:40px; text-align:center; color:var(--color-text-muted);">
+                <tbody id="invTableBody" role="rowgroup">
+                  <tr class="bento-empty-row" role="row"><td colspan="8" data-bento="empty" role="cell" style="padding:40px; text-align:center; color:var(--color-text-muted);">
                     <i class="fas fa-spinner fa-spin fa-2x" style="margin-bottom:10px; display:block;"></i>Veriler yükleniyor...
                   </td></tr>
                 </tbody>
@@ -281,7 +282,7 @@ window.inventoryManagementModule = {
     const filtered = this.applyFilters(allAssignments);
 
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="padding:48px; text-align:center; color:var(--color-text-muted);">
+      tbody.innerHTML = `<tr class="bento-empty-row" role="row"><td colspan="8" data-bento="empty" role="cell" style="padding:48px; text-align:center; color:var(--color-text-muted);">
               <i class="fas fa-inbox fa-3x" style="display:block; margin-bottom:12px; opacity:0.3;"></i>
               Filtrelere uyan zimmet kaydı bulunamadı.
             </td></tr>`;
@@ -324,9 +325,9 @@ window.inventoryManagementModule = {
       // ile aynı küme), "Zimmetten Düş" gibi satır başına değil kişi başına bir işlemdir.
       const pdfBtn = a.personelId
         ? `<button onclick="window.generatePersonnelZimmetPDF(${jsArg(String(a.personelId))})"
+                    class="inv-chip-btn inv-chip-btn--indigo"
                     title="Bu personelin resmi zimmet tutanağını indir"
-                    style="padding:5px 10px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; border-radius:8px; cursor:pointer; font-size:11px; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:4px; transition:0.2s;"
-                    onmouseover="this.style.background='#e0e7ff'" onmouseout="this.style.background='#eef2ff'">
+                    style="padding:5px 10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:4px;">
                     <i class="fas fa-file-pdf"></i> Tutanak
                   </button>`
         : '';
@@ -335,41 +336,41 @@ window.inventoryManagementModule = {
       const deviceId = [a.sn, a.envanterNo].find(v => v && v !== '-' && !String(v).includes(','));
       const historyBtn = deviceId
         ? `<button onclick="window.inventoryManagementModule.showDeviceHistory(${jsArg(String(deviceId))})"
+                    class="inv-chip-btn inv-chip-btn--blue"
                     title="Bu cihazın tüm zimmet geçmişini gör"
-                    style="padding:5px 10px; background:#eff6ff; color:#1d4ed8; border:1px solid #93c5fd; border-radius:8px; cursor:pointer; font-size:11px; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:4px; transition:0.2s;"
-                    onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
+                    style="padding:5px 10px; border-radius:8px; cursor:pointer; font-size:11px; font-weight:600; margin-top:4px; display:flex; align-items:center; gap:4px;">
                     <i class="fas fa-history"></i> Geçmiş
                   </button>`
         : '';
 
       return `
-            <tr style="border-bottom:1px solid var(--color-border); transition:0.15s;" onmouseover="this.style.background='var(--color-surface-alt,#f8fafc)'" onmouseout="this.style.background=''">
-              <td style="padding:12px 16px;">
+            <tr role="row">
+              <td role="cell" data-bento="meta" data-label="Personel">
                 <div style="font-weight:700; color:var(--color-text);">${escapeHtml(a.personel)}</div>
                 <div style="font-size:11px; color:var(--color-text-muted);">${escapeHtml(a._source === 'request' ? '📋 Talep' : '📤 Doğrudan Çıkış')}</div>
               </td>
-              <td style="padding:12px 16px;">
+              <td role="cell" data-bento="title" data-label="Ürün / SN">
                 <div style="font-weight:600; color:var(--color-text);">${escapeHtml(a.ürün)}</div>
                 ${a.sn && a.sn !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted); font-family:monospace;">SN: <b>${escapeHtml(a.sn)}</b></div>` : ''}
                 ${a.envanterNo && a.envanterNo !== '-' ? `<div style="font-size:11px; color:var(--color-text-muted); font-family:monospace;">Env. No: <b>${escapeHtml(a.envanterNo)}</b></div>` : ''}
               </td>
-              <td style="padding:12px 16px; text-align:center; font-weight:700; color:var(--color-text);">${escapeHtml(a.adet)}</td>
-              <td style="padding:12px 16px;">
+              <td role="cell" data-bento="meta" data-label="Adet" class="text-center" style="font-weight:700; color:var(--color-text);">${escapeHtml(a.adet)}</td>
+              <td role="cell" data-bento="meta" data-label="Talep Türü">
                 <span style="background:${escapeHtml(tColor.bg)}; color:${escapeHtml(tColor.text)}; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">
                   ${tColor.icon} ${escapeHtml(a.talepTuru)}
                 </span>
               </td>
-              <td style="padding:12px 16px; text-align:center;">
+              <td role="cell" data-bento="meta" data-label="Öncelik" class="text-center">
                 <span style="background:${escapeHtml(pColor.bg)}; color:${escapeHtml(pColor.text)}; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:700;">
                   ${pColor.icon} ${escapeHtml(a.oncelik)}
                 </span>
               </td>
-              <td style="padding:12px 16px;">
+              <td role="cell" data-bento="meta" data-label="Tarih / İade">
                 <div style="font-size:12px; color:var(--color-text-muted);">${escapeHtml(a.tarih)}</div>
                 ${returnDateInfo}
               </td>
-              <td style="padding:12px 16px; text-align:center;">${durumBadge}</td>
-              <td style="padding:12px 16px; text-align:center;">
+              <td role="cell" data-bento="status" data-label="Durum" class="text-center">${durumBadge}</td>
+              <td role="cell" data-bento="actions" data-label="İşlem" class="text-center">
                 <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                   ${actionBtn}
                   ${pdfBtn}
@@ -389,9 +390,10 @@ window.inventoryManagementModule = {
 
     const modal = document.createElement('div');
     modal.id = 'assignInventoryModal';
+    modal.className = 'assign-modal-overlay';   // v3.8 · HF-3: mobil alt çekmece kancası (admin-add-style.css)
     modal.style.cssText = 'display:none; position:fixed; inset:0; background:rgba(15,23,42,0.65); backdrop-filter:blur(8px); z-index:10500; align-items:center; justify-content:center;';
     modal.innerHTML = `
-        <div style="background:var(--color-surface,#fff); border:1px solid var(--color-border); border-radius:20px; width:680px; max-width:96vw; max-height:90vh; overflow-y:auto; box-shadow:0 24px 64px rgba(0,0,0,0.4); position:relative;">
+        <div class="assign-modal-card" style="background:var(--color-surface,#fff); border:1px solid var(--color-border); border-radius:20px; width:680px; max-width:96vw; max-height:90vh; overflow-y:auto; box-shadow:0 24px 64px rgba(0,0,0,0.4); position:relative;">
 
           <!-- BAŞLIK -->
           <div style="padding:20px 24px; border-bottom:1px solid var(--color-border); display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; background:var(--color-surface,#fff); z-index:1; border-radius:20px 20px 0 0;">
@@ -417,16 +419,16 @@ window.inventoryManagementModule = {
                   <option value="">-- Personel Seçiniz --</option>
                 </select>
                 <button onclick="window.inventoryManagementModule.quickAddPersonnel()"
+                  class="inv-chip-btn inv-chip-btn--green"
                   title="Yeni Personel Ekle"
-                  style="flex-shrink:0; padding:10px 14px; background:#f0fdf4; color:#16a34a; border:1px solid #86efac; border-radius:10px; cursor:pointer; font-size:13px; font-weight:700; white-space:nowrap; transition:0.2s;"
-                  onmouseover="this.style.background='#dcfce7'" onmouseout="this.style.background='#f0fdf4'">
+                  style="flex-shrink:0; padding:10px 14px; border-radius:10px; cursor:pointer; font-size:13px; font-weight:700; white-space:nowrap;">
                   <i class="fas fa-user-plus"></i> Yeni
                 </button>
               </div>
             </div>
 
             <!-- Zimmet Türü ve Öncelik -->
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px;">
+            <div class="assign-type-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px;">
               <div>
                 <label style="font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:0.5px; color:var(--color-text-muted); display:block; margin-bottom:6px;">Zimmet Türü</label>
                 <select id="assignType" style="width:100%; padding:12px; border-radius:10px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:14px;"
@@ -459,8 +461,8 @@ window.inventoryManagementModule = {
                 <label style="font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:0.5px; color:var(--color-text-muted);">Zimmet Edilecek Ürünler</label>
                 <div style="display:flex; gap:8px;">
                   <button onclick="window.inventoryManagementModule.quickAddProduct()"
-                    style="padding:6px 12px; background:#eff6ff; color:#1d4ed8; border:1px solid #93c5fd; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700; display:flex; align-items:center; gap:4px; transition:0.2s;"
-                    onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
+                    class="inv-chip-btn inv-chip-btn--blue"
+                    style="padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700; display:flex; align-items:center; gap:4px;">
                     <i class="fas fa-box"></i> Yeni Ürün
                   </button>
                   <button onclick="window.inventoryManagementModule.addAssignRow()"
@@ -482,7 +484,7 @@ window.inventoryManagementModule = {
             </div>
 
             <!-- KAYDET -->
-            <div style="display:flex; justify-content:flex-end; gap:10px;">
+            <div class="assign-modal-actions" style="display:flex; justify-content:flex-end; gap:10px;">
               <button onclick="window.inventoryManagementModule.closeAssignModal()"
                 style="padding:12px 24px; background:none; border:1px solid var(--color-border); border-radius:10px; cursor:pointer; font-weight:600; color:var(--color-text-muted);">
                 İptal
@@ -574,7 +576,8 @@ window.inventoryManagementModule = {
             style="padding:10px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); font-size:13px; text-align:center;"
             placeholder="Adet">
           <button onclick="window.inventoryManagementModule.removeAssignRow(this)"
-            style="padding:8px; background:#fee2e2; color:#c0392b; border:none; border-radius:8px; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center;">
+            class="inv-chip-btn inv-chip-btn--red"
+            style="padding:8px; border-radius:8px; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center;">
             <i class="fas fa-times"></i>
           </button>
           <div class="assign-dev-ids" hidden></div>

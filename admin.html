@@ -398,7 +398,7 @@
                         <i class="fas fa-power-off"></i>
                     </button>
                 </div>
-                <div class="sync-status">
+                <div class="sync-status" title="Canlı veri eşitleme durumu">
                     <span id="syncIndicator" class="sync-dot online"></span>
                     <span id="syncText" style="color: var(--color-text); font-weight: 800; letter-spacing: 1px;">LIVE
                         SYNC</span>
@@ -406,6 +406,19 @@
                 </div>
             </div>
         </div>
+
+        <script>
+            // [WHY]: HF-3 — mobilde #lastSyncTime gizlenir; son eşitleme zamanı kaybolmasın.
+            // [HOW]: Metin değiştikçe (admin-dashboard.js yazar) canlı durum hapının title ipucuna yansıtılır; yalnız textContent okunur.
+            (function () {
+                var pill = document.querySelector('.sync-status');
+                var last = document.getElementById('lastSyncTime');
+                if (!pill || !last) return;
+                var sync = function () { pill.title = 'Canlı veri eşitleme durumu · Son eşitleme: ' + last.textContent.trim(); };
+                new MutationObserver(sync).observe(last, { childList: true, characterData: true, subtree: true });
+                sync();
+            })();
+        </script>
 
         <script>
             // [WHY]: CSS specificity savaşı: .admin-content-visible sınıfının
@@ -1416,7 +1429,7 @@
         </div>
 
         <!-- SATIN ALMA & SERVİS GÖSTERGELERİ — ait oldukları tabloların hemen üstünde (renderPurchaseStats doldurur) -->
-        <div class="kpi-container mt-2" aria-label="Satın alma ve servis özeti">
+        <div class="kpi-container kpi-container--trio mt-2" aria-label="Satın alma ve servis özeti">
             <div class="dashboard-card card-blue">
                 <i class="fas fa-clock" aria-hidden="true"></i>
                 <div class="dashboard-info">
@@ -1475,9 +1488,16 @@
             <!-- SAĞ TABLO: SERVİS TAKİP -->
             <div class="col-xl-4 col-lg-12">
                 <div class="modern-card">
-                    <h6 class="modern-card-title">
-                        <i class="fas fa-truck-fast me-2 text-warning"></i> Servis Takip
-                    </h6>
+                    <!-- HF-3: başlık h6 olarak kalır (erişilebilir ad bozulmasın); düğme aynı satırda, dar ekranda sarar. -->
+                    <div class="service-card-head d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <h6 class="modern-card-title">
+                            <i class="fas fa-truck-fast me-2 text-warning"></i> Servis Takip
+                        </h6>
+                        <button type="button" class="btn btn-sm btn-outline-warning rounded-pill px-3"
+                            onclick="window.openDirectServiceRecordModal && window.openDirectServiceRecordModal()">
+                            <i class="fas fa-tools me-1" aria-hidden="true"></i>Servise Kaydı Aç
+                        </button>
+                    </div>
                     <div class="table-responsive" style="min-height: 350px;">
                         <table class="modern-table">
                             <thead>
@@ -1534,8 +1554,8 @@
     <div id="definitionsTab" class="admin-tab-content" style="display: none;">
 
         <!-- Sekme Navigasyonu -->
-        <div class="mb-4 d-flex flex-wrap gap-2 p-1"
-            style="background: var(--color-surface, #fff); border-radius: 12px; border: 1px solid var(--color-border); width: fit-content;">
+        <div id="defNavBar" class="def-nav-bar mb-4 d-flex flex-wrap gap-2 p-1"
+            style="background: var(--color-surface, #fff); border-radius: 12px; border: 1px solid var(--color-border);">
             <button class="btn def-nav-btn active" onclick="switchDefTab('mahal', this)"
                 style="border-radius: 8px; font-weight: 600; padding: 8px 16px; border: none; background: transparent; color: var(--color-text);">Mahaller</button>
             <button class="btn def-nav-btn" onclick="switchDefTab('products', this)"
@@ -1853,6 +1873,10 @@
 
                 document.querySelectorAll('.def-nav-btn').forEach(btn => btn.classList.remove('active'));
                 if (trigger) trigger.classList.add('active');
+                // HF-3: mobilde yatay kaydırılan sekme şeridinde seçilen sekme görünür kalsın
+                if (trigger && typeof trigger.scrollIntoView === 'function') {
+                    trigger.scrollIntoView({ inline: 'center', block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+                }
 
                 // [FIX-BUG5]: Alt sekme geçişlerinde ilgili render fonksiyonlarını tetikle
                 if (tabId === 'workflows' && typeof window.renderTemplateList === 'function') {
@@ -1911,7 +1935,7 @@
         <section id="shelfMatrixApp" class="shelf-matrix" aria-label="Depo raf haritası">
             <header class="shelf-matrix-header">
                 <div class="panel-intro">
-                    <h2>🧱 Depo Raf Haritası</h2>
+                    <h2><i class="fas fa-warehouse me-2" aria-hidden="true"></i>Depo Raf Haritası</h2>
                     <p class="panel-intro-desc">B1 ve B2 stoklarını raf konumlarına göre bulun; raf ekleyin, boş rafları ayıklayın ve sayım için rafı kilitleyin.</p>
                     <button type="button" class="panel-help-trigger" data-panel-help aria-expanded="false"
                         aria-controls="shelfMatrixHelp"><i class="fas fa-info-circle" aria-hidden="true"></i> Nasıl çalışır?</button>
@@ -2523,7 +2547,7 @@
 
     <!-- purchaseModal -->
     <div id="purchaseModal" class="modal" style="display:none; background: rgba(0,0,0,0.4);">
-        <div class="modal-content modern-modal-content" style="max-width: 650px; margin: 50px auto;">
+        <div class="modal-content modern-modal-content purchase-modal-card">
 
             <div class="modern-modal-header">
                 <h3 id="purModalTitle"><i class="fas fa-file-invoice me-2"></i> Satın Alma Talebi</h3>

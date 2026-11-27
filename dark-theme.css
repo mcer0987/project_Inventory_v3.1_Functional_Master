@@ -1891,3 +1891,27 @@ body *::after {
 [data-theme="dark"] .brand-fx-glow .brand-emblem {
     box-shadow: 0 0 16px 3px rgba(96, 165, 250, 0.45);
 }
+
+/* ── v3.8 · HF-3 · purchaseModal (Space Titanium) ───────────────────────────────────────────────────────────
+   WHY: Mobil kalem kartları ve yapışkan alt çubuk açık tema fallback'leriyle (#f8fafc/#fff) yazılmıştı.
+   HOW: Zeminler/kenarlar token'lardan; .bg-light ve .text-dark için mevcut koyu kurallar (yukarıda) yeterli. */
+[data-theme="dark"] #purchaseModal > .modal-content {
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+
+[data-theme="dark"] #purchaseModal .modern-modal-footer {
+    background: var(--color-surface);
+    border-top-color: var(--color-border-light);
+}
+
+@media (max-width: 768px) {
+    [data-theme="dark"] #purItemsEditor .purchase-items-table tbody tr {
+        background: var(--color-surface-alt);
+        border-color: var(--color-border-light);
+    }
+
+    [data-theme="dark"] #purItemsEditor .purchase-items-table tbody td::before {
+        color: var(--color-text-muted);
+    }
+}

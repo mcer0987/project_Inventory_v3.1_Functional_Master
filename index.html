@@ -1663,42 +1663,41 @@
                             </button>
 
                             <!-- v3.8 · VP-3: 24 saat limitli şifre sıfırlama talebi (oturumsuz, zero-enumeration) -->
-                            <div style="margin-top:10px; text-align:center;">
-                                <button type="button" id="loginResetToggleBtn" aria-expanded="false" aria-controls="loginResetPanel"
-                                    style="background:none; border:none; color:var(--color-info, #2563eb); font-size:12.5px; font-weight:600; cursor:pointer; padding:4px 8px;">
+                            <!-- v3.8 · HF-3: sıfırlama açılınca görünüm YER DEĞİŞTİRİR (#loginModal.is-reset-mode, aşağıdaki küçük betik +
+                                 login-redesign.css); satır içi stiller sınıflara taşındı (koyu tema + sıfır scroll). -->
+                            <div class="login-reset-toggle-row">
+                                <button type="button" id="loginResetToggleBtn" class="login-reset-toggle" aria-expanded="false" aria-controls="loginResetPanel">
                                     <i class="fas fa-key" aria-hidden="true"></i> Şifremi Unuttum / Sıfırlama Talebi
                                 </button>
                             </div>
-                            <div id="loginResetPanel" hidden
-                                style="margin-top:8px; padding:12px; border-radius:10px; border:1px solid var(--color-border, #cbd5e1); background:var(--color-surface-alt, rgba(148,163,184,0.08)); text-align:left;">
-                                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
-                                    <strong style="font-size:13px;">Şifre Sıfırlama Talebi</strong>
-                                    <button type="button" id="loginResetHelpBtn" aria-expanded="false" aria-controls="loginResetHelp"
-                                        style="background:none; border:none; color:var(--color-info, #2563eb); font-size:12px; font-weight:600; cursor:pointer;">
+                            <div id="loginResetPanel" class="login-reset-panel" role="group" aria-label="Şifre sıfırlama talebi" hidden>
+                                <button type="button" id="loginResetBackBtn" class="login-reset-back">
+                                    <i class="fas fa-arrow-left" aria-hidden="true"></i> Giriş Ekranına Dön
+                                </button>
+                                <div class="login-reset-head">
+                                    <strong>Şifre Sıfırlama Talebi</strong>
+                                    <button type="button" id="loginResetHelpBtn" class="login-reset-link" aria-expanded="false" aria-controls="loginResetHelp">
                                         <i class="fas fa-info-circle" aria-hidden="true"></i> Bilgi
                                     </button>
                                 </div>
-                                <p style="margin:0 0 8px; font-size:12px; color:var(--color-text-muted, #475569); line-height:1.4;">
+                                <p class="login-reset-intro">
                                     Kurumsal kimliğinizle yöneticinize şifre sıfırlama talebi iletin. Yönetici onayından sonra tek kullanımlık geçici kodunuzu teslim alırsınız.
                                 </p>
-                                <div id="loginResetHelp" hidden
-                                    style="margin:0 0 8px; padding:8px 10px; border-radius:8px; border:1px solid var(--color-border, #cbd5e1); font-size:11.5px; line-height:1.45; color:var(--color-text-muted, #475569);">
+                                <div id="loginResetHelp" class="login-reset-help" hidden>
                                     Aynı hesap için 24 saatte en fazla 1 talep gönderilebilir. Güvenlik gereği bu ekran hesabın sistemde kayıtlı olup olmadığını göstermez.
                                 </div>
-                                <div class="modern-input-group" style="margin-bottom:8px;">
+                                <div class="modern-input-group">
                                     <label class="login-field-label" for="loginResetPri">Kurumsal kimlik (PRI)</label>
                                     <input type="text" id="loginResetPri" placeholder="ad.soyad" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
                                 </div>
-                                <div class="modern-input-group" style="margin-bottom:8px;">
+                                <div class="modern-input-group">
                                     <label class="login-field-label" for="loginResetNote">Kısa not (opsiyonel, en fazla 160 karakter)</label>
                                     <input type="text" id="loginResetNote" maxlength="160" placeholder="Örn: Giriş kodumu unuttum" autocomplete="off">
                                 </div>
-                                <div id="loginResetStatus" aria-live="polite" style="font-size:12px; min-height:16px; margin-bottom:8px;"></div>
-                                <div style="display:flex; gap:8px; justify-content:flex-end;">
-                                    <button type="button" id="loginResetCancelBtn"
-                                        style="padding:6px 12px; border-radius:8px; border:1px solid var(--color-border, #cbd5e1); background:transparent; color:inherit; font-size:12px; cursor:pointer;">Vazgeç</button>
-                                    <button type="button" id="loginResetSubmitBtn"
-                                        style="padding:6px 14px; border-radius:8px; border:none; background:#2563eb; color:#fff; font-size:12px; font-weight:700; cursor:pointer;">Talep Gönder</button>
+                                <div id="loginResetStatus" class="login-reset-status" aria-live="polite"></div>
+                                <div class="login-reset-actions">
+                                    <button type="button" id="loginResetCancelBtn" class="login-reset-btn">Vazgeç</button>
+                                    <button type="button" id="loginResetSubmitBtn" class="login-reset-btn login-reset-btn--primary">Talep Gönder</button>
                                 </div>
                             </div>
 
@@ -1715,6 +1714,36 @@
                 <div class="login-mini-footer">ENVANTER TAKİP SİSTEMİ <span aria-hidden="true">·</span> V3.3</div>
             </div>
         </div>
+
+        <script>
+            // [WHY]: v3.8 HF-3 — "Şifre sıfırlama talebi" açılınca giriş formu + paneller alta uzayıp modalı ekran dışına taşırıyordu.
+            // [HOW]: #loginResetPanel.hidden (staff-lifecycle-panel.js yönetir) yalnız OKUNUR; #loginModal'a is-reset-mode sınıfı
+            //        yansıtılır ve login-redesign.css görünümü yer değiştirir. Geri dönüş mevcut "Vazgeç" kancasını tetikler.
+            (function () {
+                var modal = document.getElementById('loginModal');
+                var panel = document.getElementById('loginResetPanel');
+                var back = document.getElementById('loginResetBackBtn');
+                var toggle = document.getElementById('loginResetToggleBtn');
+                if (!modal || !panel) return;
+                var wasOpen = false;
+                var sync = function () {
+                    var open = !panel.hidden;
+                    modal.classList.toggle('is-reset-mode', open);
+                    if (wasOpen && !open && toggle) toggle.focus();
+                    wasOpen = open;
+                };
+                new MutationObserver(sync).observe(panel, { attributes: true, attributeFilter: ['hidden'] });
+                sync();
+                var close = function () {
+                    var cancel = document.getElementById('loginResetCancelBtn');
+                    if (cancel) { cancel.click(); return; }
+                    panel.hidden = true;
+                    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+                };
+                if (back) back.addEventListener('click', close);
+                panel.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+            })();
+        </script>
 
         <!-- Ürün Ekle/Düzenle Modal -->
         <div id="productModal" class="modal">
