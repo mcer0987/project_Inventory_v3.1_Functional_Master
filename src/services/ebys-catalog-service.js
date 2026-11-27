@@ -1,4 +1,4 @@
-import { doc, collection, query, where, getDocFromServer, getDocsFromServer, runTransaction, deleteDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+import { doc, collection, query, where, getDocFromServer, getDocsFromServer, runTransaction, deleteDoc, serverTimestamp, Timestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import { fireDb } from './firebase-handler.js';
 import '../utils/ebys-catalog-schema.js';
 
@@ -155,13 +155,129 @@ async function deletePersonalTemplate(id) {
     return { id: targetId, deleted: true };
 }
 
+// [WHY]: v3.8 VP-4 · Yönetici vekâleten kişisel şablon erişimi tanımlama (süreli, gerekçeli ve atomik denetim kayıtlı).
+// [HOW]: Tek transaction içinde ebysDelegations/items/pt_{ownerUid} ve auditLogs/items/{auditId} birlikte yazılır.
+async function grantPersonalTemplateDelegation(input) {
+    admin();
+    const actor = uid();
+    const norm = C().normalizeDelegation(input);
+    if (norm.ownerUid === actor) throw new Error('Kendi hesabınız için vekâlet tanımlayamazsınız.');
+    const auditId = crypto.randomUUID();
+    const expiresAt = Timestamp.fromMillis(Date.now() + norm.durationMs);
+    return runTransaction(fireDb, async tx => {
+        const target = ref('ebysDelegations', norm.id);
+        const snap = await tx.get(target);
+        const old = snap.exists() ? snap.data() : null;
+        const next = {
+            id: norm.id,
+            ownerUid: norm.ownerUid,
+            delegateUid: actor,
+            scope: C().DELEGATION_SCOPE,
+            reason: norm.reason,
+            expiresAt,
+            revoked: false,
+            auditId,
+            createdAt: old?.createdAt || serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            createdBy: actor,
+        };
+        tx.set(target, next);
+        tx.set(ref('auditLogs', auditId), {
+            id: auditId,
+            type: 'ebys-vekalet-verildi',
+            refCol: 'ebysDelegations',
+            refId: norm.id,
+            item: `Kişisel Şablon Vekâleti (${norm.ownerUid})`,
+            actorName: window.getActiveUser?.()?.name || 'Yönetici',
+            uid: actor,
+            result: 'approved',
+            reason: norm.reason,
+            ts: serverTimestamp(),
+        });
+        return { ...next, createdAt: null, updatedAt: null };
+    });
+}
+
+// [WHY]: v3.8 VP-4 · Aktif kişisel şablon vekâletini sonlandırma (silme yoktur; iz kalması için revoked:true + auditLogs yazılır).
+// [HOW]: Mevcut vekâlet belgesini okuyup expiresAt ve createdAt alanlarını koruyarak revoked:true ve yeni auditId ile mühürler.
+async function revokePersonalTemplateDelegation(input) {
+    admin();
+    const actor = uid();
+    const ownerUid = String(input?.ownerUid ?? input ?? '').trim();
+    const id = C().delegationId(ownerUid);
+    const reason = String(input?.reason || 'Vekâlet yönetici tarafından sonlandırıldı.').trim();
+    if (reason.length < 5 || /<[a-zA-Z/!?]/.test(reason)) throw new Error('İptal gerekçesi en az 5 karakter ve etiketsiz olmalıdır.');
+    const auditId = crypto.randomUUID();
+    return runTransaction(fireDb, async tx => {
+        const target = ref('ebysDelegations', id);
+        const snap = await tx.get(target);
+        if (!snap.exists()) throw new Error('Sonlandırılacak vekâlet kaydı bulunamadı.');
+        const old = snap.data();
+        const next = {
+            id,
+            ownerUid: old.ownerUid,
+            delegateUid: actor,
+            scope: C().DELEGATION_SCOPE,
+            reason: reason.slice(0, 240),
+            expiresAt: old.expiresAt,
+            revoked: true,
+            auditId,
+            createdAt: old.createdAt,
+            updatedAt: serverTimestamp(),
+            createdBy: actor,
+        };
+        tx.set(target, next);
+        tx.set(ref('auditLogs', auditId), {
+            id: auditId,
+            type: 'ebys-vekalet-iptal',
+            refCol: 'ebysDelegations',
+            refId: id,
+            item: `Kişisel Şablon Vekâlet İptali (${old.ownerUid})`,
+            actorName: window.getActiveUser?.()?.name || 'Yönetici',
+            uid: actor,
+            result: 'approved',
+            reason: reason.slice(0, 240),
+            ts: serverTimestamp(),
+        });
+        return { ...next, createdAt: null, updatedAt: null };
+    });
+}
+
+// [WHY]: v3.8 VP-4 · Yöneticinin tanımlı kişisel şablon vekâletlerini veya personelin kendi hesabındaki aktif vekâleti görmesi.
+// [HOW]: Yönetici tüm ebysDelegations koleksiyonunu, personel yalnız kendi deterministik pt_{uid} belgesini okur.
+async function listPersonalTemplateDelegations() {
+    admin();
+    uid();
+    const snap = await getDocsFromServer(collection(fireDb, root(), 'ebysDelegations', 'items'));
+    return rows(snap).sort((a, b) => String(a.ownerUid || '').localeCompare(String(b.ownerUid || ''), 'tr'));
+}
+async function getMyPersonalTemplateDelegation() {
+    const actor = uid();
+    const snap = await getDocFromServer(ref('ebysDelegations', C().delegationId(actor)));
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    return C().isDelegationActive(data) ? data : null;
+}
+async function listDelegatedPersonalTemplates(ownerUid) {
+    admin();
+    uid();
+    const targetOwner = String(ownerUid ?? '').trim();
+    if (!targetOwner) throw new Error('Hedef personel kullanıcı kimliği (UID) gerekli.');
+    const snap = await getDocsFromServer(query(collection(fireDb, root(), 'ebysPersonalTemplates', 'items'), where('ownerUid', '==', targetOwner)));
+    return rows(snap).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'tr'));
+}
+
 window.AppModules = window.AppModules || {};
 window.AppModules.EBYSCatalog = {
     loadCatalog, getTemplateRevision, listTemplateRevisions, listProfileRevisions,
     saveProfile, saveFilePlan, setFilePlanActive, saveTemplate, setTemplateActive,
-    listMyPersonalTemplates, savePersonalTemplate, deletePersonalTemplate
+    listMyPersonalTemplates, savePersonalTemplate, deletePersonalTemplate,
+    grantPersonalTemplateDelegation, revokePersonalTemplateDelegation,
+    listPersonalTemplateDelegations, getMyPersonalTemplateDelegation, listDelegatedPersonalTemplates
 };
 export {
     loadCatalog, getTemplateRevision, listTemplateRevisions, listProfileRevisions, saveProfile, saveFilePlan, setFilePlanActive, saveTemplate, setTemplateActive,
-    listMyPersonalTemplates, savePersonalTemplate, deletePersonalTemplate
+    listMyPersonalTemplates, savePersonalTemplate, deletePersonalTemplate,
+    grantPersonalTemplateDelegation, revokePersonalTemplateDelegation,
+    listPersonalTemplateDelegations, getMyPersonalTemplateDelegation, listDelegatedPersonalTemplates
 };

@@ -89,3 +89,33 @@ test('kişisel şablon (v3.7 İP-11): normalize sınır/etiket kontrolü ve lett
     const appliedOverride = C.applyPersonalTemplate({ name: 'Özel', subject: 'Yeni konu', content: 'Kişisel metin' }, { subject: 'Eski konu' });
     assert.deepEqual(plain(appliedOverride), { subject: 'Yeni konu', content: 'Kişisel metin', letterTemplate: null });
 });
+
+test('vekâlet şeması (v3.8 VP-4): deterministik pt_<uid> kimliği, 1–168 saat sınırı, gerekçe/etiket kontrolü ve aktiflik', () => {
+    assert.equal(C.delegationId(' uid_personel_1 '), 'pt_uid_personel_1');
+    const d = C.normalizeDelegation({ ownerUid: 'userA', reason: ' Yıllık izin süresince evrak takibi ', durationHours: 48 });
+    assert.deepEqual(plain(d), {
+        id: 'pt_userA',
+        ownerUid: 'userA',
+        scope: 'personalTemplates',
+        reason: 'Yıllık izin süresince evrak takibi',
+        durationHours: 48,
+        durationMs: 48 * 3600000,
+    });
+    for (const bad of [
+        null,
+        { ownerUid: '', reason: 'Geçerli gerekçe', durationHours: 24 },
+        { ownerUid: 'u', reason: 'kısa', durationHours: 24 },
+        { ownerUid: 'u', reason: 'x'.repeat(241), durationHours: 24 },
+        { ownerUid: 'u', reason: '<script>alert(1)</script>', durationHours: 24 },
+        { ownerUid: 'u', reason: 'Geçerli gerekçe', durationHours: 0 },
+        { ownerUid: 'u', reason: 'Geçerli gerekçe', durationHours: -5 },
+        { ownerUid: 'u', reason: 'Geçerli gerekçe', durationHours: 169 },
+    ]) {
+        assert.throws(() => C.normalizeDelegation(bad), undefined, JSON.stringify(bad));
+    }
+    const now = 1764000000000;
+    assert.equal(C.isDelegationActive({ scope: 'personalTemplates', revoked: false, expiresAt: { toMillis: () => now + 60000 } }, now), true);
+    assert.equal(C.isDelegationActive({ scope: 'personalTemplates', revoked: true, expiresAt: { toMillis: () => now + 60000 } }, now), false);
+    assert.equal(C.isDelegationActive({ scope: 'personalTemplates', revoked: false, expiresAt: { toMillis: () => now - 1 } }, now), false);
+    assert.equal(C.isDelegationActive(null, now), false);
+});

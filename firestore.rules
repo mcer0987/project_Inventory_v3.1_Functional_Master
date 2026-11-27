@@ -1640,9 +1640,61 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // İleride yönetici vekâleten kullanıcı erişimi buradan tanımlanacaktır.
+    // [WHY]: v3.8 VP-4 · Yönetici vekâleten kişisel şablon erişimi (İP-11 kancası).
+    //        Kişisel şablonlar varsayılan olarak tam gizlidir; yalnız acil kurumsal süreklilik için aktif bir yönetici,
+    //        gerekçeli, en çok 7 gün süreli ve aynı transaction'da denetim günlüğüne (auditLogs) yazılan vekâlet kaydıyla
+    //        salt-okunur (get/list) erişim açabilir. Yazma/güncelleme/silme her durumda yalnız asıl sahibe aittir.
+    // [HOW]: Deterministik belge yolu ('pt_' + ownerUid) sayesinde O(1) tek get() ile doğrulanır; 20 belge ve 1000 AST bütçesini zorlamaz.
+    function ebysDelegationPath(r, ownerUid) {
+      return /databases/$(database)/documents/$(r)/ebysDelegations/items/$('pt_' + ownerUid);
+    }
+    function activePersonalTemplateDelegation(root, ownerUid) {
+      let p = ebysDelegationPath(root, ownerUid);
+      return isAdmin(root) && exists(p)
+        && get(p).data.get('ownerUid', '') == ownerUid
+        && get(p).data.get('delegateUid', '') == request.auth.uid
+        && get(p).data.get('scope', '') == 'personalTemplates'
+        && get(p).data.get('revoked', true) == false
+        && get(p).data.get('expiresAt', request.time) > request.time;
+    }
     function personalTemplateAccessOk(root, ownerUid) {
-      return request.auth != null && request.auth.uid == ownerUid;
+      return request.auth != null && (
+        request.auth.uid == ownerUid || activePersonalTemplateDelegation(root, ownerUid)
+      );
+    }
+    function ecDelegationAuditOk(r, id, d) {
+      let a = getAfter(auditDoc(r, d.auditId)).data;
+      return !exists(auditDoc(r, d.auditId))
+        && a.get('type', '') == (d.revoked ? 'ebys-vekalet-iptal' : 'ebys-vekalet-verildi')
+        && a.get('refCol', '') == 'ebysDelegations' && a.get('refId', '') == id
+        && a.get('uid', '') == request.auth.uid && a.get('result', '') == 'approved';
+    }
+    function ecDelegationOk(r, id, d, old) {
+      return d.keys().hasOnly(['id','ownerUid','delegateUid','scope','reason','expiresAt','revoked','auditId','createdAt','updatedAt','createdBy'])
+        && d.keys().hasAll(['id','ownerUid','delegateUid','scope','reason','expiresAt','revoked','auditId','createdAt','updatedAt','createdBy'])
+        && d.id == id && id == 'pt_' + d.ownerUid
+        && d.ownerUid is string && d.ownerUid.size() >= 1 && d.ownerUid.size() <= 128 && noTag(d.ownerUid)
+        && d.ownerUid != request.auth.uid && d.ownerUid == old.get('ownerUid', d.ownerUid)
+        && d.delegateUid is string && d.delegateUid == request.auth.uid
+        && d.scope == 'personalTemplates'
+        && d.reason is string && d.reason.size() >= 5 && ebysText(d.reason, 240, true)
+        && d.revoked is bool
+        && d.expiresAt is timestamp
+        && (d.revoked
+          ? d.expiresAt == old.get('expiresAt', d.expiresAt)
+          : (d.expiresAt > request.time && d.expiresAt <= request.time + duration.value(7, 'd')))
+        && d.auditId is string && d.auditId.size() >= 1 && d.auditId.size() <= 80 && noTag(d.auditId)
+        && d.createdAt == old.get('createdAt', request.time)
+        && d.updatedAt == request.time
+        && d.createdBy is string && d.createdBy == request.auth.uid
+        && ecDelegationAuditOk(r, id, d);
+    }
+    match /{r}/ebysDelegations/items/{id} {
+      allow get: if validRoot(r) && member(r) && (isAdmin(r) || id == 'pt_' + request.auth.uid || (resource != null && resource.data.ownerUid == request.auth.uid));
+      allow list: if validRoot(r) && member(r) && (isAdmin(r) || resource.data.ownerUid == request.auth.uid);
+      allow create: if validRoot(r) && isAdmin(r) && request.resource.data.get('revoked', true) == false && ecDelegationOk(r, id, request.resource.data, {});
+      allow update: if validRoot(r) && isAdmin(r) && ecDelegationOk(r, id, request.resource.data, resource.data);
+      allow delete: if false;
     }
     function ecPersonalTemplateOk(id, d, old) {
       return d.keys().hasOnly(['id','ownerUid','name','subject','content','createdAt','updatedAt'])
@@ -1658,9 +1710,9 @@ service cloud.firestore {
     match /{r}/ebysPersonalTemplates/items/{id} {
       allow get: if validRoot(r) && member(r) && (resource == null || personalTemplateAccessOk(r, resource.data.ownerUid));
       allow list: if validRoot(r) && member(r) && personalTemplateAccessOk(r, resource.data.ownerUid);
-      allow create: if validRoot(r) && member(r) && personalTemplateAccessOk(r, request.resource.data.ownerUid) && ecPersonalTemplateOk(id, request.resource.data, {});
-      allow update: if validRoot(r) && member(r) && personalTemplateAccessOk(r, resource.data.ownerUid) && ecPersonalTemplateOk(id, request.resource.data, resource.data);
-      allow delete: if validRoot(r) && member(r) && personalTemplateAccessOk(r, resource.data.ownerUid);
+      allow create: if validRoot(r) && member(r) && request.auth != null && request.auth.uid == request.resource.data.ownerUid && ecPersonalTemplateOk(id, request.resource.data, {});
+      allow update: if validRoot(r) && member(r) && request.auth != null && request.auth.uid == resource.data.ownerUid && ecPersonalTemplateOk(id, request.resource.data, resource.data);
+      allow delete: if validRoot(r) && member(r) && request.auth != null && request.auth.uid == resource.data.ownerUid;
     }
 
     // Taslağın katalog kopyaları. Satın almaya bağlı evrak bu pakette kopya taşımaz (sözleşmesi ayrı: poVersionShape).

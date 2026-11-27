@@ -170,11 +170,12 @@ async function open(id = null, replyContext = null) {
         const frozen = !!head.currentVersionId;
         // H6b + v3.7 İP-11: kurum kataloğu ve kişisel şablonlar paralel yüklenir (dondurulmuş evrak kendi kopyalarını gösterir).
         // Katalog veya kişisel şablon yüklenemezse form eski davranışla açılır: kod ve plan elle yazılır.
-        const [cat, loadedPersonal] = frozen
-            ? [null, []]
+        const [cat, loadedPersonal, myActiveDelegation] = frozen
+            ? [null, [], null]
             : await Promise.all([
                 Promise.resolve(window.AppModules.EBYSCatalog?.loadCatalog()).catch(() => null),
                 Promise.resolve(window.AppModules.EBYSCatalog?.listMyPersonalTemplates?.()).catch(() => []),
+                Promise.resolve(window.AppModules.EBYSCatalog?.getMyPersonalTemplateDelegation?.()).catch(() => null),
             ]);
         let personalTemplates = Array.isArray(loadedPersonal) ? [...loadedPersonal] : [];
         if (actor !== window.userAuth?.uid || epoch !== editorEpoch) return;
@@ -228,6 +229,12 @@ async function open(id = null, replyContext = null) {
             helpBtn.setAttribute('aria-controls', helpPanel.id);
             tplHead.append(helpBtn);
             tplBar.append(tplHead, helpPanel);
+            if (myActiveDelegation) {
+                const expText = typeof myActiveDelegation.expiresAt?.toDate === 'function'
+                    ? myActiveDelegation.expiresAt.toDate().toLocaleString('tr-TR')
+                    : 'belirtilen süre';
+                tplBar.append(node('p', `🔑 Şeffaflık Bildirimi: Hesabınızdaki kişisel şablonlar için ${expText} tarihine kadar gerekçeli yönetici vekâlet erişimi (${myActiveDelegation.reason}) aktiftir.`, 'ebys-institution-note'));
+            }
 
             const controls = node('div', null, 'ebys-template-controls');
             const chooserWrap = node('label', '📄 Şablondan doldur (isteğe bağlı)', 'ebys-field ebys-template-select-wrap');

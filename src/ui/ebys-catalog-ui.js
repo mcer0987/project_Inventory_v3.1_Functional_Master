@@ -210,7 +210,152 @@ function renderTemplates(host) {
     }
     const card = node('div', null, 'modern-card table-responsive');
     card.append(table);
-    host.append(top, card, node('div', null, 'ebys-catalog-detail'));
+    const detail = node('div', null, 'ebys-catalog-detail');
+    const delegationBox = node('section', null, 'modern-card p-3 mt-3');
+    host.append(top, card, detail, delegationBox);
+    renderDelegationSection(delegationBox);
+}
+
+// [WHY]: v3.8 VP-4 · Yöneticiye acil kurumsal süreklilik için personel kişisel şablonlarına süreli, gerekçeli, parola doğrulamalı
+//        ve denetim kayıtlı salt-okunur vekâlet tanımlama / görüntüleme paneli sunar (AGENTS.md kısa açıklama + ⓘ yardım).
+// [HOW]: Saf createElement/textContent kullanır; yalnız aktif yönetici işlem yapabilir, değişiklik öncesi promptAdminReauth çağrılır.
+async function renderDelegationSection(box) {
+    box.replaceChildren();
+    const head = node('div', null, 'd-flex align-items-center justify-content-between flex-wrap gap-2 mb-2');
+    head.append(node('h3', '🔑 Vekâleten Kişisel Şablon Erişimi (Süreli & Denetimli)', 'h6 m-0'));
+    const helpId = 'ebysDelegationHelpBox';
+    const helpBox = node('div', null, 'small text-muted p-2 mb-2 border rounded');
+    helpBox.id = helpId;
+    helpBox.hidden = true;
+    helpBox.append(
+        node('p', '1. Kişisel üst yazı şablonları varsayılan olarak yönetici dahil herkese kapalıdır.', 'mb-1'),
+        node('p', '2. İzin, rapor veya görev devri gibi acil kurumsal süreklilik durumlarında, gerekçe ve süre (en çok 7 gün / 168 saat) belirterek yalnızca salt-okunur vekâlet açabilirsiniz.', 'mb-1'),
+        node('p', '3. Vekâlet tanımlama ve sonlandırma işlemleri yönetici parolası doğrulaması gerektirir, Güvenlik/Denetim Günlüğüne yazılır ve ilgili personelin evrak ekranında şeffaf olarak bildirilir.', 'mb-0')
+    );
+    const helpBtn = button('ⓘ Nasıl çalışır?', () => {
+        helpBox.hidden = !helpBox.hidden;
+        helpBtn.setAttribute('aria-expanded', String(!helpBox.hidden));
+    }, 'btn btn-sm btn-outline-secondary');
+    helpBtn.setAttribute('aria-expanded', 'false');
+    helpBtn.setAttribute('aria-controls', helpId);
+    head.append(helpBtn);
+
+    const desc = node('p', 'Kurumsal süreklilik gerektiğinde seçili personelin kişisel üst yazı şablonlarına süreli (en çok 7 gün) ve salt-okunur vekâlet erişimi tanımlar; tüm işlemler denetim günlüğüne kaydedilir.', 'small text-muted mb-2');
+    box.append(head, desc, helpBox);
+
+    const personel = ((window.data && window.data.personel) || []).filter(p => p && p.uid && p.active !== false);
+    const form = node('form', null, 'ebys-catalog-form ebys-catalog-inline mb-3');
+    const uidLabel = node('label', 'Personel (UID)', 'ebys-catalog-field');
+    if (personel.length) {
+        const sel = node('select', null, 'form-control');
+        sel.name = 'ownerUid';
+        sel.required = true;
+        sel.append(node('option', '— Personel seçin —'));
+        sel.firstChild.value = '';
+        for (const p of personel) {
+            const opt = node('option', `${p.name || p.adSoyad || p.pri || p.uid} (${p.pri || p.uid})`);
+            opt.value = String(p.uid);
+            sel.append(opt);
+        }
+        uidLabel.append(sel);
+    } else {
+        const inp = node('input', null, 'form-control');
+        inp.name = 'ownerUid';
+        inp.required = true;
+        inp.maxLength = 128;
+        inp.placeholder = 'Personel Auth UID';
+        uidLabel.append(inp);
+    }
+    const hoursLabel = input('Süre (saat, 1–168)', 'durationHours', '24', { max: 3, required: true, placeholder: '24' });
+    const reasonLabel = input('Gerekçe (en az 5 karakter)', 'reason', '', { max: 240, required: true, placeholder: 'ör. Yıllık izin süresince bekleyen üst yazı şablonu erişimi' });
+    const grantBtn = node('button', 'Vekâlet Tanımla', 'btn btn-primary');
+    grantBtn.type = 'submit';
+    form.append(uidLabel, hoursLabel, reasonLabel, grantBtn);
+
+    const listWrap = node('div');
+    const previewWrap = node('div', null, 'mt-2');
+    box.append(form, listWrap, previewWrap);
+
+    const confirmReauth = async titleText => {
+        if (typeof window.SecurityConfig?.promptAdminReauth === 'function') {
+            const res = await window.SecurityConfig.promptAdminReauth({
+                title: titleText,
+                message: 'Bu işlem denetim günlüğüne yazılır. Onaylamak için yönetici parolanızı doğrulayın.',
+            });
+            if (res !== 'verified') throw new Error('Parola doğrulaması tamamlanmadığı için işlem iptal edildi.');
+        }
+    };
+
+    form.addEventListener('submit', event => {
+        event.preventDefault();
+        guarded(form, async () => {
+            const v = values(form);
+            await confirmReauth('Kişisel Şablon Vekâleti Tanımla');
+            await api().grantPersonalTemplateDelegation({
+                ownerUid: v.ownerUid,
+                durationHours: Number(v.durationHours || 24),
+                reason: v.reason,
+            });
+            notify('Kişisel şablon vekâleti tanımlandı ve denetim günlüğüne kaydedildi.');
+            await renderDelegationSection(box);
+        });
+    });
+
+    try {
+        const delegations = await api().listPersonalTemplateDelegations();
+        if (!delegations.length) {
+            listWrap.append(node('p', 'Henüz tanımlanmış bir kişisel şablon vekâleti yok.', 'small text-muted mb-0'));
+            return;
+        }
+        const tbl = node('table', null, 'modern-table');
+        const trHead = node('tr');
+        ['Personel UID', 'Durum', 'Bitiş Zamanı', 'Gerekçe', 'İşlemler'].forEach(h => trHead.append(node('th', h)));
+        tbl.append(node('thead'), node('tbody'));
+        tbl.tHead.append(trHead);
+        for (const d of delegations) {
+            const isAct = C().isDelegationActive(d);
+            const row = node('tr');
+            const st = node('td');
+            st.append(node('span', isAct ? 'Aktif Vekâlet' : (d.revoked ? 'Sonlandırıldı' : 'Süresi Doldu'), `badge ${isAct ? 'bg-warning text-dark' : 'bg-secondary'}`));
+            const actTd = node('td');
+            const btns = node('div', null, 'ebys-catalog-actions');
+            if (isAct) {
+                btns.append(
+                    button('Şablonları Gör', async () => {
+                        previewWrap.replaceChildren(node('p', 'Yükleniyor…', 'small text-muted'));
+                        try {
+                            const items = await api().listDelegatedPersonalTemplates(d.ownerUid);
+                            previewWrap.replaceChildren();
+                            const cardBox = node('div', null, 'p-2 border rounded');
+                            cardBox.append(node('h4', `${d.ownerUid} · Vekâleten Görüntülenen Kişisel Şablonlar (${items.length})`, 'h6'));
+                            if (!items.length) cardBox.append(node('p', 'Bu personele ait kayıtlı kişisel şablon bulunmuyor.', 'small text-muted mb-0'));
+                            for (const tpl of items) {
+                                const det = node('details', null, 'ebys-catalog-history');
+                                det.append(node('summary', `${tpl.name}${tpl.subject ? ` · Konu: ${tpl.subject}` : ''}`));
+                                det.append(node('pre', tpl.content, 'ebys-catalog-pre'));
+                                cardBox.append(det);
+                            }
+                            previewWrap.append(cardBox);
+                        } catch (err) { previewWrap.replaceChildren(node('p', err.message, 'small text-danger')); }
+                    }, 'btn btn-sm btn-outline-primary'),
+                    button('Sonlandır', async () => {
+                        try {
+                            await confirmReauth('Kişisel Şablon Vekâletini Sonlandır');
+                            await api().revokePersonalTemplateDelegation({ ownerUid: d.ownerUid, reason: 'Yönetici tarafından panelden sonlandırıldı.' });
+                            notify('Vekâlet erişimi sonlandırıldı.');
+                            await renderDelegationSection(box);
+                        } catch (err) { notify(err.message, 'error'); }
+                    }, 'btn btn-sm btn-outline-danger')
+                );
+            }
+            actTd.append(btns);
+            row.append(node('td', d.ownerUid), st, node('td', dateText(d.expiresAt) || '-'), node('td', d.reason || '-'), actTd);
+            tbl.tBodies[0].append(row);
+        }
+        listWrap.append(tbl);
+    } catch (err) {
+        listWrap.append(node('p', `Vekâlet listesi okunamadı: ${err.message}`, 'small text-muted mb-0'));
+    }
 }
 async function openTemplateEditor(host, template) {
     const detail = host.querySelector('.ebys-catalog-detail');

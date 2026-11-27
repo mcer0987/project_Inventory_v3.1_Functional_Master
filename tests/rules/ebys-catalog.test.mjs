@@ -290,3 +290,108 @@ test('kişisel üst yazı şablonları (v3.7 İP-11): tam gizlilik (yönetici da
     await staffA.catalog.deletePersonalTemplate(created.id);
     assert.deepEqual(await staffA.catalog.listMyPersonalTemplates(), []);
 });
+
+test('yönetici vekâleten kişisel şablon erişimi (v3.8 VP-4): denetimli/süreli salt-okunur erişim, iptal ve sınırlar', async () => {
+    const staffA = services('a', false);
+    const staffB = services('b', false);
+    const admin = services('owner', true);
+
+    const tpl = await staffA.catalog.savePersonalTemplate({
+        name: 'İzin Dönemi Üst Yazısı',
+        subject: 'Vekâleten Gönderim',
+        content: 'Personel A yıllık izindeyken kullanılacak şablon.',
+    });
+
+    // 1. Vekâlet yokken yönetici A'nın şablonunu okuyamaz ve listeleyemez.
+    await assertFails(sdk.getDoc(ref(admin.store, 'ebysPersonalTemplates', tpl.id)));
+    await assert.rejects(admin.catalog.listDelegatedPersonalTemplates('a'));
+    assert.equal(await staffA.catalog.getMyPersonalTemplateDelegation(), null);
+
+    // 2. Kurallar: auditLogs kaydı olmadan, 7 günü aşan süreyle veya personel tarafından sahte vekâlet yazılamaz.
+    const fakeAuditId = webcrypto.randomUUID();
+    const validExp = sdk.Timestamp.fromMillis(Date.now() + 24 * 3600000);
+    const tooLongExp = sdk.Timestamp.fromMillis(Date.now() + 8 * 24 * 3600000);
+    await assertFails(sdk.setDoc(ref(admin.store, 'ebysDelegations', 'pt_a'), {
+        id: 'pt_a', ownerUid: 'a', delegateUid: 'owner', scope: 'personalTemplates',
+        reason: 'Denetim kaydı olmadan sızma denemesi', expiresAt: validExp, revoked: false,
+        auditId: fakeAuditId, createdAt: sdk.serverTimestamp(), updatedAt: sdk.serverTimestamp(), createdBy: 'owner',
+    }));
+    await assertFails(sdk.setDoc(ref(staffB.store, 'ebysDelegations', 'pt_a'), {
+        id: 'pt_a', ownerUid: 'a', delegateUid: 'b', scope: 'personalTemplates',
+        reason: 'Personel B sahte vekâlet denemesi', expiresAt: validExp, revoked: false,
+        auditId: fakeAuditId, createdAt: sdk.serverTimestamp(), updatedAt: sdk.serverTimestamp(), createdBy: 'b',
+    }));
+    // 7 günü aşan süre (denetim kaydı aynı batch'te yazılsa dahi) reddedilir.
+    const overBatch = sdk.writeBatch(admin.store);
+    const overAuditId = webcrypto.randomUUID();
+    overBatch.set(ref(admin.store, 'ebysDelegations', 'pt_a'), {
+        id: 'pt_a', ownerUid: 'a', delegateUid: 'owner', scope: 'personalTemplates',
+        reason: '8 günlük aşırı süreli vekâlet', expiresAt: tooLongExp, revoked: false,
+        auditId: overAuditId, createdAt: sdk.serverTimestamp(), updatedAt: sdk.serverTimestamp(), createdBy: 'owner',
+    });
+    overBatch.set(ref(admin.store, 'auditLogs', overAuditId), {
+        id: overAuditId, type: 'ebys-vekalet-verildi', refCol: 'ebysDelegations', refId: 'pt_a',
+        item: 'Kişisel Şablon Vekâleti (a)', actorName: 'Yönetici', uid: 'owner', result: 'approved',
+        reason: '8 günlük aşırı süreli vekâlet', ts: sdk.serverTimestamp(),
+    });
+    await assertFails(overBatch.commit());
+
+    // 3. Yönetici geçerli, denetim kayıtlı vekâlet tanımlar → salt-okunur (get + list) erişim açılır.
+    const granted = await admin.catalog.grantPersonalTemplateDelegation({
+        ownerUid: 'a',
+        reason: 'Yıllık izin süresince kurumsal yazışma sürekliliği',
+        durationHours: 24,
+    });
+    assert.equal(granted.id, 'pt_a');
+    assert.equal(granted.revoked, false);
+
+    // Denetim kaydı gerçekten oluşmuş olmalı.
+    const auditSnap = await sdk.getDoc(ref(admin.store, 'auditLogs', granted.auditId));
+    assert.equal(auditSnap.exists(), true);
+    assert.equal(auditSnap.data().type, 'ebys-vekalet-verildi');
+
+    // Yönetici artık A'nın kişisel şablonlarını listeleyebilir ve tekil okuyabilir.
+    const delegatedList = await admin.catalog.listDelegatedPersonalTemplates('a');
+    assert.equal(delegatedList.length, 1);
+    assert.equal(delegatedList[0].id, tpl.id);
+    await assertSucceeds(sdk.getDoc(ref(admin.store, 'ebysPersonalTemplates', tpl.id)));
+
+    // Ancak yönetici vekâletle dahi A'nın kişisel şablonunu değiştiremez, silemez veya A adına yeni şablon yaratamaz!
+    await assertFails(sdk.updateDoc(ref(admin.store, 'ebysPersonalTemplates', tpl.id), {
+        name: 'Yönetici Değiştirdi', updatedAt: sdk.serverTimestamp(),
+    }));
+    await assertFails(sdk.deleteDoc(ref(admin.store, 'ebysPersonalTemplates', tpl.id)));
+    const forgedId = webcrypto.randomUUID();
+    await assertFails(sdk.setDoc(ref(admin.store, 'ebysPersonalTemplates', forgedId), {
+        id: forgedId, ownerUid: 'a', name: 'Sahte', subject: '', content: 'x',
+        createdAt: sdk.serverTimestamp(), updatedAt: sdk.serverTimestamp(),
+    }));
+
+    // 4. KVKK Şeffaflığı: Personel A kendi üzerindeki aktif vekâleti okuyabilir; Personel B okuyamaz ve A'nın şablonuna erişemez.
+    const myDel = await staffA.catalog.getMyPersonalTemplateDelegation();
+    assert.equal(myDel?.ownerUid, 'a');
+    assert.equal(myDel?.reason, 'Yıllık izin süresince kurumsal yazışma sürekliliği');
+    await assertFails(sdk.getDoc(ref(staffB.store, 'ebysDelegations', 'pt_a')));
+    await assertFails(sdk.getDoc(ref(staffB.store, 'ebysPersonalTemplates', tpl.id)));
+
+    // Vekâlet belgesi silinemez (iz korunur).
+    await assertFails(sdk.deleteDoc(ref(admin.store, 'ebysDelegations', 'pt_a')));
+
+    // 5. Yönetici vekâleti sonlandırdığında (revoked: true) okuma erişimi anında kapanır.
+    const revoked = await admin.catalog.revokePersonalTemplateDelegation({
+        ownerUid: 'a',
+        reason: 'Personel izinden döndü, vekâlet sonlandırıldı.',
+    });
+    assert.equal(revoked.revoked, true);
+    await assertFails(sdk.getDoc(ref(admin.store, 'ebysPersonalTemplates', tpl.id)));
+    await assert.rejects(admin.catalog.listDelegatedPersonalTemplates('a'));
+    assert.equal(await staffA.catalog.getMyPersonalTemplateDelegation(), null);
+
+    // 6. Süresi dolmuş (expiresAt <= request.time) vekâlet, revoked:false kalsa dahi erişim vermez.
+    await env.withSecurityRulesDisabled(c => sdk.updateDoc(ref(c.firestore(), 'ebysDelegations', 'pt_a'), {
+        revoked: false,
+        expiresAt: sdk.Timestamp.fromMillis(Date.now() - 60000),
+    }));
+    await assertFails(sdk.getDoc(ref(admin.store, 'ebysPersonalTemplates', tpl.id)));
+    await assert.rejects(admin.catalog.listDelegatedPersonalTemplates('a'));
+});

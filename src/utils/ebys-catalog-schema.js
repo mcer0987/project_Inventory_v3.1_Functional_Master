@@ -89,9 +89,45 @@
         };
     }
 
+    // [WHY]: v3.8 VP-4 · Yönetici vekâleten kişisel şablon erişimi için saf kimlik, süre (≤168 saat = 7 gün) ve gerekçe doğrulaması.
+    // [HOW]: Deterministik 'pt_' + ownerUid kimliği üretir; gerekçeyi 5–240 karakter ve etiketsiz metin kuralına göre doğrular.
+    const DELEGATION_SCOPE = 'personalTemplates';
+    const DELEGATION_MAX_HOURS = 168;
+    function delegationId(ownerUid) {
+        const uid = text(ownerUid, 128, 'Personel kullanıcı kimliği (UID)');
+        return `pt_${uid}`;
+    }
+    function normalizeDelegation(input) {
+        if (!input || typeof input !== 'object') throw new Error('Vekâlet bilgisi geçersiz.');
+        const ownerUid = text(input.ownerUid, 128, 'Personel kullanıcı kimliği (UID)');
+        const reason = text(input.reason, 240, 'Vekâlet gerekçesi');
+        if (reason.length < 5) throw new Error('Vekâlet gerekçesi en az 5 karakter olmalıdır.');
+        const hours = Number(input.durationHours ?? 24);
+        if (!Number.isFinite(hours) || hours <= 0 || hours > DELEGATION_MAX_HOURS) {
+            throw new Error(`Vekâlet süresi 1 ile ${DELEGATION_MAX_HOURS} saat (7 gün) arasında olmalıdır.`);
+        }
+        return {
+            id: `pt_${ownerUid}`,
+            ownerUid,
+            scope: DELEGATION_SCOPE,
+            reason,
+            durationHours: hours,
+            durationMs: Math.round(hours * 3600000),
+        };
+    }
+    function isDelegationActive(doc, nowMs = Date.now()) {
+        if (!doc || doc.revoked === true || doc.scope !== DELEGATION_SCOPE) return false;
+        const expMs = typeof doc.expiresAt?.toMillis === 'function'
+            ? doc.expiresAt.toMillis()
+            : (typeof doc.expiresAt === 'number' ? doc.expiresAt : NaN);
+        return Number.isFinite(expMs) && expMs > nowMs;
+    }
+
     window.AppModules = window.AppModules || {};
     window.AppModules.EBYSCatalogSchema = Object.freeze({
-        PROFILE_ID, PROFILE_FIELDS, LIMITS, active, normalizeProfile, planCode, normalizeFilePlan, planLabel, filePlanOptions,
+        PROFILE_ID, PROFILE_FIELDS, LIMITS, DELEGATION_SCOPE, DELEGATION_MAX_HOURS,
+        active, normalizeProfile, planCode, normalizeFilePlan, planLabel, filePlanOptions,
         normalizeTemplate, normalizePersonalTemplate, revisionId, applyTemplate, applyPersonalTemplate,
+        delegationId, normalizeDelegation, isDelegationActive,
     });
 })();
